@@ -52,11 +52,7 @@ where
         location: &DatabaseLocation,
         catalog: &MigrationCatalog,
     ) -> Result<Database, DatabaseError> {
-        ora_info!(
-            message = "opening database",
-            operation = "database_open",
-            location = location.logging_label()
-        );
+        ora_info!(message = "opening database", operation = "database_open");
 
         let mut connection = match location.open() {
             Ok(connection) => connection,
@@ -64,7 +60,6 @@ where
                 ora_error!(
                     message = "failed to open database",
                     operation = "database_open",
-                    location = location.logging_label(),
                     error.kind = "database_open",
                     error.message = error.to_string()
                 );
@@ -72,11 +67,7 @@ where
             }
         };
 
-        ora_info!(
-            message = "opened database",
-            operation = "database_open",
-            location = location.logging_label()
-        );
+        ora_info!(message = "opened database", operation = "database_open");
 
         if let Err(error) =
             migration::reconcile_database(&mut connection, catalog, &self.timestamp_source)
@@ -84,7 +75,6 @@ where
             ora_error!(
                 message = "database bootstrap failed",
                 operation = "database_bootstrap",
-                location = location.logging_label(),
                 error.kind = "database_bootstrap",
                 error.message = error.to_string()
             );
@@ -94,7 +84,6 @@ where
         ora_info!(
             message = "database bootstrap complete",
             operation = "database_bootstrap",
-            location = location.logging_label()
         );
 
         Ok(Database { connection })

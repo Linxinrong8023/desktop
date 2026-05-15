@@ -239,7 +239,6 @@ fn emits_structured_bootstrap_and_migration_events() {
             event_has_fields(
                 &event,
                 &[
-                    ("location", "in_memory"),
                     ("method", "bootstrap"),
                     ("message", "database bootstrap complete"),
                     ("operation", "database_bootstrap"),

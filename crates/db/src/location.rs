@@ -33,14 +33,6 @@ impl DatabaseLocation {
         }
     }
 
-    /// Returns the stable location label used by operational logs.
-    pub(crate) fn logging_label(&self) -> &str {
-        match self {
-            Self::Path(_) => "path",
-            Self::InMemory => "in_memory",
-        }
-    }
-
     /// Returns the backing path required by file-based pooling entry points.
     pub(crate) fn pooled_path(&self) -> Result<&Path, DatabaseError> {
         match self {
