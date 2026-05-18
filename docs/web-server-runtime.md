@@ -6,7 +6,8 @@
 
 - It boots shared structured logging through `ora-logging`.
 - It exposes health endpoints for process liveness and runtime readiness.
-- It serves persisted HTTP CRUD routes for `project`, `task`, `worktree`, and `session` by delegating to `ora-application`.
+- It serves persisted HTTP CRUD routes for `project`, `task`, and `session` by delegating to `ora-application`.
+- It provisions and cleans up task-owned linked worktrees as internal backend state during task lifecycle flows.
 
 ## Database Configuration
 
@@ -53,7 +54,7 @@ Invalid host or port values fail startup during bootstrap.
 
 ## HTTP API
 
-The persisted runtime exposes CRUD routes for all core models:
+The persisted runtime exposes CRUD routes for the supported public models:
 
 - `POST /api/projects`
 - `GET /api/projects`
@@ -67,11 +68,6 @@ The persisted runtime exposes CRUD routes for all core models:
 - `GET /api/tasks/{task_id}`
 - `PUT /api/tasks/{task_id}`
 - `DELETE /api/tasks/{task_id}`
-- `POST /api/worktrees`
-- `GET /api/worktrees`
-- `GET /api/worktrees/{worktree_id}`
-- `PUT /api/worktrees/{worktree_id}`
-- `DELETE /api/worktrees/{worktree_id}`
 - `POST /api/sessions`
 - `GET /api/sessions`
 - `GET /api/sessions/{session_id}`
@@ -79,6 +75,7 @@ The persisted runtime exposes CRUD routes for all core models:
 - `DELETE /api/sessions/{session_id}`
 
 Request and response payloads use `ora-contracts` DTO shapes, so transport behavior stays aligned with the shared application contract.
+Task payloads do not expose backend-owned worktree identifiers, and the runtime does not expose standalone public worktree CRUD endpoints.
 
 The project work context routes provide the current backend-managed project selection surface.
 
@@ -92,4 +89,4 @@ The current runtime uses a file-backed SQLite database bootstrapped through `ora
 
 - Data persists across process restarts as long as the same `ORA_DB_PATH` is reused.
 - Readiness depends on successful database bootstrap, repository-pool construction, bootstrap-project reconciliation, and synthetic web work context reconciliation.
-- Application-layer failures still map into the shared structured HTTP error envelope across all four route families.
+- Application-layer failures still map into the shared structured HTTP error envelope across the supported route families.

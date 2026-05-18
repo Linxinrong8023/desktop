@@ -20,7 +20,6 @@ pub struct Task {
     pub project_id: String,
     pub title: String,
     pub status: TaskStatus,
-    pub worktree_id: Option<String>,
 }
 
 /// Carries the app-facing payload for task creation requests.
@@ -80,7 +79,6 @@ pub struct UpdateTaskRequest {
     pub project_id: String,
     pub title: String,
     pub status: TaskStatus,
-    pub worktree_id: Option<String>,
 }
 
 /// Returns the updated task after a successful update request.
@@ -126,7 +124,6 @@ mod tests {
             project_id: "project-1".to_string(),
             title: "Ship handlers".to_string(),
             status: TaskStatus::Doing,
-            worktree_id: Some("worktree-1".to_string()),
         };
         let create_request = CreateTaskRequest {
             project_id: "project-1".to_string(),
@@ -142,7 +139,6 @@ mod tests {
             project_id: "project-1".to_string(),
             title: "Ship updated handlers".to_string(),
             status: TaskStatus::Done,
-            worktree_id: Some("worktree-2".to_string()),
         };
         let delete_request = DeleteTaskRequest {
             task_id: "task-1".to_string(),
@@ -155,7 +151,6 @@ mod tests {
                 "projectId": "project-1",
                 "title": "Ship handlers",
                 "status": "doing",
-                "worktreeId": "worktree-1",
             }),
         );
         assert_serialized_json(
@@ -174,7 +169,6 @@ mod tests {
                     "projectId": "project-1",
                     "title": "Ship handlers",
                     "status": "doing",
-                    "worktreeId": "worktree-1",
                 },
             }),
         );
@@ -187,7 +181,6 @@ mod tests {
                     "projectId": "project-1",
                     "title": "Ship handlers",
                     "status": "doing",
-                    "worktreeId": "worktree-1",
                 },
             }),
         );
@@ -203,7 +196,6 @@ mod tests {
                         "projectId": "project-1",
                         "title": "Ship handlers",
                         "status": "doing",
-                        "worktreeId": "worktree-1",
                     },
                 ],
             }),
@@ -215,7 +207,6 @@ mod tests {
                 "projectId": "project-1",
                 "title": "Ship updated handlers",
                 "status": "done",
-                "worktreeId": "worktree-2",
             }),
         );
         assert_serialized_json(
@@ -226,7 +217,6 @@ mod tests {
                     "projectId": "project-1",
                     "title": "Ship handlers",
                     "status": "doing",
-                    "worktreeId": "worktree-1",
                 },
             }),
         );
@@ -247,7 +237,6 @@ mod tests {
             project_id: "project-1".to_string(),
             title: "Ship handlers".to_string(),
             status: TaskStatus::Todo,
-            worktree_id: None,
         };
 
         assert_eq!(

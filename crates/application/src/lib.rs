@@ -28,7 +28,5 @@ pub use task::{
     UpdateTaskHandler, UuidTaskIdGenerator,
 };
 pub use worktree::{
-    CreateWorktreeHandler, DeleteWorktreeHandler, GetWorktreeHandler, ListWorktreesHandler,
-    UpdateWorktreeHandler, UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository,
-    WorktreeRepositoryError,
+    UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository, WorktreeRepositoryError,
 };

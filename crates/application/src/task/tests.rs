@@ -60,7 +60,6 @@ fn creates_tasks_with_owned_worktrees_and_clock_values() {
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
                     status: ContractTaskStatus::Doing,
-                    worktree_id: Some("worktree-1".to_string()),
                 },
             }
         );
@@ -123,7 +122,6 @@ fn gets_tasks_by_identifier() {
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
                     status: ContractTaskStatus::Todo,
-                    worktree_id: None,
                 },
             }
         );
@@ -167,14 +165,12 @@ fn lists_visible_tasks() {
                         project_id: "project-1".to_string(),
                         title: "Ship handlers".to_string(),
                         status: ContractTaskStatus::Todo,
-                        worktree_id: None,
                     },
                     ContractTask {
                         id: "task-2".to_string(),
                         project_id: "project-2".to_string(),
                         title: "Wire exports".to_string(),
                         status: ContractTaskStatus::Done,
-                        worktree_id: Some("worktree-2".to_string()),
                     },
                 ],
             }
@@ -202,7 +198,6 @@ fn updates_tasks_with_refreshed_timestamps() {
                 project_id: "project-2".to_string(),
                 title: "Ship updated handlers".to_string(),
                 status: ContractTaskStatus::Done,
-                worktree_id: Some("worktree-2".to_string()),
             })
             .unwrap_or_else(|error| panic!("update handler failed: {error}"));
 
@@ -214,7 +209,6 @@ fn updates_tasks_with_refreshed_timestamps() {
                     project_id: "project-2".to_string(),
                     title: "Ship updated handlers".to_string(),
                     status: ContractTaskStatus::Done,
-                    worktree_id: Some("worktree-2".to_string()),
                 },
             }
         );
@@ -225,7 +219,7 @@ fn updates_tasks_with_refreshed_timestamps() {
                 ProjectId::new("project-2"),
                 "Ship updated handlers",
                 DomainTaskStatus::Done,
-                Some(WorktreeId::new("worktree-2")),
+                None,
                 AuditFields::new(10, 30, false),
             )]
         );

@@ -1,4 +1,4 @@
-use crate::service::{ProjectApi, ProjectWorkContextApi, SessionApi, TaskApi, WorktreeApi};
+use crate::service::{ProjectApi, ProjectWorkContextApi, SessionApi, TaskApi};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -8,7 +8,6 @@ pub struct AppState {
     project_api: Arc<ProjectApi>,
     project_work_context_api: Arc<ProjectWorkContextApi>,
     task_api: Arc<TaskApi>,
-    worktree_api: Arc<WorktreeApi>,
     session_api: Arc<SessionApi>,
     ready: Arc<AtomicBool>,
 }
@@ -19,14 +18,12 @@ impl AppState {
         project_api: Arc<ProjectApi>,
         project_work_context_api: Arc<ProjectWorkContextApi>,
         task_api: Arc<TaskApi>,
-        worktree_api: Arc<WorktreeApi>,
         session_api: Arc<SessionApi>,
     ) -> Self {
         Self {
             project_api,
             project_work_context_api,
             task_api,
-            worktree_api,
             session_api,
             ready: Arc::new(AtomicBool::new(false)),
         }
@@ -45,11 +42,6 @@ impl AppState {
     /// Returns the shared task API that routes delegate into.
     pub fn task_api(&self) -> &Arc<TaskApi> {
         &self.task_api
-    }
-
-    /// Returns the shared worktree API that routes delegate into.
-    pub fn worktree_api(&self) -> &Arc<WorktreeApi> {
-        &self.worktree_api
     }
 
     /// Returns the shared session API that routes delegate into.

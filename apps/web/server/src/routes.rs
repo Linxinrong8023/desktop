@@ -1,10 +1,10 @@
 use crate::app_state::AppState;
-use crate::handlers::{health, project_work_contexts, projects, sessions, tasks, worktrees};
+use crate::handlers::{health, project_work_contexts, projects, sessions, tasks};
 use axum::Router;
 use axum::routing::{get, post};
 use ora_contracts::{
     PROJECT_PATH, PROJECT_WORK_CONTEXT_OPEN_PATH, PROJECT_WORK_CONTEXT_RENEW_PATH, PROJECTS_PATH,
-    SESSION_PATH, SESSIONS_PATH, TASK_PATH, TASKS_PATH, WORKTREE_PATH, WORKTREES_PATH,
+    SESSION_PATH, SESSIONS_PATH, TASK_PATH, TASKS_PATH,
 };
 
 /// Builds the top-level router for health checks and the persisted CRUD routes.
@@ -38,16 +38,6 @@ pub fn build_router(app_state: AppState) -> Router {
                 .delete(tasks::delete_task),
         )
         .route(
-            WORKTREES_PATH,
-            post(worktrees::create_worktree).get(worktrees::list_worktrees),
-        )
-        .route(
-            WORKTREE_PATH,
-            get(worktrees::get_worktree)
-                .put(worktrees::update_worktree)
-                .delete(worktrees::delete_worktree),
-        )
-        .route(
             SESSIONS_PATH,
             post(sessions::create_session).get(sessions::list_sessions),
         )
@@ -66,9 +56,12 @@ mod tests {
     use crate::bootstrap::build_app_state_for_database;
     use axum::body::{Body, to_bytes};
     use axum::http::{Method, Request, StatusCode};
-    use ora_application::ProjectWorkContextRepository;
-    use ora_db::{DatabaseBootstrapper, DatabaseLocation, SqliteProjectWorkContextRepository};
-    use ora_domain::ProjectWorkContextSurface;
+    use ora_application::{ProjectWorkContextRepository, WorktreeRepository};
+    use ora_db::{
+        DatabaseBootstrapper, DatabaseLocation, SqliteProjectWorkContextRepository,
+        SqliteWorktreeRepository,
+    };
+    use ora_domain::{ProjectWorkContextSurface, WorktreeId};
     use pretty_assertions::assert_eq;
     use serde_json::{Value, json};
     use std::path::Path;
@@ -557,10 +550,6 @@ mod tests {
             Some(task_id) => task_id.to_string(),
             None => panic!("response did not include a task id"),
         };
-        let worktree_id = match created_task["worktreeId"].as_str() {
-            Some(worktree_id) => worktree_id.to_string(),
-            None => panic!("response did not include a task worktree id"),
-        };
         let list_response = match app
             .clone()
             .oneshot(
@@ -601,7 +590,6 @@ mod tests {
                             "projectId": "project-2",
                             "title": "Ship updated handlers",
                             "status": "doing",
-                            "worktreeId": worktree_id,
                         })
                         .to_string(),
                     ))
@@ -612,25 +600,17 @@ mod tests {
             Ok(response) => response,
             Err(error) => panic!("request failed: {error}"),
         };
+        let repository = bootstrapped_worktree_repository(&_database_path);
+        let worktree_id = match repository.list_worktrees().unwrap().first() {
+            Some(worktree) => worktree.id.to_string(),
+            None => panic!("expected created task worktree to exist before task deletion"),
+        };
         let delete_response = match app
             .clone()
             .oneshot(
                 Request::builder()
                     .method(Method::DELETE)
                     .uri(format!("/api/tasks/{task_id}"))
-                    .body(Body::empty())
-                    .unwrap_or_else(|error| panic!("failed to build request: {error}")),
-            )
-            .await
-        {
-            Ok(response) => response,
-            Err(error) => panic!("request failed: {error}"),
-        };
-        let deleted_worktree_response = match app
-            .oneshot(
-                Request::builder()
-                    .method(Method::GET)
-                    .uri(format!("/api/worktrees/{worktree_id}"))
                     .body(Body::empty())
                     .unwrap_or_else(|error| panic!("failed to build request: {error}")),
             )
@@ -647,7 +627,6 @@ mod tests {
                 "projectId": "project-1",
                 "title": "Ship handlers",
                 "status": "todo",
-                "worktreeId": worktree_id,
             })
         );
         assert_eq!(
@@ -659,7 +638,6 @@ mod tests {
                         "projectId": "project-1",
                         "title": "Ship handlers",
                         "status": "todo",
-                        "worktreeId": worktree_id,
                     },
                 ],
             })
@@ -672,7 +650,6 @@ mod tests {
                     "projectId": "project-1",
                     "title": "Ship handlers",
                     "status": "todo",
-                    "worktreeId": worktree_id,
                 },
             })
         );
@@ -684,7 +661,6 @@ mod tests {
                     "projectId": "project-2",
                     "title": "Ship updated handlers",
                     "status": "doing",
-                    "worktreeId": worktree_id,
                 },
             })
         );
@@ -694,41 +670,19 @@ mod tests {
                 "taskId": task_id,
             })
         );
-        assert_eq!(deleted_worktree_response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            repository
+                .find_worktree(&WorktreeId::new(worktree_id))
+                .unwrap(),
+            None
+        );
     }
 
-    /// Verifies the router supports worktree CRUD routes end to end.
+    /// Verifies the router no longer exposes standalone public worktree routes.
     #[tokio::test]
-    async fn serves_worktree_crud_routes() {
+    async fn rejects_public_worktree_routes() {
         let (_temp_dir, _database_path, app) = test_router();
-        let create_response = match app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/api/worktrees")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        json!({
-                            "taskId": "task-1",
-                            "branchName": "feature/task-handlers",
-                            "activity": "active",
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap_or_else(|error| panic!("failed to build request: {error}")),
-            )
-            .await
-        {
-            Ok(response) => response,
-            Err(error) => panic!("request failed: {error}"),
-        };
-        let created_worktree = response_json(create_response).await["worktree"].clone();
-        let worktree_id = match created_worktree["id"].as_str() {
-            Some(worktree_id) => worktree_id.to_string(),
-            None => panic!("response did not include a worktree id"),
-        };
-        let list_response = match app
+        let collection_response = match app
             .clone()
             .oneshot(
                 Request::builder()
@@ -742,47 +696,11 @@ mod tests {
             Ok(response) => response,
             Err(error) => panic!("request failed: {error}"),
         };
-        let get_response = match app
-            .clone()
+        let item_response = match app
             .oneshot(
                 Request::builder()
                     .method(Method::GET)
-                    .uri(format!("/api/worktrees/{worktree_id}"))
-                    .body(Body::empty())
-                    .unwrap_or_else(|error| panic!("failed to build request: {error}")),
-            )
-            .await
-        {
-            Ok(response) => response,
-            Err(error) => panic!("request failed: {error}"),
-        };
-        let update_response = match app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(Method::PUT)
-                    .uri(format!("/api/worktrees/{worktree_id}"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        json!({
-                            "taskId": "task-2",
-                            "branchName": null,
-                            "activity": "inactive",
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap_or_else(|error| panic!("failed to build request: {error}")),
-            )
-            .await
-        {
-            Ok(response) => response,
-            Err(error) => panic!("request failed: {error}"),
-        };
-        let delete_response = match app
-            .oneshot(
-                Request::builder()
-                    .method(Method::DELETE)
-                    .uri(format!("/api/worktrees/{worktree_id}"))
+                    .uri("/api/worktrees/worktree-1")
                     .body(Body::empty())
                     .unwrap_or_else(|error| panic!("failed to build request: {error}")),
             )
@@ -792,56 +710,8 @@ mod tests {
             Err(error) => panic!("request failed: {error}"),
         };
 
-        assert_eq!(
-            created_worktree,
-            json!({
-                "id": worktree_id,
-                "taskId": "task-1",
-                "branchName": "feature/task-handlers",
-                "activity": "active",
-            })
-        );
-        assert_eq!(
-            response_json(list_response).await,
-            json!({
-                "worktrees": [
-                    {
-                        "id": worktree_id,
-                        "taskId": "task-1",
-                        "branchName": "feature/task-handlers",
-                        "activity": "active",
-                    },
-                ],
-            })
-        );
-        assert_eq!(
-            response_json(get_response).await,
-            json!({
-                "worktree": {
-                    "id": worktree_id,
-                    "taskId": "task-1",
-                    "branchName": "feature/task-handlers",
-                    "activity": "active",
-                },
-            })
-        );
-        assert_eq!(
-            response_json(update_response).await,
-            json!({
-                "worktree": {
-                    "id": worktree_id,
-                    "taskId": "task-2",
-                    "branchName": null,
-                    "activity": "inactive",
-                },
-            })
-        );
-        assert_eq!(
-            response_json(delete_response).await,
-            json!({
-                "worktreeId": worktree_id,
-            })
-        );
+        assert_eq!(collection_response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(item_response.status(), StatusCode::NOT_FOUND);
     }
 
     /// Verifies the router supports session CRUD routes end to end.
@@ -1058,7 +928,21 @@ mod tests {
         SqliteProjectWorkContextRepository::new(pool)
     }
 
-    /// Initializes one real Git repository with an initial commit so task worktree routes can exercise linked worktree creation.
+    /// Opens the test database so route assertions can inspect persisted worktree state.
+    fn bootstrapped_worktree_repository(database_path: &Path) -> SqliteWorktreeRepository {
+        let pool = DatabaseBootstrapper::system()
+            .bootstrap_repository_pool(
+                &DatabaseLocation::path(database_path),
+                &ora_db::default_migration_catalog().unwrap(),
+            )
+            .unwrap_or_else(|error| {
+                panic!("expected repository pool bootstrap to succeed: {error}")
+            });
+
+        SqliteWorktreeRepository::new(pool)
+    }
+
+    /// Initializes one real Git repository with an initial commit so task routes can exercise linked worktree creation.
     fn initialize_git_repository(repository_root: std::path::PathBuf) -> std::path::PathBuf {
         std::fs::create_dir_all(&repository_root)
             .unwrap_or_else(|error| panic!("failed to create repository root: {error}"));

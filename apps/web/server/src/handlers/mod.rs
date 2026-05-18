@@ -3,4 +3,3 @@ pub mod project_work_contexts;
 pub mod projects;
 pub mod sessions;
 pub mod tasks;
-pub mod worktrees;

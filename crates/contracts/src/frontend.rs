@@ -37,8 +37,6 @@ pub const PROJECT_WORK_CONTEXT_OPEN_PATH: &str = "/api/project-work-contexts/ope
 pub const PROJECT_WORK_CONTEXT_RENEW_PATH: &str = "/api/project-work-contexts/renew";
 pub const TASKS_PATH: &str = "/api/tasks";
 pub const TASK_PATH: &str = "/api/tasks/{taskId}";
-pub const WORKTREES_PATH: &str = "/api/worktrees";
-pub const WORKTREE_PATH: &str = "/api/worktrees/{worktreeId}";
 pub const SESSIONS_PATH: &str = "/api/sessions";
 pub const SESSION_PATH: &str = "/api/sessions/{sessionId}";
 
@@ -50,10 +48,6 @@ const TASK_ID_PATH_PARAM: FrontendPathParam = FrontendPathParam {
     rust_field_name: "task_id",
     wire_name: "taskId",
 };
-const WORKTREE_ID_PATH_PARAM: FrontendPathParam = FrontendPathParam {
-    rust_field_name: "worktree_id",
-    wire_name: "worktreeId",
-};
 const SESSION_ID_PATH_PARAM: FrontendPathParam = FrontendPathParam {
     rust_field_name: "session_id",
     wire_name: "sessionId",
@@ -61,7 +55,6 @@ const SESSION_ID_PATH_PARAM: FrontendPathParam = FrontendPathParam {
 
 const PROJECT_PATH_PARAMS: &[FrontendPathParam] = &[PROJECT_ID_PATH_PARAM];
 const TASK_PATH_PARAMS: &[FrontendPathParam] = &[TASK_ID_PATH_PARAM];
-const WORKTREE_PATH_PARAMS: &[FrontendPathParam] = &[WORKTREE_ID_PATH_PARAM];
 const SESSION_PATH_PARAMS: &[FrontendPathParam] = &[SESSION_ID_PATH_PARAM];
 const NO_PATH_PARAMS: &[FrontendPathParam] = &[];
 
@@ -175,51 +168,6 @@ const FRONTEND_ENDPOINTS: &[FrontendEndpoint] = &[
         has_json_body: false,
     },
     FrontendEndpoint {
-        operation_name: "createWorktree",
-        method: FrontendHttpMethod::Post,
-        path_template: WORKTREES_PATH,
-        request_type: "CreateWorktreeRequest",
-        response_type: "CreateWorktreeResponse",
-        path_params: NO_PATH_PARAMS,
-        has_json_body: true,
-    },
-    FrontendEndpoint {
-        operation_name: "getWorktree",
-        method: FrontendHttpMethod::Get,
-        path_template: WORKTREE_PATH,
-        request_type: "GetWorktreeRequest",
-        response_type: "GetWorktreeResponse",
-        path_params: WORKTREE_PATH_PARAMS,
-        has_json_body: false,
-    },
-    FrontendEndpoint {
-        operation_name: "listWorktrees",
-        method: FrontendHttpMethod::Get,
-        path_template: WORKTREES_PATH,
-        request_type: "ListWorktreesRequest",
-        response_type: "ListWorktreesResponse",
-        path_params: NO_PATH_PARAMS,
-        has_json_body: false,
-    },
-    FrontendEndpoint {
-        operation_name: "updateWorktree",
-        method: FrontendHttpMethod::Put,
-        path_template: WORKTREE_PATH,
-        request_type: "UpdateWorktreeRequest",
-        response_type: "UpdateWorktreeResponse",
-        path_params: WORKTREE_PATH_PARAMS,
-        has_json_body: true,
-    },
-    FrontendEndpoint {
-        operation_name: "deleteWorktree",
-        method: FrontendHttpMethod::Delete,
-        path_template: WORKTREE_PATH,
-        request_type: "DeleteWorktreeRequest",
-        response_type: "DeleteWorktreeResponse",
-        path_params: WORKTREE_PATH_PARAMS,
-        has_json_body: false,
-    },
-    FrontendEndpoint {
         operation_name: "createSession",
         method: FrontendHttpMethod::Post,
         path_template: SESSIONS_PATH,
@@ -276,8 +224,7 @@ mod tests {
     use super::{
         FrontendEndpoint, FrontendHttpMethod, FrontendPathParam, PROJECT_PATH,
         PROJECT_WORK_CONTEXT_OPEN_PATH, PROJECT_WORK_CONTEXT_RENEW_PATH, PROJECTS_PATH,
-        SESSION_PATH, SESSIONS_PATH, TASK_PATH, TASKS_PATH, WORKTREE_PATH, WORKTREES_PATH,
-        frontend_endpoints,
+        SESSION_PATH, SESSIONS_PATH, TASK_PATH, TASKS_PATH, frontend_endpoints,
     };
     use pretty_assertions::assert_eq;
 
@@ -414,60 +361,6 @@ mod tests {
                     has_json_body: false,
                 },
                 FrontendEndpoint {
-                    operation_name: "createWorktree",
-                    method: FrontendHttpMethod::Post,
-                    path_template: WORKTREES_PATH,
-                    request_type: "CreateWorktreeRequest",
-                    response_type: "CreateWorktreeResponse",
-                    path_params: &[],
-                    has_json_body: true,
-                },
-                FrontendEndpoint {
-                    operation_name: "getWorktree",
-                    method: FrontendHttpMethod::Get,
-                    path_template: WORKTREE_PATH,
-                    request_type: "GetWorktreeRequest",
-                    response_type: "GetWorktreeResponse",
-                    path_params: &[FrontendPathParam {
-                        rust_field_name: "worktree_id",
-                        wire_name: "worktreeId",
-                    }],
-                    has_json_body: false,
-                },
-                FrontendEndpoint {
-                    operation_name: "listWorktrees",
-                    method: FrontendHttpMethod::Get,
-                    path_template: WORKTREES_PATH,
-                    request_type: "ListWorktreesRequest",
-                    response_type: "ListWorktreesResponse",
-                    path_params: &[],
-                    has_json_body: false,
-                },
-                FrontendEndpoint {
-                    operation_name: "updateWorktree",
-                    method: FrontendHttpMethod::Put,
-                    path_template: WORKTREE_PATH,
-                    request_type: "UpdateWorktreeRequest",
-                    response_type: "UpdateWorktreeResponse",
-                    path_params: &[FrontendPathParam {
-                        rust_field_name: "worktree_id",
-                        wire_name: "worktreeId",
-                    }],
-                    has_json_body: true,
-                },
-                FrontendEndpoint {
-                    operation_name: "deleteWorktree",
-                    method: FrontendHttpMethod::Delete,
-                    path_template: WORKTREE_PATH,
-                    request_type: "DeleteWorktreeRequest",
-                    response_type: "DeleteWorktreeResponse",
-                    path_params: &[FrontendPathParam {
-                        rust_field_name: "worktree_id",
-                        wire_name: "worktreeId",
-                    }],
-                    has_json_body: false,
-                },
-                FrontendEndpoint {
                     operation_name: "createSession",
                     method: FrontendHttpMethod::Post,
                     path_template: SESSIONS_PATH,
@@ -548,6 +441,17 @@ mod tests {
                 }],
                 has_json_body: true,
             }
+        );
+    }
+
+    /// Verifies the exported endpoint manifest omits backend-owned worktree operations.
+    #[test]
+    fn omits_worktree_endpoints_from_frontend_manifest() {
+        assert_eq!(
+            frontend_endpoints()
+                .iter()
+                .all(|endpoint| !endpoint.operation_name.contains("Worktree")),
+            true
         );
     }
 }

@@ -3,7 +3,6 @@ import type { CreateProjectRequest, CreateProjectResponse, DeleteProjectRequest,
 import type { OpenProjectWorkContextRequest, OpenProjectWorkContextResponse, RenewProjectWorkContextRequest, RenewProjectWorkContextResponse } from "./project-work-context.js";
 import type { CreateSessionRequest, CreateSessionResponse, DeleteSessionRequest, DeleteSessionResponse, GetSessionRequest, GetSessionResponse, ListSessionsRequest, ListSessionsResponse, UpdateSessionRequest, UpdateSessionResponse } from "./session.js";
 import type { CreateTaskRequest, CreateTaskResponse, DeleteTaskRequest, DeleteTaskResponse, GetTaskRequest, GetTaskResponse, ListTasksRequest, ListTasksResponse, UpdateTaskRequest, UpdateTaskResponse } from "./task.js";
-import type { CreateWorktreeRequest, CreateWorktreeResponse, DeleteWorktreeRequest, DeleteWorktreeResponse, GetWorktreeRequest, GetWorktreeResponse, ListWorktreesRequest, ListWorktreesResponse, UpdateWorktreeRequest, UpdateWorktreeResponse } from "./worktree.js";
 import type { HttpMethod } from "./transport.js";
 
 export type EndpointPathParam = {
@@ -34,11 +33,6 @@ export type RequestByOperation = {
   listTasks: ListTasksRequest;
   updateTask: UpdateTaskRequest;
   deleteTask: DeleteTaskRequest;
-  createWorktree: CreateWorktreeRequest;
-  getWorktree: GetWorktreeRequest;
-  listWorktrees: ListWorktreesRequest;
-  updateWorktree: UpdateWorktreeRequest;
-  deleteWorktree: DeleteWorktreeRequest;
   createSession: CreateSessionRequest;
   getSession: GetSessionRequest;
   listSessions: ListSessionsRequest;
@@ -59,11 +53,6 @@ export type ResponseByOperation = {
   listTasks: ListTasksResponse;
   updateTask: UpdateTaskResponse;
   deleteTask: DeleteTaskResponse;
-  createWorktree: CreateWorktreeResponse;
-  getWorktree: GetWorktreeResponse;
-  listWorktrees: ListWorktreesResponse;
-  updateWorktree: UpdateWorktreeResponse;
-  deleteWorktree: DeleteWorktreeResponse;
   createSession: CreateSessionResponse;
   getSession: GetSessionResponse;
   listSessions: ListSessionsResponse;
@@ -180,51 +169,6 @@ export const endpoints = {
     requestType: "DeleteTaskRequest",
     responseType: "DeleteTaskResponse",
     pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    hasJsonBody: false,
-  },
-  createWorktree: {
-    operationName: "createWorktree",
-    method: "POST",
-    pathTemplate: "/api/worktrees",
-    requestType: "CreateWorktreeRequest",
-    responseType: "CreateWorktreeResponse",
-    pathParams: [],
-    hasJsonBody: true,
-  },
-  getWorktree: {
-    operationName: "getWorktree",
-    method: "GET",
-    pathTemplate: "/api/worktrees/{worktreeId}",
-    requestType: "GetWorktreeRequest",
-    responseType: "GetWorktreeResponse",
-    pathParams: [{ rustFieldName: "worktree_id", wireName: "worktreeId" }],
-    hasJsonBody: false,
-  },
-  listWorktrees: {
-    operationName: "listWorktrees",
-    method: "GET",
-    pathTemplate: "/api/worktrees",
-    requestType: "ListWorktreesRequest",
-    responseType: "ListWorktreesResponse",
-    pathParams: [],
-    hasJsonBody: false,
-  },
-  updateWorktree: {
-    operationName: "updateWorktree",
-    method: "PUT",
-    pathTemplate: "/api/worktrees/{worktreeId}",
-    requestType: "UpdateWorktreeRequest",
-    responseType: "UpdateWorktreeResponse",
-    pathParams: [{ rustFieldName: "worktree_id", wireName: "worktreeId" }],
-    hasJsonBody: true,
-  },
-  deleteWorktree: {
-    operationName: "deleteWorktree",
-    method: "DELETE",
-    pathTemplate: "/api/worktrees/{worktreeId}",
-    requestType: "DeleteWorktreeRequest",
-    responseType: "DeleteWorktreeResponse",
-    pathParams: [{ rustFieldName: "worktree_id", wireName: "worktreeId" }],
     hasJsonBody: false,
   },
   createSession: {

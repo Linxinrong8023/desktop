@@ -52,7 +52,6 @@ export type Task = {
   projectId: string;
   title: string;
   status: TaskStatus;
-  worktreeId: string | null;
 };
 
 /**
@@ -68,7 +67,6 @@ export type UpdateTaskRequest = {
   projectId: string;
   title: string;
   status: TaskStatus;
-  worktreeId: string | null;
 };
 
 /**

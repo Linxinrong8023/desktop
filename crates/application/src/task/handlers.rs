@@ -347,7 +347,7 @@ where
             ProjectId::new(request.project_id),
             request.title,
             map_contract_task_status(request.status),
-            request.worktree_id.map(WorktreeId::new),
+            existing_task.worktree_id,
             AuditFields::new(
                 existing_task.audit_fields.created_at,
                 self.clock.now_timestamp_millis(),

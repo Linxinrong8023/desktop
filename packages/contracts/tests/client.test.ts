@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createContractsClient } from "../src/client.js";
+import { endpoints } from "../src/endpoints.js";
 import type { ContractTransport, ContractTransportRequest } from "../src/transport.js";
 
 /**
@@ -31,7 +32,6 @@ test("builds update URLs from path params and JSON bodies", async () => {
         projectId: "project-1",
         title: "Ship SDK",
         status: "doing",
-        worktreeId: null,
       },
     }),
   );
@@ -40,7 +40,6 @@ test("builds update URLs from path params and JSON bodies", async () => {
     projectId: "project-1",
     title: "Ship SDK",
     status: "doing",
-    worktreeId: null,
   });
 
   assert.deepEqual(requests, [
@@ -52,7 +51,6 @@ test("builds update URLs from path params and JSON bodies", async () => {
         projectId: "project-1",
         title: "Ship SDK",
         status: "doing",
-        worktreeId: null,
       },
       headers: {
         "content-type": "application/json",
@@ -65,7 +63,6 @@ test("builds update URLs from path params and JSON bodies", async () => {
       projectId: "project-1",
       title: "Ship SDK",
       status: "doing",
-      worktreeId: null,
     },
   });
 });
@@ -95,4 +92,29 @@ test("omits JSON bodies for path-only operations", async () => {
       headers: {},
     },
   ]);
+});
+
+test("omits standalone worktree operations from generated contracts", () => {
+  assert.equal("createWorktree" in endpoints, false);
+  assert.equal("getWorktree" in endpoints, false);
+  assert.equal("listWorktrees" in endpoints, false);
+  assert.equal("updateWorktree" in endpoints, false);
+  assert.equal("deleteWorktree" in endpoints, false);
+
+  const client = createContractsClient(
+    recordingTransport([], {
+      task: {
+        id: "task-1",
+        projectId: "project-1",
+        title: "Ship SDK",
+        status: "doing",
+      },
+    }),
+  );
+
+  assert.equal("createWorktree" in client, false);
+  assert.equal("getWorktree" in client, false);
+  assert.equal("listWorktrees" in client, false);
+  assert.equal("updateWorktree" in client, false);
+  assert.equal("deleteWorktree" in client, false);
 });

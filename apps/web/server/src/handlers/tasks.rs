@@ -23,7 +23,6 @@ pub struct UpdateTaskBody {
     project_id: String,
     title: String,
     status: TaskStatus,
-    worktree_id: Option<String>,
 }
 
 /// Creates one task by forwarding the request body into the application layer.
@@ -76,7 +75,6 @@ pub async fn update_task(
             project_id: body.project_id,
             title: body.title,
             status: body.status,
-            worktree_id: body.worktree_id,
         })
         .map(Json)
         .map_err(WebApiError::from)

@@ -5,11 +5,11 @@ Define the backend-owned linked-worktree lifecycle that task creation and deleti
 ## Requirements
 
 ### Requirement: Task creation SHALL provision exactly one internal linked worktree
-The system SHALL treat linked worktree provisioning as part of task creation. When a new task is created, the backend SHALL derive a task-owned branch name and worktree root from the generated task identifier, SHALL create one linked Git worktree from the configured project repository, SHALL persist one worktree record for that checkout, and SHALL persist the task with the new `worktree_id`.
+The system SHALL treat linked worktree provisioning as part of task creation. When a new task is created, the backend SHALL derive a task-owned branch name and worktree root from the generated task identifier, SHALL create one linked Git worktree from the configured project repository, SHALL persist one worktree record for that checkout, and SHALL persist the task with the new internal `worktree_id`.
 
 #### Scenario: Creating a task provisions and links a worktree
 - **WHEN** the backend handles a valid task creation request for the configured project
-- **THEN** it creates one linked Git worktree, persists one worktree record, and returns a created task whose `worktree_id` matches the persisted worktree
+- **THEN** it creates one linked Git worktree, persists one worktree record, and stores the task-to-worktree linkage internally without exposing the internal `worktree_id` in the public task payload
 
 #### Scenario: Branch and path are derived from the generated task identity
 - **WHEN** the backend generates a new task identifier during task creation

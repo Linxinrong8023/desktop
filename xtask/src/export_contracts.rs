@@ -13,6 +13,7 @@ pub fn run_export_contracts(workspace_root: &Path) -> Result<(), Box<dyn std::er
 
     export_typescript_bindings_to(&contracts_source_directory)?;
     write_contract_runtime_files(&contracts_source_directory, frontend_endpoints())?;
+    remove_stale_generated_file(&contracts_source_directory.join("worktree.ts"))?;
 
     Ok(())
 }
@@ -56,6 +57,15 @@ fn write_generated_file(
     }
 
     fs::write(output_path, contents)?;
+
+    Ok(())
+}
+
+/// Removes one obsolete generated file when a contract family is no longer exported.
+fn remove_stale_generated_file(output_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if output_path.exists() {
+        fs::remove_file(output_path)?;
+    }
 
     Ok(())
 }
@@ -395,7 +405,6 @@ fn render_index_module() -> String {
     source.push_str("export * from \"./project-work-context.js\";\n");
     source.push_str("export * from \"./session.js\";\n");
     source.push_str("export * from \"./task.js\";\n");
-    source.push_str("export * from \"./worktree.js\";\n");
 
     source
 }
@@ -441,16 +450,6 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         "CreateTaskRequest" | "CreateTaskResponse" | "DeleteTaskRequest" | "DeleteTaskResponse"
         | "GetTaskRequest" | "GetTaskResponse" | "ListTasksRequest" | "ListTasksResponse"
         | "UpdateTaskRequest" | "UpdateTaskResponse" => "task",
-        "CreateWorktreeRequest"
-        | "CreateWorktreeResponse"
-        | "DeleteWorktreeRequest"
-        | "DeleteWorktreeResponse"
-        | "GetWorktreeRequest"
-        | "GetWorktreeResponse"
-        | "ListWorktreesRequest"
-        | "ListWorktreesResponse"
-        | "UpdateWorktreeRequest"
-        | "UpdateWorktreeResponse" => "worktree",
         "CreateSessionRequest"
         | "CreateSessionResponse"
         | "DeleteSessionRequest"
@@ -570,7 +569,6 @@ mod tests {
             "session.ts",
             "task.ts",
             "transport.ts",
-            "worktree.ts",
         ];
 
         for generated_file in generated_files {

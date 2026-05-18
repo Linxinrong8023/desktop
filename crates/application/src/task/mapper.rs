@@ -8,7 +8,6 @@ pub(crate) fn map_task(task: DomainTask) -> ContractTask {
         project_id: task.project_id.to_string(),
         title: task.title,
         status: map_task_status(task.status),
-        worktree_id: task.worktree_id.map(|worktree_id| worktree_id.to_string()),
     }
 }
 
