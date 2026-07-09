@@ -1,0 +1,17 @@
+[package]
+name = "ora-process-manager"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "ora_process_manager"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { workspace = true, features = ["io-util", "process"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "time"] }

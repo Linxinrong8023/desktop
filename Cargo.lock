@@ -1183,6 +1183,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ora-process-manager"
+version = "0.0.0"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "ora-pty"
 version = "0.0.0"
 dependencies = [
