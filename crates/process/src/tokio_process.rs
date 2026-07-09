@@ -140,6 +140,15 @@ impl ManagedProcess for TokioManagedProcess {
         }
     }
 
+/// Forcefully terminates the child process.
+///
+/// Known limitation: only the direct child is terminated. Descendant processes spawned by the
+/// child (for example a shell launching further tools) keep running, because tree-wide
+/// termination requires Unix process groups / Windows Job Objects. This also applies to the
+/// `kill_on_drop` path. Tree-wide termination is tracked as a follow-up task.
+///
+/// Returns once the termination request is delivered to the OS; callers that need the final
+/// exit status must still await [`ManagedProcess::wait`].
     fn kill(&self) -> impl Future<Output = io::Result<()>> + Send + '_ {
         let kill_tx = self.kill_tx.clone();
         let exit_rx = self.exit_rx.clone();
