@@ -13,4 +13,8 @@ pub enum DomainModelError {
     InvalidVirtualEntryKind(i64),
     #[error("invalid session status value: {0}")]
     InvalidSessionStatus(i64),
+    #[error("skill name must not be blank")]
+    EmptySkillName,
+    #[error("agent definition name must not be blank")]
+    EmptyAgentDefinitionName,
 }

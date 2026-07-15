@@ -401,9 +401,11 @@ fn render_index_module() -> String {
     source.push_str("export * from \"./client.js\";\n");
     source.push_str("export * from \"./endpoints.js\";\n");
     source.push_str("export * from \"./transport.js\";\n");
+    source.push_str("export * from \"./agent.js\";\n");
     source.push_str("export * from \"./project.js\";\n");
     source.push_str("export * from \"./project-work-context.js\";\n");
     source.push_str("export * from \"./session.js\";\n");
+    source.push_str("export * from \"./skill.js\";\n");
     source.push_str("export * from \"./task.js\";\n");
 
     source
@@ -561,12 +563,14 @@ mod tests {
         });
 
         let generated_files = [
+            "agent.ts",
             "client.ts",
             "endpoints.ts",
             "fetch.ts",
             "index.ts",
             "project.ts",
             "session.ts",
+            "skill.ts",
             "task.ts",
             "transport.ts",
         ];
@@ -583,6 +587,8 @@ mod tests {
         let index_module = fs::read_to_string(package_source_directory.join("index.ts"))
             .unwrap_or_else(|error| panic!("failed to read generated index module: {error}"));
 
+        assert!(index_module.contains("export * from \"./agent.js\";"));
+        assert!(index_module.contains("export * from \"./skill.js\";"));
         assert_eq!(index_module, render_index_module(),);
     }
 }

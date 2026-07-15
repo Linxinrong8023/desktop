@@ -1,9 +1,12 @@
+mod agent;
 mod frontend;
 mod project;
 mod project_work_context;
 mod session;
+mod skill;
 mod task;
 
+pub use agent::Agent;
 pub use frontend::{
     FrontendEndpoint, FrontendHttpMethod, FrontendPathParam, PROJECT_PATH,
     PROJECT_WORK_CONTEXT_OPEN_PATH, PROJECT_WORK_CONTEXT_RENEW_PATH, PROJECTS_PATH, SESSION_PATH,
@@ -23,6 +26,7 @@ pub use session::{
     GetSessionRequest, GetSessionResponse, ListSessionsRequest, ListSessionsResponse, Session,
     SessionStatus, UpdateSessionRequest, UpdateSessionResponse,
 };
+pub use skill::Skill;
 use std::path::Path;
 pub use task::{
     CreateTaskRequest, CreateTaskResponse, DeleteTaskRequest, DeleteTaskResponse, GetTaskRequest,
@@ -37,6 +41,7 @@ pub fn export_typescript_bindings_to(
 ) -> Result<(), ExportError> {
     let config = Config::new().with_out_dir(output_directory.as_ref());
 
+    Agent::export(&config)?;
     Project::export(&config)?;
     CreateProjectRequest::export(&config)?;
     CreateProjectResponse::export(&config)?;
@@ -67,6 +72,8 @@ pub fn export_typescript_bindings_to(
     UpdateSessionResponse::export(&config)?;
     DeleteSessionRequest::export(&config)?;
     DeleteSessionResponse::export(&config)?;
+
+    Skill::export(&config)?;
 
     TaskStatus::export(&config)?;
     Task::export(&config)?;

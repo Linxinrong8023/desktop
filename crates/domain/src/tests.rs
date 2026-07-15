@@ -1,8 +1,9 @@
 use crate::{
-    AgentId, Artifact, ArtifactId, AuditFields, DomainModelError, Project, ProjectId,
-    ProjectWorkContext, ProjectWorkContextId, ProjectWorkContextSurface, Session, SessionId,
-    SessionStatus, Task, TaskId, TaskStatus, VirtualEntry, VirtualEntryId, VirtualEntryKind,
-    VirtualFolder, VirtualFolderId, Worktree, WorktreeActivity, WorktreeId,
+    AgentDefinition, AgentDefinitionId, AgentId, Artifact, ArtifactId, AuditFields,
+    DomainModelError, Project, ProjectId, ProjectWorkContext, ProjectWorkContextId,
+    ProjectWorkContextSurface, Session, SessionId, SessionStatus, Skill, SkillId, Task, TaskId,
+    TaskStatus, VirtualEntry, VirtualEntryId, VirtualEntryKind, VirtualFolder, VirtualFolderId,
+    Worktree, WorktreeActivity, WorktreeId,
 };
 use pretty_assertions::assert_eq;
 
@@ -70,6 +71,20 @@ fn constructs_schema_backed_entities() {
         SessionStatus::Running,
         audit_fields.clone(),
     );
+    let skill = Skill::new(
+        SkillId::new("skill-1"),
+        "review",
+        "Reviews implementation changes",
+        audit_fields.clone(),
+    )
+    .unwrap();
+    let agent_definition = AgentDefinition::new(
+        AgentDefinitionId::new("agent-definition-1"),
+        "opencode",
+        "OpenCode agent configuration",
+        audit_fields.clone(),
+    )
+    .unwrap();
 
     assert_eq!(
         project,
@@ -152,8 +167,46 @@ fn constructs_schema_backed_entities() {
             agent_id: AgentId::new("codex"),
             agent_session_id: Some("agent-session-1".to_string()),
             status: SessionStatus::Running,
+            audit_fields: audit_fields.clone(),
+        }
+    );
+    assert_eq!(
+        skill,
+        Skill {
+            id: SkillId::new("skill-1"),
+            name: "review".to_string(),
+            description: "Reviews implementation changes".to_string(),
+            audit_fields: audit_fields.clone(),
+        }
+    );
+    assert_eq!(
+        agent_definition,
+        AgentDefinition {
+            id: AgentDefinitionId::new("agent-definition-1"),
+            name: "opencode".to_string(),
+            description: "OpenCode agent configuration".to_string(),
             audit_fields,
         }
+    );
+}
+
+/// Verifies configurable resource constructors reject names that cannot identify a resource.
+#[test]
+fn rejects_blank_skill_and_agent_definition_names() {
+    let audit_fields = AuditFields::new(1, 1, false);
+
+    assert_eq!(
+        Skill::new(SkillId::new("skill-1"), "  ", "", audit_fields.clone()),
+        Err(DomainModelError::EmptySkillName)
+    );
+    assert_eq!(
+        AgentDefinition::new(
+            AgentDefinitionId::new("agent-definition-1"),
+            "\t",
+            "",
+            audit_fields,
+        ),
+        Err(DomainModelError::EmptyAgentDefinitionName)
     );
 }
 

@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use ora_logging::{with_recorded_trace_logging, with_trace_logging};
 use pretty_assertions::assert_eq;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, ErrorCode, params};
 use tempfile::TempDir;
 use tracing_subscriber::layer::{Context, Layer};
 use tracing_subscriber::registry::LookupSpan;
@@ -42,11 +42,13 @@ fn bootstraps_empty_database_with_default_catalog() {
     assert_eq!(
         load_table_names(database.connection()),
         vec![
+            "agents".to_string(),
             "artifacts".to_string(),
             "migrations".to_string(),
             "project_work_contexts".to_string(),
             "projects".to_string(),
             "sessions".to_string(),
+            "skills".to_string(),
             "tasks".to_string(),
             "virtual_entries".to_string(),
             "virtual_folders".to_string(),
@@ -58,8 +60,81 @@ fn bootstraps_empty_database_with_default_catalog() {
         vec![
             AppliedMigration::new("0001", 1_700_000_000_000),
             AppliedMigration::new("0002", 1_700_000_000_000),
+            AppliedMigration::new("0003", 1_700_000_000_000),
         ]
     );
+}
+
+/// Verifies the catalog creates active-name indexes and removes the new schema during rollback.
+#[test]
+fn manages_skill_and_agent_definition_schema_lifecycle() {
+    let temp_dir = TempDir::new().unwrap();
+    let database_path = temp_dir.path().join("skill-agent.sqlite3");
+    let catalog = default_migration_catalog().unwrap();
+    let migrations = ["0001", "0002", "0003"].map(|version| {
+        catalog
+            .migration(version)
+            .cloned()
+            .unwrap_or_else(|| panic!("missing migration {version}"))
+    });
+
+    bootstrap_file_database(&database_path, catalog, 1_700_000_000_000);
+
+    let connection = Connection::open(&database_path).unwrap();
+    assert_eq!(index_exists(&connection, "idx_skills_active_name"), true);
+    assert_eq!(index_exists(&connection, "idx_agents_active_name"), true);
+
+    for table_name in ["skills", "agents"] {
+        connection
+            .execute(
+                &format!(
+                    "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                     VALUES (?1, ?2, ?3, ?4, ?5, 0)"
+                ),
+                params!["first", "opencode", "OpenCode", 1_i64, 1_i64],
+            )
+            .unwrap();
+        let duplicate = connection.execute(
+            &format!(
+                "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                 VALUES (?1, ?2, ?3, ?4, ?5, 0)"
+            ),
+            params!["second", "opencode", "OpenCode duplicate", 2_i64, 2_i64],
+        );
+
+        assert_eq!(
+            matches!(
+                duplicate,
+                Err(rusqlite::Error::SqliteFailure(error, _))
+                    if error.code == ErrorCode::ConstraintViolation
+            ),
+            true
+        );
+
+        connection
+            .execute(
+                &format!("UPDATE {table_name} SET is_deleted = 1 WHERE id = ?1"),
+                params!["first"],
+            )
+            .unwrap();
+        connection
+            .execute(
+                &format!(
+                    "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                     VALUES (?1, ?2, ?3, ?4, ?5, 0)"
+                ),
+                params!["third", "opencode", "OpenCode replacement", 3_i64, 3_i64],
+            )
+            .unwrap();
+    }
+
+    drop(connection);
+    let rollback_catalog =
+        MigrationCatalog::with_target_versions(migrations.to_vec(), vec!["0001", "0002"]).unwrap();
+    bootstrap_file_database(&database_path, rollback_catalog, 1_700_000_000_100);
+
+    let connection = Connection::open(&database_path).unwrap();
+    assert_eq!(table_exists(&connection, "skills"), false);
+    assert_eq!(table_exists(&connection, "agents"), false);
+    assert_eq!(index_exists(&connection, "idx_skills_active_name"), false);
+    assert_eq!(index_exists(&connection, "idx_agents_active_name"), false);
 }
 
 /// Verifies the runner applies only the missing tail of a linear migration history in ascending order.
@@ -348,6 +423,18 @@ fn table_exists(connection: &Connection, table_name: &str) -> bool {
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
             params![table_name],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap()
+        == 1
+}
+
+/// Reports whether a named index exists so migration tests can assert partial-index installation.
+fn index_exists(connection: &Connection, index_name: &str) -> bool {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1)",
+            params![index_name],
             |row| row.get::<_, i64>(0),
         )
         .unwrap()
