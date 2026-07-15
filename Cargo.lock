@@ -1121,11 +1121,9 @@ dependencies = [
  "ora-contracts",
  "ora-domain",
  "ora-logging",
- "ora-pty",
  "pretty_assertions",
  "thiserror 2.0.18",
  "tokio",
- "tokio-util",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -1186,9 +1184,11 @@ dependencies = [
 name = "ora-process"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "pretty_assertions",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1215,7 +1215,6 @@ dependencies = [
  "ora-db",
  "ora-domain",
  "ora-logging",
- "ora-pty",
  "pretty_assertions",
  "reqwest",
  "serde",
@@ -1223,8 +1222,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tokio-tungstenite",
- "tokio-util",
  "tower",
  "tracing",
 ]
