@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Menu, Search, SquarePen } from "lucide-react";
+import { IconMenu2, IconSearch, IconEdit } from "@tabler/icons-react";
 import { Input } from "@ora/ui";
 import { IconButton } from "../../components/icon-button";
 import { ConversationItem } from "./conversation-item";
@@ -20,7 +20,7 @@ interface SidebarProps {
   onSignOut: () => void;
 }
 
-/** The collapsible left rail: new chat, search, date-grouped history, user footer. */
+/** The collapsible left rail: new chat, IconSearch, date-grouped history, user footer. */
 export function Sidebar({
   user,
   conversations,
@@ -46,8 +46,8 @@ export function Sidebar({
   if (collapsed) {
     return (
       <aside className="flex h-dvh w-16 shrink-0 flex-col items-center gap-2 border-r border-border bg-muted/40 py-2">
-        <IconButton icon={SquarePen} label="New chat" onClick={onNewChat} />
-        <IconButton icon={Menu} label="Open sidebar" onClick={onToggleCollapsed} />
+        <IconButton icon={IconEdit} label="New chat" onClick={onNewChat} />
+        <IconButton icon={IconMenu2} label="Open sidebar" onClick={onToggleCollapsed} />
         <div className="flex-1" />
         <UserProfile user={user} compact onSignOut={onSignOut} />
       </aside>
@@ -57,13 +57,13 @@ export function Sidebar({
   return (
     <aside className="flex h-dvh w-72 shrink-0 flex-col border-r border-border bg-muted/40">
       <div className="flex items-center justify-between px-2 pt-2">
-        <IconButton icon={SquarePen} label="New chat" onClick={onNewChat} />
-        <IconButton icon={Menu} label="Collapse sidebar" onClick={onToggleCollapsed} />
+        <IconButton icon={IconEdit} label="New chat" onClick={onNewChat} />
+        <IconButton icon={IconMenu2} label="Collapse sidebar" onClick={onToggleCollapsed} />
       </div>
 
       <div className="px-2 pt-2">
         <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <IconSearch className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search conversations"
             value={query}

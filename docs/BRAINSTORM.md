@@ -9,7 +9,7 @@ Put shared application UI (chat shell: sidebar + conversation + composer) in `pa
 - Shared product UI lives in `@ora/app-shell`; apps are thin hosts only.
 - Both desktop and web-client mount `<AppShell client={…} />`.
 - Desktop transport for now: `@ora/mock-service` (same as web-client).
-- Icons: `lucide-react` (drop `@untitledui/icons`).
+- Icons: `@tabler/icons-react` everywhere (drop lucide / Untitled icons).
 - Design system: current shadcn `@ora/ui` APIs + tokens.
 
 ## Ownership boundaries
@@ -23,6 +23,6 @@ Put shared application UI (chat shell: sidebar + conversation + composer) in `pa
 
 ## Status
 
-- Migrated app-shell off Untitled UI onto shadcn/`lucide-react`.
+- Migrated app-shell onto shadcn `@ora/ui` + `@tabler/icons-react`.
 - Web-client and desktop both wire AppShell + mock-service.
-- Verified web-client renders shell with visible icons.
+- Verified web-client renders shell with Tabler icons.

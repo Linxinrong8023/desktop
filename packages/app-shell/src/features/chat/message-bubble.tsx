@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Copy, ThumbsDown, ThumbsUp } from "lucide-react";
+import { IconCheck, IconCopy, IconThumbDown, IconThumbUp } from "@tabler/icons-react";
 import { Button } from "@ora/ui";
 import { ColoredAvatar } from "../../components/colored-avatar";
 import { OraMark } from "../../components/ora-mark";
@@ -49,16 +49,16 @@ export function MessageBubble({ message, userName }: MessageBubbleProps) {
             <div className="flex items-center gap-0.5 opacity-0 transition duration-100 group-hover/message:opacity-100">
               <Button variant="ghost" size="icon-xs" aria-label="Copy" onClick={copy}>
                 {copied ? (
-                  <Check className="size-3.5 text-emerald-600" />
+                  <IconCheck className="size-3.5 text-emerald-600" />
                 ) : (
-                  <Copy className="size-3.5 text-muted-foreground" />
+                  <IconCopy className="size-3.5 text-muted-foreground" />
                 )}
               </Button>
               <Button variant="ghost" size="icon-xs" aria-label="Good response">
-                <ThumbsUp className="size-3.5 text-muted-foreground" />
+                <IconThumbUp className="size-3.5 text-muted-foreground" />
               </Button>
               <Button variant="ghost" size="icon-xs" aria-label="Bad response">
-                <ThumbsDown className="size-3.5 text-muted-foreground" />
+                <IconThumbDown className="size-3.5 text-muted-foreground" />
               </Button>
             </div>
           )}

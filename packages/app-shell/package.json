@@ -11,7 +11,7 @@
   "dependencies": {
     "@ora/contracts": "workspace:*",
     "@ora/ui": "workspace:*",
-    "lucide-react": "^1.24.0"
+    "@tabler/icons-react": "^3.44.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",

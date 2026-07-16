@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { ArrowUp } from "lucide-react";
+import { IconArrowUp } from "@tabler/icons-react";
 import { Button, Textarea } from "@ora/ui";
 
 interface ComposerProps {
@@ -18,7 +18,7 @@ interface ComposerProps {
 export function Composer({
   onSend,
   isResponding,
-  placeholder = "Message Ora…",
+  placeholder = "Message Ora...",
   autoFocus = false,
 }: ComposerProps) {
   const [value, setValue] = useState("");
@@ -61,7 +61,7 @@ export function Composer({
       />
       <div className="flex items-center justify-between pt-1">
         <p className="px-2 text-xs text-muted-foreground">
-          Enter to send · <span className="text-foreground/70">Shift+Enter for newline</span>
+          Enter to send / <span className="text-foreground/70">Shift+Enter for newline</span>
         </p>
         <Button
           size="icon-sm"
@@ -70,7 +70,7 @@ export function Composer({
           onClick={submit}
           className="rounded-full"
         >
-          <ArrowUp className="size-[18px]" />
+          <IconArrowUp className="size-[18px]" />
         </Button>
       </div>
     </div>

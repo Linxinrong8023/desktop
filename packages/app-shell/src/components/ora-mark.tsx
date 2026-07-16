@@ -1,5 +1,5 @@
 import { Avatar, AvatarFallback, cn } from "@ora/ui";
-import { MessageCircle } from "lucide-react";
+import { IconMessageCircle } from "@tabler/icons-react";
 
 type AvatarSize = "sm" | "default" | "lg";
 
@@ -19,7 +19,7 @@ export function OraMark({ size = "default", className }: OraMarkProps) {
   return (
     <Avatar size={size} className={cn("rounded-lg", className)}>
       <AvatarFallback className="rounded-lg bg-primary text-primary-foreground">
-        <MessageCircle className={ICON_SIZE[size]} />
+        <IconMessageCircle className={ICON_SIZE[size]} />
       </AvatarFallback>
     </Avatar>
   );

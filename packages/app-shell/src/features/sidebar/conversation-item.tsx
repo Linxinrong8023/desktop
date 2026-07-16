@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { EllipsisVertical, MessageSquare, Pencil, Trash2 } from "lucide-react";
+import { IconDotsVertical, IconMessage, IconPencil, IconTrash } from "@tabler/icons-react";
 import {
   Button,
   DropdownMenu,
@@ -91,7 +91,7 @@ export function ConversationItem({
             : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
         )}
       >
-        <MessageSquare className="size-[18px] shrink-0 stroke-[1.75px] text-muted-foreground" />
+        <IconMessage className="size-[18px] shrink-0 stroke-[1.75px] text-muted-foreground" />
         <span className="flex-1 truncate">{conversation.title}</span>
       </button>
 
@@ -100,17 +100,17 @@ export function ConversationItem({
           <DropdownMenuTrigger
             render={
               <Button variant="ghost" size="icon-xs" aria-label="Conversation options">
-                <EllipsisVertical className="size-4 text-muted-foreground" />
+                <IconDotsVertical className="size-4 text-muted-foreground" />
               </Button>
             }
           />
           <DropdownMenuContent className="w-48" align="end">
             <DropdownMenuItem onClick={startEdit}>
-              <Pencil />
+              <IconPencil />
               Rename
             </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onClick={onRemove}>
-              <Trash2 />
+              <IconTrash />
               Delete
             </DropdownMenuItem>
           </DropdownMenuContent>

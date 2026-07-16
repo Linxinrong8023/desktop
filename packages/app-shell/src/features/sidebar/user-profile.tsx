@@ -1,4 +1,4 @@
-import { ChevronDown, LogOut, Settings } from "lucide-react";
+import { IconChevronDown, IconLogout, IconSettings } from "@tabler/icons-react";
 import {
   Button,
   DropdownMenu,
@@ -11,7 +11,7 @@ import type { CurrentUser } from "../../lib/types";
 
 interface UserProfileProps {
   user: CurrentUser;
-  /** Renders only the avatar — used when the sidebar is collapsed. */
+  /** Renders only the avatar - used when the sidebar is collapsed. */
   compact?: boolean;
   onSignOut?: () => void;
 }
@@ -38,7 +38,7 @@ export function UserProfile({ user, compact = false, onSignOut }: UserProfilePro
         <span className="truncate text-sm font-semibold text-foreground">{user.name}</span>
         <span className="truncate text-xs text-muted-foreground">{user.email}</span>
       </span>
-      <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+      <IconChevronDown className="size-4 shrink-0 text-muted-foreground" />
     </Button>
   );
 
@@ -47,11 +47,11 @@ export function UserProfile({ user, compact = false, onSignOut }: UserProfilePro
       <DropdownMenuTrigger render={trigger} />
       <DropdownMenuContent className="w-60" align="start" side="top">
         <DropdownMenuItem>
-          <Settings />
+          <IconSettings />
           Settings
         </DropdownMenuItem>
         <DropdownMenuItem onClick={onSignOut}>
-          <LogOut />
+          <IconLogout />
           Log out
         </DropdownMenuItem>
       </DropdownMenuContent>

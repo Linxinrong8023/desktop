@@ -1,4 +1,4 @@
-import { SquarePen } from "lucide-react";
+import { IconEdit } from "@tabler/icons-react";
 import { IconButton } from "../../components/icon-button";
 import { Composer } from "./composer";
 import { EmptyState } from "./empty-state";
@@ -28,7 +28,7 @@ export function ChatView({ active, userName, isResponding, onSend, onNewChat }: 
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
         <span className="truncate text-sm font-semibold text-foreground">{active.title}</span>
         <div className="flex-1" />
-        <IconButton icon={SquarePen} label="New chat" onClick={onNewChat} />
+        <IconButton icon={IconEdit} label="New chat" onClick={onNewChat} />
       </header>
 
       <MessageList messages={active.messages} userName={userName} isResponding={isResponding} />
