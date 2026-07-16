@@ -1,4 +1,4 @@
-import { IconChevronDown, IconLanguage, IconLogout, IconSettings } from "@tabler/icons-react";
+import { IconChevronDown, IconLanguage, IconLogout } from "@tabler/icons-react";
 import {
   Button,
   DropdownMenu,
@@ -20,7 +20,7 @@ interface UserProfileProps {
 /**
  * The sidebar footer user chip. Expanded it shows the colored avatar, name,
  * and email; collapsed it shows just the avatar. Both open a small account
- * menu (Settings / Log out).
+ * menu (language / log out).
  */
 export function UserProfile({ user, compact = false, onSignOut }: UserProfileProps) {
   const { i18n, t } = useTranslation();
@@ -50,10 +50,6 @@ export function UserProfile({ user, compact = false, onSignOut }: UserProfilePro
     <DropdownMenu>
       <DropdownMenuTrigger render={trigger} />
       <DropdownMenuContent className="w-60" align="start" side="top">
-        <DropdownMenuItem>
-          <IconSettings />
-          {t("common.settings")}
-        </DropdownMenuItem>
         <DropdownMenuItem onClick={() => void i18n.changeLanguage(locale === "zh-CN" ? "en-US" : "zh-CN")}>
           <IconLanguage />
           {t("account.language")}: {locale === "zh-CN" ? t("account.switchEnglish") : t("account.switchChinese")}

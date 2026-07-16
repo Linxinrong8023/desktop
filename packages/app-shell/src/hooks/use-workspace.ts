@@ -142,9 +142,12 @@ export function useWorkspace(client: ContractsClient): WorkspaceData {
       setSessions((items) => items.filter((item) => !childTaskIds.has(item.taskId)));
       setTasks((items) => items.filter((item) => item.projectId !== projectId));
       setProjects((items) => items.filter((item) => item.id !== projectId));
-      setSelection((current) => current.projectId === projectId ? EMPTY_SELECTION : current);
+      const nextProject = projects.find((project) => project.id !== projectId);
+      setSelection((current) => current.projectId === projectId
+        ? { projectId: nextProject?.id ?? null, taskId: null, sessionId: null }
+        : current);
     });
-  }, [client, runMutation, sessions, tasks]);
+  }, [client, projects, runMutation, sessions, tasks]);
 
   const createTask = useCallback(async (projectId: string, title: string, status: TaskStatus) => {
     await runMutation(async () => {

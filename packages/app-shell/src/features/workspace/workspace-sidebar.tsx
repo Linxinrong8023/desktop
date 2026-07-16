@@ -1,7 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Project, Session, SessionStatus, Task, TaskStatus } from "@ora/contracts";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Button,
   DropdownMenu,
   DropdownMenuContent,
@@ -22,9 +30,9 @@ import {
   IconLayoutSidebarLeftCollapse,
   IconPlus,
   IconSearch,
-  IconSettings,
   IconSparkles,
-  IconTerminal2,
+  IconTrash,
+  IconX,
 } from "@tabler/icons-react";
 import type { CurrentUser } from "../../lib/types";
 import type { WorkspaceData } from "../../hooks/use-workspace";
@@ -35,6 +43,11 @@ type DialogState =
   | { kind: "project"; entity?: Project }
   | { kind: "task"; projectId: string; entity?: Task }
   | { kind: "session"; taskId: string; entity?: Session };
+
+type DeleteTarget =
+  | { kind: "project"; id: string; name: string }
+  | { kind: "task"; id: string; name: string }
+  | { kind: "session"; id: string; name: string };
 
 interface WorkspaceSidebarProps {
   user: CurrentUser;
@@ -48,6 +61,7 @@ export function WorkspaceSidebar({ user, workspace, onCollapse, onSignOut }: Wor
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [expandedProjects, setExpandedProjects] = useState(() => new Set<string>());
   const [expandedTasks, setExpandedTasks] = useState(() => new Set<string>());
   const needle = query.trim().toLowerCase();
@@ -59,6 +73,14 @@ export function WorkspaceSidebar({ user, workspace, onCollapse, onSignOut }: Wor
       || projectTasks.some((task) => task.title.toLowerCase().includes(needle)
         || workspace.sessions.some((session) => session.taskId === task.id && session.agentId.toLowerCase().includes(needle)));
   }), [needle, workspace.projects, workspace.sessions, workspace.tasks]);
+
+  // Mutations select their new child. Expand its ancestors once without preventing a later manual collapse.
+  useEffect(() => {
+    const projectId = workspace.selection.projectId;
+    const taskId = workspace.selection.taskId;
+    if (taskId) setExpandedTasks((current) => current.has(taskId) ? current : new Set(current).add(taskId));
+    if (projectId) setExpandedProjects((current) => current.has(projectId) ? current : new Set(current).add(projectId));
+  }, [workspace.selection.projectId, workspace.selection.taskId]);
 
   const toggleSet = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) => {
     setter((current) => {
@@ -88,7 +110,7 @@ export function WorkspaceSidebar({ user, workspace, onCollapse, onSignOut }: Wor
           <span className="text-sm font-semibold">Ora Agent</span>
           <div className="flex-1" />
           <Tooltip>
-            <TooltipTrigger render={<Button variant="ghost" size="icon-sm" onClick={onCollapse} />}>
+            <TooltipTrigger render={<Button variant="ghost" size="icon-sm" onClick={onCollapse} aria-label={t("sidebar.collapse")} />}>
               <IconLayoutSidebarLeftCollapse />
             </TooltipTrigger>
             <TooltipContent>{t("sidebar.collapse")}</TooltipContent>
@@ -102,11 +124,23 @@ export function WorkspaceSidebar({ user, workspace, onCollapse, onSignOut }: Wor
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t("sidebar.search")}
-              className="h-8 bg-background pl-7 text-xs"
+              className="h-8 bg-background px-7 text-xs"
             />
+            {query && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="absolute right-1 top-1/2 -translate-y-1/2"
+                aria-label={t("sidebar.clearSearch")}
+                onClick={() => setQuery("")}
+              >
+                <IconX />
+              </Button>
+            )}
           </div>
           <Tooltip>
-            <TooltipTrigger render={<Button size="icon" onClick={() => setDialog({ kind: "project" })} />}>
+            <TooltipTrigger render={<Button size="icon" onClick={() => setDialog({ kind: "project" })} aria-label={t("sidebar.newProject")} />}>
               <IconPlus />
             </TooltipTrigger>
             <TooltipContent>{t("sidebar.newProject")}</TooltipContent>
@@ -124,7 +158,7 @@ export function WorkspaceSidebar({ user, workspace, onCollapse, onSignOut }: Wor
           )}
           {visibleProjects.map((project) => {
             const projectTasks = workspace.tasks.filter((task) => task.projectId === project.id);
-            const projectOpen = expandedProjects.has(project.id) || workspace.selection.projectId === project.id || Boolean(needle);
+            const projectOpen = expandedProjects.has(project.id) || Boolean(needle);
             return (
               <div key={project.id} className="mt-1">
                 <TreeRow
@@ -140,13 +174,13 @@ export function WorkspaceSidebar({ user, workspace, onCollapse, onSignOut }: Wor
                       onAdd={() => setDialog({ kind: "task", projectId: project.id })}
                       addLabel={t("sidebar.newWorktree")}
                       onEdit={() => setDialog({ kind: "project", entity: project })}
-                      onDelete={() => void workspace.deleteProject(project.id).catch(() => undefined)}
+                      onDelete={() => setDeleteTarget({ kind: "project", id: project.id, name: project.name })}
                     />
                   )}
                 />
                 {projectOpen && projectTasks.map((task) => {
                   const taskSessions = workspace.sessions.filter((session) => session.taskId === task.id);
-                  const taskOpen = expandedTasks.has(task.id) || workspace.selection.taskId === task.id || Boolean(needle);
+                  const taskOpen = expandedTasks.has(task.id) || Boolean(needle);
                   return (
                     <div key={task.id}>
                       <TreeRow
@@ -162,7 +196,7 @@ export function WorkspaceSidebar({ user, workspace, onCollapse, onSignOut }: Wor
                             onAdd={() => setDialog({ kind: "session", taskId: task.id })}
                             addLabel={t("sidebar.newSession")}
                             onEdit={() => setDialog({ kind: "task", projectId: project.id, entity: task })}
-                            onDelete={() => void workspace.deleteTask(task.id).catch(() => undefined)}
+                            onDelete={() => setDeleteTarget({ kind: "task", id: task.id, name: task.title })}
                           />
                         )}
                       />
@@ -178,7 +212,7 @@ export function WorkspaceSidebar({ user, workspace, onCollapse, onSignOut }: Wor
                           menu={(
                             <EntityMenu
                               onEdit={() => setDialog({ kind: "session", taskId: task.id, entity: session })}
-                              onDelete={() => void workspace.deleteSession(session.id).catch(() => undefined)}
+                              onDelete={() => setDeleteTarget({ kind: "session", id: session.id, name: session.agentId })}
                             />
                           )}
                         />
@@ -193,16 +227,13 @@ export function WorkspaceSidebar({ user, workspace, onCollapse, onSignOut }: Wor
 
         {workspace.error && <p className="border-t border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">{workspace.error}</p>}
         <div className="border-t border-sidebar-border p-2">
-          <div className="mb-1 flex gap-1">
-            <Button variant="ghost" size="sm" className="flex-1 justify-start text-muted-foreground"><IconTerminal2 /> {t("sidebar.console")}</Button>
-            <Button variant="ghost" size="icon-sm" aria-label={t("common.settings")}><IconSettings /></Button>
-          </div>
           <UserProfile user={user} onSignOut={onSignOut} />
         </div>
       </aside>
       {dialog && (
         <WorkspaceDialog dialog={dialog} workspace={workspace} onOpenChange={(open) => !open && setDialog(null)} />
       )}
+      <DeleteEntityDialog target={deleteTarget} workspace={workspace} onOpenChange={(open) => !open && setDeleteTarget(null)} />
     </>
   );
 }
@@ -221,20 +252,63 @@ interface TreeRowProps {
 /** Keeps every tree level aligned while preserving a stable row width for actions. */
 function TreeRow({ depth, active, icon, label, meta, expanded, onClick, menu }: TreeRowProps) {
   return (
-    <div className={`group flex h-8 items-center rounded-md ${active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60"}`}>
+    <div className={`group/tree flex h-8 items-center rounded-md ${active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/60"}`}>
       <button
         type="button"
         onClick={onClick}
-        className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-xs"
+        aria-expanded={expanded}
+        className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
         style={{ paddingLeft: `${6 + depth * 16}px` }}
       >
-        {expanded === undefined ? <span className="w-3" /> : expanded ? <IconChevronDown className="size-3" /> : <IconChevronRight className="size-3" />}
-        {icon}
+        <span className="relative flex size-4 shrink-0 items-center justify-center">
+          <span className={`flex items-center justify-center transition-opacity duration-100 ${expanded === undefined ? "" : "group-hover/tree:opacity-0"}`}>{icon}</span>
+          {expanded !== undefined && (expanded
+            ? <IconChevronDown className="absolute size-3.5 opacity-0 transition-opacity duration-100 group-hover/tree:opacity-100" />
+            : <IconChevronRight className="absolute size-3.5 opacity-0 transition-opacity duration-100 group-hover/tree:opacity-100" />)}
+        </span>
         <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
         <span className="truncate text-[10px] text-muted-foreground">{meta}</span>
       </button>
-      <div className="mr-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">{menu}</div>
+      <div className="mr-1 opacity-0 transition-opacity duration-100 group-hover/tree:opacity-100 group-focus-within/tree:opacity-100">{menu}</div>
     </div>
+  );
+}
+
+/** Confirms destructive tree mutations and prevents duplicate requests while cascading deletes run. */
+function DeleteEntityDialog({ target, workspace, onOpenChange }: { target: DeleteTarget | null; workspace: WorkspaceData; onOpenChange: (open: boolean) => void }) {
+  const { t } = useTranslation();
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDelete = async () => {
+    if (!target || deleting) return;
+    setDeleting(true);
+    try {
+      if (target.kind === "project") await workspace.deleteProject(target.id);
+      if (target.kind === "task") await workspace.deleteTask(target.id);
+      if (target.kind === "session") await workspace.deleteSession(target.id);
+      onOpenChange(false);
+    } catch {
+      // The workspace error banner retains the transport error while the dialog stays open for retry.
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <AlertDialog open={target !== null} onOpenChange={(open) => !deleting && onOpenChange(open)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("delete.title", { name: target?.name ?? "" })}</AlertDialogTitle>
+          <AlertDialogDescription>{target ? t(`delete.${target.kind}Description`) : ""}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={deleting}>{t("common.cancel")}</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" disabled={deleting} onClick={() => void confirmDelete()}>
+            <IconTrash />{deleting ? t("delete.deleting") : t("common.delete")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

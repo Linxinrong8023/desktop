@@ -48,14 +48,21 @@ export function EntityDialog({
   const { t } = useTranslation();
   const [values, setValues] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [validationError, setValidationError] = useState(false);
 
   useEffect(() => {
-    if (open) setValues(Object.fromEntries(fields.map((field) => [field.name, field.value])));
+    if (open) {
+      setValues(Object.fromEntries(fields.map((field) => [field.name, field.value])));
+      setValidationError(false);
+    }
   }, [fields, open]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (fields.some((field) => !values[field.name]?.trim())) return;
+    if (fields.some((field) => !values[field.name]?.trim())) {
+      setValidationError(true);
+      return;
+    }
     setSubmitting(true);
     try {
       await onSubmit(values);
@@ -68,7 +75,7 @@ export function EntityDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(nextOpen) => (!submitting || nextOpen) && onOpenChange(nextOpen)}>
       <DialogContent>
         <form onSubmit={handleSubmit} className="contents">
           <DialogHeader>
@@ -98,15 +105,20 @@ export function EntityDialog({
                     id={`entity-${field.name}`}
                     value={values[field.name] ?? ""}
                     placeholder={field.placeholder}
-                    onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))}
+                    aria-invalid={validationError && !values[field.name]?.trim()}
+                    onChange={(event) => {
+                      setValues((current) => ({ ...current, [field.name]: event.target.value }));
+                      setValidationError(false);
+                    }}
                     autoFocus={field === fields[0]}
                   />
                 )}
               </div>
             ))}
           </div>
+          {validationError && <p role="alert" className="text-xs text-destructive">{t("dialog.required")}</p>}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
+            <Button type="button" variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
             <Button type="submit" disabled={submitting}>{submitting ? t("common.saving") : submitLabel}</Button>
           </DialogFooter>
         </form>
