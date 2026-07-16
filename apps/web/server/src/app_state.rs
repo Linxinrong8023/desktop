@@ -1,32 +1,43 @@
-use crate::service::{ProjectApi, ProjectWorkContextApi, SessionApi, TaskApi};
+use crate::service::{AgentApi, ProjectApi, ProjectWorkContextApi, SessionApi, SkillApi, TaskApi};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Holds the shared state that HTTP handlers need to serve requests.
 #[derive(Clone)]
 pub struct AppState {
+    agent_api: Arc<AgentApi>,
     project_api: Arc<ProjectApi>,
     project_work_context_api: Arc<ProjectWorkContextApi>,
     task_api: Arc<TaskApi>,
     session_api: Arc<SessionApi>,
+    skill_api: Arc<SkillApi>,
     ready: Arc<AtomicBool>,
 }
 
 impl AppState {
     /// Creates one shared application state value with readiness disabled until bootstrap completes.
     pub fn new(
+        agent_api: Arc<AgentApi>,
         project_api: Arc<ProjectApi>,
         project_work_context_api: Arc<ProjectWorkContextApi>,
         task_api: Arc<TaskApi>,
         session_api: Arc<SessionApi>,
+        skill_api: Arc<SkillApi>,
     ) -> Self {
         Self {
+            agent_api,
             project_api,
             project_work_context_api,
             task_api,
             session_api,
+            skill_api,
             ready: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Returns the shared configurable-agent API used by HTTP routes.
+    pub fn agent_api(&self) -> &Arc<AgentApi> {
+        &self.agent_api
     }
 
     /// Returns the shared project API that routes delegate into.
@@ -47,6 +58,11 @@ impl AppState {
     /// Returns the shared session API that routes delegate into.
     pub fn session_api(&self) -> &Arc<SessionApi> {
         &self.session_api
+    }
+
+    /// Returns the shared skill API used by HTTP routes.
+    pub fn skill_api(&self) -> &Arc<SkillApi> {
+        &self.skill_api
     }
 
     /// Marks the runtime as ready after bootstrap finishes successfully.

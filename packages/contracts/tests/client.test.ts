@@ -94,6 +94,40 @@ test("omits JSON bodies for path-only operations", async () => {
   ]);
 });
 
+test("uses a skill id in PUT paths while leaving editable fields in JSON", async () => {
+  const requests: ContractTransportRequest[] = [];
+  const client = createContractsClient(
+    recordingTransport(requests, {
+      skill: {
+        id: "skill-1",
+        name: "code-review",
+        description: "Reviews code",
+      },
+    }),
+  );
+
+  await client.updateSkill({
+    skillId: "skill-1",
+    name: "code-review",
+    description: "Reviews code",
+  });
+
+  assert.deepEqual(requests, [
+    {
+      operationName: "updateSkill",
+      method: "PUT",
+      path: "/api/skills/skill-1",
+      body: {
+        name: "code-review",
+        description: "Reviews code",
+      },
+      headers: {
+        "content-type": "application/json",
+      },
+    },
+  ]);
+});
+
 test("omits standalone worktree operations from generated contracts", () => {
   assert.equal("createWorktree" in endpoints, false);
   assert.equal("getWorktree" in endpoints, false);

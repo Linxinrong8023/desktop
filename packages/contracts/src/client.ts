@@ -27,6 +27,16 @@ export function createContractsClient(transport: ContractTransport): ContractsCl
     listSessions: (request) => executeOperation("listSessions", request, transport),
     updateSession: (request) => executeOperation("updateSession", request, transport),
     deleteSession: (request) => executeOperation("deleteSession", request, transport),
+    createSkill: (request) => executeOperation("createSkill", request, transport),
+    getSkill: (request) => executeOperation("getSkill", request, transport),
+    listSkills: (request) => executeOperation("listSkills", request, transport),
+    updateSkill: (request) => executeOperation("updateSkill", request, transport),
+    deleteSkill: (request) => executeOperation("deleteSkill", request, transport),
+    createAgent: (request) => executeOperation("createAgent", request, transport),
+    getAgent: (request) => executeOperation("getAgent", request, transport),
+    listAgents: (request) => executeOperation("listAgents", request, transport),
+    updateAgent: (request) => executeOperation("updateAgent", request, transport),
+    deleteAgent: (request) => executeOperation("deleteAgent", request, transport),
   };
 }
 

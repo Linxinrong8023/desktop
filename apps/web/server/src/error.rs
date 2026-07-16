@@ -90,6 +90,36 @@ impl From<ApplicationError> for WebApiError {
     /// Maps stable application errors into transport-visible HTTP status codes.
     fn from(error: ApplicationError) -> Self {
         match error {
+            ApplicationError::SkillNameBlank => Self {
+                status: StatusCode::BAD_REQUEST,
+                code: "skill_name_blank",
+                message: "skill name must not be blank".to_string(),
+            },
+            ApplicationError::SkillNotFound { skill_id } => Self {
+                status: StatusCode::NOT_FOUND,
+                code: "skill_not_found",
+                message: format!("skill not found: {skill_id}"),
+            },
+            ApplicationError::SkillRepository { message } => Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "skill_repository_error",
+                message,
+            },
+            ApplicationError::AgentDefinitionNameBlank => Self {
+                status: StatusCode::BAD_REQUEST,
+                code: "agent_name_blank",
+                message: "agent definition name must not be blank".to_string(),
+            },
+            ApplicationError::AgentDefinitionNotFound { agent_id } => Self {
+                status: StatusCode::NOT_FOUND,
+                code: "agent_not_found",
+                message: format!("agent definition not found: {agent_id}"),
+            },
+            ApplicationError::AgentDefinitionRepository { message } => Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "agent_repository_error",
+                message,
+            },
             ApplicationError::ProjectNotFound { project_id } => Self {
                 status: StatusCode::NOT_FOUND,
                 code: "project_not_found",

@@ -4,3 +4,57 @@
  * Describes a public configurable-agent payload without persistence audit metadata.
  */
 export type Agent = { id: string; name: string; description: string };
+
+/**
+ * Carries the public fields required to create a configurable agent type.
+ */
+export type CreateAgentRequest = { name: string; description: string };
+
+/**
+ * Returns one created configurable agent type.
+ */
+export type CreateAgentResponse = { agent: Agent };
+
+/**
+ * Identifies the visible configurable agent type to soft-delete by identifier.
+ */
+export type DeleteAgentRequest = { agentId: string };
+
+/**
+ * Returns the identifier of the configurable agent type that was soft-deleted.
+ */
+export type DeleteAgentResponse = { agentId: string };
+
+/**
+ * Identifies the visible configurable agent type requested by identifier.
+ */
+export type GetAgentRequest = { agentId: string };
+
+/**
+ * Returns one visible configurable agent type.
+ */
+export type GetAgentResponse = { agent: Agent };
+
+/**
+ * Requests every visible configurable agent type in stable storage order.
+ */
+export type ListAgentsRequest = Record<symbol, never>;
+
+/**
+ * Returns every visible configurable agent type.
+ */
+export type ListAgentsResponse = { agents: Array<Agent> };
+
+/**
+ * Replaces one configurable agent type located by its stable identifier.
+ */
+export type UpdateAgentRequest = {
+  agentId: string;
+  name: string;
+  description: string;
+};
+
+/**
+ * Returns the replacement configurable agent type.
+ */
+export type UpdateAgentResponse = { agent: Agent };

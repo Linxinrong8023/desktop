@@ -1,24 +1,149 @@
 use std::path::PathBuf;
 
 use ora_application::{
-    ProjectRepository, ProjectRepositoryError, ProjectWorkContextRepository, SessionRepository,
-    SessionRepositoryError, TaskRepository, TaskRepositoryError, WorktreeRepository,
-    WorktreeRepositoryError,
+    AgentDefinitionRepository, ProjectRepository, ProjectRepositoryError,
+    ProjectWorkContextRepository, SessionRepository, SessionRepositoryError, SkillRepository,
+    TaskRepository, TaskRepositoryError, WorktreeRepository, WorktreeRepositoryError,
 };
 use ora_domain::{
-    AgentId, AuditFields, Project, ProjectId, ProjectWorkContext, ProjectWorkContextId,
-    ProjectWorkContextSurface, Session, SessionId, SessionStatus, Task, TaskId, TaskStatus,
-    Worktree, WorktreeActivity, WorktreeId,
+    AgentDefinition, AgentDefinitionId, AgentId, AuditFields, Project, ProjectId,
+    ProjectWorkContext, ProjectWorkContextId, ProjectWorkContextSurface, Session, SessionId,
+    SessionStatus, Skill, SkillId, Task, TaskId, TaskStatus, Worktree, WorktreeActivity,
+    WorktreeId,
 };
 use ora_logging::with_trace_logging;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 use crate::{
-    DatabaseBootstrapper, DatabaseLocation, RepositoryPool, SqliteProjectRepository,
-    SqliteProjectWorkContextRepository, SqliteSessionRepository, SqliteTaskRepository,
-    SqliteWorktreeRepository, TimestampSource, default_migration_catalog,
+    DatabaseBootstrapper, DatabaseLocation, RepositoryPool, SqliteAgentDefinitionRepository,
+    SqliteProjectRepository, SqliteProjectWorkContextRepository, SqliteSessionRepository,
+    SqliteSkillRepository, SqliteTaskRepository, SqliteWorktreeRepository, TimestampSource,
+    default_migration_catalog,
 };
+
+/// Verifies catalog repositories use stable identifiers and hide soft-deleted rows.
+#[test]
+fn catalog_repositories_support_id_based_crud_and_allow_duplicate_names() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let skill_repository = SqliteSkillRepository::new(pool.clone());
+    let agent_repository = SqliteAgentDefinitionRepository::new(pool);
+    let created_skill = skill("skill-1", "review", "Reviews changes", 1, 1, false);
+    let created_agent = agent("agent-1", "opencode", "OpenCode", 1, 1, false);
+
+    assert_eq!(
+        skill_repository
+            .create_skill(created_skill.clone())
+            .unwrap(),
+        created_skill.clone()
+    );
+    assert_eq!(
+        agent_repository
+            .create_agent_definition(created_agent.clone())
+            .unwrap(),
+        created_agent.clone()
+    );
+    let earlier_skill = skill("skill-0", "review", "Builds", 0, 0, false);
+    let earlier_agent = agent("agent-0", "opencode", "Assists", 0, 0, false);
+    skill_repository
+        .create_skill(earlier_skill.clone())
+        .unwrap();
+    agent_repository
+        .create_agent_definition(earlier_agent.clone())
+        .unwrap();
+    assert_eq!(
+        skill_repository.list_skills().unwrap(),
+        vec![earlier_skill.clone(), created_skill.clone()]
+    );
+    assert_eq!(
+        agent_repository.list_agent_definitions().unwrap(),
+        vec![earlier_agent.clone(), created_agent.clone()]
+    );
+    let renamed_skill = skill("skill-1", "reviewer", "Reviews code", 1, 2, false);
+    let renamed_agent = agent("agent-1", "reviewer-agent", "Reviews code", 1, 2, false);
+    assert_eq!(
+        skill_repository
+            .update_skill(renamed_skill.clone())
+            .unwrap(),
+        renamed_skill.clone()
+    );
+    assert_eq!(
+        agent_repository
+            .update_agent_definition(renamed_agent.clone())
+            .unwrap(),
+        renamed_agent.clone()
+    );
+    assert_eq!(
+        skill_repository
+            .soft_delete_skill(&SkillId::new("skill-1"), 3)
+            .unwrap(),
+        true
+    );
+    assert_eq!(
+        agent_repository
+            .soft_delete_agent_definition(&AgentDefinitionId::new("agent-1"), 3)
+            .unwrap(),
+        true
+    );
+    assert_eq!(
+        skill_repository
+            .find_skill(&SkillId::new("skill-1"))
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        agent_repository
+            .find_agent_definition(&AgentDefinitionId::new("agent-1"))
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        skill_repository
+            .soft_delete_skill(&SkillId::new("missing"), 4)
+            .unwrap(),
+        false
+    );
+    assert_eq!(
+        agent_repository
+            .soft_delete_agent_definition(&AgentDefinitionId::new("missing"), 4)
+            .unwrap(),
+        false
+    );
+}
+
+fn skill(
+    id: &str,
+    name: &str,
+    description: &str,
+    created_at: i64,
+    updated_at: i64,
+    is_deleted: bool,
+) -> Skill {
+    Skill::new(
+        SkillId::new(id),
+        name,
+        description,
+        AuditFields::new(created_at, updated_at, is_deleted),
+    )
+    .unwrap()
+}
+
+fn agent(
+    id: &str,
+    name: &str,
+    description: &str,
+    created_at: i64,
+    updated_at: i64,
+    is_deleted: bool,
+) -> AgentDefinition {
+    AgentDefinition::new(
+        AgentDefinitionId::new(id),
+        name,
+        description,
+        AuditFields::new(created_at, updated_at, is_deleted),
+    )
+    .unwrap()
+}
 
 /// Produces deterministic bootstrap timestamps so repository tests can assert stored objects.
 #[derive(Clone, Copy, Debug)]

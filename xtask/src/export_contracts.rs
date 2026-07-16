@@ -462,6 +462,26 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "ListSessionsResponse"
         | "UpdateSessionRequest"
         | "UpdateSessionResponse" => "session",
+        "CreateSkillRequest"
+        | "CreateSkillResponse"
+        | "DeleteSkillRequest"
+        | "DeleteSkillResponse"
+        | "GetSkillRequest"
+        | "GetSkillResponse"
+        | "ListSkillsRequest"
+        | "ListSkillsResponse"
+        | "UpdateSkillRequest"
+        | "UpdateSkillResponse" => "skill",
+        "CreateAgentRequest"
+        | "CreateAgentResponse"
+        | "DeleteAgentRequest"
+        | "DeleteAgentResponse"
+        | "GetAgentRequest"
+        | "GetAgentResponse"
+        | "ListAgentsRequest"
+        | "ListAgentsResponse"
+        | "UpdateAgentRequest"
+        | "UpdateAgentResponse" => "agent",
         other => panic!("unknown contract type `{other}`"),
     }
 }

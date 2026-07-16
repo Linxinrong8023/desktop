@@ -39,6 +39,10 @@ pub const TASKS_PATH: &str = "/api/tasks";
 pub const TASK_PATH: &str = "/api/tasks/{taskId}";
 pub const SESSIONS_PATH: &str = "/api/sessions";
 pub const SESSION_PATH: &str = "/api/sessions/{sessionId}";
+pub const SKILLS_PATH: &str = "/api/skills";
+pub const SKILL_PATH: &str = "/api/skills/{skillId}";
+pub const AGENTS_PATH: &str = "/api/agents";
+pub const AGENT_PATH: &str = "/api/agents/{agentId}";
 
 const PROJECT_ID_PATH_PARAM: FrontendPathParam = FrontendPathParam {
     rust_field_name: "project_id",
@@ -52,10 +56,20 @@ const SESSION_ID_PATH_PARAM: FrontendPathParam = FrontendPathParam {
     rust_field_name: "session_id",
     wire_name: "sessionId",
 };
+const SKILL_ID_PATH_PARAM: FrontendPathParam = FrontendPathParam {
+    rust_field_name: "skill_id",
+    wire_name: "skillId",
+};
+const AGENT_ID_PATH_PARAM: FrontendPathParam = FrontendPathParam {
+    rust_field_name: "agent_id",
+    wire_name: "agentId",
+};
 
 const PROJECT_PATH_PARAMS: &[FrontendPathParam] = &[PROJECT_ID_PATH_PARAM];
 const TASK_PATH_PARAMS: &[FrontendPathParam] = &[TASK_ID_PATH_PARAM];
 const SESSION_PATH_PARAMS: &[FrontendPathParam] = &[SESSION_ID_PATH_PARAM];
+const SKILL_PATH_PARAMS: &[FrontendPathParam] = &[SKILL_ID_PATH_PARAM];
+const AGENT_PATH_PARAMS: &[FrontendPathParam] = &[AGENT_ID_PATH_PARAM];
 const NO_PATH_PARAMS: &[FrontendPathParam] = &[];
 
 const FRONTEND_ENDPOINTS: &[FrontendEndpoint] = &[
@@ -212,6 +226,96 @@ const FRONTEND_ENDPOINTS: &[FrontendEndpoint] = &[
         path_params: SESSION_PATH_PARAMS,
         has_json_body: false,
     },
+    FrontendEndpoint {
+        operation_name: "createSkill",
+        method: FrontendHttpMethod::Post,
+        path_template: SKILLS_PATH,
+        request_type: "CreateSkillRequest",
+        response_type: "CreateSkillResponse",
+        path_params: NO_PATH_PARAMS,
+        has_json_body: true,
+    },
+    FrontendEndpoint {
+        operation_name: "getSkill",
+        method: FrontendHttpMethod::Get,
+        path_template: SKILL_PATH,
+        request_type: "GetSkillRequest",
+        response_type: "GetSkillResponse",
+        path_params: SKILL_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "listSkills",
+        method: FrontendHttpMethod::Get,
+        path_template: SKILLS_PATH,
+        request_type: "ListSkillsRequest",
+        response_type: "ListSkillsResponse",
+        path_params: NO_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "updateSkill",
+        method: FrontendHttpMethod::Put,
+        path_template: SKILL_PATH,
+        request_type: "UpdateSkillRequest",
+        response_type: "UpdateSkillResponse",
+        path_params: SKILL_PATH_PARAMS,
+        has_json_body: true,
+    },
+    FrontendEndpoint {
+        operation_name: "deleteSkill",
+        method: FrontendHttpMethod::Delete,
+        path_template: SKILL_PATH,
+        request_type: "DeleteSkillRequest",
+        response_type: "DeleteSkillResponse",
+        path_params: SKILL_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "createAgent",
+        method: FrontendHttpMethod::Post,
+        path_template: AGENTS_PATH,
+        request_type: "CreateAgentRequest",
+        response_type: "CreateAgentResponse",
+        path_params: NO_PATH_PARAMS,
+        has_json_body: true,
+    },
+    FrontendEndpoint {
+        operation_name: "getAgent",
+        method: FrontendHttpMethod::Get,
+        path_template: AGENT_PATH,
+        request_type: "GetAgentRequest",
+        response_type: "GetAgentResponse",
+        path_params: AGENT_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "listAgents",
+        method: FrontendHttpMethod::Get,
+        path_template: AGENTS_PATH,
+        request_type: "ListAgentsRequest",
+        response_type: "ListAgentsResponse",
+        path_params: NO_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "updateAgent",
+        method: FrontendHttpMethod::Put,
+        path_template: AGENT_PATH,
+        request_type: "UpdateAgentRequest",
+        response_type: "UpdateAgentResponse",
+        path_params: AGENT_PATH_PARAMS,
+        has_json_body: true,
+    },
+    FrontendEndpoint {
+        operation_name: "deleteAgent",
+        method: FrontendHttpMethod::Delete,
+        path_template: AGENT_PATH,
+        request_type: "DeleteAgentRequest",
+        response_type: "DeleteAgentResponse",
+        path_params: AGENT_PATH_PARAMS,
+        has_json_body: false,
+    },
 ];
 
 /// Returns the Rust-owned endpoint metadata exported to the generated frontend SDK.
@@ -222,9 +326,10 @@ pub fn frontend_endpoints() -> &'static [FrontendEndpoint] {
 #[cfg(test)]
 mod tests {
     use super::{
-        FrontendEndpoint, FrontendHttpMethod, FrontendPathParam, PROJECT_PATH,
-        PROJECT_WORK_CONTEXT_OPEN_PATH, PROJECT_WORK_CONTEXT_RENEW_PATH, PROJECTS_PATH,
-        SESSION_PATH, SESSIONS_PATH, TASK_PATH, TASKS_PATH, frontend_endpoints,
+        AGENT_PATH, AGENTS_PATH, FrontendEndpoint, FrontendHttpMethod, FrontendPathParam,
+        PROJECT_PATH, PROJECT_WORK_CONTEXT_OPEN_PATH, PROJECT_WORK_CONTEXT_RENEW_PATH,
+        PROJECTS_PATH, SESSION_PATH, SESSIONS_PATH, SKILL_PATH, SKILLS_PATH, TASK_PATH, TASKS_PATH,
+        frontend_endpoints,
     };
     use pretty_assertions::assert_eq;
 
@@ -414,6 +519,114 @@ mod tests {
                     }],
                     has_json_body: false,
                 },
+                FrontendEndpoint {
+                    operation_name: "createSkill",
+                    method: FrontendHttpMethod::Post,
+                    path_template: SKILLS_PATH,
+                    request_type: "CreateSkillRequest",
+                    response_type: "CreateSkillResponse",
+                    path_params: &[],
+                    has_json_body: true,
+                },
+                FrontendEndpoint {
+                    operation_name: "getSkill",
+                    method: FrontendHttpMethod::Get,
+                    path_template: SKILL_PATH,
+                    request_type: "GetSkillRequest",
+                    response_type: "GetSkillResponse",
+                    path_params: &[FrontendPathParam {
+                        rust_field_name: "skill_id",
+                        wire_name: "skillId"
+                    }],
+                    has_json_body: false,
+                },
+                FrontendEndpoint {
+                    operation_name: "listSkills",
+                    method: FrontendHttpMethod::Get,
+                    path_template: SKILLS_PATH,
+                    request_type: "ListSkillsRequest",
+                    response_type: "ListSkillsResponse",
+                    path_params: &[],
+                    has_json_body: false,
+                },
+                FrontendEndpoint {
+                    operation_name: "updateSkill",
+                    method: FrontendHttpMethod::Put,
+                    path_template: SKILL_PATH,
+                    request_type: "UpdateSkillRequest",
+                    response_type: "UpdateSkillResponse",
+                    path_params: &[FrontendPathParam {
+                        rust_field_name: "skill_id",
+                        wire_name: "skillId"
+                    }],
+                    has_json_body: true,
+                },
+                FrontendEndpoint {
+                    operation_name: "deleteSkill",
+                    method: FrontendHttpMethod::Delete,
+                    path_template: SKILL_PATH,
+                    request_type: "DeleteSkillRequest",
+                    response_type: "DeleteSkillResponse",
+                    path_params: &[FrontendPathParam {
+                        rust_field_name: "skill_id",
+                        wire_name: "skillId"
+                    }],
+                    has_json_body: false,
+                },
+                FrontendEndpoint {
+                    operation_name: "createAgent",
+                    method: FrontendHttpMethod::Post,
+                    path_template: AGENTS_PATH,
+                    request_type: "CreateAgentRequest",
+                    response_type: "CreateAgentResponse",
+                    path_params: &[],
+                    has_json_body: true,
+                },
+                FrontendEndpoint {
+                    operation_name: "getAgent",
+                    method: FrontendHttpMethod::Get,
+                    path_template: AGENT_PATH,
+                    request_type: "GetAgentRequest",
+                    response_type: "GetAgentResponse",
+                    path_params: &[FrontendPathParam {
+                        rust_field_name: "agent_id",
+                        wire_name: "agentId"
+                    }],
+                    has_json_body: false,
+                },
+                FrontendEndpoint {
+                    operation_name: "listAgents",
+                    method: FrontendHttpMethod::Get,
+                    path_template: AGENTS_PATH,
+                    request_type: "ListAgentsRequest",
+                    response_type: "ListAgentsResponse",
+                    path_params: &[],
+                    has_json_body: false,
+                },
+                FrontendEndpoint {
+                    operation_name: "updateAgent",
+                    method: FrontendHttpMethod::Put,
+                    path_template: AGENT_PATH,
+                    request_type: "UpdateAgentRequest",
+                    response_type: "UpdateAgentResponse",
+                    path_params: &[FrontendPathParam {
+                        rust_field_name: "agent_id",
+                        wire_name: "agentId"
+                    }],
+                    has_json_body: true,
+                },
+                FrontendEndpoint {
+                    operation_name: "deleteAgent",
+                    method: FrontendHttpMethod::Delete,
+                    path_template: AGENT_PATH,
+                    request_type: "DeleteAgentRequest",
+                    response_type: "DeleteAgentResponse",
+                    path_params: &[FrontendPathParam {
+                        rust_field_name: "agent_id",
+                        wire_name: "agentId"
+                    }],
+                    has_json_body: false,
+                },
             ]
         );
     }
@@ -452,6 +665,23 @@ mod tests {
                 .iter()
                 .all(|endpoint| !endpoint.operation_name.contains("Worktree")),
             true
+        );
+    }
+
+    /// Verifies catalogs publish separate collection and identifier resource routes.
+    #[test]
+    fn exports_skill_and_agent_crud_endpoints() {
+        assert!(
+            frontend_endpoints()
+                .iter()
+                .any(|endpoint| endpoint.operation_name == "updateSkill"
+                    && endpoint.path_template == "/api/skills/{skillId}")
+        );
+        assert!(
+            frontend_endpoints()
+                .iter()
+                .any(|endpoint| endpoint.operation_name == "updateAgent"
+                    && endpoint.path_template == "/api/agents/{agentId}")
         );
     }
 }

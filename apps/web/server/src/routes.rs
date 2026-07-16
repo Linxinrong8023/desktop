@@ -1,10 +1,11 @@
 use crate::app_state::AppState;
-use crate::handlers::{health, project_work_contexts, projects, sessions, tasks};
+use crate::handlers::{agents, health, project_work_contexts, projects, sessions, skills, tasks};
 use axum::Router;
 use axum::routing::{get, post};
 use ora_contracts::{
-    PROJECT_PATH, PROJECT_WORK_CONTEXT_OPEN_PATH, PROJECT_WORK_CONTEXT_RENEW_PATH, PROJECTS_PATH,
-    SESSION_PATH, SESSIONS_PATH, TASK_PATH, TASKS_PATH,
+    AGENT_PATH, AGENTS_PATH, PROJECT_PATH, PROJECT_WORK_CONTEXT_OPEN_PATH,
+    PROJECT_WORK_CONTEXT_RENEW_PATH, PROJECTS_PATH, SESSION_PATH, SESSIONS_PATH, SKILL_PATH,
+    SKILLS_PATH, TASK_PATH, TASKS_PATH,
 };
 
 /// Builds the top-level router for health checks and the persisted CRUD routes.
@@ -46,6 +47,26 @@ pub fn build_router(app_state: AppState) -> Router {
             get(sessions::get_session)
                 .put(sessions::update_session)
                 .delete(sessions::delete_session),
+        )
+        .route(
+            SKILLS_PATH,
+            post(skills::create_skill).get(skills::list_skills),
+        )
+        .route(
+            SKILL_PATH,
+            get(skills::get_skill)
+                .put(skills::update_skill)
+                .delete(skills::delete_skill),
+        )
+        .route(
+            AGENTS_PATH,
+            post(agents::create_agent).get(agents::list_agents),
+        )
+        .route(
+            AGENT_PATH,
+            get(agents::get_agent)
+                .put(agents::update_agent)
+                .delete(agents::delete_agent),
         )
         .with_state(app_state)
 }
@@ -873,7 +894,168 @@ mod tests {
         );
     }
 
-    /// Builds a ready router for tests that need the full persisted route surface.
+    /// Verifies catalog routes address resources by identifier while names remain editable fields.
+    #[tokio::test]
+    async fn serves_skill_and_agent_crud_routes() {
+        let (_temp_dir, _database_path, app) = test_router();
+        let skill_create = request_json(
+            &app,
+            Method::POST,
+            "/api/skills",
+            json!({ "name": " review / guide ", "description": "Reviews guides" }),
+        )
+        .await;
+        assert_eq!(skill_create.status(), StatusCode::OK);
+        let skill = response_json(skill_create).await;
+        let skill_id = skill["skill"]["id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("response did not include a skill id"))
+            .to_string();
+        assert_eq!(skill["skill"]["name"], "review / guide");
+        let skill_path = format!("/api/skills/{skill_id}");
+        let skill_get = request_empty(&app, Method::GET, &skill_path).await;
+        assert_eq!(skill_get.status(), StatusCode::OK);
+        let skill_list = request_empty(&app, Method::GET, "/api/skills").await;
+        assert_eq!(skill_list.status(), StatusCode::OK);
+        let skill_update = request_json(
+            &app,
+            Method::PUT,
+            &skill_path,
+            json!({ "name": "reviewer", "description": "Reviews changes" }),
+        )
+        .await;
+        assert_eq!(skill_update.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(skill_update).await,
+            json!({ "skill": { "id": skill_id, "name": "reviewer", "description": "Reviews changes" } })
+        );
+        let duplicate_skill = request_json(
+            &app,
+            Method::POST,
+            "/api/skills",
+            json!({ "name": "reviewer", "description": "Duplicate" }),
+        )
+        .await;
+        assert_eq!(duplicate_skill.status(), StatusCode::OK);
+        let skill_delete = request_empty(&app, Method::DELETE, &skill_path).await;
+        assert_eq!(skill_delete.status(), StatusCode::OK);
+        assert_eq!(
+            request_empty(&app, Method::GET, &skill_path).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            request_json(
+                &app,
+                Method::POST,
+                "/api/skills",
+                json!({ "name": "   ", "description": "Invalid" })
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        let agent_create = request_json(
+            &app,
+            Method::POST,
+            "/api/agents",
+            json!({ "name": "opencode", "description": "OpenCode" }),
+        )
+        .await;
+        assert_eq!(agent_create.status(), StatusCode::OK);
+        let agent = response_json(agent_create).await;
+        let agent_id = agent["agent"]["id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("response did not include an agent id"))
+            .to_string();
+        let agent_path = format!("/api/agents/{agent_id}");
+        assert_eq!(
+            request_empty(&app, Method::GET, "/api/agents")
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            request_empty(&app, Method::GET, &agent_path).await.status(),
+            StatusCode::OK
+        );
+        let agent_update = request_json(
+            &app,
+            Method::PUT,
+            &agent_path,
+            json!({ "name": "review-agent", "description": "Reviews changes" }),
+        )
+        .await;
+        assert_eq!(agent_update.status(), StatusCode::OK);
+        assert_eq!(
+            request_empty(&app, Method::DELETE, &agent_path)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            request_empty(&app, Method::GET, &agent_path).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            request_json(
+                &app,
+                Method::POST,
+                "/api/agents",
+                json!({ "name": " ", "description": "Invalid" })
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    /// Sends one JSON request to the router under test.
+    async fn request_json(
+        app: &axum::Router,
+        method: Method,
+        uri: &str,
+        body: Value,
+    ) -> axum::response::Response {
+        match app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap_or_else(|error| panic!("failed to build request: {error}")),
+            )
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => panic!("request failed: {error}"),
+        }
+    }
+
+    /// Sends one empty-body request to the router under test.
+    async fn request_empty(
+        app: &axum::Router,
+        method: Method,
+        uri: &str,
+    ) -> axum::response::Response {
+        match app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap_or_else(|error| panic!("failed to build request: {error}")),
+            )
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => panic!("request failed: {error}"),
+        }
+    }
+
     fn test_router() -> (TempDir, std::path::PathBuf, axum::Router) {
         let temp_dir = TempDir::new().unwrap();
         let database_path = temp_dir.path().join("routes.sqlite3");

@@ -1,12 +1,26 @@
 use crate::{
-    ProjectRepositoryError, ProjectWorkContextRepositoryError, SessionRepositoryError,
-    TaskRepositoryError, TaskWorktreeProvisionerError, WorktreeRepositoryError,
+    AgentDefinitionRepositoryError, ProjectRepositoryError, ProjectWorkContextRepositoryError,
+    SessionRepositoryError, SkillRepositoryError, TaskRepositoryError,
+    TaskWorktreeProvisionerError, WorktreeRepositoryError,
 };
+use ora_domain::DomainModelError;
 use thiserror::Error;
 
 /// Enumerates application-visible failures that adapters must translate for callers.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum ApplicationError {
+    #[error("skill name must not be blank")]
+    SkillNameBlank,
+    #[error("skill not found: {skill_id}")]
+    SkillNotFound { skill_id: String },
+    #[error("skill repository operation failed: {message}")]
+    SkillRepository { message: String },
+    #[error("agent definition name must not be blank")]
+    AgentDefinitionNameBlank,
+    #[error("agent definition not found: {agent_id}")]
+    AgentDefinitionNotFound { agent_id: String },
+    #[error("agent definition repository operation failed: {message}")]
+    AgentDefinitionRepository { message: String },
     #[error("project not found: {project_id}")]
     ProjectNotFound { project_id: String },
     #[error("project repository operation failed: {message}")]
@@ -34,6 +48,43 @@ pub enum ApplicationError {
 }
 
 impl ApplicationError {
+    /// Converts skill-construction validation failures into application errors.
+    pub(crate) fn from_skill_domain_error(error: DomainModelError) -> Self {
+        match error {
+            DomainModelError::EmptySkillName => Self::SkillNameBlank,
+            _ => Self::SkillRepository {
+                message: error.to_string(),
+            },
+        }
+    }
+
+    /// Converts configurable-agent construction validation failures into application errors.
+    pub(crate) fn from_agent_definition_domain_error(error: DomainModelError) -> Self {
+        match error {
+            DomainModelError::EmptyAgentDefinitionName => Self::AgentDefinitionNameBlank,
+            _ => Self::AgentDefinitionRepository {
+                message: error.to_string(),
+            },
+        }
+    }
+
+    /// Maps skill repository failures into stable application errors.
+    pub(crate) fn from_skill_repository_error(error: SkillRepositoryError) -> Self {
+        match error {
+            SkillRepositoryError::OperationFailed(message) => Self::SkillRepository { message },
+        }
+    }
+
+    /// Maps configurable-agent repository failures into stable application errors.
+    pub(crate) fn from_agent_definition_repository_error(
+        error: AgentDefinitionRepositoryError,
+    ) -> Self {
+        match error {
+            AgentDefinitionRepositoryError::OperationFailed(message) => {
+                Self::AgentDefinitionRepository { message }
+            }
+        }
+    }
     /// Maps infrastructure-facing repository failures into stable application errors.
     pub(crate) fn from_project_repository_error(error: ProjectRepositoryError) -> Self {
         match error {
