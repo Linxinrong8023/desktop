@@ -11,7 +11,7 @@ pub struct Skill {
 }
 
 impl Skill {
-    /// Creates a skill while normalizing its user-facing name for stable lookup and uniqueness.
+    /// Creates a skill while normalizing its user-facing name for stable lookup.
     pub fn new(
         id: SkillId,
         name: impl Into<String>,

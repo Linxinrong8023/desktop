@@ -18,19 +18,9 @@ CREATE TABLE IF NOT EXISTS agents (
     updated_at INTEGER NOT NULL,
     is_deleted INTEGER NOT NULL DEFAULT 0
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_active_name
-    ON skills (name)
-    WHERE is_deleted = 0;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_active_name
-    ON agents (name)
-    WHERE is_deleted = 0;
 "#];
 
 const DOWN_STATEMENTS: &[&str] = &[r#"
-DROP INDEX IF EXISTS idx_agents_active_name;
-DROP INDEX IF EXISTS idx_skills_active_name;
 DROP TABLE IF EXISTS agents;
 DROP TABLE IF EXISTS skills;
 "#];

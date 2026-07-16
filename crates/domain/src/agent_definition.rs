@@ -11,7 +11,7 @@ pub struct AgentDefinition {
 }
 
 impl AgentDefinition {
-    /// Creates an agent definition while normalizing its user-facing name for stable lookup and uniqueness.
+    /// Creates an agent definition while normalizing its user-facing name for stable lookup.
     pub fn new(
         id: AgentDefinitionId,
         name: impl Into<String>,

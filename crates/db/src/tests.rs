@@ -65,7 +65,7 @@ fn bootstraps_empty_database_with_default_catalog() {
     );
 }
 
-/// Verifies the catalog creates active-name indexes and removes the new schema during rollback.
+/// Verifies the catalog creates ID-keyed schema without name indexes and removes it during rollback.
 #[test]
 fn manages_skill_and_agent_definition_schema_lifecycle() {
     let temp_dir = TempDir::new().unwrap();
@@ -81,10 +81,19 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
     bootstrap_file_database(&database_path, catalog, 1_700_000_000_000);
 
     let connection = Connection::open(&database_path).unwrap();
-    assert_eq!(index_exists(&connection, "idx_skills_active_name"), true);
-    assert_eq!(index_exists(&connection, "idx_agents_active_name"), true);
-
     for table_name in ["skills", "agents"] {
+        assert_eq!(
+            load_table_column_names(&connection, table_name),
+            vec![
+                "id".to_string(),
+                "name".to_string(),
+                "description".to_string(),
+                "created_at".to_string(),
+                "updated_at".to_string(),
+                "is_deleted".to_string(),
+            ]
+        );
+
         connection
             .execute(
                 &format!(
@@ -93,34 +102,43 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
                 params!["first", "opencode", "OpenCode", 1_i64, 1_i64],
             )
             .unwrap();
-        let duplicate = connection.execute(
+        connection
+            .execute(
+                &format!(
+                    "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                     VALUES (?1, ?2, ?3, ?4, ?5, 0)"
+                ),
+                params!["second", "opencode", "OpenCode duplicate", 2_i64, 2_i64],
+            )
+            .unwrap();
+        let duplicate_id = connection.execute(
             &format!(
                 "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                 VALUES (?1, ?2, ?3, ?4, ?5, 0)"
             ),
-            params!["second", "opencode", "OpenCode duplicate", 2_i64, 2_i64],
+            params!["first", "different-name", "Duplicate ID", 3_i64, 3_i64],
         );
 
         assert_eq!(
             matches!(
-                duplicate,
+                duplicate_id,
                 Err(rusqlite::Error::SqliteFailure(error, _))
                     if error.code == ErrorCode::ConstraintViolation
             ),
             true
         );
 
-        connection
+        let deleted_rows = connection
             .execute(
                 &format!("UPDATE {table_name} SET is_deleted = 1 WHERE id = ?1"),
                 params!["first"],
             )
             .unwrap();
+        assert_eq!(deleted_rows, 1);
         connection
             .execute(
                 &format!(
-                    "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                     VALUES (?1, ?2, ?3, ?4, ?5, 0)"
+                    "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                 VALUES (?1, ?2, ?3, ?4, ?5, 0)"
                 ),
-                params!["third", "opencode", "OpenCode replacement", 3_i64, 3_i64],
+                params!["third", "opencode", "OpenCode replacement", 4_i64, 4_i64],
             )
             .unwrap();
     }
@@ -133,8 +151,6 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
     let connection = Connection::open(&database_path).unwrap();
     assert_eq!(table_exists(&connection, "skills"), false);
     assert_eq!(table_exists(&connection, "agents"), false);
-    assert_eq!(index_exists(&connection, "idx_skills_active_name"), false);
-    assert_eq!(index_exists(&connection, "idx_agents_active_name"), false);
 }
 
 /// Verifies the runner applies only the missing tail of a linear migration history in ascending order.
@@ -429,16 +445,16 @@ fn table_exists(connection: &Connection, table_name: &str) -> bool {
         == 1
 }
 
-/// Reports whether a named index exists so migration tests can assert partial-index installation.
-fn index_exists(connection: &Connection, index_name: &str) -> bool {
-    connection
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1)",
-            params![index_name],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap()
-        == 1
+/// Loads a table's column names in declaration order so migration tests can assert its shape.
+fn load_table_column_names(connection: &Connection, table_name: &str) -> Vec<String> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table_name})"))
+        .unwrap();
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap();
+
+    rows.collect::<Result<Vec<_>, _>>().unwrap()
 }
 
 /// Verifies a migration-step error identifies the version and direction while preserving the SQL parser context.
