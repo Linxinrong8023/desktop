@@ -1,3 +1,5 @@
+pub mod acp;
+
 mod agent;
 mod frontend;
 mod project;

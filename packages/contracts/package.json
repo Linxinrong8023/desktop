@@ -8,6 +8,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./acp": "./src/acp/index.ts",
     "./fetch": "./src/fetch.ts"
   }
 }
