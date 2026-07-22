@@ -15,7 +15,11 @@ pub(super) fn code_agent_cli_executable(home_directory: &Path) -> PathBuf {
 }
 
 /// Selects the separately-defined fixed executable path for one immutable session provider.
-pub(super) fn executable_for(agent_cli: AgentCli, home_directory: &Path, opencode_path: &Path) -> PathBuf {
+pub(super) fn executable_for(
+    agent_cli: AgentCli,
+    home_directory: &Path,
+    opencode_path: &Path,
+) -> PathBuf {
     match agent_cli {
         AgentCli::OpenCode => opencode_path.to_path_buf(),
         AgentCli::Nga => nga_executable(home_directory),

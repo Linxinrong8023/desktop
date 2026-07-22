@@ -145,7 +145,7 @@ impl AgentRuntimeManager {
                     })?;
             }
         }
-        let opencode_path = resolve_opencode_path()?;
+        let opencode_path = resolve_opencode_path(&home_directory)?;
         Ok(Self {
             inner: Arc::new(ManagerInner {
                 pool,
@@ -166,8 +166,13 @@ impl AgentRuntimeManager {
     ) -> Result<CreateSessionResponse, BackendError> {
         let agent_cli = domain_agent_cli(request.agent_cli);
         let cwd = resolve_task_cwd(&self.inner.pool, &TaskId::new(request.task_id.clone()))?;
-        let process =
-            spawn_initialized_process(agent_cli, &cwd, &self.inner.home_directory, &self.inner.opencode_path).await?;
+        let process = spawn_initialized_process(
+            agent_cli,
+            &cwd,
+            &self.inner.home_directory,
+            &self.inner.opencode_path,
+        )
+        .await?;
         let response = timeout(
             SESSION_SETUP_TIMEOUT,
             process.client.request::<_, NewSessionResponse>(
@@ -641,8 +646,9 @@ fn contract_agent_cli(agent_cli: AgentCli) -> ContractAgentCli {
     }
 }
 
-/// Resolves the opencode executable path via `where.exe` once at startup.
-fn resolve_opencode_path() -> Result<PathBuf, BackendError> {
+/// Resolves OpenCode through the Windows executable lookup mechanism once at startup.
+#[cfg(windows)]
+fn resolve_opencode_path(_home_directory: &Path) -> Result<PathBuf, BackendError> {
     let output = std::process::Command::new("where.exe")
         .arg("opencode")
         .output()
@@ -663,8 +669,22 @@ fn resolve_opencode_path() -> Result<PathBuf, BackendError> {
         .or_else(|| stdout.lines().next())
         .map(|path| PathBuf::from(path.trim()))
         .ok_or_else(|| {
-            runtime_internal("opencode_not_found", "opencode executable not found on PATH")
+            runtime_internal(
+                "opencode_not_found",
+                "opencode executable not found on PATH",
+            )
         })
+}
+
+/// Resolves OpenCode from its fixed per-user Unix installation directory once at startup.
+#[cfg(unix)]
+fn resolve_opencode_path(home_directory: &Path) -> Result<PathBuf, BackendError> {
+    // Process creation owns the existence check so the backend can still expose non-agent
+    // capabilities when a provider has not been installed for this user.
+    Ok(home_directory
+        .join(".opencode")
+        .join("bin")
+        .join("opencode"))
 }
 
 /// Builds the stable error used when ownership cannot resolve a live Git worktree.
@@ -684,4 +704,25 @@ fn map_acp_error(error: ora_acp::AcpError) -> BackendError {
 /// Builds a private runtime failure with a stable public code.
 fn runtime_internal(code: &'static str, message: impl Into<String>) -> BackendError {
     BackendError::new(BackendErrorKind::Internal, code, message)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::resolve_opencode_path;
+    use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
+
+    /// Verifies Unix builds resolve OpenCode from the configured user's fixed installation path.
+    #[test]
+    fn resolves_unix_opencode_path_from_home_directory() {
+        let home_directory = PathBuf::from("users").join("demo");
+
+        assert_eq!(
+            resolve_opencode_path(&home_directory).expect("resolve OpenCode path"),
+            home_directory
+                .join(".opencode")
+                .join("bin")
+                .join("opencode")
+        );
+    }
 }
