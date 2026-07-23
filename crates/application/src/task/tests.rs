@@ -7,8 +7,8 @@ use crate::{
 };
 use ora_contracts::{
     CreateTaskRequest, CreateTaskResponse, GetTaskRequest, GetTaskResponse, ListTasksRequest,
-    ListTasksResponse, Task as ContractTask, TaskStatus as ContractTaskStatus, UpdateTaskRequest,
-    UpdateTaskResponse,
+    ListTasksResponse, Task as ContractTask, TaskStatus as ContractTaskStatus, TaskWorkspaceMode,
+    UpdateTaskRequest, UpdateTaskResponse,
 };
 use ora_domain::{
     AuditFields, ProjectId, Task, TaskId, TaskStatus as DomainTaskStatus, Worktree,
@@ -50,6 +50,7 @@ fn creates_tasks_with_owned_worktrees_and_clock_values() {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
                 status: ContractTaskStatus::Doing,
+                workspace_mode: None,
             })
             .unwrap_or_else(|error| panic!("create handler failed: {error}"));
 
@@ -61,6 +62,7 @@ fn creates_tasks_with_owned_worktrees_and_clock_values() {
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
                     status: ContractTaskStatus::Doing,
+                    workspace_mode: TaskWorkspaceMode::Worktree,
                 },
             }
         );
@@ -95,6 +97,50 @@ fn creates_tasks_with_owned_worktrees_and_clock_values() {
     });
 }
 
+/// Verifies project-root tasks persist without provisioning Git or a worktree record.
+#[test]
+fn creates_project_root_tasks_without_worktrees() {
+    with_trace_logging(|| {
+        let task_repository = Rc::new(FakeTaskRepository::default());
+        let worktree_repository = Rc::new(FakeWorktreeRepository::default());
+        let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
+        let handler = CreateTaskHandler::new(
+            task_repository.clone(),
+            worktree_repository.clone(),
+            FixedTaskIdGenerator::new(TASK_ID),
+            FixedWorktreeIdGenerator::new("worktree-1"),
+            provisioner.clone(),
+            PathBuf::from(WORK_DIR),
+            FixedClock::new(1_700_000_000_000),
+        );
+
+        let response = handler
+            .handle(CreateTaskRequest {
+                project_id: "project-1".to_string(),
+                title: "Chat in project root".to_string(),
+                status: ContractTaskStatus::Doing,
+                workspace_mode: Some(TaskWorkspaceMode::ProjectRoot),
+            })
+            .unwrap_or_else(|error| panic!("create handler failed: {error}"));
+
+        assert_eq!(
+            response,
+            CreateTaskResponse {
+                task: ContractTask {
+                    id: TASK_ID.to_string(),
+                    project_id: "project-1".to_string(),
+                    title: "Chat in project root".to_string(),
+                    status: ContractTaskStatus::Doing,
+                    workspace_mode: TaskWorkspaceMode::ProjectRoot,
+                },
+            }
+        );
+        assert!(provisioner.created_requests().is_empty());
+        assert!(worktree_repository.visible_worktrees().is_empty());
+        assert_eq!(task_repository.visible_tasks()[0].worktree_id, None,);
+    });
+}
+
 /// Verifies task creation regenerates ids when the short branch prefix already exists as a worktree folder.
 #[test]
 fn regenerates_task_ids_when_branch_prefix_folder_exists() {
@@ -123,6 +169,7 @@ fn regenerates_task_ids_when_branch_prefix_folder_exists() {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
                 status: ContractTaskStatus::Doing,
+                workspace_mode: None,
             })
             .unwrap_or_else(|error| panic!("create handler failed: {error}"));
 
@@ -134,6 +181,7 @@ fn regenerates_task_ids_when_branch_prefix_folder_exists() {
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
                     status: ContractTaskStatus::Doing,
+                    workspace_mode: TaskWorkspaceMode::Worktree,
                 },
             }
         );
@@ -184,6 +232,7 @@ fn regenerates_task_ids_when_orphaned_branch_exists() {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
                 status: ContractTaskStatus::Doing,
+                workspace_mode: None,
             })
             .unwrap_or_else(|error| panic!("create handler failed: {error}"));
 
@@ -195,6 +244,7 @@ fn regenerates_task_ids_when_orphaned_branch_exists() {
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
                     status: ContractTaskStatus::Doing,
+                    workspace_mode: TaskWorkspaceMode::Worktree,
                 },
             }
         );
@@ -229,6 +279,7 @@ fn creates_task_when_work_dir_does_not_exist() {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
                 status: ContractTaskStatus::Doing,
+                workspace_mode: None,
             })
             .unwrap_or_else(|error| panic!("create handler failed: {error}"));
 
@@ -240,6 +291,7 @@ fn creates_task_when_work_dir_does_not_exist() {
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
                     status: ContractTaskStatus::Doing,
+                    workspace_mode: TaskWorkspaceMode::Worktree,
                 },
             }
         );
@@ -278,6 +330,7 @@ fn reports_task_worktree_error_when_task_id_retries_are_exhausted() {
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
                     status: ContractTaskStatus::Doing,
+                    workspace_mode: None,
                 })
                 .unwrap_err(),
             ApplicationError::TaskWorktree {
@@ -339,6 +392,7 @@ fn gets_tasks_by_identifier() {
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
                     status: ContractTaskStatus::Todo,
+                    workspace_mode: TaskWorkspaceMode::ProjectRoot,
                 },
             }
         );
@@ -382,12 +436,14 @@ fn lists_visible_tasks() {
                         project_id: "project-1".to_string(),
                         title: "Ship handlers".to_string(),
                         status: ContractTaskStatus::Todo,
+                        workspace_mode: TaskWorkspaceMode::ProjectRoot,
                     },
                     ContractTask {
                         id: "task-2".to_string(),
                         project_id: "project-2".to_string(),
                         title: "Wire exports".to_string(),
                         status: ContractTaskStatus::Done,
+                        workspace_mode: TaskWorkspaceMode::Worktree,
                     },
                 ],
             }
@@ -425,6 +481,7 @@ fn updates_tasks_with_refreshed_timestamps() {
                     project_id: "project-1".to_string(),
                     title: "Ship updated handlers".to_string(),
                     status: ContractTaskStatus::Done,
+                    workspace_mode: TaskWorkspaceMode::ProjectRoot,
                 },
             }
         );
@@ -467,6 +524,7 @@ fn cleans_up_created_worktree_when_task_persistence_fails() {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
                 status: ContractTaskStatus::Todo,
+                workspace_mode: None,
             })
             .unwrap_err();
 
@@ -518,6 +576,7 @@ fn reports_application_errors() {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
                 status: ContractTaskStatus::Todo,
+                workspace_mode: None,
             })
             .unwrap_err();
 
@@ -574,6 +633,7 @@ fn emits_structured_operational_events() {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
                 status: ContractTaskStatus::Todo,
+                workspace_mode: None,
             })
             .unwrap();
         assert_eq!(
@@ -582,6 +642,7 @@ fn emits_structured_operational_events() {
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
                     status: ContractTaskStatus::Todo,
+                    workspace_mode: None,
                 })
                 .unwrap_err(),
             ApplicationError::TaskWorktree {

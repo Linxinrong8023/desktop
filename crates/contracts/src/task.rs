@@ -11,6 +11,18 @@ pub enum TaskStatus {
     Done,
 }
 
+/// Selects the filesystem context used when a task starts an agent session.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "task.ts")]
+pub enum TaskWorkspaceMode {
+    /// Creates an isolated linked Git worktree owned by the task.
+    #[default]
+    Worktree,
+    /// Uses the owning project's root directory directly without creating a worktree.
+    ProjectRoot,
+}
+
 /// Describes the public task payload shared across adapter responses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -20,6 +32,7 @@ pub struct Task {
     pub project_id: String,
     pub title: String,
     pub status: TaskStatus,
+    pub workspace_mode: TaskWorkspaceMode,
 }
 
 /// Carries the app-facing payload for task creation requests.
@@ -30,6 +43,9 @@ pub struct CreateTaskRequest {
     pub project_id: String,
     pub title: String,
     pub status: TaskStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub workspace_mode: Option<TaskWorkspaceMode>,
 }
 
 /// Returns the created task after a successful create request.
@@ -107,6 +123,7 @@ pub struct DeleteTaskResponse {
 /// Exports every TypeScript binding declared in this module into the target directory.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     TaskStatus::export(config)?;
+    TaskWorkspaceMode::export(config)?;
     Task::export(config)?;
     CreateTaskRequest::export(config)?;
     CreateTaskResponse::export(config)?;
@@ -126,7 +143,7 @@ mod tests {
     use super::{
         CreateTaskRequest, CreateTaskResponse, DeleteTaskRequest, DeleteTaskResponse,
         GetTaskRequest, GetTaskResponse, ListTasksRequest, ListTasksResponse, Task, TaskStatus,
-        UpdateTaskRequest, UpdateTaskResponse,
+        TaskWorkspaceMode, UpdateTaskRequest, UpdateTaskResponse,
     };
     use pretty_assertions::assert_eq;
     use serde::Serialize;
@@ -140,11 +157,13 @@ mod tests {
             project_id: "project-1".to_string(),
             title: "Ship handlers".to_string(),
             status: TaskStatus::Doing,
+            workspace_mode: TaskWorkspaceMode::Worktree,
         };
         let create_request = CreateTaskRequest {
             project_id: "project-1".to_string(),
             title: "Ship handlers".to_string(),
             status: TaskStatus::Todo,
+            workspace_mode: None,
         };
         let get_request = GetTaskRequest {
             task_id: "task-1".to_string(),
@@ -166,6 +185,7 @@ mod tests {
                 "projectId": "project-1",
                 "title": "Ship handlers",
                 "status": "doing",
+                "workspaceMode": "worktree",
             }),
         );
         assert_serialized_json(
@@ -182,8 +202,9 @@ mod tests {
                 "task": {
                     "id": "task-1",
                     "projectId": "project-1",
-                    "title": "Ship handlers",
-                    "status": "doing",
+                "title": "Ship handlers",
+                "status": "doing",
+                "workspaceMode": "worktree",
                 },
             }),
         );
@@ -194,8 +215,9 @@ mod tests {
                 "task": {
                     "id": "task-1",
                     "projectId": "project-1",
-                    "title": "Ship handlers",
-                    "status": "doing",
+                "title": "Ship handlers",
+                "status": "doing",
+                "workspaceMode": "worktree",
                 },
             }),
         );
@@ -211,6 +233,7 @@ mod tests {
                         "projectId": "project-1",
                         "title": "Ship handlers",
                         "status": "doing",
+                        "workspaceMode": "worktree",
                     },
                 ],
             }),
@@ -231,6 +254,7 @@ mod tests {
                     "projectId": "project-1",
                     "title": "Ship handlers",
                     "status": "doing",
+                    "workspaceMode": "worktree",
                 },
             }),
         );
@@ -251,6 +275,7 @@ mod tests {
             project_id: "project-1".to_string(),
             title: "Ship handlers".to_string(),
             status: TaskStatus::Todo,
+            workspace_mode: TaskWorkspaceMode::Worktree,
         };
 
         assert_eq!(

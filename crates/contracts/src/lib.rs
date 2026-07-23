@@ -50,8 +50,8 @@ pub use skill::{
 use std::path::Path;
 pub use task::{
     CreateTaskRequest, CreateTaskResponse, DeleteTaskRequest, DeleteTaskResponse, GetTaskRequest,
-    GetTaskResponse, ListTasksRequest, ListTasksResponse, Task, TaskStatus, UpdateTaskRequest,
-    UpdateTaskResponse,
+    GetTaskResponse, ListTasksRequest, ListTasksResponse, Task, TaskStatus, TaskWorkspaceMode,
+    UpdateTaskRequest, UpdateTaskResponse,
 };
 use ts_rs::{Config, ExportError};
 

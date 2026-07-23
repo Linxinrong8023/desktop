@@ -7,6 +7,7 @@ export type CreateTaskRequest = {
   projectId: string;
   title: string;
   status: TaskStatus;
+  workspaceMode?: TaskWorkspaceMode;
 };
 
 /**
@@ -52,12 +53,18 @@ export type Task = {
   projectId: string;
   title: string;
   status: TaskStatus;
+  workspaceMode: TaskWorkspaceMode;
 };
 
 /**
  * Describes the public task status shared across adapter boundaries.
  */
 export type TaskStatus = "todo" | "doing" | "done";
+
+/**
+ * Selects the filesystem context used when a task starts an agent session.
+ */
+export type TaskWorkspaceMode = "worktree" | "project_root";
 
 /**
  * Carries the full replacement payload for task updates in the first slice.

@@ -549,12 +549,25 @@ async fn drain_stderr(mut stderr: tokio::process::ChildStderr) {
     }
 }
 
-/// Resolves the authoritative task worktree path through persisted ownership and Git metadata.
+/// Resolves the task's cwd from either its owned worktree or its project root.
 fn resolve_task_cwd(pool: &RepositoryPool, task_id: &TaskId) -> Result<PathBuf, BackendError> {
     let task = SqliteTaskRepository::new(pool.clone())
         .find_task(task_id)
         .map_err(|_| task_worktree_unavailable())?
         .ok_or_else(task_worktree_unavailable)?;
+    if task.worktree_id.is_none() {
+        let project = SqliteProjectRepository::new(pool.clone())
+            .find_project(&task.project_id)
+            .map_err(|_| task_project_root_unavailable())?
+            .ok_or_else(task_project_root_unavailable)?;
+        let cwd = PathBuf::from(project.root_path);
+        return if cwd.is_dir() {
+            Ok(cwd)
+        } else {
+            Err(task_project_root_unavailable())
+        };
+    }
+
     let worktree_id = task.worktree_id.ok_or_else(task_worktree_unavailable)?;
     let worktree = SqliteWorktreeRepository::new(pool.clone())
         .find_worktree(&worktree_id)
@@ -696,6 +709,15 @@ fn task_worktree_unavailable() -> BackendError {
     )
 }
 
+/// Builds the stable error used when a project-root task cannot resolve its directory.
+fn task_project_root_unavailable() -> BackendError {
+    BackendError::new(
+        BackendErrorKind::Conflict,
+        "task_project_root_unavailable",
+        "task project root is unavailable",
+    )
+}
+
 /// Sanitizes ACP peer details behind one transport-neutral protocol failure.
 fn map_acp_error(error: ora_acp::AcpError) -> BackendError {
     runtime_internal("agent_protocol_error", error.to_string())
@@ -706,13 +728,25 @@ fn runtime_internal(code: &'static str, message: impl Into<String>) -> BackendEr
     BackendError::new(BackendErrorKind::Internal, code, message)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::resolve_opencode_path;
+    use super::resolve_task_cwd;
+    use ora_application::{ProjectRepository, TaskRepository};
+    use ora_db::{
+        DatabaseBootstrapper, DatabaseLocation, SqliteProjectRepository, SqliteTaskRepository,
+        default_migration_catalog,
+    };
+    use ora_domain::{AuditFields, Project, ProjectId, Task, TaskId, TaskStatus};
     use pretty_assertions::assert_eq;
+    use std::fs;
+    #[cfg(unix)]
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     /// Verifies Unix builds resolve OpenCode from the configured user's fixed installation path.
+    #[cfg(unix)]
     #[test]
     fn resolves_unix_opencode_path_from_home_directory() {
         let home_directory = PathBuf::from("users").join("demo");
@@ -723,6 +757,45 @@ mod tests {
                 .join(".opencode")
                 .join("bin")
                 .join("opencode")
+        );
+    }
+
+    /// Verifies tasks without a linked worktree start agents in their project's root directory.
+    #[test]
+    fn resolves_project_root_for_tasks_without_worktrees() {
+        let temp_dir = TempDir::new().expect("create temporary directory");
+        let project_root = temp_dir.path().join("project-root");
+        fs::create_dir_all(&project_root).expect("create project root");
+        let database_path = temp_dir.path().join("ora.sqlite3");
+        let pool = DatabaseBootstrapper::system()
+            .bootstrap_repository_pool(
+                &DatabaseLocation::path(&database_path),
+                &default_migration_catalog().expect("create migration catalog"),
+            )
+            .expect("bootstrap repository pool");
+        let project = Project::new(
+            ProjectId::new("project-1"),
+            "Project",
+            project_root.to_string_lossy(),
+            AuditFields::new(1, 1, false),
+        );
+        SqliteProjectRepository::new(pool.clone())
+            .create_project(project)
+            .expect("persist project");
+        SqliteTaskRepository::new(pool.clone())
+            .create_task(Task::new(
+                TaskId::new("task-1"),
+                ProjectId::new("project-1"),
+                "Project chat",
+                TaskStatus::Doing,
+                None,
+                AuditFields::new(1, 1, false),
+            ))
+            .expect("persist task");
+
+        assert_eq!(
+            resolve_task_cwd(&pool, &TaskId::new("task-1")).expect("resolve project root cwd"),
+            project_root,
         );
     }
 }
