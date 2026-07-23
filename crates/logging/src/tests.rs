@@ -6,9 +6,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use tempfile::TempDir;
+use time::{OffsetDateTime, UtcOffset, format_description::well_known::Rfc3339};
 use tracing::dispatcher::with_default;
 
 use crate::file_output::{ActiveLogPath, cleanup_old_logs};
+use crate::formatter::select_local_timestamp;
 use crate::{
     FileLoggingConfig, LogLevel, LogOutput, LoggingConfig, LoggingInitError, RotationPolicy,
     build_dispatch, init_logging, runtime_span, span_with_correlation,
@@ -156,6 +158,40 @@ fn formats_json_events_with_context_and_error_objects() {
         })
     );
     assert_eq!(stdout_event["timestamp"].as_str().is_some(), true);
+}
+
+/// Verifies JSON timestamps use the system's local UTC offset instead of always using UTC.
+#[test]
+fn formats_json_timestamps_with_system_offset() {
+    let stdout = SharedBuffer::default();
+    let (dispatch, _guard) = build_dispatch(
+        &LoggingConfig::new(LogLevel::Info, LogOutput::Stdout),
+        stdout.make_writer(),
+    )
+    .unwrap();
+
+    with_default(&dispatch, || {
+        tracing::info!(message = "local timestamp");
+    });
+
+    let events = stdout.json_lines();
+    let timestamp_text = events[0]["timestamp"]
+        .as_str()
+        .unwrap_or_else(|| panic!("expected a string timestamp"));
+    let timestamp = OffsetDateTime::parse(timestamp_text, &Rfc3339)
+        .unwrap_or_else(|error| panic!("expected an RFC3339 timestamp: {error}"));
+    let expected_offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+
+    assert_eq!(timestamp.offset(), expected_offset);
+}
+
+/// Verifies an unavailable local offset falls back to the supplied UTC timestamp.
+#[test]
+fn falls_back_to_utc_when_local_offset_is_unavailable() {
+    let utc = OffsetDateTime::parse("2026-07-23T06:00:00Z", &Rfc3339)
+        .unwrap_or_else(|error| panic!("expected a valid UTC timestamp: {error}"));
+
+    assert_eq!(select_local_timestamp(None, utc), utc);
 }
 
 /// Verifies the wrapper macros add the current function name under the top-level `method` field.

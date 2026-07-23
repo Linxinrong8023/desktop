@@ -11,6 +11,14 @@ use crate::correlation::scope_correlation;
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct JsonEventFormatter;
 
+/// Selects the system-local timestamp when available and otherwise preserves a UTC timestamp.
+pub(crate) fn select_local_timestamp(
+    local: Option<OffsetDateTime>,
+    utc: OffsetDateTime,
+) -> OffsetDateTime {
+    local.unwrap_or(utc)
+}
+
 impl<S, N> FormatEvent<S, N> for JsonEventFormatter
 where
     S: tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
@@ -28,10 +36,12 @@ where
 
         let scope = scope_correlation(context.event_scope());
         let mut payload = Map::new();
+        let timestamp =
+            select_local_timestamp(OffsetDateTime::now_local().ok(), OffsetDateTime::now_utc());
         payload.insert(
             "timestamp".to_string(),
             json!(
-                OffsetDateTime::now_utc()
+                timestamp
                     .format(&Rfc3339)
                     .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
             ),
