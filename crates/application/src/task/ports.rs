@@ -37,6 +37,9 @@ pub trait TaskIdGenerator {
 /// Implementations are expected to provision and remove backend-managed task worktrees
 /// while hiding Git and filesystem details from the application layer.
 pub trait TaskWorktreeProvisioner {
+    /// Verifies the configured project path belongs to a Git repository.
+    fn validate_repository(&self) -> Result<(), TaskWorktreeProvisionerError>;
+
     /// Reports whether the repository already contains the task branch, including orphaned branches without worktree folders.
     fn task_branch_exists(&self, branch_name: &str) -> Result<bool, TaskWorktreeProvisionerError>;
 
@@ -82,5 +85,6 @@ pub enum TaskRepositoryError {
 /// Captures linked-worktree lifecycle failures that handlers convert into stable application errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskWorktreeProvisionerError {
+    NotARepository,
     OperationFailed(String),
 }

@@ -98,6 +98,19 @@ describe("WebPlatformAdapter", () => {
     expect(screen.getByRole("button", { name: "Browse" })).toHaveFocus();
   });
 
+  it("returns the open directory when no child entry is selected", async () => {
+    const user = userEvent.setup();
+    const { client } = fileSystemClient();
+    const adapter = createWebPlatformAdapter(client);
+    render(<PickerHarness adapter={adapter} />);
+
+    await user.click(screen.getByRole("button", { name: "Browse" }));
+    await screen.findByText("projects");
+    await user.click(screen.getByRole("button", { name: "Select" }));
+
+    expect(await screen.findByText("/home/ora")).toBeVisible();
+  });
+
   it("uses a stable desktop workspace while remaining viewport-bound", async () => {
     const user = userEvent.setup();
     const { client } = fileSystemClient();
@@ -203,7 +216,6 @@ describe("WebPlatformAdapter", () => {
     await user.dblClick(await screen.findByText("projects"));
 
     expect(await screen.findByRole("alert")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Select current folder" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Select" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));

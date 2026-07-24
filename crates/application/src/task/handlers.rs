@@ -117,6 +117,10 @@ where
         &self,
         request: CreateTaskRequest,
     ) -> Result<CreateTaskResponse, ApplicationError> {
+        self.worktree_provisioner
+            .validate_repository()
+            .map_err(ApplicationError::from_task_worktree_provisioner_error)
+            .inspect_err(|error| log_task_failure("create_task", None, error))?;
         let task_id = self
             .select_available_task_id()
             .inspect_err(|error| log_task_failure("create_task", None, error))?;
@@ -525,6 +529,14 @@ fn log_task_failure(operation: &'static str, task_id: Option<&TaskId>, error: &A
                 message = "task operation failed",
                 operation,
                 error.kind = "task_worktree",
+                error.message = error.to_string()
+            );
+        }
+        (None, ApplicationError::TaskWorktreeRequiresGitRepository) => {
+            ora_error!(
+                message = "task operation failed",
+                operation,
+                error.kind = "worktree_requires_git_repository",
                 error.message = error.to_string()
             );
         }

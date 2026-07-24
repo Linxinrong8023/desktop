@@ -119,6 +119,11 @@ impl From<ApplicationError> for BackendError {
             ApplicationError::TaskRepository { .. } => {
                 internal("task_repository_error", "task repository operation failed")
             }
+            ApplicationError::TaskWorktreeRequiresGitRepository => Self::new(
+                BackendErrorKind::BadRequest,
+                "worktree_requires_git_repository",
+                "worktree mode requires a Git repository",
+            ),
             ApplicationError::TaskWorktree { .. } => {
                 internal("task_worktree_error", "task worktree operation failed")
             }
@@ -147,4 +152,19 @@ impl From<ApplicationError> for BackendError {
 /// Builds a sanitized internal failure without leaking repository or filesystem diagnostics.
 fn internal(code: &'static str, message: &'static str) -> BackendError {
     BackendError::new(BackendErrorKind::Internal, code, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BackendError, BackendErrorKind};
+    use ora_application::ApplicationError;
+
+    #[test]
+    fn exposes_non_git_worktree_roots_as_a_stable_bad_request() {
+        let error = BackendError::from(ApplicationError::TaskWorktreeRequiresGitRepository);
+
+        assert_eq!(error.kind(), BackendErrorKind::BadRequest);
+        assert_eq!(error.code(), "worktree_requires_git_repository");
+        assert_eq!(error.message(), "worktree mode requires a Git repository");
+    }
 }

@@ -19,9 +19,11 @@ import {
   IconChevronRight,
   IconAlertTriangle,
   IconDots,
+  IconEdit,
   IconFolder,
   IconGitBranch,
   IconLayoutSidebarLeftCollapse,
+  IconMessageCircle,
   IconPencil,
   IconPlus,
   IconSearch,
@@ -47,7 +49,7 @@ interface WorkspaceSidebarProps {
   onSignOut: () => void;
 }
 
-/** Renders projects, worktree tasks, and agent sessions as a dense three-level navigation tree. */
+/** Renders projects, direct-chat/worktree tasks, and agent sessions as a dense three-level navigation tree. */
 export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -103,7 +105,6 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
 
   const openProject = (projectId: string) => {
     toggleProjectExpand(projectId);
-    selectProject(projectId);
   };
 
   const openTask = (taskId: string) => {
@@ -114,10 +115,14 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
     }
   };
 
-  // Conversations are keyed by Ora session, so "new chat" is just dropping the
-  // current selection: the workspace falls back to the empty composer.
+  // Start a blank direct chat in the current project. With no project selected,
+  // keep the empty selection so the composer can explain what is missing.
   const openNewChat = () => {
-    clearSelection();
+    if (selection.projectId === null) {
+      clearSelection();
+    } else {
+      selectProject(selection.projectId);
+    }
   };
 
   // Match desktop IDE conventions while preventing the browser's new-window shortcut.
@@ -125,12 +130,16 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
     const handleNewChatShortcut = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
         event.preventDefault();
-        clearSelection();
+        if (selection.projectId === null) {
+          clearSelection();
+        } else {
+          selectProject(selection.projectId);
+        }
       }
     };
     window.addEventListener("keydown", handleNewChatShortcut);
     return () => window.removeEventListener("keydown", handleNewChatShortcut);
-  }, [clearSelection]);
+  }, [clearSelection, selectProject, selection.projectId]);
 
   return (
     <>
@@ -202,6 +211,10 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
           )}
           {visibleProjects.map((project) => {
             const projectTasks = tasks.filter((task) => task.projectId === project.id);
+            const projectTaskIds = new Set(projectTasks.map((task) => task.id));
+            const projectSessionIds = sessions
+              .filter((session) => projectTaskIds.has(session.taskId))
+              .map((session) => session.id);
             const projectOpen = expandedProjects.has(project.id) || Boolean(needle);
             return (
               <div key={project.id}>
@@ -212,11 +225,21 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
                   label={project.name}
                   expanded={projectOpen}
                   onClick={() => openProject(project.id)}
-                  action={<NewTaskButton onClick={() => setDialog({ kind: "task", projectId: project.id })} />}
+                  action={(
+                    <>
+                      <NewWorktreeButton onClick={() => setDialog({ kind: "task", projectId: project.id })} />
+                      <NewDirectChatButton onClick={() => selectProject(project.id)} />
+                    </>
+                  )}
                   menu={(
                     <EntityMenu
                       onEdit={() => setDialog({ kind: "project", entity: project })}
-                      onDelete={() => setDeleteTarget({ kind: "project", id: project.id, name: project.name })}
+                      onDelete={() => setDeleteTarget({
+                        kind: "project",
+                        id: project.id,
+                        name: project.name,
+                        sessionIds: projectSessionIds,
+                      })}
                     />
                   )}
                 />
@@ -224,12 +247,43 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
                   {projectTasks.map((task) => {
                     const taskSessions = sessions.filter((session) => session.taskId === task.id);
                     const taskOpen = expandedTasks.has(task.id) || Boolean(needle);
+                    if (task.workspaceMode === "project_root") {
+                      const directSession = taskSessions[0];
+                      return (
+                        <TreeRow
+                          key={task.id}
+                          depth={1}
+                          active={directSession
+                            ? selection.sessionId === directSession.id
+                            : selection.taskId === task.id}
+                          icon={directSession && conversations[directSession.id]?.pendingPermissions.length
+                            ? <IconAlertTriangle className="size-[18px] text-amber-500" aria-label={t("sidebar.permissionRequired")} />
+                            : <IconMessageCircle className="size-4 text-muted-foreground" aria-label={t("sidebar.directChatTask")} />}
+                          label={task.title}
+                          onClick={() => directSession
+                            ? selectSession(directSession.id, task.id, project.id)
+                            : selectTask(task.id, task.projectId)}
+                          menu={(
+                            <EntityMenu
+                              onEdit={() => setDialog({ kind: "task", projectId: project.id, entity: task })}
+                              onDelete={() => setDeleteTarget({
+                                kind: "task",
+                                id: task.id,
+                                name: task.title,
+                                workspaceMode: task.workspaceMode,
+                                sessionIds: taskSessions.map((session) => session.id),
+                              })}
+                            />
+                          )}
+                        />
+                      );
+                    }
                     return (
                       <div key={task.id}>
                         <TreeRow
                           depth={1}
                           active={selection.taskId === task.id && selection.sessionId === null}
-                          icon={<IconGitBranch className="size-4 text-muted-foreground" />}
+                          icon={<IconGitBranch className="size-4 text-muted-foreground" aria-label={t("sidebar.worktreeTask")} />}
                           label={task.title}
                           expanded={taskOpen}
                           onClick={() => openTask(task.id)}
@@ -237,7 +291,13 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
                           menu={(
                             <EntityMenu
                               onEdit={() => setDialog({ kind: "task", projectId: project.id, entity: task })}
-                              onDelete={() => setDeleteTarget({ kind: "task", id: task.id, name: task.title })}
+                              onDelete={() => setDeleteTarget({
+                                kind: "task",
+                                id: task.id,
+                                name: task.title,
+                                workspaceMode: task.workspaceMode,
+                                sessionIds: taskSessions.map((session) => session.id),
+                              })}
                             />
                           )}
                         />
@@ -401,26 +461,53 @@ function NewSessionButton({ onClick }: { onClick: () => void }) {
 
 /**
  * Opens the create-worktree-task dialog scoped to the row's project.
- *
- * A project's primary "+" creates a new worktree task rather than dropping
- * straight into a composer: a task owns the branch a session runs against, so
- * this is the entry point that gives later sessions somewhere to attach.
  */
-function NewTaskButton({ onClick }: { onClick: () => void }) {
+function NewWorktreeButton({ onClick }: { onClick: () => void }) {
   const { t } = useTranslation();
   return (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      aria-label={t("sidebar.newTask")}
-      onClick={(event) => {
-        // The row underneath toggles expansion; opening the dialog should not.
-        event.stopPropagation();
-        onClick();
-      }}
-    >
-      <IconPlus />
-    </Button>
+    <Tooltip>
+      <TooltipTrigger
+        render={(
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t("sidebar.newTask")}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClick();
+            }}
+          />
+        )}
+      >
+        <IconGitBranch />
+      </TooltipTrigger>
+      <TooltipContent>{t("sidebar.newTask")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Starts a blank direct chat rooted at the row's project. */
+function NewDirectChatButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={(
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t("sidebar.newDirectChat")}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClick();
+            }}
+          />
+        )}
+      >
+        <IconEdit />
+      </TooltipTrigger>
+      <TooltipContent>{t("sidebar.newDirectChat")}</TooltipContent>
+    </Tooltip>
   );
 }
 

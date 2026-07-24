@@ -43,7 +43,7 @@ export function createMockClient(state: MockClientState): ContractsClient {
       update: async (req) => {
         const idx = state.projects.findIndex((p) => p.id === req.projectId);
         if (idx < 0) throw new Error(`project ${req.projectId} not found`);
-        const updated: Project = { id: req.projectId, name: req.name, rootPath: req.rootPath };
+        const updated: Project = { ...state.projects[idx]!, name: req.name };
         state.projects[idx] = updated;
         return { project: updated };
       },
@@ -66,6 +66,7 @@ export function createMockClient(state: MockClientState): ContractsClient {
           projectId: req.projectId,
           title: req.title,
           status: req.status as TaskStatus,
+          workspaceMode: req.workspaceMode ?? "worktree",
         };
         state.tasks.push(task);
         return { task };

@@ -141,6 +141,40 @@ fn creates_project_root_tasks_without_worktrees() {
     });
 }
 
+/// Verifies worktree mode rejects an ordinary directory before persisting any Ora records.
+#[test]
+fn rejects_worktree_tasks_outside_git_repositories() {
+    with_trace_logging(|| {
+        let task_repository = Rc::new(FakeTaskRepository::default());
+        let worktree_repository = Rc::new(FakeWorktreeRepository::default());
+        let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
+        provisioner.fail_repository_validation(TaskWorktreeProvisionerError::NotARepository);
+        let handler = CreateTaskHandler::new(
+            task_repository.clone(),
+            worktree_repository.clone(),
+            FixedTaskIdGenerator::new(TASK_ID),
+            FixedWorktreeIdGenerator::new("worktree-1"),
+            provisioner.clone(),
+            PathBuf::from(WORK_DIR),
+            FixedClock::new(1_700_000_000_000),
+        );
+
+        let error = handler
+            .handle(CreateTaskRequest {
+                project_id: "project-1".to_string(),
+                title: "Cannot create worktree here".to_string(),
+                status: ContractTaskStatus::Doing,
+                workspace_mode: Some(TaskWorkspaceMode::Worktree),
+            })
+            .expect_err("non-Git project root should be rejected");
+
+        assert_eq!(error, ApplicationError::TaskWorktreeRequiresGitRepository);
+        assert!(provisioner.created_requests().is_empty());
+        assert!(worktree_repository.visible_worktrees().is_empty());
+        assert!(task_repository.visible_tasks().is_empty());
+    });
+}
+
 /// Verifies task creation regenerates ids when the short branch prefix already exists as a worktree folder.
 #[test]
 fn regenerates_task_ids_when_branch_prefix_folder_exists() {
@@ -885,6 +919,7 @@ struct FakeTaskWorktreeProvisioner {
     existing_branches: RefCell<Vec<String>>,
     created_requests: RefCell<Vec<CreateTaskWorktreeRequest>>,
     deleted_requests: RefCell<Vec<DeleteTaskWorktreeRequest>>,
+    next_repository_error: RefCell<Option<TaskWorktreeProvisionerError>>,
     next_create_error: RefCell<Option<TaskWorktreeProvisionerError>>,
     next_delete_error: RefCell<Option<TaskWorktreeProvisionerError>>,
 }
@@ -896,6 +931,11 @@ impl FakeTaskWorktreeProvisioner {
             existing_branches: RefCell::new(branches.into_iter().map(str::to_string).collect()),
             ..Self::default()
         }
+    }
+
+    /// Configures repository validation to fail once with a deterministic error.
+    fn fail_repository_validation(&self, error: TaskWorktreeProvisionerError) {
+        self.next_repository_error.replace(Some(error));
     }
 
     /// Configures the next create request to fail with a deterministic error.
@@ -931,6 +971,13 @@ impl FakeTaskWorktreeProvisioner {
 }
 
 impl TaskWorktreeProvisioner for Rc<FakeTaskWorktreeProvisioner> {
+    fn validate_repository(&self) -> Result<(), TaskWorktreeProvisionerError> {
+        match self.next_repository_error.borrow_mut().take() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
     fn task_branch_exists(&self, branch_name: &str) -> Result<bool, TaskWorktreeProvisionerError> {
         Ok(self
             .existing_branches

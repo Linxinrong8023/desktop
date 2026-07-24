@@ -170,6 +170,10 @@ function WebPathPickerDialog({
   const selectedEntry = selectedIndex === -1 ? undefined : entries[selectedIndex];
   const confirmableEntry =
     selectedEntry !== undefined && selectedEntry.kind === options.kind ? selectedEntry : undefined;
+  const selectionPath = confirmableEntry?.path
+    ?? (options.kind === "directory" && selectedEntry === undefined
+      ? directory?.currentPath
+      : undefined);
   const getItemKey = useCallback(
     (index: number) => entries[index]?.path ?? index,
     [entries],
@@ -377,20 +381,10 @@ function WebPathPickerDialog({
           <Button type="button" variant="outline" onClick={() => adapter.completeSelection(requestId, null)}>
             {messages.cancel}
           </Button>
-          {options.kind === "directory" && (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={loading || readError || directory === null}
-              onClick={() => directory !== null && adapter.completeSelection(requestId, directory.currentPath)}
-            >
-              {messages.chooseCurrentDirectory}
-            </Button>
-          )}
           <Button
             type="button"
-            disabled={loading || readError || confirmableEntry === undefined}
-            onClick={() => confirmableEntry !== undefined && adapter.completeSelection(requestId, confirmableEntry.path)}
+            disabled={loading || readError || selectionPath === undefined}
+            onClick={() => selectionPath !== undefined && adapter.completeSelection(requestId, selectionPath)}
           >
             {messages.choose}
           </Button>

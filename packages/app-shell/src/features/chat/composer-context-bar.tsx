@@ -212,7 +212,7 @@ function ProjectTab() {
 }
 
 /**
- * Selects which worktree a task runs in, or creates a new one.
+ * Selects which worktree a session runs in, or creates a new one.
  *
  * Tasks stand in for branches here: the backend owns the worktree and its branch
  * name and does not expose either through the frontend contract, so the task
@@ -228,8 +228,15 @@ function BranchTab() {
   const setDialog = useUiStore((s) => s.setDialog);
 
   const projectId = selection.projectId;
-  const projectTasks = tasks.filter((task) => task.projectId === projectId);
+  const projectTasks = tasks.filter((task) => task.projectId === projectId && task.workspaceMode === "worktree");
   const selectedTask = tasks.find((task) => task.id === selection.taskId);
+
+  // Direct chat is the default project context, so repeating it between the
+  // project and environment adds no information. Worktrees still show their
+  // branch control because that context is meaningful and switchable.
+  if (selectedTask?.workspaceMode !== "worktree") {
+    return null;
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -245,7 +252,7 @@ function BranchTab() {
         }
       >
         <IconGitBranch className="size-3.5" />
-        <span className="min-w-0 max-w-28 truncate sm:max-w-40">{selectedTask?.title ?? t("chat.contextBar.defaultBranch")}</span>
+        <span className="min-w-0 max-w-28 truncate sm:max-w-40">{selectedTask.title}</span>
         <IconChevronDown className="size-3 opacity-50 transition-transform group-data-popup-open/context-trigger:rotate-180" aria-hidden="true" />
       </PopoverTrigger>
       <PopoverContent align="start" side="top" className={`${SEARCH_MENU_WIDTH_CLASS} p-0`}>

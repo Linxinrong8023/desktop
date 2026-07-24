@@ -1,9 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Project, Task, TaskStatus } from "@ora/contracts";
+import type { Project, Task, TaskStatus, TaskWorkspaceMode } from "@ora/contracts";
 import { useContractsClient } from "../../contracts-client-context";
 import { queryKeys } from "./query-keys";
 import { useWorkspaceSelectionStore } from "../stores/workspace-selection-store";
 import { useUiStore } from "../stores/ui-store";
+import { useChatStore } from "../../chat-store-context";
 
 type QueryClient = ReturnType<typeof useQueryClient>;
 
@@ -28,6 +29,10 @@ export function useCreateProject() {
     mutationFn: ({ name, rootPath }: { name: string; rootPath: string }) =>
       client.project.create({ name, rootPath }).then((response) => response.project),
     onSuccess: (project) => {
+      queryClient.setQueryData<Project[]>(queryKeys.projects, (current) => [
+        ...(current ?? []).filter((candidate) => candidate.id !== project.id),
+        project,
+      ]);
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       useWorkspaceSelectionStore.getState().selectProject(project.id);
     },
@@ -75,11 +80,16 @@ export function useCreateTask() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ projectId, title, status }: { projectId: string; title: string; status: TaskStatus }) =>
-      client.task.create({ projectId, title, status }).then((response) => response.task),
+    mutationFn: ({ projectId, title, status, workspaceMode }: { projectId: string; title: string; status: TaskStatus; workspaceMode?: TaskWorkspaceMode }) =>
+      client.task.create({ projectId, title, status, workspaceMode }).then((response) => response.task),
     onSuccess: (task) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
-      useWorkspaceSelectionStore.getState().selectTask(task.id, task.projectId);
+      // Worktrees preserve the original Task -> Session flow. A direct chat
+      // waits until its provider session is ready before changing selection,
+      // avoiding an intermediate task-only state in the composer.
+      if (task.workspaceMode === "worktree") {
+        useWorkspaceSelectionStore.getState().selectTask(task.id, task.projectId);
+      }
       // Reveal the new row. Expanding here rather than reacting to the selection
       // keeps a plain row click free to collapse what it just selected.
       useUiStore.getState().expandProject(task.projectId);
@@ -123,6 +133,7 @@ export function useDeleteTask() {
 export function useCreateSession() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
+  const chatStore = useChatStore();
   return useMutation({
     mutationFn: async ({ taskId }: { taskId: string }) => {
       return client.session
@@ -130,6 +141,9 @@ export function useCreateSession() {
         .then((response) => response.session);
     },
     onSuccess: (session) => {
+      // A just-created provider session has no history to replay. Register an
+      // empty loaded conversation so WorkspaceView does not issue session/load.
+      chatStore.getState().initializeSession(session.id);
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
       // Recover the owning project from the task cache so selection stays consistent.
       const tasks = readCache<Task>(queryClient, queryKeys.tasks);

@@ -3,7 +3,6 @@ import type { PlatformLocale } from "../types";
 export interface PlatformMessages {
   cancel: string;
   choose: string;
-  chooseCurrentDirectory: string;
   chooseDirectoryTitle: string;
   chooseFileTitle: string;
   emptyDirectory: string;
@@ -19,7 +18,6 @@ const messages: Record<PlatformLocale, PlatformMessages> = {
   "zh-CN": {
     cancel: "取消",
     choose: "选择",
-    chooseCurrentDirectory: "选择当前文件夹",
     chooseDirectoryTitle: "选择文件夹",
     chooseFileTitle: "选择文件",
     emptyDirectory: "此文件夹为空",
@@ -33,7 +31,6 @@ const messages: Record<PlatformLocale, PlatformMessages> = {
   "en-US": {
     cancel: "Cancel",
     choose: "Select",
-    chooseCurrentDirectory: "Select current folder",
     chooseDirectoryTitle: "Select folder",
     chooseFileTitle: "Select file",
     emptyDirectory: "This folder is empty",

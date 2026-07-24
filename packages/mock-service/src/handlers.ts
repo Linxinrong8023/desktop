@@ -179,6 +179,7 @@ export function createMockHandlers(state: MockState = mockState): HttpHandler[] 
         projectId: body.projectId,
         title: body.title,
         status: body.status,
+        workspaceMode: body.workspaceMode ?? "worktree",
       };
       state.tasks.push(task);
 

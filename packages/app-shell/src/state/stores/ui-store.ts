@@ -9,8 +9,8 @@ export type DialogState =
 
 /** Shape of the delete-confirmation dialog driven from the workspace tree. */
 export type DeleteTarget =
-  | { kind: "project"; id: string; name: string }
-  | { kind: "task"; id: string; name: string }
+  | { kind: "project"; id: string; name: string; sessionIds: string[] }
+  | { kind: "task"; id: string; name: string; workspaceMode: Task["workspaceMode"]; sessionIds: string[] }
   | { kind: "session"; id: string; name: string };
 
 interface UiState {

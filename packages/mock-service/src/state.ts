@@ -40,18 +40,21 @@ export function createInitialMockState(now = Date.now()): MockState {
         projectId: "project-ora-desktop",
         title: "Refactor the agent runtime",
         status: "doing",
+        workspaceMode: "worktree",
       },
       {
         id: "task-web-layout",
         projectId: "project-ora-desktop",
         title: "Design the web client layout",
         status: "todo",
+        workspaceMode: "worktree",
       },
       {
         id: "task-component-audit",
         projectId: "project-design-system",
         title: "Audit shared components",
         status: "done",
+        workspaceMode: "worktree",
       },
     ],
     sessions: [

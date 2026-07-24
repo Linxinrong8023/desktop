@@ -52,6 +52,8 @@ export interface SendMessageRequest {
 
 export interface ChatState {
   conversations: Record<string, SessionConversation>;
+  /** Registers a newly created provider session as an empty, already-loaded conversation. */
+  initializeSession(oraSessionId: string): void;
   loadSession(oraSessionId: string): Promise<void>;
   sendMessage(request: SendMessageRequest): Promise<void>;
   stopGeneration(oraSessionId: string): void;
@@ -91,6 +93,15 @@ export function createChatStore(
 
   const store = createStore<ChatState>((set, get) => ({
     conversations: {},
+
+    initializeSession: (oraSessionId) => {
+      updateConversation(set, oraSessionId, (conversation) => ({
+        ...conversation,
+        isLoaded: true,
+        isLoading: false,
+        error: null,
+      }));
+    },
 
     loadSession: async (oraSessionId) => {
       if (operations.has(oraSessionId)) return;

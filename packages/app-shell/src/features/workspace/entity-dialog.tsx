@@ -46,7 +46,7 @@ export type EntityField = TextEntityField | SelectEntityField | PathEntityField;
 interface EntityDialogProps {
   open: boolean;
   title: string;
-  description: string;
+  description?: string;
   submitLabel: string;
   fields: EntityField[];
   onOpenChange: (open: boolean) => void;
@@ -119,7 +119,7 @@ export function EntityDialog({
         <form onSubmit={handleSubmit} className="contents">
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{description}</DialogDescription>
+            {description && <DialogDescription>{description}</DialogDescription>}
           </DialogHeader>
           <div className="grid gap-3">
             {fields.map((field) => (

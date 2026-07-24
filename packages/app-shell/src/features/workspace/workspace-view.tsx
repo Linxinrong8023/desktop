@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Button } from "@ora/ui";
+import type { Session, Task } from "@ora/contracts";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import {
@@ -27,6 +28,17 @@ import { LocationActionsButton } from "./location-actions-button";
 
 interface WorkspaceViewProps {
   userName: string;
+}
+
+/** Builds a compact direct-chat title from the first message without splitting Unicode characters. */
+export function directChatTitle(text: string): string {
+  const normalized = text.trim().replace(/\s+/gu, " ");
+  return Array.from(normalized).slice(0, 10).join("");
+}
+
+/** Inserts a freshly-created entity into query data before the invalidation refetch completes. */
+function upsertById<T extends { id: string }>(current: T[] | undefined, entity: T): T[] {
+  return [...(current ?? []).filter((item) => item.id !== entity.id), entity];
 }
 
 /** Shows useful project/task context until a session is selected, then opens its agent chat. */
@@ -71,14 +83,7 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
     }
   }, [chatStore, conversation?.error, conversation?.isLoaded, conversation?.isLoading, session?.id, session?.status, sessionsQuery]);
 
-  /**
-   * Sends into the selected session, or starts one for the selected worktree
-   * first. The new-session path is optimistic: the store materializes the user
-   * turn up front (so the composer slides into the thread immediately) and
-   * creates the agent session in the background, re-pointing selection at the
-   * draft and then the real id as each becomes available. This mirrors the
-   * project root path the session dialog opens against.
-   */
+  /** Sends into the selected session, or lazily creates the selected execution context. */
   const sendOrStartSession = async (text: string) => {
     if (session) {
       try {
@@ -90,26 +95,60 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
       }
       return;
     }
-    if (task === undefined) return;
-    const taskId = task.id;
-    const projectId = task.projectId;
+    if (project === undefined) return;
+
+    const projectId = project.id;
+    let taskId = task?.id ?? null;
+    let draftSessionId: string | null = null;
     try {
       await chatStore.getState().sendMessage({
         text,
-        createSession: () =>
-          client.session
-            .create({ taskId, agentCli: DEFAULT_AGENT_CLI })
-            .then((response) => response.session.id),
-        // Show the optimistic turn under its temporary key right away.
-        onDraft: (draftSessionId) =>
-          useWorkspaceSelectionStore.getState().selectSession(draftSessionId, taskId, projectId),
-        // The store has already re-keyed the conversation onto the real id, so
-        // selecting it here cannot flash an empty thread.
+        createSession: async () => {
+          if (taskId === null) {
+            const response = await client.task.create({
+              projectId,
+              title: directChatTitle(text),
+              status: "todo",
+              workspaceMode: "project_root",
+            });
+            const createdTask = response.task;
+            taskId = createdTask.id;
+            queryClient.setQueryData<Task[]>(queryKeys.tasks, (current) =>
+              upsertById(current, createdTask));
+            void queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
+            useUiStore.getState().expandProject(projectId);
+
+            // Keep the optimistic conversation visible while the slower provider
+            // session handshake runs. If that handshake fails, this real task is
+            // retained and the next send reuses it.
+            if (draftSessionId !== null) {
+              useWorkspaceSelectionStore.getState()
+                .selectSession(draftSessionId, createdTask.id, projectId);
+            }
+          }
+
+          const response = await client.session.create({
+            taskId,
+            agentCli: DEFAULT_AGENT_CLI,
+          });
+          queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
+            upsertById(current, response.session));
+          return response.session.id;
+        },
+        onDraft: (draftId) => {
+          draftSessionId = draftId;
+          const selectionStore = useWorkspaceSelectionStore.getState();
+          if (taskId === null) {
+            selectionStore.selectDraftSession(draftId, projectId);
+          } else {
+            selectionStore.selectSession(draftId, taskId, projectId);
+          }
+        },
         onSessionCreated: (realSessionId) => {
           void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-          useWorkspaceSelectionStore.getState().selectSession(realSessionId, taskId, projectId);
+          useWorkspaceSelectionStore.getState().selectSession(realSessionId, taskId!, projectId);
           useUiStore.getState().expandProject(projectId);
-          useUiStore.getState().expandTask(taskId);
+          useUiStore.getState().expandTask(taskId!);
         },
       });
     } finally {
@@ -117,18 +156,13 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
     }
   };
 
-  // Anything short of a selected session is the new-task landing. The composer's
-  // context bar owns the project and branch selection, so choosing either must not
-  // navigate away from the composer that reads them. The overview is left as the
-  // fallback for a session whose task or project has gone missing.
+  // Anything short of a persisted selected session is a new or optimistic chat.
   const chatIsOpen = session === undefined || (task !== undefined && project !== undefined);
 
   if (chatIsOpen) {
-    // With a session selected the agent session decides; without one, a project and
-    // worktree are enough, because the first message creates the session itself.
     const canChat = session
       ? session.status === "running" || conversation?.isLoaded === true
-      : task !== undefined && project !== undefined;
+      : project !== undefined;
     // A failed background session-create settles onto the draft conversation, so
     // the conversation error already covers the start-up failure path.
     const chatError = conversation?.error ?? null;
@@ -169,10 +203,10 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
             error={chatError}
             pendingPermissions={conversation?.pendingPermissions ?? []}
             disabled={!canChat}
-            disabledHint={canChat ? undefined : t("chat.pickProjectAndBranch")}
-            // A live session already fixes its project and branch, so the pickers
-            // only belong to the not-yet-created task.
-            contextBar={session ? undefined : <ComposerContextBar />}
+            disabledHint={canChat ? undefined : t("chat.pickProject")}
+            // A persisted or optimistic session already fixes its project and
+            // execution context, so the pickers only belong to a blank composer.
+            contextBar={selection.sessionId === null ? <ComposerContextBar /> : undefined}
             // Failures land in chatError; the rejection itself is expected.
             onSend={(text) => void sendOrStartSession(text).catch(() => undefined)}
             // The selected id, not session.id: during the optimistic startup the

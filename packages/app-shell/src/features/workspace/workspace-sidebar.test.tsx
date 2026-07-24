@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Project, Session, Task } from "@ora/contracts";
@@ -18,7 +18,7 @@ const USER = { name: "Eric", email: "eric@example.com" };
 // Deliberately not "Ora": the sidebar header renders that as the product mark,
 // so a project of the same name makes every text query ambiguous.
 const PROJECT: Project = { id: "p1", name: "Ora Desktop", rootPath: "/ora" };
-const TASK: Task = { id: "t1", projectId: "p1", title: "Refactor", status: "todo" };
+const TASK: Task = { id: "t1", projectId: "p1", title: "Refactor", status: "todo", workspaceMode: "worktree" };
 const SESSION: Session = {
   id: "s1",
   taskId: "t1",
@@ -71,7 +71,12 @@ function workspaceWithOneSession(): MockClientState {
 
 beforeEach(() => {
   useWorkspaceSelectionStore.getState().clearSelection();
-  useUiStore.setState({ expandedProjects: new Set(), expandedTasks: new Set() });
+  useUiStore.setState({
+    expandedProjects: new Set(),
+    expandedTasks: new Set(),
+    dialog: null,
+    deleteTarget: null,
+  });
   useUnreadSessionsStore.setState({ unread: new Set() });
 });
 
@@ -87,6 +92,98 @@ function treeRow(label: string): HTMLElement | null {
 }
 
 describe("WorkspaceSidebar", () => {
+  it("only toggles project expansion when the project row is clicked", async () => {
+    const user = userEvent.setup();
+    useWorkspaceSelectionStore.getState().selectSession(SESSION.id, TASK.id, PROJECT.id);
+    renderSidebar(workspaceWithOneSession());
+
+    await waitFor(() => expect(treeRow(TASK.title)).not.toBeNull());
+    await user.click(screen.getByText(PROJECT.name));
+
+    expect(useWorkspaceSelectionStore.getState().selection).toEqual({
+      projectId: PROJECT.id,
+      taskId: TASK.id,
+      sessionId: SESSION.id,
+    });
+    expect(useUiStore.getState().expandedProjects.has(PROJECT.id)).toBe(false);
+  });
+
+  it("opens worktree creation from the project branch action", async () => {
+    const user = userEvent.setup();
+    renderSidebar(workspaceWithOneSession());
+
+    await user.click(await screen.findByRole("button", { name: /新建工作树任务|New worktree task/ }));
+
+    expect(useUiStore.getState().dialog).toEqual({
+      kind: "task",
+      projectId: PROJECT.id,
+    });
+    expect(useWorkspaceSelectionStore.getState().selection).toEqual({
+      projectId: null,
+      taskId: null,
+      sessionId: null,
+    });
+  });
+
+  it("starts a blank direct chat from the project edit action", async () => {
+    const user = userEvent.setup();
+    useWorkspaceSelectionStore.getState().selectSession(SESSION.id, TASK.id, PROJECT.id);
+    renderSidebar(workspaceWithOneSession());
+
+    await user.click(await screen.findByRole("button", { name: /新建会话|New chat/ }));
+
+    expect(useWorkspaceSelectionStore.getState().selection).toEqual({
+      projectId: PROJECT.id,
+      taskId: null,
+      sessionId: null,
+    });
+    expect(useUiStore.getState().dialog).toBeNull();
+  });
+
+  it("collects every descendant session when deleting a project", async () => {
+    const user = userEvent.setup();
+    const state = workspaceWithOneSession();
+    state.tasks.push({
+      id: "t2",
+      projectId: PROJECT.id,
+      title: "Direct chat",
+      status: "todo",
+      workspaceMode: "project_root",
+    });
+    state.sessions.push({
+      id: "s2",
+      taskId: "t2",
+      agentCli: "open_code",
+      status: "running",
+    });
+    renderSidebar(state);
+
+    const projectRow = (await screen.findByRole("button", { name: new RegExp(PROJECT.name) })).parentElement!;
+    await user.click(within(projectRow).getByRole("button", { name: /打开操作菜单|Open actions/ }));
+    await user.click(await screen.findByRole("menuitem", { name: /删除|Delete/ }));
+
+    expect(useUiStore.getState().deleteTarget).toEqual({
+      kind: "project",
+      id: PROJECT.id,
+      name: PROJECT.name,
+      sessionIds: ["s1", "s2"],
+    });
+  });
+
+  it("starts a new direct chat without losing the selected project", async () => {
+    const user = userEvent.setup();
+    useWorkspaceSelectionStore.getState().selectSession(SESSION.id, TASK.id, PROJECT.id);
+    renderSidebar(workspaceWithOneSession());
+
+    await user.click(await screen.findByRole("button", { name: /新建对话|New chat/ }));
+
+    expect(useWorkspaceSelectionStore.getState().selection).toEqual({
+      projectId: PROJECT.id,
+      taskId: null,
+      sessionId: null,
+    });
+  });
+
   // Regression: selecting a row used to re-expand its ancestors, so the first
   // click on an expanded row selected and silently re-opened it, and only the
   // second click appeared to collapse anything.
@@ -148,6 +245,20 @@ describe("WorkspaceSidebar", () => {
 
     await waitFor(() => expect(treeRow(SESSION.agentCli)).not.toBeNull());
     expect(workingIndicator()).toBeNull();
+  });
+
+  it("uses a message icon for direct-chat tasks and a branch icon for worktrees", async () => {
+    const state = createMockClientState();
+    state.projects = [PROJECT];
+    state.tasks = [
+      TASK,
+      { id: "t2", projectId: PROJECT.id, title: "Direct chat", status: "todo", workspaceMode: "project_root" },
+    ];
+    renderSidebar(state);
+
+    await waitFor(() => expect(treeRow("Direct chat")).not.toBeNull());
+    expect(screen.getByLabelText(/直聊任务|Direct chat task/)).not.toBeNull();
+    expect(screen.getByLabelText(/Git 工作树任务|Git worktree task/)).not.toBeNull();
   });
 
   it("shows the working indicator only while the session is responding", async () => {

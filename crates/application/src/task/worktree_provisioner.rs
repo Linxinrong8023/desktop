@@ -8,7 +8,9 @@ use gitlancer::git::worktree::{
     DeleteWorktreeRequest as GitDeleteWorktreeRequest, ResolveWorktreeByBranchRequest,
     WorktreeDeletionMode as GitWorktreeDeletionMode,
 };
-use gitlancer::{BranchName, CliGitRunner, Git, RepoRoot, Repository, WorktreeRoot};
+use gitlancer::{
+    BranchName, CliGitRunner, DomainError, Git, GitlancerError, RepoRoot, Repository, WorktreeRoot,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -30,6 +32,21 @@ impl GitTaskWorktreeProvisioner {
 }
 
 impl TaskWorktreeProvisioner for GitTaskWorktreeProvisioner {
+    /// Rejects ordinary directories before any branch or worktree mutation is attempted.
+    fn validate_repository(&self) -> Result<(), TaskWorktreeProvisionerError> {
+        self.git
+            .discover_repository(self.repository.root().clone())
+            .map(|_| ())
+            .map_err(|error| match error {
+                GitlancerError::Domain(DomainError::NotARepository(_)) => {
+                    TaskWorktreeProvisionerError::NotARepository
+                }
+                _ => TaskWorktreeProvisionerError::OperationFailed(
+                    "failed to validate project repository".to_string(),
+                ),
+            })
+    }
+
     /// Checks local refs so orphaned task branches also participate in id collision avoidance.
     fn task_branch_exists(&self, branch_name: &str) -> Result<bool, TaskWorktreeProvisionerError> {
         self.git
@@ -113,5 +130,27 @@ fn create_parent_directory(worktree_path: &Path) -> Result<(), TaskWorktreeProvi
             )
         }),
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GitTaskWorktreeProvisioner, TaskWorktreeProvisioner};
+    use crate::TaskWorktreeProvisionerError;
+    use std::fs;
+    use uuid::Uuid;
+
+    #[test]
+    fn rejects_an_existing_directory_that_is_not_a_git_repository() {
+        let directory = std::env::temp_dir().join(format!("ora-non-git-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).expect("create non-Git test directory");
+        let provisioner = GitTaskWorktreeProvisioner::new(directory.clone());
+
+        assert_eq!(
+            provisioner.validate_repository(),
+            Err(TaskWorktreeProvisionerError::NotARepository)
+        );
+
+        fs::remove_dir_all(directory).expect("remove non-Git test directory");
     }
 }

@@ -585,7 +585,7 @@ pub(crate) fn resolve_task_cwd(
             .find_project(&task.project_id)
             .map_err(|_| task_project_root_unavailable())?
             .ok_or_else(task_project_root_unavailable)?;
-        let cwd = PathBuf::from(project.root_path);
+        let cwd = absolute_project_root(PathBuf::from(project.root_path))?;
         return if cwd.is_dir() {
             Ok(cwd)
         } else {
@@ -618,6 +618,19 @@ pub(crate) fn resolve_task_cwd(
         return Err(task_worktree_unavailable());
     }
     Ok(cwd)
+}
+
+/// Normalizes a stored project root before it crosses the ACP process boundary.
+///
+/// Projects created from a relative server configuration (for example `.data/rustun`)
+/// are valid for local filesystem checks, but ACP providers expect a stable absolute cwd.
+fn absolute_project_root(path: PathBuf) -> Result<PathBuf, BackendError> {
+    if path.is_absolute() {
+        return Ok(path);
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path))
+        .map_err(|_| task_project_root_unavailable())
 }
 
 /// Sends one validated permission choice and prevents duplicate responses.
@@ -759,7 +772,7 @@ fn runtime_internal(code: &'static str, message: impl Into<String>) -> BackendEr
 mod tests {
     #[cfg(unix)]
     use super::resolve_opencode_path;
-    use super::resolve_task_cwd;
+    use super::{absolute_project_root, resolve_task_cwd};
     use ora_application::{ProjectRepository, TaskRepository};
     use ora_db::{
         DatabaseBootstrapper, DatabaseLocation, SqliteProjectRepository, SqliteTaskRepository,
@@ -768,7 +781,6 @@ mod tests {
     use ora_domain::{AuditFields, Project, ProjectId, Task, TaskId, TaskStatus};
     use pretty_assertions::assert_eq;
     use std::fs;
-    #[cfg(unix)]
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -824,5 +836,12 @@ mod tests {
             resolve_task_cwd(&pool, &TaskId::new("task-1")).expect("resolve project root cwd"),
             project_root,
         );
+    }
+
+    #[test]
+    fn normalizes_relative_project_roots_for_acp() {
+        let cwd = absolute_project_root(PathBuf::from(".")).expect("resolve relative project root");
+        assert!(cwd.is_absolute());
+        assert!(cwd.is_dir());
     }
 }

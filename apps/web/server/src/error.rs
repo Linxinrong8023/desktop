@@ -169,6 +169,11 @@ impl From<ApplicationError> for WebApiError {
                 code: "task_repository_error",
                 message,
             },
+            ApplicationError::TaskWorktreeRequiresGitRepository => Self {
+                status: StatusCode::BAD_REQUEST,
+                code: "worktree_requires_git_repository",
+                message: "worktree mode requires a Git repository".to_string(),
+            },
             ApplicationError::TaskWorktree { message } => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "task_worktree_error",
@@ -341,6 +346,34 @@ mod tests {
                 "error": {
                     "code": "project_occupied",
                     "message": "project is already occupied: project-1",
+                },
+            })
+        );
+    }
+
+    /// Verifies worktree creation outside Git repositories becomes an actionable HTTP 400.
+    #[tokio::test]
+    async fn maps_non_git_worktree_roots_to_http_400() {
+        let response =
+            WebApiError::from(ApplicationError::TaskWorktreeRequiresGitRepository).into_response();
+        let status = response.status();
+        let body = response.into_body();
+        let bytes = match to_bytes(body, usize::MAX).await {
+            Ok(bytes) => bytes,
+            Err(error) => panic!("failed to read response body: {error}"),
+        };
+        let actual = match serde_json::from_slice::<Value>(&bytes) {
+            Ok(actual) => actual,
+            Err(error) => panic!("failed to decode JSON body: {error}"),
+        };
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            actual,
+            json!({
+                "error": {
+                    "code": "worktree_requires_git_repository",
+                    "message": "worktree mode requires a Git repository",
                 },
             })
         );
