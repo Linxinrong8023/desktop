@@ -33,6 +33,8 @@ Ora is an IDE for AI Agent. In the crates folder where the rust code lives:
     the existing file unless there is a strong documented reason not to.
   - When extracting code from a large module, move the related tests and module/type docs toward
     the new implementation so the invariants stay close to the code that owns them.
+- Use local time instead of UTC time.
+- Use ora-logging wrapper macros instead of `tracing` macros. Use `ora_logging::clock::now_local` instead of `OffsetDateTime::now_local()`.
 
 ## Tests
 

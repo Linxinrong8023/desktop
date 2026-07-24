@@ -38,6 +38,8 @@ ora-process = { path = "crates/process" }
 ora-pty = { path = "crates/pty" }
 
 # External
+chrono = "0.4"
+chrono-tz = "0.10"
 derive_more = "2"
 futures-util = { version = "0.3", features = ["sink"] }
 libc = "0.2"

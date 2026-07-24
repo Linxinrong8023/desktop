@@ -549,8 +549,11 @@ async fn drain_stderr(mut stderr: tokio::process::ChildStderr) {
     }
 }
 
-/// Resolves the task's cwd from either its owned worktree or its project root.
-fn resolve_task_cwd(pool: &RepositoryPool, task_id: &TaskId) -> Result<PathBuf, BackendError> {
+/// Resolves the authoritative task worktree path through persisted ownership and Git metadata.
+pub(crate) fn resolve_task_cwd(
+    pool: &RepositoryPool,
+    task_id: &TaskId,
+) -> Result<PathBuf, BackendError> {
     let task = SqliteTaskRepository::new(pool.clone())
         .find_task(task_id)
         .map_err(|_| task_worktree_unavailable())?

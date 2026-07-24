@@ -1,3 +1,4 @@
+pub mod clock;
 mod config;
 mod correlation;
 mod error;
