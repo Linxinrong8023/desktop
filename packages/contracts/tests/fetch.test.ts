@@ -2,7 +2,31 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createFetchTransport, decodeErrorEnvelope, resolveUrl } from "../src/fetch.js";
-import { ContractTransportError, type ContractTransportRequest } from "../src/transport.js";
+import {
+  ContractTransportError,
+  LocalTransportError,
+  RemoteContractError,
+  UnknownRemoteError,
+  decodeRemoteError,
+  type ContractTransportRequest,
+} from "../src/transport.js";
+
+const requestId = "123e4567-e89b-42d3-a456-426614174000";
+
+test("validates known, unknown, and malformed remote errors", () => {
+  assert.ok(
+    decodeRemoteError({ code: "project_not_found", params: {}, requestId }, 404)
+      instanceof RemoteContractError,
+  );
+  assert.ok(
+    decodeRemoteError({ code: "future_error", params: {}, requestId }, 500)
+      instanceof UnknownRemoteError,
+  );
+  assert.ok(
+    decodeRemoteError({ code: "project_not_found", params: {} }, 404)
+      instanceof LocalTransportError,
+  );
+});
 
 test("resolves paths relative to the current origin when baseUrl is empty", () => {
   assert.equal(resolveUrl("", "/api/projects"), "/api/projects");
