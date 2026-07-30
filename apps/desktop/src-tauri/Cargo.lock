@@ -2527,6 +2527,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "ts-rs",
+ "uuid",
 ]
 
 [[package]]
@@ -2579,6 +2580,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "gitlancer",
+ "regex",
  "serde_json",
  "thiserror 2.0.18",
  "time",
