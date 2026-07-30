@@ -3,8 +3,8 @@ use crate::config::{ProjectConfig, RuntimeConfig};
 use crate::error::WebBootstrapError;
 use crate::service::{FileSystemApi, ProjectWorkContextApi};
 use ora_application::{
-    Clock, OpenProjectWorkContextHandler, ProjectIdGenerator, ProjectRepository,
-    ProjectRepositoryError, UuidProjectIdGenerator, UuidProjectWorkContextIdGenerator,
+    Clock, OpenProjectWorkContextHandler, ProjectIdGenerator, ProjectRepository, RepositoryError,
+    UuidProjectIdGenerator, UuidProjectWorkContextIdGenerator,
 };
 use ora_backend::{Backend, BackendBootstrapError, BackendPaths};
 use ora_contracts::{OpenProjectWorkContextRequest, ProjectWorkContextSurface};
@@ -141,11 +141,9 @@ fn web_backend_bootstrap_error(error: BackendBootstrapError) -> WebBootstrapErro
 }
 
 /// Converts repository-owned bootstrap failures into one stable startup error variant.
-fn project_bootstrap_error(error: ProjectRepositoryError) -> WebBootstrapError {
-    match error {
-        ProjectRepositoryError::OperationFailed(message) => {
-            WebBootstrapError::ProjectBootstrap { message }
-        }
+fn project_bootstrap_error(_error: RepositoryError) -> WebBootstrapError {
+    WebBootstrapError::ProjectBootstrap {
+        message: "project repository operation failed".to_string(),
     }
 }
 

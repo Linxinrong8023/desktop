@@ -1,7 +1,7 @@
 use crate::{
     ApplicationError, Clock, OpenProjectWorkContextHandler, ProjectRepository,
-    ProjectRepositoryError, ProjectWorkContextIdGenerator, ProjectWorkContextRepository,
-    ProjectWorkContextRepositoryError, RenewProjectWorkContextHandler,
+    ProjectWorkContextIdGenerator, ProjectWorkContextRepository, RenewProjectWorkContextHandler,
+    RepositoryError,
 };
 use ora_contracts::{
     OpenProjectWorkContextRequest, OpenProjectWorkContextResponse,
@@ -274,7 +274,7 @@ fn emits_owner_details_in_conflict_logs() {
 #[derive(Debug, Default)]
 struct FakeProjectRepository {
     projects: RefCell<Vec<Project>>,
-    next_error: RefCell<Option<ProjectRepositoryError>>,
+    next_error: RefCell<Option<RepositoryError>>,
 }
 
 impl FakeProjectRepository {
@@ -287,7 +287,7 @@ impl FakeProjectRepository {
     }
 
     /// Returns a queued error when a test wants to simulate repository failure.
-    fn take_error(&self) -> Result<(), ProjectRepositoryError> {
+    fn take_error(&self) -> Result<(), RepositoryError> {
         match self.next_error.borrow_mut().take() {
             Some(error) => Err(error),
             None => Ok(()),
@@ -297,17 +297,14 @@ impl FakeProjectRepository {
 
 impl ProjectRepository for Rc<FakeProjectRepository> {
     /// Persists a new project in memory for create-path tests that need it.
-    fn create_project(&self, project: Project) -> Result<Project, ProjectRepositoryError> {
+    fn create_project(&self, project: Project) -> Result<Project, RepositoryError> {
         self.take_error()?;
         self.projects.borrow_mut().push(project.clone());
         Ok(project)
     }
 
     /// Loads one visible project by identifier from the fake in-memory store.
-    fn find_project(
-        &self,
-        project_id: &ProjectId,
-    ) -> Result<Option<Project>, ProjectRepositoryError> {
+    fn find_project(&self, project_id: &ProjectId) -> Result<Option<Project>, RepositoryError> {
         self.take_error()?;
 
         Ok(self
@@ -319,10 +316,7 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
     }
 
     /// Loads one visible project by exact name from the fake in-memory store.
-    fn find_project_by_name(
-        &self,
-        project_name: &str,
-    ) -> Result<Option<Project>, ProjectRepositoryError> {
+    fn find_project_by_name(&self, project_name: &str) -> Result<Option<Project>, RepositoryError> {
         self.take_error()?;
 
         Ok(self
@@ -334,7 +328,7 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
     }
 
     /// Lists every visible project from the fake in-memory store.
-    fn list_projects(&self) -> Result<Vec<Project>, ProjectRepositoryError> {
+    fn list_projects(&self) -> Result<Vec<Project>, RepositoryError> {
         self.take_error()?;
 
         Ok(self
@@ -347,7 +341,7 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
     }
 
     /// Replaces one visible project snapshot in the fake in-memory store.
-    fn update_project(&self, project: Project) -> Result<Project, ProjectRepositoryError> {
+    fn update_project(&self, project: Project) -> Result<Project, RepositoryError> {
         self.take_error()?;
 
         let mut projects = self.projects.borrow_mut();
@@ -357,7 +351,7 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
             *existing_project = project.clone();
             Ok(project)
         } else {
-            Err(ProjectRepositoryError::OperationFailed(format!(
+            Err(RepositoryError::from_message(format!(
                 "missing project during update: {}",
                 project.id
             )))
@@ -369,7 +363,7 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
         &self,
         project_id: &ProjectId,
         deleted_at: i64,
-    ) -> Result<bool, ProjectRepositoryError> {
+    ) -> Result<bool, RepositoryError> {
         self.take_error()?;
 
         let mut projects = self.projects.borrow_mut();
@@ -389,7 +383,7 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
 #[derive(Debug, Default)]
 struct FakeProjectWorkContextRepository {
     contexts: RefCell<Vec<ProjectWorkContext>>,
-    next_error: RefCell<Option<ProjectWorkContextRepositoryError>>,
+    next_error: RefCell<Option<RepositoryError>>,
 }
 
 impl FakeProjectWorkContextRepository {
@@ -407,7 +401,7 @@ impl FakeProjectWorkContextRepository {
     }
 
     /// Returns a queued error when a test wants to simulate repository failure.
-    fn take_error(&self) -> Result<(), ProjectWorkContextRepositoryError> {
+    fn take_error(&self) -> Result<(), RepositoryError> {
         match self.next_error.borrow_mut().take() {
             Some(error) => Err(error),
             None => Ok(()),
@@ -420,7 +414,7 @@ impl ProjectWorkContextRepository for Rc<FakeProjectWorkContextRepository> {
     fn create_project_work_context(
         &self,
         context: ProjectWorkContext,
-    ) -> Result<ProjectWorkContext, ProjectWorkContextRepositoryError> {
+    ) -> Result<ProjectWorkContext, RepositoryError> {
         self.take_error()?;
         self.contexts.borrow_mut().push(context.clone());
         Ok(context)
@@ -431,7 +425,7 @@ impl ProjectWorkContextRepository for Rc<FakeProjectWorkContextRepository> {
         &self,
         surface: ProjectWorkContextSurface,
         window_id: &str,
-    ) -> Result<Option<ProjectWorkContext>, ProjectWorkContextRepositoryError> {
+    ) -> Result<Option<ProjectWorkContext>, RepositoryError> {
         self.take_error()?;
 
         Ok(self
@@ -447,7 +441,7 @@ impl ProjectWorkContextRepository for Rc<FakeProjectWorkContextRepository> {
         &self,
         project_id: &ProjectId,
         active_after: i64,
-    ) -> Result<Option<ProjectWorkContext>, ProjectWorkContextRepositoryError> {
+    ) -> Result<Option<ProjectWorkContext>, RepositoryError> {
         self.take_error()?;
 
         Ok(self
@@ -465,7 +459,7 @@ impl ProjectWorkContextRepository for Rc<FakeProjectWorkContextRepository> {
     fn update_project_work_context(
         &self,
         context: ProjectWorkContext,
-    ) -> Result<ProjectWorkContext, ProjectWorkContextRepositoryError> {
+    ) -> Result<ProjectWorkContext, RepositoryError> {
         self.take_error()?;
 
         let mut contexts = self.contexts.borrow_mut();
@@ -476,7 +470,7 @@ impl ProjectWorkContextRepository for Rc<FakeProjectWorkContextRepository> {
             *existing_context = context.clone();
             Ok(context)
         } else {
-            Err(ProjectWorkContextRepositoryError::OperationFailed(format!(
+            Err(RepositoryError::from_message(format!(
                 "missing project work context during update: {}",
                 context.id
             )))
@@ -488,7 +482,7 @@ impl ProjectWorkContextRepository for Rc<FakeProjectWorkContextRepository> {
         &self,
         surface: ProjectWorkContextSurface,
         window_id: &str,
-    ) -> Result<bool, ProjectWorkContextRepositoryError> {
+    ) -> Result<bool, RepositoryError> {
         self.take_error()?;
 
         let mut contexts = self.contexts.borrow_mut();
@@ -501,7 +495,7 @@ impl ProjectWorkContextRepository for Rc<FakeProjectWorkContextRepository> {
     fn delete_expired_project_work_contexts(
         &self,
         expired_before: i64,
-    ) -> Result<usize, ProjectWorkContextRepositoryError> {
+    ) -> Result<usize, RepositoryError> {
         self.take_error()?;
 
         let mut contexts = self.contexts.borrow_mut();

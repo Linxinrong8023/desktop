@@ -1,11 +1,11 @@
-use crate::ApplicationError;
 use crate::project::{Clock, ProjectRepository};
 use crate::project_work_context::mapper::{
     map_project_work_context, map_project_work_context_surface_to_domain,
 };
 use crate::project_work_context::ports::{
-    ProjectWorkContextIdGenerator, ProjectWorkContextRepository, ProjectWorkContextRepositoryError,
+    ProjectWorkContextIdGenerator, ProjectWorkContextRepository,
 };
+use crate::{ApplicationError, RepositoryError};
 use ora_contracts::{
     OpenProjectWorkContextRequest, OpenProjectWorkContextResponse, RenewProjectWorkContextRequest,
     RenewProjectWorkContextResponse,
@@ -306,7 +306,7 @@ fn persist_project_work_context<Repository>(
     repository: &Repository,
     is_update: bool,
     context: ProjectWorkContext,
-) -> Result<ProjectWorkContext, ProjectWorkContextRepositoryError>
+) -> Result<ProjectWorkContext, RepositoryError>
 where
     Repository: ProjectWorkContextRepository,
 {

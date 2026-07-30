@@ -1,6 +1,6 @@
 use crate::{
     ApplicationError, Clock, CreateProjectHandler, GetProjectHandler, ListProjectsHandler,
-    ProjectIdGenerator, ProjectRepository, ProjectRepositoryError, UpdateProjectHandler,
+    ProjectIdGenerator, ProjectRepository, RepositoryError, UpdateProjectHandler,
 };
 use ora_contracts::{
     CreateProjectRequest, CreateProjectResponse, GetProjectRequest, GetProjectResponse,
@@ -184,7 +184,7 @@ fn reports_application_errors() {
         let missing_repository = Rc::new(FakeProjectRepository::default());
         let get_handler = GetProjectHandler::new(missing_repository);
         let failing_repository = Rc::new(FakeProjectRepository::default());
-        failing_repository.fail_next(ProjectRepositoryError::OperationFailed(
+        failing_repository.fail_next(RepositoryError::from_message(
             "storage unavailable".to_string(),
         ));
         let list_handler = ListProjectsHandler::new(failing_repository);
@@ -209,7 +209,7 @@ fn reports_application_errors() {
         assert_eq!(
             repository_error,
             ApplicationError::ProjectRepository {
-                message: "storage unavailable".to_string(),
+                source: RepositoryError::from_message("storage unavailable"),
             }
         );
     });
@@ -287,7 +287,7 @@ fn emits_structured_operational_events() {
 #[derive(Debug, Default)]
 struct FakeProjectRepository {
     projects: RefCell<Vec<Project>>,
-    next_error: RefCell<Option<ProjectRepositoryError>>,
+    next_error: RefCell<Option<RepositoryError>>,
 }
 
 impl FakeProjectRepository {
@@ -299,7 +299,7 @@ impl FakeProjectRepository {
     }
 
     /// Configures the next repository call to fail with a deterministic error.
-    fn fail_next(&self, error: ProjectRepositoryError) {
+    fn fail_next(&self, error: RepositoryError) {
         self.next_error.replace(Some(error));
     }
 
@@ -314,7 +314,7 @@ impl FakeProjectRepository {
     }
 
     /// Returns a queued error when a test wants to simulate repository failure.
-    fn take_error(&self) -> Result<(), ProjectRepositoryError> {
+    fn take_error(&self) -> Result<(), RepositoryError> {
         match self.next_error.borrow_mut().take() {
             Some(error) => Err(error),
             None => Ok(()),
@@ -323,17 +323,14 @@ impl FakeProjectRepository {
 }
 
 impl ProjectRepository for Rc<FakeProjectRepository> {
-    fn create_project(&self, project: Project) -> Result<Project, ProjectRepositoryError> {
+    fn create_project(&self, project: Project) -> Result<Project, RepositoryError> {
         self.take_error()?;
 
         self.projects.borrow_mut().push(project.clone());
         Ok(project)
     }
 
-    fn find_project(
-        &self,
-        project_id: &ProjectId,
-    ) -> Result<Option<Project>, ProjectRepositoryError> {
+    fn find_project(&self, project_id: &ProjectId) -> Result<Option<Project>, RepositoryError> {
         self.take_error()?;
 
         Ok(self
@@ -344,10 +341,7 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
             .cloned())
     }
 
-    fn find_project_by_name(
-        &self,
-        project_name: &str,
-    ) -> Result<Option<Project>, ProjectRepositoryError> {
+    fn find_project_by_name(&self, project_name: &str) -> Result<Option<Project>, RepositoryError> {
         self.take_error()?;
 
         Ok(self
@@ -358,13 +352,13 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
             .cloned())
     }
 
-    fn list_projects(&self) -> Result<Vec<Project>, ProjectRepositoryError> {
+    fn list_projects(&self) -> Result<Vec<Project>, RepositoryError> {
         self.take_error()?;
 
         Ok(self.visible_projects())
     }
 
-    fn update_project(&self, project: Project) -> Result<Project, ProjectRepositoryError> {
+    fn update_project(&self, project: Project) -> Result<Project, RepositoryError> {
         self.take_error()?;
 
         let mut projects = self.projects.borrow_mut();
@@ -374,7 +368,7 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
             *existing_project = project.clone();
             Ok(project)
         } else {
-            Err(ProjectRepositoryError::OperationFailed(format!(
+            Err(RepositoryError::from_message(format!(
                 "missing project during update: {}",
                 project.id
             )))
@@ -385,7 +379,7 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
         &self,
         project_id: &ProjectId,
         deleted_at: i64,
-    ) -> Result<bool, ProjectRepositoryError> {
+    ) -> Result<bool, RepositoryError> {
         self.take_error()?;
 
         let mut projects = self.projects.borrow_mut();

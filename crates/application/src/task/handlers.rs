@@ -580,21 +580,24 @@ fn task_branch_prefix_exists_in_work_dir(
     let entries = match fs::read_dir(work_dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(_) => {
-            return Err(ApplicationError::TaskWorktree {
-                message: "failed to inspect task worktree directory".to_string(),
+        Err(source) => {
+            return Err(ApplicationError::TaskFilesystem {
+                context: "failed to inspect task worktree directory",
+                source,
             });
         }
     };
 
     for entry in entries {
-        let entry = entry.map_err(|_| ApplicationError::TaskWorktree {
-            message: "failed to inspect task worktree directory".to_string(),
+        let entry = entry.map_err(|source| ApplicationError::TaskFilesystem {
+            context: "failed to inspect task worktree directory",
+            source,
         })?;
         let file_type = entry
             .file_type()
-            .map_err(|_| ApplicationError::TaskWorktree {
-                message: "failed to inspect task worktree directory".to_string(),
+            .map_err(|source| ApplicationError::TaskFilesystem {
+                context: "failed to inspect task worktree directory",
+                source,
             })?;
 
         if file_type.is_dir()

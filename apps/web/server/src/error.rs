@@ -114,10 +114,10 @@ impl From<ApplicationError> for WebApiError {
                 code: "skill_not_found",
                 message: format!("skill not found: {skill_id}"),
             },
-            ApplicationError::SkillRepository { message } => Self {
+            ApplicationError::SkillRepository { .. } => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "skill_repository_error",
-                message,
+                message: "skill repository operation failed".to_string(),
             },
             ApplicationError::AgentDefinitionNameBlank => Self {
                 status: StatusCode::BAD_REQUEST,
@@ -129,20 +129,20 @@ impl From<ApplicationError> for WebApiError {
                 code: "agent_not_found",
                 message: format!("agent definition not found: {agent_id}"),
             },
-            ApplicationError::AgentDefinitionRepository { message } => Self {
+            ApplicationError::AgentDefinitionRepository { .. } => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "agent_repository_error",
-                message,
+                message: "agent repository operation failed".to_string(),
             },
             ApplicationError::ProjectNotFound { project_id } => Self {
                 status: StatusCode::NOT_FOUND,
                 code: "project_not_found",
                 message: format!("project not found: {project_id}"),
             },
-            ApplicationError::ProjectRepository { message } => Self {
+            ApplicationError::ProjectRepository { .. } => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "project_repository_error",
-                message,
+                message: "project repository operation failed".to_string(),
             },
             ApplicationError::ProjectOccupied { project_id } => Self {
                 status: StatusCode::CONFLICT,
@@ -154,20 +154,20 @@ impl From<ApplicationError> for WebApiError {
                 code: "project_work_context_not_found",
                 message: format!("project work context not found for {surface}/{window_id}"),
             },
-            ApplicationError::ProjectWorkContextRepository { message } => Self {
+            ApplicationError::ProjectWorkContextRepository { .. } => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "project_work_context_repository_error",
-                message,
+                message: "project work context repository operation failed".to_string(),
             },
             ApplicationError::TaskNotFound { task_id } => Self {
                 status: StatusCode::NOT_FOUND,
                 code: "task_not_found",
                 message: format!("task not found: {task_id}"),
             },
-            ApplicationError::TaskRepository { message } => Self {
+            ApplicationError::TaskRepository { .. } => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "task_repository_error",
-                message,
+                message: "task repository operation failed".to_string(),
             },
             ApplicationError::TaskWorktreeRequiresGitRepository => Self {
                 status: StatusCode::BAD_REQUEST,
@@ -179,25 +179,31 @@ impl From<ApplicationError> for WebApiError {
                 code: "task_worktree_error",
                 message,
             },
+            ApplicationError::TaskFilesystem { .. }
+            | ApplicationError::TaskWorktreeProvisioner { .. } => Self {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "task_worktree_error",
+                message: "task worktree operation failed".to_string(),
+            },
             ApplicationError::WorktreeNotFound { worktree_id } => Self {
                 status: StatusCode::NOT_FOUND,
                 code: "worktree_not_found",
                 message: format!("worktree not found: {worktree_id}"),
             },
-            ApplicationError::WorktreeRepository { message } => Self {
+            ApplicationError::WorktreeRepository { .. } => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "worktree_repository_error",
-                message,
+                message: "worktree repository operation failed".to_string(),
             },
             ApplicationError::SessionNotFound { session_id } => Self {
                 status: StatusCode::NOT_FOUND,
                 code: "session_not_found",
                 message: format!("session not found: {session_id}"),
             },
-            ApplicationError::SessionRepository { message } => Self {
+            ApplicationError::SessionRepository { .. } => Self {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "session_repository_error",
-                message,
+                message: "session repository operation failed".to_string(),
             },
         }
     }

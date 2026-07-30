@@ -4,7 +4,7 @@ use gitlancer::git::worktree::ResolveWorktreeByBranchRequest;
 use gitlancer::{CliGitRunner, Git, RepoRoot, Repository};
 use ora_application::{
     ApplicationError, Clock, CreateTaskHandler, GetTaskHandler, GitTaskWorktreeProvisioner,
-    ListTasksHandler, ProjectRepository, ProjectRepositoryError, TaskRepository, UpdateTaskHandler,
+    ListTasksHandler, ProjectRepository, RepositoryError, TaskRepository, UpdateTaskHandler,
     UuidTaskIdGenerator, UuidWorktreeIdGenerator, WorktreeRepository,
 };
 use ora_contracts::{
@@ -147,12 +147,8 @@ impl TaskApi {
 }
 
 /// Converts project repository failures encountered during dynamic task routing.
-fn project_repository_error(error: ProjectRepositoryError) -> ApplicationError {
-    match error {
-        ProjectRepositoryError::OperationFailed(message) => {
-            ApplicationError::ProjectRepository { message }
-        }
-    }
+fn project_repository_error(error: RepositoryError) -> ApplicationError {
+    ApplicationError::ProjectRepository { source: error }
 }
 
 /// Resolves the task's authoritative execution directory from its selected workspace mode.

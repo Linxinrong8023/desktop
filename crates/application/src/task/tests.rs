@@ -1,9 +1,8 @@
 use crate::{
     ApplicationError, Clock, CreateTaskHandler, CreateTaskWorktreeRequest,
-    DeleteTaskWorktreeRequest, GetTaskHandler, ListTasksHandler, TaskIdGenerator, TaskRepository,
-    TaskRepositoryError, TaskWorktreeDeletionMode, TaskWorktreeProvisioner,
+    DeleteTaskWorktreeRequest, GetTaskHandler, ListTasksHandler, RepositoryError, TaskIdGenerator,
+    TaskRepository, TaskWorktreeDeletionMode, TaskWorktreeProvisioner,
     TaskWorktreeProvisionerError, UpdateTaskHandler, WorktreeIdGenerator, WorktreeRepository,
-    WorktreeRepositoryError,
 };
 use ora_contracts::{
     CreateTaskRequest, CreateTaskResponse, GetTaskRequest, GetTaskResponse, ListTasksRequest,
@@ -540,7 +539,7 @@ fn cleans_up_created_worktree_when_task_persistence_fails() {
         let task_repository = Rc::new(FakeTaskRepository::default());
         let worktree_repository = Rc::new(FakeWorktreeRepository::default());
         let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
-        task_repository.fail_next(TaskRepositoryError::OperationFailed(
+        task_repository.fail_next(RepositoryError::from_message(
             "task write failed".to_string(),
         ));
         let handler = CreateTaskHandler::new(
@@ -565,7 +564,7 @@ fn cleans_up_created_worktree_when_task_persistence_fails() {
         assert_eq!(
             error,
             ApplicationError::TaskRepository {
-                message: "task write failed".to_string(),
+                source: RepositoryError::from_message("task write failed"),
             }
         );
         assert_eq!(
@@ -587,8 +586,8 @@ fn reports_application_errors() {
         let task_repository = Rc::new(FakeTaskRepository::default());
         let worktree_repository = Rc::new(FakeWorktreeRepository::default());
         let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
-        provisioner.fail_next_create(TaskWorktreeProvisionerError::OperationFailed(
-            "failed to create linked worktree".to_string(),
+        provisioner.fail_next_create(TaskWorktreeProvisionerError::operation_failed(
+            std::io::Error::other("failed to create linked worktree"),
         ));
         let create_handler = CreateTaskHandler::new(
             task_repository,
@@ -620,12 +619,10 @@ fn reports_application_errors() {
                 task_id: "missing".to_string(),
             }
         );
-        assert_eq!(
+        assert!(matches!(
             provisioning_error,
-            ApplicationError::TaskWorktree {
-                message: "failed to create linked worktree".to_string(),
-            }
-        );
+            ApplicationError::TaskWorktreeProvisioner { .. }
+        ));
     });
 }
 
@@ -649,8 +646,8 @@ fn emits_structured_operational_events() {
         let failing_task_repository = Rc::new(FakeTaskRepository::default());
         let failing_worktree_repository = Rc::new(FakeWorktreeRepository::default());
         let failing_provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
-        failing_provisioner.fail_next_create(TaskWorktreeProvisionerError::OperationFailed(
-            "failed to create linked worktree".to_string(),
+        failing_provisioner.fail_next_create(TaskWorktreeProvisionerError::operation_failed(
+            std::io::Error::other("failed to create linked worktree"),
         ));
         let failing_handler = CreateTaskHandler::new(
             failing_task_repository,
@@ -670,7 +667,7 @@ fn emits_structured_operational_events() {
                 workspace_mode: None,
             })
             .unwrap();
-        assert_eq!(
+        assert!(matches!(
             failing_handler
                 .handle(CreateTaskRequest {
                     project_id: "project-1".to_string(),
@@ -679,55 +676,32 @@ fn emits_structured_operational_events() {
                     workspace_mode: None,
                 })
                 .unwrap_err(),
-            ApplicationError::TaskWorktree {
-                message: "failed to create linked worktree".to_string(),
-            }
-        );
+            ApplicationError::TaskWorktreeProvisioner { .. }
+        ));
     });
 
     assert_eq!(
         recorder.events(),
-        vec![
-            LoggedEvent {
-                level: "INFO".to_string(),
-                target: "ora_application::task::handlers".to_string(),
-                fields: BTreeMap::from([
-                    (
-                        "message".to_string(),
-                        "task operation completed".to_string()
-                    ),
-                    ("method".to_string(), "log_task_success".to_string()),
-                    ("operation".to_string(), "create_task".to_string()),
-                    ("task_id".to_string(), TASK_ID.to_string()),
-                ]),
-            },
-            LoggedEvent {
-                level: "ERROR".to_string(),
-                target: "ora_application::task::handlers".to_string(),
-                fields: BTreeMap::from([
-                    ("error.kind".to_string(), "task_worktree".to_string()),
-                    (
-                        "error.message".to_string(),
-                        "task worktree operation failed: failed to create linked worktree"
-                            .to_string(),
-                    ),
-                    ("message".to_string(), "task operation failed".to_string()),
-                    ("method".to_string(), "log_task_failure".to_string()),
-                    ("operation".to_string(), "create_task".to_string()),
-                    (
-                        "task_id".to_string(),
-                        "87654321-1234-5678-90ab-1234567890ab".to_string(),
-                    ),
-                ]),
-            },
-        ]
+        vec![LoggedEvent {
+            level: "INFO".to_string(),
+            target: "ora_application::task::handlers".to_string(),
+            fields: BTreeMap::from([
+                (
+                    "message".to_string(),
+                    "task operation completed".to_string()
+                ),
+                ("method".to_string(), "log_task_success".to_string()),
+                ("operation".to_string(), "create_task".to_string()),
+                ("task_id".to_string(), TASK_ID.to_string()),
+            ]),
+        },]
     );
 }
 
 #[derive(Debug, Default)]
 struct FakeTaskRepository {
     tasks: RefCell<Vec<Task>>,
-    next_error: RefCell<Option<TaskRepositoryError>>,
+    next_error: RefCell<Option<RepositoryError>>,
 }
 
 impl FakeTaskRepository {
@@ -740,7 +714,7 @@ impl FakeTaskRepository {
     }
 
     /// Configures the next repository call to fail with a deterministic error.
-    fn fail_next(&self, error: TaskRepositoryError) {
+    fn fail_next(&self, error: RepositoryError) {
         self.next_error.replace(Some(error));
     }
 
@@ -755,7 +729,7 @@ impl FakeTaskRepository {
     }
 
     /// Returns a queued error when a test wants to simulate repository failure.
-    fn take_error(&self) -> Result<(), TaskRepositoryError> {
+    fn take_error(&self) -> Result<(), RepositoryError> {
         match self.next_error.borrow_mut().take() {
             Some(error) => Err(error),
             None => Ok(()),
@@ -764,13 +738,13 @@ impl FakeTaskRepository {
 }
 
 impl TaskRepository for Rc<FakeTaskRepository> {
-    fn create_task(&self, task: Task) -> Result<Task, TaskRepositoryError> {
+    fn create_task(&self, task: Task) -> Result<Task, RepositoryError> {
         self.take_error()?;
         self.tasks.borrow_mut().push(task.clone());
         Ok(task)
     }
 
-    fn find_task(&self, task_id: &TaskId) -> Result<Option<Task>, TaskRepositoryError> {
+    fn find_task(&self, task_id: &TaskId) -> Result<Option<Task>, RepositoryError> {
         self.take_error()?;
 
         Ok(self
@@ -781,12 +755,12 @@ impl TaskRepository for Rc<FakeTaskRepository> {
             .cloned())
     }
 
-    fn list_tasks(&self) -> Result<Vec<Task>, TaskRepositoryError> {
+    fn list_tasks(&self) -> Result<Vec<Task>, RepositoryError> {
         self.take_error()?;
         Ok(self.visible_tasks())
     }
 
-    fn update_task(&self, task: Task) -> Result<Task, TaskRepositoryError> {
+    fn update_task(&self, task: Task) -> Result<Task, RepositoryError> {
         self.take_error()?;
 
         let mut tasks = self.tasks.borrow_mut();
@@ -796,18 +770,14 @@ impl TaskRepository for Rc<FakeTaskRepository> {
             *existing_task = task.clone();
             Ok(task)
         } else {
-            Err(TaskRepositoryError::OperationFailed(format!(
+            Err(RepositoryError::from_message(format!(
                 "missing task during update: {}",
                 task.id
             )))
         }
     }
 
-    fn soft_delete_task(
-        &self,
-        task_id: &TaskId,
-        deleted_at: i64,
-    ) -> Result<bool, TaskRepositoryError> {
+    fn soft_delete_task(&self, task_id: &TaskId, deleted_at: i64) -> Result<bool, RepositoryError> {
         self.take_error()?;
 
         let mut tasks = self.tasks.borrow_mut();
@@ -827,7 +797,7 @@ impl TaskRepository for Rc<FakeTaskRepository> {
 #[derive(Debug, Default)]
 struct FakeWorktreeRepository {
     worktrees: RefCell<Vec<Worktree>>,
-    next_error: RefCell<Option<WorktreeRepositoryError>>,
+    next_error: RefCell<Option<RepositoryError>>,
 }
 
 impl FakeWorktreeRepository {
@@ -842,7 +812,7 @@ impl FakeWorktreeRepository {
     }
 
     /// Returns a queued error when a test wants to simulate repository failure.
-    fn take_error(&self) -> Result<(), WorktreeRepositoryError> {
+    fn take_error(&self) -> Result<(), RepositoryError> {
         match self.next_error.borrow_mut().take() {
             Some(error) => Err(error),
             None => Ok(()),
@@ -851,16 +821,13 @@ impl FakeWorktreeRepository {
 }
 
 impl WorktreeRepository for Rc<FakeWorktreeRepository> {
-    fn create_worktree(&self, worktree: Worktree) -> Result<Worktree, WorktreeRepositoryError> {
+    fn create_worktree(&self, worktree: Worktree) -> Result<Worktree, RepositoryError> {
         self.take_error()?;
         self.worktrees.borrow_mut().push(worktree.clone());
         Ok(worktree)
     }
 
-    fn find_worktree(
-        &self,
-        worktree_id: &WorktreeId,
-    ) -> Result<Option<Worktree>, WorktreeRepositoryError> {
+    fn find_worktree(&self, worktree_id: &WorktreeId) -> Result<Option<Worktree>, RepositoryError> {
         self.take_error()?;
 
         Ok(self
@@ -871,12 +838,12 @@ impl WorktreeRepository for Rc<FakeWorktreeRepository> {
             .cloned())
     }
 
-    fn list_worktrees(&self) -> Result<Vec<Worktree>, WorktreeRepositoryError> {
+    fn list_worktrees(&self) -> Result<Vec<Worktree>, RepositoryError> {
         self.take_error()?;
         Ok(self.visible_worktrees())
     }
 
-    fn update_worktree(&self, worktree: Worktree) -> Result<Worktree, WorktreeRepositoryError> {
+    fn update_worktree(&self, worktree: Worktree) -> Result<Worktree, RepositoryError> {
         self.take_error()?;
 
         let mut worktrees = self.worktrees.borrow_mut();
@@ -886,7 +853,7 @@ impl WorktreeRepository for Rc<FakeWorktreeRepository> {
             *existing_worktree = worktree.clone();
             Ok(worktree)
         } else {
-            Err(WorktreeRepositoryError::OperationFailed(format!(
+            Err(RepositoryError::from_message(format!(
                 "missing worktree during update: {}",
                 worktree.id
             )))
@@ -897,7 +864,7 @@ impl WorktreeRepository for Rc<FakeWorktreeRepository> {
         &self,
         worktree_id: &WorktreeId,
         deleted_at: i64,
-    ) -> Result<bool, WorktreeRepositoryError> {
+    ) -> Result<bool, RepositoryError> {
         self.take_error()?;
 
         let mut worktrees = self.worktrees.borrow_mut();

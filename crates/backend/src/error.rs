@@ -127,6 +127,10 @@ impl From<ApplicationError> for BackendError {
             ApplicationError::TaskWorktree { .. } => {
                 internal("task_worktree_error", "task worktree operation failed")
             }
+            ApplicationError::TaskFilesystem { .. }
+            | ApplicationError::TaskWorktreeProvisioner { .. } => {
+                internal("task_worktree_error", "task worktree operation failed")
+            }
             ApplicationError::WorktreeNotFound { worktree_id } => Self::new(
                 BackendErrorKind::NotFound,
                 "worktree_not_found",
