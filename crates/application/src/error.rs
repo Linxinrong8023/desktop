@@ -48,8 +48,10 @@ pub enum ApplicationError {
     },
     #[error("worktree mode requires a Git repository")]
     TaskWorktreeRequiresGitRepository,
-    #[error("task worktree operation failed: {message}")]
-    TaskWorktree { message: String },
+    #[error("failed to generate a unique task worktree id after {attempts} attempts")]
+    TaskWorktreeIdExhausted { attempts: usize },
+    #[error("worktree root configuration is unavailable")]
+    TaskWorktreeRootUnavailable,
     #[error("{context}")]
     TaskFilesystem {
         context: &'static str,
@@ -181,7 +183,11 @@ impl PartialEq for ApplicationError {
                 },
             ) => left_surface == right_surface && left_window == right_window,
             (TaskNotFound { task_id: left }, TaskNotFound { task_id: right }) => left == right,
-            (TaskWorktree { message: left }, TaskWorktree { message: right }) => left == right,
+            (
+                TaskWorktreeIdExhausted { attempts: left },
+                TaskWorktreeIdExhausted { attempts: right },
+            ) => left == right,
+            (TaskWorktreeRootUnavailable, TaskWorktreeRootUnavailable) => true,
             (TaskFilesystem { .. }, TaskFilesystem { .. }) => true,
             (TaskWorktreeProvisioner { .. }, TaskWorktreeProvisioner { .. }) => true,
             (WorktreeNotFound { worktree_id: left }, WorktreeNotFound { worktree_id: right }) => {

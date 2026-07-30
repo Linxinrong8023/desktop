@@ -2491,10 +2491,8 @@ dependencies = [
  "gitlancer",
  "ora-contracts",
  "ora-domain",
- "ora-logging",
  "thiserror 2.0.18",
  "tokio",
- "tracing",
  "uuid",
 ]
 

@@ -135,9 +135,7 @@ impl TaskApi {
         self.worktree_root
             .read()
             .map(|root| root.clone())
-            .map_err(|_poisoned| ApplicationError::TaskWorktree {
-                message: "worktree root configuration is unavailable".to_string(),
-            })
+            .map_err(|_poisoned| ApplicationError::TaskWorktreeRootUnavailable)
     }
 }
 

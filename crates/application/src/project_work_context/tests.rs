@@ -13,14 +13,10 @@ use ora_domain::{
     AuditFields, Project, ProjectId, ProjectWorkContext, ProjectWorkContextId,
     ProjectWorkContextSurface,
 };
-use ora_logging::{with_recorded_trace_logging, with_trace_logging};
+use ora_logging::with_trace_logging;
 use pretty_assertions::assert_eq;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
-use tracing_subscriber::layer::{Context, Layer};
-use tracing_subscriber::registry::LookupSpan;
 
 /// Verifies open requests create or switch one window-scoped context using backend lease timing.
 #[test]
@@ -193,82 +189,6 @@ fn renews_project_work_context_leases() {
             }
         );
     });
-}
-
-/// Verifies conflict logging includes the owning surface and window id for operators.
-#[test]
-fn emits_owner_details_in_conflict_logs() {
-    let recorder = EventRecorder::default();
-    with_recorded_trace_logging(recorder.layer(), || {
-        let project_repository = Rc::new(FakeProjectRepository::with_projects(vec![Project::new(
-            ProjectId::new("project-1"),
-            "Ora",
-            "/workspace/ora",
-            AuditFields::new(1, 1, false),
-        )]));
-        let context_repository = Rc::new(FakeProjectWorkContextRepository::with_contexts(vec![
-            ProjectWorkContext::new(
-                ProjectWorkContextId::new("context-1"),
-                ProjectWorkContextSurface::Tauri,
-                "window-a",
-                ProjectId::new("project-1"),
-                200,
-                10,
-                10,
-            ),
-        ]));
-        let handler = OpenProjectWorkContextHandler::new(
-            project_repository,
-            context_repository,
-            FixedProjectWorkContextIdGenerator::new("context-2"),
-            FixedClock::new(100),
-        );
-
-        assert_eq!(
-            handler
-                .handle(OpenProjectWorkContextRequest {
-                    surface: ContractProjectWorkContextSurface::Tauri,
-                    window_id: "window-b".to_string(),
-                    project_id: "project-1".to_string(),
-                })
-                .unwrap_err(),
-            ApplicationError::ProjectOccupied {
-                project_id: "project-1".to_string(),
-            }
-        );
-    });
-
-    assert_eq!(
-        recorder.events(),
-        vec![LoggedEvent {
-            level: "ERROR".to_string(),
-            target: "ora_application::project_work_context::handlers".to_string(),
-            fields: BTreeMap::from([
-                ("error.kind".to_string(), "project_occupied".to_string()),
-                (
-                    "error.message".to_string(),
-                    "project is already occupied: project-1".to_string(),
-                ),
-                (
-                    "message".to_string(),
-                    "project work context operation failed".to_string(),
-                ),
-                (
-                    "method".to_string(),
-                    "log_project_work_context_failure".to_string(),
-                ),
-                (
-                    "operation".to_string(),
-                    "open_project_work_context".to_string(),
-                ),
-                ("owner.surface".to_string(), "tauri".to_string()),
-                ("owner.window_id".to_string(), "window-a".to_string()),
-                ("project_id".to_string(), "project-1".to_string()),
-                ("surface".to_string(), "tauri".to_string()),
-                ("window_id".to_string(), "window-b".to_string()),
-            ]),
-        }]
-    );
 }
 
 #[derive(Debug, Default)]
@@ -540,77 +460,5 @@ impl Clock for FixedClock {
     /// Returns the deterministic Unix timestamp configured for the current test.
     fn now_timestamp_millis(&self) -> i64 {
         self.timestamp_millis
-    }
-}
-
-/// Captures one emitted event in a comparison-friendly structure for logging assertions.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct LoggedEvent {
-    level: String,
-    target: String,
-    fields: BTreeMap<String, String>,
-}
-
-/// Records tracing events into shared memory so tests can assert full structured outcomes.
-#[derive(Clone, Debug, Default)]
-struct EventRecorder {
-    events: Arc<Mutex<Vec<LoggedEvent>>>,
-}
-
-impl EventRecorder {
-    /// Builds the recording layer attached to one scoped test subscriber.
-    fn layer(&self) -> RecordingLayer {
-        RecordingLayer {
-            events: self.events.clone(),
-        }
-    }
-
-    /// Returns every captured event in emission order.
-    fn events(&self) -> Vec<LoggedEvent> {
-        self.events.lock().unwrap().clone()
-    }
-}
-
-/// Pushes each tracing event into the shared recorder without relying on global subscriber state.
-#[derive(Clone, Debug)]
-struct RecordingLayer {
-    events: Arc<Mutex<Vec<LoggedEvent>>>,
-}
-
-impl<S> Layer<S> for RecordingLayer
-where
-    S: tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
-{
-    /// Records one event with its level, target, and normalized string fields.
-    fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
-        let mut visitor = FieldVisitor::default();
-        event.record(&mut visitor);
-        self.events.lock().unwrap().push(LoggedEvent {
-            level: event.metadata().level().to_string(),
-            target: event.metadata().target().to_string(),
-            fields: visitor.fields,
-        });
-    }
-}
-
-/// Collects tracing event fields into a deterministic string map for assertions.
-#[derive(Debug, Default)]
-struct FieldVisitor {
-    fields: BTreeMap<String, String>,
-}
-
-impl tracing::field::Visit for FieldVisitor {
-    /// Records debug-formatted values for non-string tracing fields.
-    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        self.fields.insert(
-            field.name().to_string(),
-            format!("{value:?}").trim_matches('"').to_string(),
-        );
-    }
-
-    /// Records string tracing fields without extra formatting noise.
-    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        self.fields
-            .insert(field.name().to_string(), value.to_string());
     }
 }

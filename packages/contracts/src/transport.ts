@@ -24,44 +24,8 @@ export interface ContractTransport {
 
 export type ContractStreamFrame<TEvent> =
   | { type: "data"; data: TEvent }
-  | { type: "error"; error: ContractErrorPayload }
+  | { type: "error"; error: unknown }
   | { type: "end" };
-
-/** @deprecated Kept only while Web and Tauri callers migrate to ContractError. */
-export type ContractErrorPayload = {
-  code: string;
-  message: string;
-};
-
-/** @deprecated Kept only while Web and Tauri callers migrate to ContractError. */
-export type ContractErrorEnvelope = {
-  error: ContractErrorPayload;
-};
-
-/** @deprecated Kept only while Web and Tauri callers migrate to typed errors. */
-export class ContractTransportError extends Error {
-  readonly code: string;
-  readonly status: number | null;
-  readonly responseBody: unknown;
-
-  constructor({
-    code,
-    message,
-    status,
-    responseBody,
-  }: {
-    code: string;
-    message: string;
-    status: number | null;
-    responseBody: unknown;
-  }) {
-    super(message);
-    this.name = "ContractTransportError";
-    this.code = code;
-    this.status = status;
-    this.responseBody = responseBody;
-  }
-}
 
 export const localTransportErrorKinds = [
   "network_failure",

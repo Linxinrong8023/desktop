@@ -18,9 +18,7 @@ Handlers accept `ora-contracts` requests, operate on `ora-domain` models, and ma
 
 `ApplicationError` is the stable application-facing failure vocabulary. Handlers translate domain
 validation into semantic variants and retain infrastructure failures as `Error::source()` chains
-through the shared `RepositoryError`. Handler events describe use-case operation facts and entity
-context; they do not choose public error codes or transport status. Runtime seams separately own the
-correlated request-completion event and derive its level from the public classification.
+through the shared `RepositoryError`. Handlers do not emit generic success or propagation-only failure events, choose public error codes, or select transport status. Web, Tauri, and stream seams own the single correlated request-completion event and derive its level from the public classification.
 
 Aggregate deletion, SQLite composition, ACP process supervision, and transport-neutral public error normalization belong to `ora-backend` and `ora-db`. Contract serialization and endpoint metadata belong to `ora-contracts`.
 

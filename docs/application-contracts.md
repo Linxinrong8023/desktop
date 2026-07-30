@@ -66,11 +66,11 @@ Notable consequences:
 
 Deletion stays a normal delete use case at the boundary even though the repository implements it as a soft delete. Callers interact with delete-oriented request and response contracts and never see soft-delete or archive semantics.
 
-## Structured events
+## Error propagation and completion logging
 
-Handlers emit structured operational `tracing` events without introducing transport concerns. Success events log at `INFO` with the use-case `operation` and the relevant entity identifier when one is available; not-found and repository failures log at `ERROR` with details under `error`. An adapter never has to add the log entry itself.
+Application handlers preserve semantic errors and infrastructure source chains without emitting generic success or propagation-only failure events. Repository adapters likewise do not add another event merely to report the same failure. Web, Tauri, and stream entry seams own the single correlated request-completion event and derive its level from the public classification.
 
-The application layer emits events only. Logging initialization, sink selection, and writer lifetimes stay with runtime composition roots. See [Runtime Logging](runtime-logging.md).
+Bootstrap, migration, state-transition, and secondary-cleanup events remain independent lifecycle facts. Logging initialization, sink selection, and writer lifetimes stay with runtime composition roots. See [Runtime Logging](runtime-logging.md).
 
 ## Slice invariants
 

@@ -12,5 +12,5 @@ mod task;
 
 pub use agent_runtime::SessionEventStream;
 pub use bootstrap::{Backend, BackendBootstrapError, BackendPaths};
-pub use error::{BackendError, BackendErrorKind, ErrorClassification};
+pub use error::{BackendError, ErrorClassification};
 pub use request_lifecycle::{RequestIdGenerator, RequestLifecycle, UuidRequestIdGenerator};

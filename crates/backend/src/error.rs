@@ -1,6 +1,5 @@
 use ora_application::ApplicationError;
 use ora_contracts::{ContractError, EmptyErrorParams, PublicError, RequestId};
-use serde::{Serialize, Serializer};
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
@@ -11,15 +10,6 @@ type SharedError = Arc<dyn Error + Send + Sync + 'static>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErrorClassification {
     InvalidRequest,
-    NotFound,
-    Conflict,
-    Internal,
-}
-
-/// Temporary adapter compatibility while Web and Tauri migrate to ErrorClassification.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BackendErrorKind {
-    BadRequest,
     NotFound,
     Conflict,
     Internal,
@@ -79,26 +69,6 @@ impl BackendError {
         self.classification
     }
 
-    /// Temporary adapter compatibility; new callers must use `classification`.
-    pub const fn kind(&self) -> BackendErrorKind {
-        match self.classification {
-            ErrorClassification::InvalidRequest => BackendErrorKind::BadRequest,
-            ErrorClassification::NotFound => BackendErrorKind::NotFound,
-            ErrorClassification::Conflict => BackendErrorKind::Conflict,
-            ErrorClassification::Internal => BackendErrorKind::Internal,
-        }
-    }
-
-    /// Temporary adapter compatibility; new callers must use `public_error`.
-    pub const fn code(&self) -> &'static str {
-        self.public_error.code()
-    }
-
-    /// Temporary adapter compatibility; public clients must localize the typed payload.
-    pub fn message(&self) -> &str {
-        &self.context
-    }
-
     /// Returns the strongly typed public error without exposing internal diagnostics.
     pub const fn public_error(&self) -> &PublicError {
         &self.public_error
@@ -110,26 +80,6 @@ impl BackendError {
             error: self.public_error.clone(),
             request_id,
         }
-    }
-}
-
-impl Serialize for BackendError {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct LegacyBackendError<'a> {
-            code: &'static str,
-            message: &'a str,
-        }
-
-        LegacyBackendError {
-            code: self.code(),
-            message: self.message(),
-        }
-        .serialize(serializer)
     }
 }
 
@@ -210,7 +160,8 @@ impl From<ApplicationError> for BackendError {
             | ApplicationError::ProjectRepository { .. }
             | ApplicationError::ProjectWorkContextRepository { .. }
             | ApplicationError::TaskRepository { .. }
-            | ApplicationError::TaskWorktree { .. }
+            | ApplicationError::TaskWorktreeIdExhausted { .. }
+            | ApplicationError::TaskWorktreeRootUnavailable
             | ApplicationError::TaskFilesystem { .. }
             | ApplicationError::TaskWorktreeProvisioner { .. }
             | ApplicationError::WorktreeRepository { .. }
