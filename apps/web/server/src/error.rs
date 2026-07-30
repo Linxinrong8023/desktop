@@ -301,7 +301,7 @@ mod tests {
     #[tokio::test]
     async fn maps_repository_errors_to_http_500() {
         let response = WebApiError::from(ApplicationError::ProjectRepository {
-            message: "write failed".to_string(),
+            source: ora_application::RepositoryError::new(std::io::Error::other("write failed")),
         })
         .into_response();
         let status = response.status();
@@ -321,7 +321,7 @@ mod tests {
             json!({
                 "error": {
                     "code": "project_repository_error",
-                    "message": "write failed",
+                    "message": "project repository operation failed",
                 },
             })
         );

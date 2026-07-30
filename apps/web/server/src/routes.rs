@@ -428,7 +428,7 @@ mod tests {
             json!({
                 "error": {
                     "code": "project_not_found",
-                    "message": "project not found: missing-project",
+                    "message": "project not found",
                 },
             })
         );
@@ -888,7 +888,7 @@ mod tests {
             json!({
                 "error": {
                     "code": "session_not_found",
-                    "message": "session not found: missing-session",
+                    "message": "session not found",
                 },
             })
         );

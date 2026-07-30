@@ -1,5 +1,5 @@
 use crate::clock::SystemClock;
-use crate::{BackendError, BackendErrorKind};
+use crate::{BackendError, ErrorClassification};
 use gitlancer::git::worktree::ResolveWorktreeByBranchRequest;
 use gitlancer::{CliGitRunner, Git, RepoRoot, Repository};
 use ora_application::{
@@ -11,6 +11,7 @@ use ora_contracts::{
     CreateTaskRequest, CreateTaskResponse, DeleteTaskRequest, DeleteTaskResponse, GetTaskRequest,
     GetTaskResponse, ListTasksRequest, ListTasksResponse, UpdateTaskRequest, UpdateTaskResponse,
 };
+use ora_contracts::{EmptyErrorParams, PublicError};
 use ora_db::{
     CascadeDeleteOutcome, RepositoryPool, SqliteCascadeRepository, SqliteProjectRepository,
     SqliteTaskRepository, SqliteWorktreeRepository,
@@ -98,26 +99,20 @@ impl TaskApi {
         let task_id = TaskId::new(request.task_id);
         let outcome = SqliteCascadeRepository::new(self.pool.clone())
             .delete_task(&task_id, self.clock.now_timestamp_millis())
-            .map_err(|_| {
-                BackendError::new(
-                    BackendErrorKind::Internal,
-                    "task_repository_error",
-                    "task repository operation failed",
-                )
-            })?;
+            .map_err(|source| BackendError::internal("task repository operation failed", source))?;
 
         match outcome {
             CascadeDeleteOutcome::Deleted => Ok(DeleteTaskResponse {
                 task_id: task_id.to_string(),
             }),
             CascadeDeleteOutcome::NotFound => Err(BackendError::new(
-                BackendErrorKind::NotFound,
-                "task_not_found",
+                ErrorClassification::NotFound,
+                PublicError::TaskNotFound(EmptyErrorParams {}),
                 format!("task not found: {task_id}"),
             )),
             CascadeDeleteOutcome::ActiveSession => Err(BackendError::new(
-                BackendErrorKind::Conflict,
-                "resource_in_use",
+                ErrorClassification::Conflict,
+                PublicError::ResourceInUse(EmptyErrorParams {}),
                 "task has a running session and cannot be deleted",
             )),
         }
@@ -140,7 +135,7 @@ impl TaskApi {
         self.worktree_root
             .read()
             .map(|root| root.clone())
-            .map_err(|_| ApplicationError::TaskWorktree {
+            .map_err(|_poisoned| ApplicationError::TaskWorktree {
                 message: "worktree root configuration is unavailable".to_string(),
             })
     }
@@ -158,12 +153,12 @@ pub(crate) fn resolve_task_cwd(
 ) -> Result<PathBuf, BackendError> {
     let task = SqliteTaskRepository::new(pool.clone())
         .find_task(task_id)
-        .map_err(|_| task_worktree_unavailable())?
+        .map_err(task_worktree_unavailable_with)?
         .ok_or_else(task_worktree_unavailable)?;
     if task.worktree_id.is_none() {
         let project = SqliteProjectRepository::new(pool.clone())
             .find_project(&task.project_id)
-            .map_err(|_| task_project_root_unavailable())?
+            .map_err(task_project_root_unavailable_with)?
             .ok_or_else(task_project_root_unavailable)?;
         let cwd = absolute_project_root(PathBuf::from(project.root_path))?;
         return if cwd.is_dir() {
@@ -176,7 +171,7 @@ pub(crate) fn resolve_task_cwd(
     let worktree_id = task.worktree_id.ok_or_else(task_worktree_unavailable)?;
     let worktree = SqliteWorktreeRepository::new(pool.clone())
         .find_worktree(&worktree_id)
-        .map_err(|_| task_worktree_unavailable())?
+        .map_err(task_worktree_unavailable_with)?
         .ok_or_else(task_worktree_unavailable)?;
     if worktree.task_id != task.id || worktree.activity != WorktreeActivity::Active {
         return Err(task_worktree_unavailable());
@@ -184,7 +179,7 @@ pub(crate) fn resolve_task_cwd(
     let branch_name = worktree.branch_name.ok_or_else(task_worktree_unavailable)?;
     let project = SqliteProjectRepository::new(pool.clone())
         .find_project(&task.project_id)
-        .map_err(|_| task_worktree_unavailable())?
+        .map_err(task_worktree_unavailable_with)?
         .ok_or_else(task_worktree_unavailable)?;
     let repository = Repository::new(RepoRoot::new(project.root_path));
     let resolved = Git::new(CliGitRunner)
@@ -192,7 +187,7 @@ pub(crate) fn resolve_task_cwd(
             repository: &repository,
             branch_name: &branch_name,
         })
-        .map_err(|_| task_worktree_unavailable())?;
+        .map_err(task_worktree_unavailable_with)?;
     let cwd = resolved.worktree_root().as_path().to_path_buf();
     if !cwd.is_dir() {
         return Err(task_worktree_unavailable());
@@ -210,24 +205,46 @@ fn absolute_project_root(path: PathBuf) -> Result<PathBuf, BackendError> {
     }
     std::env::current_dir()
         .map(|cwd| cwd.join(path))
-        .map_err(|_| task_project_root_unavailable())
+        .map_err(task_project_root_unavailable_with)
 }
 
 /// Builds the conflict used when task ownership cannot resolve an active Git worktree.
 fn task_worktree_unavailable() -> BackendError {
     BackendError::new(
-        BackendErrorKind::Conflict,
-        "task_worktree_unavailable",
+        ErrorClassification::Conflict,
+        PublicError::TaskWorktreeUnavailable(EmptyErrorParams {}),
         "task worktree is unavailable",
+    )
+}
+
+fn task_worktree_unavailable_with(
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> BackendError {
+    BackendError::with_source(
+        ErrorClassification::Conflict,
+        PublicError::TaskWorktreeUnavailable(EmptyErrorParams {}),
+        "task worktree is unavailable",
+        source,
     )
 }
 
 /// Builds the conflict used when a project-root task no longer has a usable directory.
 fn task_project_root_unavailable() -> BackendError {
     BackendError::new(
-        BackendErrorKind::Conflict,
-        "task_project_root_unavailable",
+        ErrorClassification::Conflict,
+        PublicError::TaskProjectRootUnavailable(EmptyErrorParams {}),
         "task project root is unavailable",
+    )
+}
+
+fn task_project_root_unavailable_with(
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> BackendError {
+    BackendError::with_source(
+        ErrorClassification::Conflict,
+        PublicError::TaskProjectRootUnavailable(EmptyErrorParams {}),
+        "task project root is unavailable",
+        source,
     )
 }
 
