@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 
 /// Executes one synchronous backend operation on the runtime's blocking executor.
-async fn run_backend<Request, Response>(
+pub(crate) async fn run_backend<Request, Response>(
     operation_name: &'static str,
     backend: Backend,
     request: Request,

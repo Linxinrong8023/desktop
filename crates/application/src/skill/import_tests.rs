@@ -1,4 +1,4 @@
-use super::import::UploadedSkillFile;
+use super::import::{MAX_SKILL_UPLOAD_BYTES, UploadedSkillFile};
 use super::{
     DeleteSkillHandler, ImportSkillHandler, ReconcileSkillStorageHandler, SkillIdGenerator,
     SkillImportCommitError, SkillImportUnitOfWork, SkillPackageStore, SkillPackageStoreError,
@@ -111,6 +111,23 @@ fn rejects_upload_exceeding_the_file_limit() {
     assert_eq!(
         error,
         ApplicationError::SkillUploadTooManyFiles { max_files: 1000 }
+    );
+}
+#[test]
+fn rejects_upload_exceeding_the_byte_limit() {
+    let store = Rc::new(FakeSkillPackageStore::default());
+    let error = handler(store, FakeUnitOfWork::default())
+        .handle(vec![UploadedSkillFile {
+            relative_path: "large.bin".to_string(),
+            bytes: vec![0; MAX_SKILL_UPLOAD_BYTES + 1],
+        }])
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ApplicationError::SkillUploadTooLarge {
+            max_bytes: MAX_SKILL_UPLOAD_BYTES,
+        }
     );
 }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createFetchTransport, resolveUrl } from "../src/fetch.js";
+import { createFetchTransport, resolveUrl, uploadSkillFolder } from "../src/fetch.js";
 import {
   LocalTransportError,
   RemoteContractError,
@@ -20,6 +20,42 @@ test("resolves paths against an absolute server base", () => {
     "http://localhost:32578/api/projects",
   );
 });
+test("uploads skill files as root-relative multipart parts", async () => {
+  let requestUrl = "";
+  let requestInit: RequestInit | undefined;
+  const response = await uploadSkillFolder(
+    [
+      { relativePath: "SKILL.md", contents: new Blob(["manifest"]) },
+      { relativePath: "references/example.md", contents: new Blob(["example"]) },
+    ],
+    {
+      baseUrl: "http://localhost:32578",
+      fetch: async (input, init) => {
+        requestUrl = String(input);
+        requestInit = init;
+        return new Response(JSON.stringify({
+          skill: { id: "skill-1", name: "demo", description: "Demo" },
+        }), { status: 200 });
+      },
+    },
+  );
+
+  assert.deepEqual(response, {
+    skill: { id: "skill-1", name: "demo", description: "Demo" },
+  });
+  assert.equal(requestUrl, "http://localhost:32578/api/skills/import");
+  assert.equal(requestInit?.method, "POST");
+  assert.equal(requestInit?.headers, undefined);
+  const body = requestInit?.body;
+  assert.ok(body instanceof FormData);
+  const files = body.getAll("files");
+  assert.equal(files.length, 2);
+  assert.ok(files[0] instanceof File);
+  assert.ok(files[1] instanceof File);
+  assert.equal(files[0].name, "SKILL.md");
+  assert.equal(files[1].name, "references/example.md");
+});
+
 
 test("decodes known, unknown, and malformed remote payloads", () => {
   const requestId = "550e8400-e29b-41d4-a716-446655440000";

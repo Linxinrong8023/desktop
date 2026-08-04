@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Agent, Skill } from "@ora/contracts";
+import { usePlatform } from "@ora/platform";
 import { useContractsClient } from "../../contracts-client-context";
 import { queryKeys } from "./query-keys";
 
@@ -51,6 +52,24 @@ export function useCreateSkill() {
       client.skill.create({ name, description }).then((response) => response.skill),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.skills });
+    },
+  });
+}
+/** Imports one host-selected skill folder and refreshes the skill list after success. */
+export function useImportSkill() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => {
+      if (platform.skillFolderImport.kind === "unsupported") {
+        return Promise.resolve(null);
+      }
+      return platform.skillFolderImport.importFolder();
+    },
+    onSuccess: (skill) => {
+      if (skill !== null) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.skills });
+      }
     },
   });
 }

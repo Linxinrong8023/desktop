@@ -1,7 +1,7 @@
 use ora_application::ApplicationError;
 use ora_contracts::{
     ContractError, EmptyErrorParams, PublicError, RequestId, SkillFolderConflictParams,
-    SkillUploadTooManyFilesParams,
+    SkillUploadTooLargeParams, SkillUploadTooManyFilesParams,
 };
 use std::error::Error;
 use std::fmt;
@@ -132,6 +132,13 @@ impl From<ApplicationError> for BackendError {
                 ErrorClassification::Unprocessable,
                 PublicError::SkillUploadEmpty(EmptyErrorParams {}),
                 "skill upload contained no files",
+            ),
+            ApplicationError::SkillUploadTooLarge { max_bytes } => (
+                ErrorClassification::PayloadTooLarge,
+                PublicError::SkillUploadTooLarge(SkillUploadTooLargeParams {
+                    max_bytes: *max_bytes,
+                }),
+                "skill upload contains too many bytes",
             ),
             ApplicationError::SkillUploadTooManyFiles { max_files } => (
                 ErrorClassification::Unprocessable,

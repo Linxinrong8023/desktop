@@ -6,6 +6,7 @@ import {
   type ContractTransport,
   type ContractTransportRequest,
 } from "./transport.js";
+import type { CreateSkillResponse } from "./skill.js";
 
 const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 
@@ -13,6 +14,47 @@ export type FetchTransportOptions = {
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;
 };
+export type SkillFolderUploadFile = {
+  relativePath: string;
+  contents: Blob;
+};
+
+/** Uploads one browser-selected skill folder through the transport-specific multipart seam. */
+export async function uploadSkillFolder(
+  files: readonly SkillFolderUploadFile[],
+  options: FetchTransportOptions = {},
+): Promise<CreateSkillResponse> {
+  const fetchImplementation = options.fetch ?? globalThis.fetch;
+  if (fetchImplementation === undefined) {
+    throw new Error("global fetch is not available");
+  }
+
+  const body = new FormData();
+  for (const file of files) {
+    body.append("files", file.contents, file.relativePath);
+  }
+
+  let response: Response;
+  try {
+    response = await fetchImplementation(
+      resolveUrl(options.baseUrl ?? "", "/api/skills/import"),
+      { method: "POST", body },
+    );
+  } catch (error) {
+    throw new LocalTransportError(
+      "network_failure",
+      "Web skill import failed before Ora returned a response",
+      error,
+    );
+  }
+
+  const responseBody = await readResponseBody(response);
+  if (!response.ok) {
+    throw toTransportError(response.status, responseBody);
+  }
+  return responseBody as CreateSkillResponse;
+}
+
 
 export function createFetchTransport(
   options: FetchTransportOptions = {},

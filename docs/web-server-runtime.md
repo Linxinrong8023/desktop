@@ -148,7 +148,7 @@ Unary requests and streams receive a server-generated canonical request id befor
 
 ### Skill folder import
 
-`POST /api/skills/import` uploads a local skill folder as one `multipart/form-data` request. Each file part carries its skill-root-relative path as the part file name. The request body is capped at 50 MB: oversized uploads return the typed `413` `skill_upload_too_large` error, while uploads over 1000 files return `422`.
+`POST /api/skills/import` uploads a local skill folder as one `multipart/form-data` request. Each file part carries its skill-root-relative path as the part file name. The shared application import constraints cap both Web uploads and Desktop directory imports at 50 MB and 1000 files: oversized Web uploads return the typed `413` `skill_upload_too_large` error, while excessive file counts return `422`.
 
 The import is atomic across the filesystem and the database:
 

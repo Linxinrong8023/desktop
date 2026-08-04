@@ -20,6 +20,8 @@ pub enum ApplicationError {
     },
     #[error("skill upload contained no files")]
     SkillUploadEmpty,
+    #[error("skill upload exceeds the {max_bytes}-byte limit")]
+    SkillUploadTooLarge { max_bytes: usize },
     #[error("skill upload exceeds the {max_files}-file limit")]
     SkillUploadTooManyFiles { max_files: usize },
     #[error("skill upload contains an unsafe path")]
@@ -286,6 +288,9 @@ impl PartialEq for ApplicationError {
             | (WorktreeRepository { .. }, WorktreeRepository { .. })
             | (SessionRepository { .. }, SessionRepository { .. }) => true,
             (SkillNotFound { skill_id: left }, SkillNotFound { skill_id: right }) => left == right,
+            (SkillUploadTooLarge { max_bytes: left }, SkillUploadTooLarge { max_bytes: right }) => {
+                left == right
+            }
             (
                 SkillUploadTooManyFiles { max_files: left },
                 SkillUploadTooManyFiles { max_files: right },

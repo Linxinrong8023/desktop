@@ -1,4 +1,8 @@
-import type { ContractsClient } from "@ora/contracts";
+import {
+  LocalTransportError,
+  type ContractsClient,
+} from "@ora/contracts";
+import { uploadSkillFolder } from "@ora/contracts/fetch";
 import { type ReactNode } from "react";
 import { renderPlatformHost, type PlatformHostRenderer } from "../platform-host-renderer";
 import {
@@ -16,6 +20,10 @@ interface ActivePathSelection {
   resolve: (path: string | null) => void;
 }
 
+type SelectSkillFolderFiles = () => Promise<readonly File[] | null>;
+type UploadSkillFolder = typeof uploadSkillFolder;
+
+
 export type WebPlatformSnapshot =
   | { kind: "idle" }
   | { kind: "selecting"; requestId: number; options: SelectPathOptions };
@@ -29,10 +37,27 @@ export class WebPlatformAdapter implements PlatformAdapter, PlatformHostRenderer
   readonly locationActions = { kind: "unsupported" as const };
   private activeSelection: ActivePathSelection | null = null;
   private listeners = new Set<() => void>();
+  readonly skillFolderImport = {
+    kind: "supported" as const,
+    importFolder: async () => {
+      const files = await this.selectSkillFolderFiles();
+      if (files === null) return null;
+      const response = await this.uploadSelectedSkillFolder(files.map((file) => ({
+        relativePath: skillRootRelativePath(file),
+        contents: file,
+      })));
+      return response.skill;
+    },
+  };
+
   private nextRequestId = 1;
   private snapshot: WebPlatformSnapshot = { kind: "idle" };
 
-  constructor(readonly client: ContractsClient) {}
+  constructor(
+    readonly client: ContractsClient,
+    private readonly selectSkillFolderFiles: SelectSkillFolderFiles = selectBrowserSkillFolder,
+    private readonly uploadSelectedSkillFolder: UploadSkillFolder = uploadSkillFolder,
+  ) {}
 
   /** Opens one Web path picker and resolves after the host confirms or cancels it. */
   selectPath(options: SelectPathOptions): Promise<string | null> {
@@ -91,6 +116,49 @@ export class WebPlatformAdapter implements PlatformAdapter, PlatformHostRenderer
       listener();
     }
   }
+}
+
+/** Opens the browser's native directory chooser and resolves its selected files or cancellation. */
+function selectBrowserSkillFolder(): Promise<readonly File[] | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.webkitdirectory = true;
+    input.hidden = true;
+    document.body.append(input);
+
+    let settled = false;
+    const complete = (files: readonly File[] | null) => {
+      if (settled) return;
+      settled = true;
+      input.remove();
+      resolve(files);
+    };
+
+    input.addEventListener("change", () => {
+      const files = input.files === null ? [] : Array.from(input.files);
+      complete(files.length === 0 ? null : files);
+    }, { once: true });
+    input.addEventListener("cancel", () => complete(null), { once: true });
+    input.click();
+  });
+}
+
+/**
+ * Removes the browser-added selected-directory segment so the backend receives paths relative
+ * to the skill root, with SKILL.md at exactly the root.
+ */
+function skillRootRelativePath(file: File): string {
+  const segments = file.webkitRelativePath.split("/").filter(Boolean);
+  if (segments.length < 2) {
+    throw new LocalTransportError(
+      "malformed_response",
+      "Browser directory selection did not provide a root-relative path",
+      file.webkitRelativePath,
+    );
+  }
+  return segments.slice(1).join("/");
 }
 
 /** Creates the Web platform adapter around the same contracts client injected into AppShell. */

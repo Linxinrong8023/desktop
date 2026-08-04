@@ -32,9 +32,10 @@ pub use session::{
 };
 pub use skill::{
     CreateSkillHandler, DeleteSkillHandler, GetSkillHandler, ImportSkillHandler, ListSkillsHandler,
-    LocalSkillPackageStore, ReconcileSkillStorageHandler, SkillIdGenerator, SkillImportCommitError,
-    SkillImportUnitOfWork, SkillPackageStore, SkillPackageStoreError, SkillRepository,
-    UpdateSkillHandler, UploadedSkillFile, UuidSkillIdGenerator,
+    LocalSkillPackageStore, MAX_SKILL_FILES, MAX_SKILL_UPLOAD_BYTES, ReconcileSkillStorageHandler,
+    SkillIdGenerator, SkillImportCommitError, SkillImportUnitOfWork, SkillPackageStore,
+    SkillPackageStoreError, SkillRepository, UpdateSkillHandler, UploadedSkillFile,
+    UuidSkillIdGenerator,
 };
 pub use task::{
     CreateTaskHandler, CreateTaskWorktreeRequest, CreateTaskWorktreeResponse,

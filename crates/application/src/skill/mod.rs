@@ -16,7 +16,7 @@ pub use handlers::{
     CreateSkillHandler, DeleteSkillHandler, GetSkillHandler, ListSkillsHandler, UpdateSkillHandler,
 };
 pub use id_generator::UuidSkillIdGenerator;
-pub use import::{ImportSkillHandler, UploadedSkillFile};
+pub use import::{ImportSkillHandler, MAX_SKILL_FILES, MAX_SKILL_UPLOAD_BYTES, UploadedSkillFile};
 pub use local_store::LocalSkillPackageStore;
 pub use ports::{
     SkillIdGenerator, SkillImportCommitError, SkillImportUnitOfWork, SkillPackageStore,

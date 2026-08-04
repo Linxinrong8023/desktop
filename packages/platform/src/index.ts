@@ -9,6 +9,7 @@ export {
   type PlatformAdapter,
   type PlatformLocale,
   type SelectPathOptions,
+  type SkillFolderImportCapability,
   type WindowControlsCapability,
   type WindowManagerOs,
   type WorktreeStorageCapability,

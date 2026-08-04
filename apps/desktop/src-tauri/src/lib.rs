@@ -1,6 +1,7 @@
 mod commands;
 mod config;
 mod error;
+mod skill_import;
 mod state;
 
 use crate::config::DesktopConfigStore;
@@ -75,6 +76,7 @@ pub fn run() {
             commands::list_skills,
             commands::update_skill,
             commands::delete_skill,
+            skill_import::import_skill_from_directory,
             // =============================================================================
             // agent
             // =============================================================================

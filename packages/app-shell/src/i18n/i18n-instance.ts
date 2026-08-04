@@ -156,6 +156,10 @@ export const translationResources = {
     "settings.skills.sectionLabel": "Skills",
     "settings.skills.search": "搜索名称或描述",
     "settings.skills.new": "新建 Skill",
+    "settings.skills.import": "导入 Skill",
+    "settings.skills.importing": "正在导入…",
+    "settings.skills.importSuccess": "Skill 导入成功。",
+    "settings.skills.importError": "导入 Skill 失败，请重试。",
     "settings.skills.loading": "正在加载技能…",
     "settings.skills.empty": "还没有技能，点击「新建 Skill」创建一个。",
     "settings.skills.loadError": "无法加载技能。",
@@ -759,6 +763,10 @@ export const translationResources = {
     "settings.skills.sectionLabel": "Skills",
     "settings.skills.search": "Search name or description",
     "settings.skills.new": "New skill",
+    "settings.skills.import": "Import skill",
+    "settings.skills.importing": "Importing...",
+    "settings.skills.importSuccess": "Skill imported.",
+    "settings.skills.importError": "Unable to import the skill. Try again.",
     "settings.skills.loading": "Loading skills...",
     "settings.skills.empty": "No skills yet. Use “New skill” to create one.",
     "settings.skills.loadError": "Unable to load skills.",
@@ -1220,7 +1228,7 @@ export const translationResources = {
   },
 } as const;
 
-export type TranslationKey = keyof (typeof translations)["zh-CN"];
+export type TranslationKey = keyof (typeof translationResources)["zh-CN"];
 const LOCALE_STORAGE_KEY = "ora.locale";
 
 /** Reads the persisted locale without making application startup depend on browser storage availability. */

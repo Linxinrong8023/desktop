@@ -3,7 +3,7 @@ use crate::error::WebApiError;
 use axum::Json;
 use axum::extract::{Multipart, Path, State, multipart::MultipartError};
 use axum::http::StatusCode;
-use ora_application::UploadedSkillFile;
+use ora_application::{MAX_SKILL_UPLOAD_BYTES, UploadedSkillFile};
 use ora_backend::ErrorClassification;
 use ora_contracts::{
     CreateSkillRequest, CreateSkillResponse, DeleteSkillRequest, DeleteSkillResponse,
@@ -11,9 +11,6 @@ use ora_contracts::{
     PublicError, SkillUploadTooLargeParams, UpdateSkillRequest, UpdateSkillResponse,
 };
 use serde::Deserialize;
-
-/// Caps one skill folder upload before its multipart fields are materialized in memory.
-pub const MAX_SKILL_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 
 /// Carries the path identifier used to address one skill resource.
 #[derive(Debug, Deserialize)]

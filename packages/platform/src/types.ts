@@ -1,3 +1,5 @@
+import type { Skill } from "@ora/contracts";
+
 export type PathSelectionKind = "file" | "directory";
 
 export interface SelectPathOptions {
@@ -12,6 +14,14 @@ export type WorktreeStorageCapability =
       getRoot(): Promise<string>;
       setRoot(path: string): Promise<void>;
     };
+/** Imports one host-selected skill folder while hiding browser and Desktop transport details. */
+export type SkillFolderImportCapability =
+  | { kind: "unsupported" }
+  | {
+      kind: "supported";
+      importFolder(): Promise<Skill | null>;
+    };
+
 
 /** The host operating system, as far as the window chrome needs to care. */
 export type WindowManagerOs = "windows" | "macos" | "linux";
@@ -67,6 +77,7 @@ export interface PlatformAdapter {
   readonly windowControls: WindowControlsCapability;
   readonly locationActions: LocationActionsCapability;
   selectPath(options: SelectPathOptions): Promise<string | null>;
+  readonly skillFolderImport: SkillFolderImportCapability;
 }
 
 export type PlatformLocale = "zh-CN" | "en-US";

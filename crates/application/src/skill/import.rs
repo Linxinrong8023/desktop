@@ -12,7 +12,10 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Caps the number of files one skill upload may carry to bound staging cost and abuse.
-const MAX_SKILL_FILES: usize = 1000;
+pub const MAX_SKILL_FILES: usize = 1000;
+
+/// Caps materialized skill contents consistently across HTTP and Desktop adapters.
+pub const MAX_SKILL_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 
 /// Carries one uploaded file already materialized from transport, ready to stage on disk.
 ///
@@ -182,6 +185,15 @@ fn validate_upload(files: &[UploadedSkillFile]) -> Result<Vec<PathBuf>, Applicat
     let mut staged_paths = Vec::with_capacity(files.len());
     let mut seen_paths = HashSet::with_capacity(files.len());
     for file in files {
+        let total_bytes = files
+            .iter()
+            .try_fold(0usize, |total, file| total.checked_add(file.bytes.len()));
+        if total_bytes.is_none_or(|total| total > MAX_SKILL_UPLOAD_BYTES) {
+            return Err(ApplicationError::SkillUploadTooLarge {
+                max_bytes: MAX_SKILL_UPLOAD_BYTES,
+            });
+        }
+
         let relative_path = normalize_relative_path(&file.relative_path)
             .ok_or(ApplicationError::SkillUploadPathInvalid)?;
         if !seen_paths.insert(relative_path.clone()) {

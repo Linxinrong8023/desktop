@@ -65,4 +65,33 @@ describe("TauriPlatformAdapter", () => {
     resolvers[0]!(null);
     await expect(firstSelection).resolves.toBeNull();
   });
+  it("imports the selected native directory and returns the created skill", async () => {
+    openMock.mockResolvedValue("C:\\skills\\demo");
+    invokeMock.mockResolvedValue({
+      skill: { id: "skill-1", name: "demo", description: "Demo" },
+    });
+    const adapter = createTauriPlatformAdapter();
+
+    await expect(adapter.skillFolderImport.importFolder()).resolves.toEqual({
+      id: "skill-1",
+      name: "demo",
+      description: "Demo",
+    });
+    expect(openMock).toHaveBeenCalledWith({
+      directory: true,
+      multiple: false,
+      defaultPath: undefined,
+    });
+    expect(invokeMock).toHaveBeenCalledWith("import_skill_from_directory", {
+      request: { path: "C:\\skills\\demo" },
+    });
+  });
+
+  it("does not invoke Desktop import after native directory cancellation", async () => {
+    openMock.mockResolvedValue(null);
+    const adapter = createTauriPlatformAdapter();
+
+    await expect(adapter.skillFolderImport.importFolder()).resolves.toBeNull();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
 });

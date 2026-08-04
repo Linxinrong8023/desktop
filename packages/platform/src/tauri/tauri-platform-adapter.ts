@@ -1,3 +1,4 @@
+import { decodeRemoteError, type CreateSkillResponse } from "@ora/contracts";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -104,6 +105,24 @@ export class TauriPlatformAdapter implements PlatformAdapter {
   readonly windowControls: WindowControlsCapability = createTauriWindowControls();
 
   readonly locationActions: LocationActionsCapability = createTauriLocationActions();
+  readonly skillFolderImport = {
+    kind: "supported" as const,
+    importFolder: async () => {
+      const path = await this.selectPath({ kind: "directory" });
+      if (path === null) return null;
+
+      try {
+        const response = await invoke<CreateSkillResponse>(
+          "import_skill_from_directory",
+          { request: { path } },
+        );
+        return response.skill;
+      } catch (error) {
+        throw decodeRemoteError(error, null, error);
+      }
+    },
+  };
+
 
   readonly worktreeStorage = {
     kind: "configurable" as const,

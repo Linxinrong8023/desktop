@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { Agent, Skill } from "@ora/contracts";
+import { RemoteContractError, type Agent, type Skill } from "@ora/contracts";
+import { usePlatform } from "@ora/platform";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +24,7 @@ import {
   IconSearch,
   IconSparkles,
   IconTrash,
+  IconUpload,
 } from "@tabler/icons-react";
 import { useAgents } from "../../state/hooks/use-agents";
 import { useSkills } from "../../state/hooks/use-skills";
@@ -31,9 +33,11 @@ import {
   useUpdateAgent,
   useDeleteAgent,
   useCreateSkill,
+  useImportSkill,
   useUpdateSkill,
   useDeleteSkill,
 } from "../../state/hooks/use-atom-mutations";
+import { localizeContractError } from "../../i18n/contract-error";
 import { SettingsHeading } from "./settings-heading";
 
 type AtomRecord = Agent | Skill;
@@ -53,6 +57,8 @@ interface AtomManagerConfig {
   onCreate: (name: string, description: string) => Promise<void>;
   onUpdate: (item: AtomRecord, name: string, description: string) => Promise<void>;
   onDelete: (item: AtomRecord) => Promise<void>;
+  toolbarAction?: ReactNode;
+  toolbarMessage?: { kind: "success" | "error"; message: string } | null;
 }
 
 /** The Roles pane manages the configurable agents surfaced to Ora sessions. */
@@ -83,6 +89,27 @@ export function SkillsSettings() {
   const createSkill = useCreateSkill();
   const updateSkill = useUpdateSkill();
   const deleteSkill = useDeleteSkill();
+  const { t } = useTranslation();
+  const platform = usePlatform();
+  const importSkill = useImportSkill();
+  const [importFeedback, setImportFeedback] = useState<AtomManagerConfig["toolbarMessage"]>(null);
+
+  const importFolder = async () => {
+    if (importSkill.isPending) return;
+    setImportFeedback(null);
+    try {
+      const skill = await importSkill.mutateAsync();
+      if (skill !== null) {
+        setImportFeedback({ kind: "success", message: t("settings.skills.importSuccess") });
+      }
+    } catch (error) {
+      setImportFeedback({
+        kind: "error",
+        message: error instanceof RemoteContractError ? localizeContractError(error, t) : t("settings.skills.importError"),
+      });
+    }
+  };
+
 
   return (
     <AtomManager
@@ -93,6 +120,18 @@ export function SkillsSettings() {
       loading={skillsQuery.isPending}
       error={skillsQuery.error !== null}
       onCreate={(name, description) => createSkill.mutateAsync({ name, description }).then(() => undefined)}
+      toolbarAction={platform.skillFolderImport.kind === "supported" ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          disabled={importSkill.isPending}
+          onClick={() => void importFolder()}
+        >
+          <IconUpload />{t(importSkill.isPending ? "settings.skills.importing" : "settings.skills.import")}
+        </Button>
+      ) : null}
+      toolbarMessage={importFeedback}
       onUpdate={(item, name, description) => updateSkill.mutateAsync({ skill: item as Skill, name, description }).then(() => undefined)}
       onDelete={(item) => deleteSkill.mutateAsync({ skillId: item.id }).then(() => undefined)}
     />
@@ -103,7 +142,7 @@ export function SkillsSettings() {
  * The list-and-editor surface shared by both panes. While creating or editing, the toolbar and
  * list are replaced entirely by {@link AtomEditor}; leaving the editor brings the list back.
  */
-function AtomManager({ tPrefix, icon, hasBody, items, loading, error, onCreate, onUpdate, onDelete }: AtomManagerConfig) {
+function AtomManager({ tPrefix, icon, hasBody, items, loading, error, onCreate, onUpdate, onDelete, toolbarAction, toolbarMessage }: AtomManagerConfig) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   // `null` = list view; `{ item: null }` = creating; `{ item }` = editing that record.
@@ -149,10 +188,16 @@ function AtomManager({ tPrefix, icon, hasBody, items, loading, error, onCreate, 
           <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t(`${tPrefix}.search`)} className="pl-8" />
         </div>
-        <Button variant="secondary" size="sm" className="shrink-0" onClick={() => setEditing({ item: null })}>
-          <IconPlus />{t(`${tPrefix}.new`)}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {toolbarAction}
+          <Button variant="outline" size="sm" className="shrink-0" onClick={() => setEditing({ item: null })}>
+            <IconPlus />{t(`${tPrefix}.new`)}
+          </Button>
+        </div>
       </div>
+      {toolbarMessage && (
+        <p className={cn("text-xs", toolbarMessage.kind === "error" ? "text-destructive" : "text-muted-foreground")}>{toolbarMessage.message}</p>
+      )}
 
       <div className="overflow-hidden rounded-lg border border-border">
         <div className="flex items-center justify-between border-b border-border bg-muted/40 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">

@@ -111,7 +111,9 @@ pub fn build_router(app_state: AppState) -> Router {
         )
         .route(
             SKILL_IMPORT_PATH,
-            post(skills::import_skill).layer(DefaultBodyLimit::max(skills::MAX_SKILL_UPLOAD_BYTES)),
+            post(skills::import_skill).layer(DefaultBodyLimit::max(
+                ora_application::MAX_SKILL_UPLOAD_BYTES,
+            )),
         )
         .route(
             SKILL_PATH,

@@ -67,6 +67,46 @@ function PickerHarness({
     </PlatformProvider>
   );
 }
+/** Creates one browser-selected file with the root-inclusive path supplied by directory input. */
+function selectedSkillFile(path: string, contents: string): File {
+  it("strips the selected root and uploads nested skill files", async () => {
+    const { client } = fileSystemClient();
+    const upload = vi.fn().mockResolvedValue({
+      skill: { id: "skill-1", name: "demo", description: "Demo" },
+    });
+    const adapter = new WebPlatformAdapter(
+      client,
+      async () => [
+        selectedSkillFile("demo/SKILL.md", "manifest"),
+        selectedSkillFile("demo/references/example.md", "example"),
+      ],
+      upload,
+    );
+
+    await expect(adapter.skillFolderImport.importFolder()).resolves.toEqual({
+      id: "skill-1",
+      name: "demo",
+      description: "Demo",
+    });
+    expect(upload).toHaveBeenCalledOnce();
+    expect(upload.mock.calls[0]?.[0].map((file: { relativePath: string }) => file.relativePath))
+      .toEqual(["SKILL.md", "references/example.md"]);
+  });
+
+  it("does not upload when browser directory selection is cancelled", async () => {
+    const { client } = fileSystemClient();
+    const upload = vi.fn();
+    const adapter = new WebPlatformAdapter(client, async () => null, upload);
+
+    await expect(adapter.skillFolderImport.importFolder()).resolves.toBeNull();
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  const file = new File([contents], path.split("/").at(-1) ?? path);
+  Object.defineProperty(file, "webkitRelativePath", { value: path });
+  return file;
+}
+
 
 describe("WebPlatformAdapter", () => {
   it("rejects a second selection while preserving the first request", async () => {
