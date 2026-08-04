@@ -4,8 +4,8 @@ import { PathSelectionInProgressError, type SelectPathOptions } from "../types";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
-import { createWebPlatformAdapter, type WebPlatformAdapter } from "./web-platform-adapter";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createWebPlatformAdapter, WebPlatformAdapter } from "./web-platform-adapter";
 
 const homeDirectory: ListDirectoryResponse = {
   currentPath: "/home/ora",
@@ -69,6 +69,18 @@ function PickerHarness({
 }
 /** Creates one browser-selected file with the root-inclusive path supplied by directory input. */
 function selectedSkillFile(path: string, contents: string): File {
+  const file = new File([contents], path.split("/").at(-1) ?? path);
+  Object.defineProperty(file, "webkitRelativePath", { value: path });
+  return file;
+}
+
+
+describe("WebPlatformAdapter", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
   it("strips the selected root and uploads nested skill files", async () => {
     const { client } = fileSystemClient();
     const upload = vi.fn().mockResolvedValue({
@@ -102,13 +114,41 @@ function selectedSkillFile(path: string, contents: string): File {
     expect(upload).not.toHaveBeenCalled();
   });
 
-  const file = new File([contents], path.split("/").at(-1) ?? path);
-  Object.defineProperty(file, "webkitRelativePath", { value: path });
-  return file;
-}
+  it("uploads an empty directory selection so the backend can report a typed error", async () => {
+    const expected = new Error("empty upload");
+    const upload = vi.fn().mockRejectedValue(expected);
+    vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    const { client } = fileSystemClient();
+    const adapter = new WebPlatformAdapter(client, undefined, upload);
 
+    const importing = adapter.skillFolderImport.importFolder();
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    fireEvent.change(input!);
 
-describe("WebPlatformAdapter", () => {
+    await expect(importing).rejects.toBe(expected);
+    expect(upload).toHaveBeenCalledWith([]);
+    expect(input).not.toBeInTheDocument();
+  });
+
+  it("settles as cancelled after focus returns when the browser omits the cancel event", async () => {
+    vi.useFakeTimers();
+    const upload = vi.fn();
+    vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    const { client } = fileSystemClient();
+    const adapter = new WebPlatformAdapter(client, undefined, upload);
+
+    const importing = adapter.skillFolderImport.importFolder();
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    await expect(importing).resolves.toBeNull();
+    expect(upload).not.toHaveBeenCalled();
+    expect(input).not.toBeInTheDocument();
+  });
+
   it("rejects a second selection while preserving the first request", async () => {
     const { client } = fileSystemClient();
     const adapter = createWebPlatformAdapter(client);

@@ -129,18 +129,33 @@ function selectBrowserSkillFolder(): Promise<readonly File[] | null> {
     document.body.append(input);
 
     let settled = false;
+    let focusTimer: number | null = null;
+    let removeFocusFallback = () => {};
     const complete = (files: readonly File[] | null) => {
       if (settled) return;
       settled = true;
+      removeFocusFallback();
       input.remove();
       resolve(files);
     };
 
     input.addEventListener("change", () => {
       const files = input.files === null ? [] : Array.from(input.files);
-      complete(files.length === 0 ? null : files);
+      complete(files);
     }, { once: true });
     input.addEventListener("cancel", () => complete(null), { once: true });
+
+    const onWindowFocus = () => {
+      // Legacy browsers may omit the input cancel event. Wait briefly so a pending change event
+      // wins when the user selected a directory, then settle an otherwise abandoned picker.
+      focusTimer = window.setTimeout(() => complete(null), 300);
+    };
+    window.addEventListener("focus", onWindowFocus, { once: true });
+    removeFocusFallback = () => {
+      window.removeEventListener("focus", onWindowFocus);
+      if (focusTimer !== null) window.clearTimeout(focusTimer);
+    };
+
     input.click();
   });
 }
