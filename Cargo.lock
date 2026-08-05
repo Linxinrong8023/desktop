@@ -1910,6 +1910,7 @@ dependencies = [
  "ora-domain",
  "ora-fs",
  "ora-logging",
+ "ora-plugin-manager",
  "ora-skill-package",
  "pretty_assertions",
  "reqwest",

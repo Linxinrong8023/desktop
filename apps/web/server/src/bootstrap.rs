@@ -10,6 +10,8 @@ use ora_backend::{Backend, BackendBootstrapError, BackendPaths};
 use ora_contracts::{OpenProjectWorkContextRequest, ProjectWorkContextSurface};
 use ora_db::RepositoryPool;
 use ora_domain::{AuditFields, Project};
+use ora_logging::ora_warn;
+use ora_plugin_manager::PluginManager;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -26,6 +28,12 @@ pub fn build_app_state(runtime_config: &RuntimeConfig) -> Result<AppState, WebBo
     let clock = SystemClock;
 
     reconcile_configured_project(&pool, runtime_config.project(), clock)?;
+    let data_dir = runtime_config
+        .database()
+        .path()
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let plugin_manager = discover_plugins(data_dir);
 
     Ok(AppState::new(
         backend,
@@ -34,6 +42,7 @@ pub fn build_app_state(runtime_config: &RuntimeConfig) -> Result<AppState, WebBo
         )),
         Arc::new(ProjectWorkContextApi::new(pool.clone(), clock)),
         Arc::new(WorkspaceFileApi::new(resolve_ripgrep_path())),
+        Arc::new(plugin_manager),
     ))
 }
 
@@ -43,6 +52,7 @@ pub(crate) fn build_app_state_for_database(
     database_path: &Path,
     project_root: &Path,
     work_dir: &Path,
+    data_dir: &Path,
 ) -> Result<AppState, WebBootstrapError> {
     let backend = build_backend(
         database_path,
@@ -60,7 +70,23 @@ pub(crate) fn build_app_state_for_database(
         )),
         Arc::new(ProjectWorkContextApi::new(pool.clone(), clock)),
         Arc::new(WorkspaceFileApi::new(resolve_ripgrep_path())),
+        Arc::new(discover_plugins(data_dir)),
     ))
+}
+
+/// Captures one startup snapshot and reports every isolated package problem.
+fn discover_plugins(data_dir: &Path) -> PluginManager {
+    let manager = PluginManager::discover(data_dir);
+    for issue in manager.discovery_issues() {
+        ora_warn!(
+            message = "installed plugin manifest skipped during discovery",
+            path = %issue.path().display(),
+            issue_kind = issue.kind().as_str(),
+            field_path = issue.field_path().unwrap_or(""),
+            reason = issue.message(),
+        );
+    }
+    manager
 }
 
 /// Ensures the configured workspace project exists in persistent storage before readiness.
@@ -229,6 +255,7 @@ mod tests {
             temp_dir.path(),
             temp_dir.path(),
             &temp_dir.path().join("worktrees"),
+            temp_dir.path(),
         ) {
             Ok(_) => panic!("expected directory database path to fail"),
             Err(error) => error,

@@ -1,7 +1,8 @@
 use crate::app_state::AppState;
 use crate::handlers::{
-    agents, file_system, git, health, project_work_contexts, projects, sessions, skill_imports,
-    skills, snapshots, specs, task_diffs, tasks, workflow_runs, workflows, workspace_files,
+    agents, file_system, git, health, plugins, project_work_contexts, projects, sessions,
+    skill_imports, skills, snapshots, specs, task_diffs, tasks, workflow_runs, workflows,
+    workspace_files,
 };
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
@@ -9,8 +10,8 @@ use axum::middleware;
 use axum::routing::{get, post};
 use ora_contracts::{
     AGENT_IMPORT_COMMIT_PATH, AGENT_IMPORT_PREPARE_PATH, AGENT_PATH, AGENT_RUNTIME_STATUS_PATH,
-    AGENTS_PATH, FILE_SYSTEM_DIRECTORY_PATH, GIT_IDENTITY_PATH, PROJECT_BRANCHES_PATH,
-    PROJECT_PATH, PROJECT_SPEC_SOURCES_PATH, PROJECT_WORK_CONTEXT_OPEN_PATH,
+    AGENTS_PATH, FILE_SYSTEM_DIRECTORY_PATH, GIT_IDENTITY_PATH, INSTALLED_PLUGINS_PATH,
+    PROJECT_BRANCHES_PATH, PROJECT_PATH, PROJECT_SPEC_SOURCES_PATH, PROJECT_WORK_CONTEXT_OPEN_PATH,
     PROJECT_WORK_CONTEXT_RENEW_PATH, PROJECTS_PATH, SESSION_ATTACH_PATH, SESSION_CONFIG_PATH,
     SESSION_LOAD_PATH, SESSION_PATH, SESSION_PERMISSION_RESPONSE_PATH, SESSION_PROMPT_PATH,
     SESSION_RESUME_HISTORY_PATH, SESSION_STOP_PATH, SESSION_SWITCH_AGENT_PATH, SESSION_WARM_PATH,
@@ -166,6 +167,10 @@ pub fn build_router(app_state: AppState) -> Router {
             post(agents::prepare_agent_import),
         )
         .route(AGENT_IMPORT_COMMIT_PATH, post(agents::commit_agent_import))
+        // =============================================================================
+        // plugin
+        // =============================================================================
+        .route(INSTALLED_PLUGINS_PATH, get(plugins::list_installed_plugins))
         // =============================================================================
         // fileSystem
         // =============================================================================
@@ -325,10 +330,11 @@ mod tests {
         let database_path = temp_dir.path().join("ready.sqlite3");
         let project_root = initialize_git_repository(temp_dir.path().join("repo"));
         let work_dir = temp_dir.path().join("worktrees");
-        let app_state = build_app_state_for_database(&database_path, &project_root, &work_dir)
-            .unwrap_or_else(|error| {
-                panic!("expected application state bootstrap to succeed: {error}");
-            });
+        let app_state =
+            build_app_state_for_database(&database_path, &project_root, &work_dir, temp_dir.path())
+                .unwrap_or_else(|error| {
+                    panic!("expected application state bootstrap to succeed: {error}");
+                });
         let app = build_router(app_state);
         let response = match app
             .oneshot(
@@ -1813,10 +1819,11 @@ mod tests {
         let database_path = temp_dir.path().join("routes.sqlite3");
         let project_root = initialize_git_repository(temp_dir.path().join("repo"));
         let work_dir = temp_dir.path().join("worktrees");
-        let app_state = build_app_state_for_database(&database_path, &project_root, &work_dir)
-            .unwrap_or_else(|error| {
-                panic!("expected application state bootstrap to succeed: {error}");
-            });
+        let app_state =
+            build_app_state_for_database(&database_path, &project_root, &work_dir, temp_dir.path())
+                .unwrap_or_else(|error| {
+                    panic!("expected application state bootstrap to succeed: {error}");
+                });
         app_state.mark_ready();
 
         (temp_dir, database_path, build_router(app_state))

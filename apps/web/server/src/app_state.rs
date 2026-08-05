@@ -1,5 +1,6 @@
 use crate::service::{FileSystemApi, ProjectWorkContextApi, WorkspaceFileApi};
 use ora_backend::Backend;
+use ora_plugin_manager::PluginManager;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -10,6 +11,7 @@ pub struct AppState {
     file_system_api: Arc<FileSystemApi>,
     project_work_context_api: Arc<ProjectWorkContextApi>,
     workspace_file_api: Arc<WorkspaceFileApi>,
+    plugin_manager: Arc<PluginManager>,
     ready: Arc<AtomicBool>,
 }
 
@@ -20,12 +22,14 @@ impl AppState {
         file_system_api: Arc<FileSystemApi>,
         project_work_context_api: Arc<ProjectWorkContextApi>,
         workspace_file_api: Arc<WorkspaceFileApi>,
+        plugin_manager: Arc<PluginManager>,
     ) -> Self {
         Self {
             backend,
             file_system_api,
             project_work_context_api,
             workspace_file_api,
+            plugin_manager,
             ready: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -48,6 +52,10 @@ impl AppState {
     /// Returns the shared task-workspace filesystem API used by explorer and viewer routes.
     pub fn workspace_file_api(&self) -> &Arc<WorkspaceFileApi> {
         &self.workspace_file_api
+    }
+    /// Returns the immutable installed-plugin snapshot captured during bootstrap.
+    pub fn plugin_manager(&self) -> &Arc<PluginManager> {
+        &self.plugin_manager
     }
 
     /// Marks the runtime as ready after bootstrap finishes successfully.
