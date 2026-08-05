@@ -1830,6 +1830,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ora-plugin-manager"
+version = "0.0.0"
+dependencies = [
+ "pretty_assertions",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "tempfile",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "ora-process"
 version = "0.0.0"
 dependencies = [

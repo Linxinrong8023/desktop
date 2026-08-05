@@ -1,0 +1,22 @@
+[package]
+name = "ora-plugin-manager"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "ora_plugin_manager"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+semver = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_path_to_error = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

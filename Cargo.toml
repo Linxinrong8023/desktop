@@ -11,6 +11,7 @@ members = [
     "crates/gitlancer",
     "crates/history",
     "crates/logging",
+    "crates/plugin-manager",
     "crates/process",
     "crates/pty",
     "crates/scheduler",
@@ -40,6 +41,7 @@ ora-fs = { path = "crates/fs" }
 gitlancer = { path = "crates/gitlancer" }
 ora-history = { path = "crates/history" }
 ora-logging = { path = "crates/logging" }
+ora-plugin-manager = { path = "crates/plugin-manager" }
 ora-process = { path = "crates/process" }
 ora-pty = { path = "crates/pty" }
 ora-scheduler = { path = "crates/scheduler" }
@@ -61,9 +63,11 @@ portable-pty = "0.9"
 pretty_assertions = "1"
 r2d2 = "0.8"
 regex = "1"
+semver = "1"
 rusqlite = "0.37"
 serde = "1.0"
 serde_json = "1.0"
+serde_path_to_error = "0.1"
 serde_with = { version = "3" }
 serde_yaml = "0.9"
 tar = "0.4"
