@@ -1,6 +1,7 @@
 use crate::config::DesktopConfigStore;
 use crate::workspace_files::WorkspaceFileApi;
 use ora_backend::Backend;
+use ora_plugin_manager::PluginManager;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -9,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 pub struct DesktopState {
     pub backend: Backend,
+    pub plugin_manager: Arc<PluginManager>,
     pub config: DesktopConfigStore,
     pub workspace_files: Arc<WorkspaceFileApi>,
     pub stream_cancellations: Arc<Mutex<HashMap<String, CancellationToken>>>,

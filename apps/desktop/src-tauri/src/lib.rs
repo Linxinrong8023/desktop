@@ -14,6 +14,7 @@ use ora_logging::{
     FileLoggingConfig, LogLevel, LogOutput, LoggingConfig, RotationPolicy, init_logging, ora_info,
     ora_warn, register_gitlancer_logger,
 };
+use ora_plugin_manager::PluginManager;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex};
@@ -104,6 +105,10 @@ pub fn run() {
             commands::create_agent,
             commands::get_agent,
             commands::list_agents,
+            // =============================================================================
+            // plugin
+            // =============================================================================
+            commands::list_installed_plugins,
             commands::update_agent,
             commands::delete_agent,
             commands::prepare_agent_import,
@@ -204,16 +209,49 @@ fn bootstrap_desktop(
         ripgrep_path: ripgrep_path.clone(),
     })?;
     let workspace_files = Arc::new(workspace_files::WorkspaceFileApi::new(ripgrep_path));
+    let plugin_data_directory = desktop_plugin_data_directory(&app_data_directory);
+    let plugin_manager = PluginManager::discover(&plugin_data_directory);
+    for issue in plugin_manager.discovery_issues() {
+        ora_warn!(
+            message = "installed plugin manifest skipped during discovery",
+            path = %issue.path().display(),
+            issue_kind = issue.kind().as_str(),
+            field_path = issue.field_path().unwrap_or(""),
+            reason = issue.message(),
+        );
+    }
 
     Ok((
         DesktopState {
             backend,
+            plugin_manager: Arc::new(plugin_manager),
             config,
             workspace_files,
             stream_cancellations: Arc::new(Mutex::new(HashMap::new())),
         },
         DesktopRuntimeGuard { _logging: logging },
     ))
+}
+
+/// Resolves the plugin discovery root without changing any existing Desktop storage paths.
+fn desktop_plugin_data_directory(app_data_directory: &std::path::Path) -> std::path::PathBuf {
+    if let Some(configured) = std::env::var_os("ORA_DATA_DIR") {
+        let configured = std::path::PathBuf::from(configured);
+        if configured.is_absolute() {
+            return configured;
+        }
+        return std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(configured);
+    }
+
+    if cfg!(debug_assertions) {
+        return std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .join(".data");
+    }
+
+    app_data_directory.to_path_buf()
 }
 
 /// Resolves ripgrep from a development override or the executable directory in a release build.
