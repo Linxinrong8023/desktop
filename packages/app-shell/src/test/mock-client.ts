@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentCli,
   ContractsClient,
+  InstalledPlugin,
   Project,
   Session,
   Skill,
@@ -42,6 +43,7 @@ export interface MockClientState {
   sessions: Session[];
   agents: Agent[];
   skills: Skill[];
+  installedPlugins: InstalledPlugin[];
   workflows: MockWorkflowRecord[];
   workflowRuns: MockWorkflowRunRecord[];
   /** Warm sessions handed out but not yet attached, keyed by session id. */
@@ -64,6 +66,7 @@ export function createMockClientState(): MockClientState {
     sessions: [],
     agents: [],
     skills: [],
+    installedPlugins: [],
     workflows: [],
     workflowRuns: [],
     warmSessions: new Map(),
@@ -255,6 +258,9 @@ export function createMockClient(state: MockClientState): ContractsClient {
           { agentCli: "code_agent_cli", status: "ready" },
         ],
       }),
+    },
+    plugin: {
+      listInstalled: async () => ({ plugins: [...state.installedPlugins] }),
     },
     agent: {
       list: async () => ({ agents: [...state.agents] }),

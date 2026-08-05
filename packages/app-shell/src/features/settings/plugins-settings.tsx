@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { InstalledPlugin } from "@ora/contracts";
 import {
   Button,
   DropdownMenu,
@@ -18,6 +19,7 @@ import {
   IconDots,
   IconFilter,
   IconInfoCircle,
+  IconPlug,
   IconSearch,
   IconSettings,
   IconTrash,
@@ -36,6 +38,7 @@ import { PluginDetail } from "./plugin-detail";
 import { PluginManager } from "./plugin-manager";
 import { PluginTile } from "./plugin-tile";
 import { SettingsHeading } from "./settings-heading";
+import { useInstalledPlugins } from "../../state/hooks/use-installed-plugins";
 
 /** The number of leading names named in the collapsed "show more" row. */
 const NAMED_IN_SHOW_MORE = 2;
@@ -46,6 +49,10 @@ const NAMED_IN_SHOW_MORE = 2;
  * ~704px content column (76px per tile, 8px gaps).
  */
 const MAX_INSTALLED_TILES = 7;
+type InstalledEntry =
+  | { source: "catalog"; plugin: PluginEntry }
+  | { source: "discovered"; plugin: InstalledPlugin };
+
 
 /**
  * The plugin marketplace pane: an installed strip, a public/personal browse grid and a
@@ -57,6 +64,7 @@ const MAX_INSTALLED_TILES = 7;
 export function PluginsSettings() {
   const { t } = useTranslation();
   const [installedIds, setInstalledIds] = useState<string[]>(DEFAULT_INSTALLED_PLUGIN_IDS);
+  const discoveredPlugins = useInstalledPlugins().data ?? [];
   const [query, setQuery] = useState("");
   const [collection, setCollection] = useState<PluginCollection>("public");
   const [expanded, setExpanded] = useState(false);
@@ -97,6 +105,10 @@ export function PluginsSettings() {
     [isInstalled],
   );
 
+  const installedEntries: InstalledEntry[] = [
+    ...installed.map((plugin) => ({ source: "catalog" as const, plugin })),
+    ...discoveredPlugins.map((plugin) => ({ source: "discovered" as const, plugin })),
+  ];
   const needle = query.trim().toLowerCase();
   const visible = useMemo(() => PLUGIN_CATALOG.filter((plugin) => plugin.collection === collection
     && (!needle
@@ -124,6 +136,7 @@ export function PluginsSettings() {
         plugins={installed}
         disabledIds={disabledIds}
         onBack={() => setManaging(false)}
+        discoveredPlugins={discoveredPlugins}
         onOpen={setOpenId}
         onToggleEnabled={toggleEnabled}
         onUninstall={toggleInstall}
@@ -180,12 +193,18 @@ export function PluginsSettings() {
           </div>
           {/* Never wraps: the overflow tile is the row's last cell, not a second line. */}
           <div className="flex flex-nowrap items-start gap-x-2 overflow-hidden pt-2">
-            {installed.length === 0 && <p className="py-4 text-sm text-muted-foreground">{t("settings.plugins.noneInstalled")}</p>}
-            {installed.slice(0, MAX_INSTALLED_TILES).map((plugin) => (
-              <InstalledTile key={plugin.id} plugin={plugin} onOpen={() => setOpenId(plugin.id)} />
+            {installedEntries.length === 0 && <p className="py-4 text-sm text-muted-foreground">{t("settings.plugins.noneInstalled")}</p>}
+            {installedEntries.slice(0, MAX_INSTALLED_TILES).map((entry) => (
+              entry.source === "catalog"
+                ? <InstalledTile key={`catalog:${entry.plugin.id}`} plugin={entry.plugin} onOpen={() => setOpenId(entry.plugin.id)} />
+                : <DiscoveredInstalledTile key={`discovered:${entry.plugin.id}`} plugin={entry.plugin} />
             ))}
-            {installed.length > MAX_INSTALLED_TILES && (
-              <InstalledOverflowTile hidden={installed.length - MAX_INSTALLED_TILES} total={installed.length} onOpen={() => setManaging(true)} />
+            {installedEntries.length > MAX_INSTALLED_TILES && (
+              <InstalledOverflowTile
+                hidden={installedEntries.length - MAX_INSTALLED_TILES}
+                total={installedEntries.length}
+                onOpen={() => setManaging(true)}
+              />
             )}
           </div>
         </section>
@@ -270,11 +289,29 @@ function InstalledTile({ plugin, onOpen }: { plugin: PluginEntry; onOpen: () => 
   );
 }
 
+/** A discovered package is visible but intentionally has no local mutation controls. */
+function DiscoveredInstalledTile({ plugin }: { plugin: InstalledPlugin }) {
+  return (
+    <div
+      title={`${plugin.displayName} · ${plugin.packageName} · ${plugin.version}`}
+      className="flex w-[76px] shrink-0 flex-col items-center gap-1.5 rounded-lg pt-1.5"
+    >
+      <span className="flex size-11 shrink-0 items-center justify-center text-muted-foreground">
+        <IconPlug className="size-7" />
+      </span>
+      <span className="w-full truncate text-center text-[11px] leading-4 text-muted-foreground">
+        {plugin.displayName}
+      </span>
+    </div>
+  );
+}
+
 /**
  * Closes the installed strip once it overflows. It keeps an installed tile's exact
  * footprint — square mark, label underneath — so the row stays a single even grid
  * instead of wrapping onto a second line.
  */
+
 function InstalledOverflowTile({ hidden, total, onOpen }: { hidden: number; total: number; onOpen: () => void }) {
   const { t } = useTranslation();
   return (

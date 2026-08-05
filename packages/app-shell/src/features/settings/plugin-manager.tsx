@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { InstalledPlugin } from "@ora/contracts";
 import {
   Badge,
   Breadcrumb,
@@ -17,17 +18,17 @@ import {
   Input,
   Switch,
 } from "@ora/ui";
-import { IconDots, IconInfoCircle, IconSearch, IconTrash } from "@tabler/icons-react";
+import { IconDots, IconInfoCircle, IconPlug, IconSearch, IconTrash } from "@tabler/icons-react";
 import type { PluginEntry } from "./plugin-catalog";
 import { PluginTile } from "./plugin-tile";
 
 /**
- * The installed-plugin manager reached from the gear beside "Installed". It lists
- * plugins only — skills, MCP servers and apps are deliberately absent — with one
- * switch per row so a plugin can be turned off without uninstalling it.
+ * The installed-plugin manager keeps catalog interactions unchanged and appends
+ * discovered packages as read-only rows without detail, uninstall, or enable controls.
  */
-export function PluginManager({ plugins, disabledIds, onBack, onOpen, onToggleEnabled, onUninstall }: {
+export function PluginManager({ plugins, discoveredPlugins, disabledIds, onBack, onOpen, onToggleEnabled, onUninstall }: {
   plugins: PluginEntry[];
+  discoveredPlugins: InstalledPlugin[];
   disabledIds: string[];
   onBack: () => void;
   onOpen: (id: string) => void;
@@ -42,6 +43,10 @@ export function PluginManager({ plugins, disabledIds, onBack, onOpen, onToggleEn
     || plugin.name.toLowerCase().includes(needle)
     || plugin.publisher.toLowerCase().includes(needle)
     || t(plugin.summaryKey).toLowerCase().includes(needle)), [needle, plugins, t]);
+  const visibleDiscovered = useMemo(
+    () => filterDiscoveredPlugins(discoveredPlugins, needle),
+    [discoveredPlugins, needle],
+  );
 
   return (
     <div className="space-y-5">
@@ -63,7 +68,7 @@ export function PluginManager({ plugins, disabledIds, onBack, onOpen, onToggleEn
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Badge variant="secondary" className="h-7 shrink-0 gap-1.5 rounded-lg px-2.5 text-sm font-medium">
           {t("settings.plugins.title")}
-          <span className="font-normal text-muted-foreground">{plugins.length}</span>
+          <span className="font-normal text-muted-foreground">{plugins.length + discoveredPlugins.length}</span>
         </Badge>
         <div className="relative min-w-0 flex-1 sm:max-w-xs sm:ml-auto">
           <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -77,8 +82,8 @@ export function PluginManager({ plugins, disabledIds, onBack, onOpen, onToggleEn
         </div>
       </div>
 
-      {visible.length === 0
-        ? <p className="py-10 text-center text-sm text-muted-foreground">{plugins.length === 0 ? t("settings.plugins.noneInstalled") : t("settings.plugins.empty")}</p>
+      {visible.length === 0 && visibleDiscovered.length === 0
+        ? <p className="py-10 text-center text-sm text-muted-foreground">{plugins.length + discoveredPlugins.length === 0 ? t("settings.plugins.noneInstalled") : t("settings.plugins.empty")}</p>
         : (
           <div className="divide-y divide-border border-y border-border">
             {visible.map((plugin) => (
@@ -119,8 +124,34 @@ export function PluginManager({ plugins, disabledIds, onBack, onOpen, onToggleEn
                 />
               </div>
             ))}
+            {visibleDiscovered.map((plugin) => (
+              <div key={`discovered:${plugin.id}`} className="flex items-center gap-3 py-3">
+                <span className="flex size-10 shrink-0 items-center justify-center text-muted-foreground">
+                  <IconPlug className="size-6" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{plugin.displayName}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{plugin.packageName}</span>
+                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/80">
+                    {plugin.version} · {plugin.kind}
+                  </span>
+                </span>
+              </div>
+            ))}
           </div>
         )}
     </div>
   );
+}
+
+/** Filters discovered packages across every field exposed by installed-plugin search. */
+export function filterDiscoveredPlugins(plugins: InstalledPlugin[], query: string): InstalledPlugin[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return plugins;
+  return plugins.filter((plugin) => [
+    plugin.displayName,
+    plugin.packageName,
+    plugin.id,
+    ...plugin.agents.map((agent) => agent.displayName),
+  ].some((value) => value.toLowerCase().includes(needle)));
 }
