@@ -143,6 +143,10 @@ export function createContractsClient(
       commit: (request, options) =>
         executeOperation("commitAgentImport", request, transport, options),
     },
+    plugin: {
+      listInstalled: (request, options) =>
+        executeOperation("listInstalledPlugins", request, transport, options),
+    },
     fileSystem: {
       listDirectory: (request, options) =>
         executeOperation("listDirectory", request, transport, options),

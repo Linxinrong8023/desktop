@@ -394,6 +394,8 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "PrepareAgentImportResponse"
         | "CommitAgentImportRequest"
         | "CommitAgentImportResponse" => "agent-import",
+        // plugin
+        "ListInstalledPluginsRequest" | "ListInstalledPluginsResponse" => "plugin",
         // workflow
         "CreateWorkflowRequest"
         | "CreateWorkflowResponse"

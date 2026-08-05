@@ -45,6 +45,7 @@ pub const AGENT_PATH: &str = "/api/agents/{agentId}";
 pub const AGENT_IMPORT_PREPARE_PATH: &str = "/api/agent-imports/prepare";
 pub const AGENT_IMPORT_COMMIT_PATH: &str = "/api/agent-imports/commit";
 pub const FILE_SYSTEM_DIRECTORY_PATH: &str = "/api/file-system/directory";
+pub const INSTALLED_PLUGINS_PATH: &str = "/api/plugins/installed";
 pub const WORKSPACE_DIRECTORY_PATH: &str = "/api/tasks/{taskId}/files/list";
 pub const WORKSPACE_FILE_PATH: &str = "/api/tasks/{taskId}/files/read";
 pub const WORKSPACE_SEARCH_PATH: &str = "/api/tasks/{taskId}/files/search";

@@ -301,6 +301,34 @@ test("splits task diff comment identifiers from the review body", async () => {
   ]);
 });
 
+test("lists installed plugins with a bodyless GET request", async () => {
+  const requests: ContractTransportRequest[] = [];
+  const response = {
+    plugins: [{
+      id: "ora.reviewer",
+      packageName: "@ora-plugins/reviewer",
+      displayName: "Reviewer",
+      version: "1.0.0",
+      kind: "agent",
+      main: "dist/index.js",
+      agents: [],
+    }],
+  };
+  const client = createContractsClient(recordingTransport(requests, response));
+
+  const actual = await client.plugin.listInstalled({});
+
+  assert.deepEqual(requests, [{
+    operationName: "listInstalledPlugins",
+    request: {},
+    method: "GET",
+    path: "/api/plugins/installed",
+    body: undefined,
+    headers: {},
+  }]);
+  assert.deepEqual(actual, response);
+});
+
 test("omits standalone worktree operations from generated contracts", () => {
   assert.equal("createWorktree" in endpoints, false);
   assert.equal("getWorktree" in endpoints, false);

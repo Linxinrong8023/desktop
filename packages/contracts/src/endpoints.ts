@@ -3,6 +3,7 @@ import type { CreateAgentRequest, CreateAgentResponse, DeleteAgentRequest, Delet
 import type { CommitAgentImportRequest, CommitAgentImportResponse, PrepareAgentImportRequest, PrepareAgentImportResponse } from "./agent-import.js";
 import type { ListDirectoryRequest, ListDirectoryResponse, ListWorkspaceDirectoryRequest, ListWorkspaceDirectoryResponse, ReadWorkspaceFileRequest, ReadWorkspaceFileResponse, SearchWorkspaceRequest, SearchWorkspaceResponse, WatchWorkspaceRequest, WorkspaceFileEventBatch } from "./file-system.js";
 import type { GetGitIdentityRequest, GitIdentityResponse } from "./git.js";
+import type { ListInstalledPluginsRequest, ListInstalledPluginsResponse } from "./plugin.js";
 import type { CreateProjectRequest, CreateProjectResponse, DeleteProjectRequest, DeleteProjectResponse, GetProjectRequest, GetProjectResponse, ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse, UpdateProjectRequest, UpdateProjectResponse } from "./project.js";
 import type { OpenProjectWorkContextRequest, OpenProjectWorkContextResponse, RenewProjectWorkContextRequest, RenewProjectWorkContextResponse } from "./project-work-context.js";
 import type { AttachSessionRequest, AttachSessionResponse, DeleteSessionRequest, DeleteSessionResponse, GetAgentRuntimeStatusRequest, GetAgentRuntimeStatusResponse, GetSessionRequest, GetSessionResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionEvent, LoadSessionRequest, PromptSessionEvent, PromptSessionRequest, RespondToPermissionRequest, RespondToPermissionResponse, ResumeSessionHistoryRequest, ResumeSessionHistoryResponse, SetSessionConfigRequest, SetSessionConfigResponse, StopSessionRequest, StopSessionResponse, SwitchSessionAgentRequest, SwitchSessionAgentResponse, WarmSessionRequest, WarmSessionResponse } from "./session.js";
@@ -90,6 +91,7 @@ export type RequestByOperation = {
   deleteAgent: DeleteAgentRequest;
   prepareAgentImport: PrepareAgentImportRequest;
   commitAgentImport: CommitAgentImportRequest;
+  listInstalledPlugins: ListInstalledPluginsRequest;
   listDirectory: ListDirectoryRequest;
   listWorkspaceDirectory: ListWorkspaceDirectoryRequest;
   readWorkspaceFile: ReadWorkspaceFileRequest;
@@ -174,6 +176,7 @@ export type ResponseByOperation = {
   deleteAgent: DeleteAgentResponse;
   prepareAgentImport: PrepareAgentImportResponse;
   commitAgentImport: CommitAgentImportResponse;
+  listInstalledPlugins: ListInstalledPluginsResponse;
   listDirectory: ListDirectoryResponse;
   listWorkspaceDirectory: ListWorkspaceDirectoryResponse;
   readWorkspaceFile: ReadWorkspaceFileResponse;
@@ -859,6 +862,19 @@ export const endpoints = {
     pathParams: [],
     queryParams: [],
     hasJsonBody: true,
+  },
+  listInstalledPlugins: {
+    operationName: "listInstalledPlugins",
+    namespace: "plugin",
+    memberName: "listInstalled",
+    method: "GET",
+    pathTemplate: "/api/plugins/installed",
+    requestType: "ListInstalledPluginsRequest",
+    responseType: "ListInstalledPluginsResponse",
+    responseMode: "unary",
+    pathParams: [],
+    queryParams: [],
+    hasJsonBody: false,
   },
   listDirectory: {
     operationName: "listDirectory",

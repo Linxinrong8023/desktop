@@ -2,6 +2,7 @@ import type * as acp from "./acp/index.js";
 import type { Agent } from "./agent.js";
 import type { AgentCli } from "./session.js";
 import type { ContractsClient } from "./client.js";
+import type { InstalledPlugin } from "./plugin.js";
 import type { Project } from "./project.js";
 import type { ProjectWorkContext } from "./project-work-context.js";
 import type { Session } from "./session.js";
@@ -23,6 +24,7 @@ export interface MemoryContractsState {
   sessions: Session[];
   agents: Array<Agent & { content?: string }>;
   skills: Array<Skill & { content?: string }>;
+  plugins: InstalledPlugin[];
   workflows: MemoryWorkflowRecord[];
   /** Warm sessions handed out but not yet attached, keyed by session id. */
   warmSessions: Map<string, AgentCli>;
@@ -40,6 +42,7 @@ export function createMemoryContractsState(
     sessions: structuredClone(seed.sessions ?? []),
     agents: structuredClone(seed.agents ?? []),
     skills: structuredClone(seed.skills ?? []),
+    plugins: structuredClone(seed.plugins ?? []),
     workflows: structuredClone(seed.workflows ?? []),
     warmSessions: seed.warmSessions ?? new Map(),
     configOptions: structuredClone(seed.configOptions ?? [
@@ -320,6 +323,9 @@ export function createMemoryContractsClient(
       commit: async () => {
         throw new Error("agentImport.commit not implemented in memory client");
       },
+    },
+    plugin: {
+      listInstalled: async () => ({ plugins: structuredClone(state.plugins) }),
     },
     skill: {
       list: async () => ({ skills: structuredClone(state.skills) }),
