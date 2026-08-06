@@ -89,14 +89,17 @@ fn reports_blank_name_not_found_and_repository_errors() {
         description: "Invalid".to_string(),
     })
     .unwrap_err();
-    let missing = GetSkillHandler::new(Rc::new(FakeSkillRepository::default()))
-        .handle(GetSkillRequest {
-            skill_id: "missing".to_string(),
-        })
-        .unwrap_err();
+    let missing = GetSkillHandler::new(
+        Rc::new(FakeSkillRepository::default()),
+        Rc::new(FakeSkillStorage::default()),
+    )
+    .handle(GetSkillRequest {
+        skill_id: "missing".to_string(),
+    })
+    .unwrap_err();
     let failing = Rc::new(FakeSkillRepository::default());
     failing.fail_next(RepositoryError::new(std::io::Error::other("unavailable")));
-    let repository_error = GetSkillHandler::new(failing)
+    let repository_error = GetSkillHandler::new(failing, Rc::new(FakeSkillStorage::default()))
         .handle(GetSkillRequest {
             skill_id: "skill-1".to_string(),
         })
@@ -208,7 +211,7 @@ fn soft_delete_hides_a_skill_by_id() {
         .unwrap();
 
     assert_eq!(
-        GetSkillHandler::new(repository).handle(GetSkillRequest {
+        GetSkillHandler::new(repository, storage.clone()).handle(GetSkillRequest {
             skill_id: "skill-1".to_string()
         }),
         Err(ApplicationError::SkillNotFound {

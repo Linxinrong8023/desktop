@@ -137,6 +137,12 @@ export function createContractsClient(
       update: (request, options) => executeOperation("updateAgent", request, transport, options),
       delete: (request, options) => executeOperation("deleteAgent", request, transport, options),
     },
+    agentImport: {
+      prepare: (request, options) =>
+        executeOperation("prepareAgentImport", request, transport, options),
+      commit: (request, options) =>
+        executeOperation("commitAgentImport", request, transport, options),
+    },
     fileSystem: {
       listDirectory: (request, options) =>
         executeOperation("listDirectory", request, transport, options),

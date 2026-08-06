@@ -216,6 +216,16 @@ impl From<ApplicationError> for BackendError {
                 PublicError::AgentNameBlank(EmptyErrorParams {}),
                 "agent definition name must not be blank",
             ),
+            ApplicationError::AgentImportInvalid => (
+                ErrorClassification::InvalidRequest,
+                PublicError::InvalidRequest(EmptyErrorParams {}),
+                "agent import Markdown is invalid",
+            ),
+            ApplicationError::AgentImportDecisionMissing => (
+                ErrorClassification::InvalidRequest,
+                PublicError::InvalidRequest(EmptyErrorParams {}),
+                "agent import conflict decision is missing",
+            ),
             ApplicationError::AgentDefinitionNotFound { .. } => (
                 ErrorClassification::NotFound,
                 PublicError::AgentNotFound(EmptyErrorParams {}),

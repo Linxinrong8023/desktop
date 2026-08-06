@@ -8,7 +8,8 @@ use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{get, post};
 use ora_contracts::{
-    AGENT_PATH, AGENT_RUNTIME_STATUS_PATH, AGENTS_PATH, FILE_SYSTEM_DIRECTORY_PATH,
+    AGENT_IMPORT_COMMIT_PATH, AGENT_IMPORT_PREPARE_PATH, AGENT_PATH, AGENT_RUNTIME_STATUS_PATH,
+    AGENTS_PATH, FILE_SYSTEM_DIRECTORY_PATH,
     GIT_IDENTITY_PATH, PROJECT_BRANCHES_PATH, PROJECT_PATH, PROJECT_SPEC_SOURCES_PATH,
     PROJECT_WORK_CONTEXT_OPEN_PATH, PROJECT_WORK_CONTEXT_RENEW_PATH, PROJECTS_PATH,
     SESSION_ATTACH_PATH, SESSION_CONFIG_PATH, SESSION_LOAD_PATH, SESSION_PATH,
@@ -161,6 +162,11 @@ pub fn build_router(app_state: AppState) -> Router {
                 .put(agents::update_agent)
                 .delete(agents::delete_agent),
         )
+        .route(
+            AGENT_IMPORT_PREPARE_PATH,
+            post(agents::prepare_agent_import),
+        )
+        .route(AGENT_IMPORT_COMMIT_PATH, post(agents::commit_agent_import))
         // =============================================================================
         // fileSystem
         // =============================================================================
@@ -1596,6 +1602,89 @@ mod tests {
         let delete_run = request_empty(&app, Method::DELETE, &run_path).await;
         assert_eq!(delete_run.status(), StatusCode::OK);
         assert_eq!(response_json(delete_run).await["runId"], json!(run_id));
+    }
+
+    /// Verifies one Markdown document is sent as JSON, imported, read back, and conflict-skipped.
+    #[tokio::test]
+    async fn imports_agent_markdown_through_json_routes() {
+        let (_temp_dir, _database_path, app) = test_router();
+        let markdown =
+            "---\nname: review-agent\ndescription: Reviews changes\n---\nReview changes.\n";
+
+        let prepare = request_json(
+            &app,
+            Method::POST,
+            "/api/agent-imports/prepare",
+            json!({ "content": markdown }),
+        )
+        .await;
+        assert_eq!(prepare.status(), StatusCode::OK);
+        let candidate = response_json(prepare).await;
+        assert_eq!(candidate["candidate"]["status"], "ready");
+        assert_eq!(candidate["candidate"]["name"], "review-agent");
+        assert_eq!(candidate["candidate"]["existingAgent"], Value::Null);
+
+        let commit = request_json(
+            &app,
+            Method::POST,
+            "/api/agent-imports/commit",
+            json!({
+                "content": markdown,
+                "decision": null,
+                "expectedAgentId": null,
+                "expectedUpdatedAt": null,
+            }),
+        )
+        .await;
+        assert_eq!(commit.status(), StatusCode::OK);
+        let imported = response_json(commit).await;
+        assert_eq!(imported["status"], "imported");
+        let agent_id = imported["agent"]["id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("import response did not include an agent id"));
+        let details = response_json(
+            request_empty(&app, Method::GET, &format!("/api/agents/{agent_id}")).await,
+        )
+        .await;
+        assert_eq!(details["agent"]["content"], "Review changes.");
+
+        let conflict = response_json(
+            request_json(
+                &app,
+                Method::POST,
+                "/api/agent-imports/prepare",
+                json!({ "content": markdown }),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(conflict["candidate"]["status"], "conflict");
+        assert_eq!(conflict["candidate"]["existingAgent"]["agentId"], agent_id);
+        let skipped = response_json(
+            request_json(
+                &app,
+                Method::POST,
+                "/api/agent-imports/commit",
+                json!({
+                    "content": markdown,
+                    "decision": "skip",
+                    "expectedAgentId": agent_id,
+                    "expectedUpdatedAt": conflict["candidate"]["existingAgent"]["updatedAt"],
+                }),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(skipped, json!({ "status": "skipped", "agent": null }));
+
+        let invalid = request_json(
+            &app,
+            Method::POST,
+            "/api/agent-imports/prepare",
+            json!({ "content": "# Missing frontmatter" }),
+        )
+        .await;
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
     }
 
     /// Sends one JSON request to the router under test.

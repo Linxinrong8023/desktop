@@ -1115,6 +1115,7 @@ fn agent(
         AgentDefinitionId::new(id),
         name,
         description,
+        "",
         AuditFields::new(created_at, updated_at, is_deleted),
     )
     .unwrap()

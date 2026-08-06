@@ -11,6 +11,17 @@ pub struct Agent {
     pub description: String,
 }
 
+/// Describes one configurable agent together with its imported Markdown content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "agent.ts")]
+pub struct AgentDetails {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub content: String,
+}
+
 /// Carries the public fields required to create a configurable agent type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -41,7 +52,7 @@ pub struct GetAgentRequest {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "agent.ts")]
 pub struct GetAgentResponse {
-    pub agent: Agent,
+    pub agent: AgentDetails,
 }
 
 /// Requests every visible configurable agent type in stable storage order.
@@ -95,6 +106,7 @@ pub struct DeleteAgentResponse {
 /// Exports every TypeScript binding declared in this module into the target directory.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     Agent::export(config)?;
+    AgentDetails::export(config)?;
     CreateAgentRequest::export(config)?;
     CreateAgentResponse::export(config)?;
     GetAgentRequest::export(config)?;
@@ -167,9 +179,14 @@ mod tests {
         );
         assert_serialized_json(
             &GetAgentResponse {
-                agent: agent.clone(),
+                agent: super::AgentDetails {
+                    id: agent.id.clone(),
+                    name: agent.name.clone(),
+                    description: agent.description.clone(),
+                    content: "# Instructions".to_string(),
+                },
             },
-            json!({ "agent": { "id": "agent-1", "name": "opencode", "description": "OpenCode agent configuration" } }),
+            json!({ "agent": { "id": "agent-1", "name": "opencode", "description": "OpenCode agent configuration", "content": "# Instructions" } }),
         );
         assert_serialized_json(&ListAgentsRequest {}, json!({}));
         assert_serialized_json(

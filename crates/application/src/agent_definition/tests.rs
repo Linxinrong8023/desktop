@@ -133,6 +133,19 @@ impl AgentDefinitionRepository for Rc<FakeAgentRepository> {
             .find(|agent| agent.id == *agent_id && !agent.audit_fields.is_deleted)
             .cloned())
     }
+    fn find_agent_definition_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<AgentDefinition>, RepositoryError> {
+        self.take_error()?;
+        Ok(self
+            .agents
+            .borrow()
+            .iter()
+            .find(|agent| agent.name.eq_ignore_ascii_case(name) && !agent.audit_fields.is_deleted)
+            .cloned())
+    }
+
     fn list_agent_definitions(&self) -> Result<Vec<AgentDefinition>, RepositoryError> {
         self.take_error()?;
         Ok(self
@@ -192,6 +205,7 @@ fn agent(
         AgentDefinitionId::new(id),
         name,
         description,
+        "",
         AuditFields::new(created_at, updated_at, is_deleted),
     )
     .unwrap()

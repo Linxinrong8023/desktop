@@ -6,6 +6,16 @@
 export type Agent = { id: string; name: string; description: string };
 
 /**
+ * Describes one configurable agent together with its imported Markdown content.
+ */
+export type AgentDetails = {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+};
+
+/**
  * Carries the public fields required to create a configurable agent type.
  */
 export type CreateAgentRequest = { name: string; description: string };
@@ -33,7 +43,7 @@ export type GetAgentRequest = { agentId: string };
 /**
  * Returns one visible configurable agent type.
  */
-export type GetAgentResponse = { agent: Agent };
+export type GetAgentResponse = { agent: AgentDetails };
 
 /**
  * Requests every visible configurable agent type in stable storage order.

@@ -598,6 +598,23 @@ impl Backend {
     ) -> Result<DeleteAgentResponse, BackendError> {
         self.agent.delete(request).map_err(BackendError::from)
     }
+    pub fn prepare_agent_import(
+        &self,
+        request: PrepareAgentImportRequest,
+    ) -> Result<PrepareAgentImportResponse, BackendError> {
+        self.agent
+            .prepare_import(request)
+            .map_err(BackendError::from)
+    }
+
+    pub fn commit_agent_import(
+        &self,
+        request: CommitAgentImportRequest,
+    ) -> Result<CommitAgentImportResponse, BackendError> {
+        self.agent
+            .commit_import(request)
+            .map_err(BackendError::from)
+    }
 
     // =============================================================================
     // gitIdentity

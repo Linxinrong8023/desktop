@@ -28,7 +28,7 @@ export type GetSkillRequest = { skillId: string };
 /**
  * Returns one visible skill.
  */
-export type GetSkillResponse = { skill: Skill };
+export type GetSkillResponse = { skill: SkillDetails };
 
 /**
  * Requests every visible skill in stable storage order.
@@ -44,6 +44,16 @@ export type ListSkillsResponse = { skills: Array<Skill> };
  * Describes a public skill payload without persistence audit metadata.
  */
 export type Skill = { id: string; name: string; description: string };
+
+/**
+ * Describes one skill together with the Markdown body from its SKILL.md.
+ */
+export type SkillDetails = {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+};
 
 /**
  * Replaces one skill located by its stable identifier.

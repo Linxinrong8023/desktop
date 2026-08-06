@@ -14,9 +14,9 @@ mod workflow_run;
 mod worktree;
 
 pub use agent_definition::{
-    AgentDefinitionIdGenerator, AgentDefinitionRepository, CreateAgentDefinitionHandler,
-    DeleteAgentDefinitionHandler, GetAgentDefinitionHandler, ListAgentDefinitionsHandler,
-    UpdateAgentDefinitionHandler, UuidAgentDefinitionIdGenerator,
+    AgentDefinitionIdGenerator, AgentDefinitionRepository, AgentImportService,
+    CreateAgentDefinitionHandler, DeleteAgentDefinitionHandler, GetAgentDefinitionHandler,
+    ListAgentDefinitionsHandler, UpdateAgentDefinitionHandler, UuidAgentDefinitionIdGenerator,
 };
 pub use error::ApplicationError;
 pub use project::{

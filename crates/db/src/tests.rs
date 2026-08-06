@@ -128,16 +128,20 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
 
     let connection = Connection::open(&database_path).unwrap();
     for table_name in ["skills", "agents"] {
+        let mut expected_columns = vec![
+            "id".to_string(),
+            "name".to_string(),
+            "description".to_string(),
+            "created_at".to_string(),
+            "updated_at".to_string(),
+            "is_deleted".to_string(),
+        ];
+        if table_name == "agents" {
+            expected_columns.push("content".to_string());
+        }
         assert_eq!(
             load_table_column_names(&connection, table_name),
-            vec![
-                "id".to_string(),
-                "name".to_string(),
-                "description".to_string(),
-                "created_at".to_string(),
-                "updated_at".to_string(),
-                "is_deleted".to_string(),
-            ]
+            expected_columns
         );
 
         connection

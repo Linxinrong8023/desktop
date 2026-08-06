@@ -1,4 +1,4 @@
-use crate::agent_definition::mapper::map_agent_definition;
+use crate::agent_definition::mapper::{map_agent_definition, map_agent_definition_details};
 use crate::agent_definition::ports::{AgentDefinitionIdGenerator, AgentDefinitionRepository};
 use crate::{ApplicationError, Clock};
 use ora_contracts::{
@@ -44,6 +44,7 @@ where
             self.id_generator.generate_agent_definition_id(),
             request.name,
             request.description,
+            "",
             AuditFields::new(now, now, false),
         )
         .map_err(ApplicationError::from_agent_definition_domain_error)?;
@@ -85,7 +86,7 @@ where
             })?;
 
         Ok(GetAgentResponse {
-            agent: map_agent_definition(agent_definition),
+            agent: map_agent_definition_details(agent_definition),
         })
     }
 }
@@ -154,6 +155,7 @@ where
             agent_id,
             request.name,
             request.description,
+            existing.content,
             AuditFields::new(
                 existing.audit_fields.created_at,
                 self.clock.now_timestamp_millis(),

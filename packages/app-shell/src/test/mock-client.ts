@@ -258,7 +258,7 @@ export function createMockClient(state: MockClientState): ContractsClient {
     },
     agent: {
       list: async () => ({ agents: [...state.agents] }),
-      get: async (req) => ({ agent: state.agents.find((a) => a.id === req.agentId)! }),
+      get: async (req) => ({ agent: { ...state.agents.find((a) => a.id === req.agentId)!, content: "" } }),
       create: async (req) => {
         const agent: Agent = { id: nextId("a", state.agents.length), name: req.name, description: req.description };
         state.agents.push(agent);
@@ -277,9 +277,13 @@ export function createMockClient(state: MockClientState): ContractsClient {
         return { agentId: req.agentId };
       },
     },
+    agentImport: {
+      prepare: async () => { throw new Error("agentImport not implemented in mock"); },
+      commit: async () => { throw new Error("agentImport not implemented in mock"); },
+    },
     skill: {
       list: async () => ({ skills: [...state.skills] }),
-      get: async (req) => ({ skill: state.skills.find((s) => s.id === req.skillId)! }),
+      get: async (req) => ({ skill: { ...state.skills.find((s) => s.id === req.skillId)!, content: "" } }),
       create: async (req) => {
         const skill: Skill = { id: nextId("sk", state.skills.length), name: req.name, description: req.description };
         state.skills.push(skill);
