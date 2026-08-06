@@ -21,8 +21,8 @@ export interface MemoryContractsState {
   projects: Project[];
   tasks: Task[];
   sessions: Session[];
-  agents: Agent[];
-  skills: Skill[];
+  agents: Array<Agent & { content?: string }>;
+  skills: Array<Skill & { content?: string }>;
   workflows: MemoryWorkflowRecord[];
   /** Warm sessions handed out but not yet attached, keyed by session id. */
   warmSessions: Map<string, AgentCli>;
@@ -282,23 +282,28 @@ export function createMemoryContractsClient(
     agent: {
       list: async () => ({ agents: structuredClone(state.agents) }),
       get: async (request) => ({
-        agent: structuredClone(requireRecord(state.agents, request.agentId, "agent")),
+        agent: {
+          ...structuredClone(requireRecord(state.agents, request.agentId, "agent")),
+          content: requireRecord(state.agents, request.agentId, "agent").content ?? "",
+        },
       }),
       create: async (request) => {
-        const agent: Agent = {
+        const agent: Agent & { content: string } = {
           id: nextId("a", state.agents),
           name: request.name,
           description: request.description,
+          content: request.content ?? "",
         };
         state.agents.push(agent);
         return { agent: structuredClone(agent) };
       },
       update: async (request) => {
         const index = requireRecordIndex(state.agents, request.agentId, "agent");
-        const agent: Agent = {
+        const agent: Agent & { content: string } = {
           id: request.agentId,
           name: request.name,
           description: request.description,
+          content: request.content ?? state.agents[index]!.content ?? "",
         };
         state.agents[index] = agent;
         return { agent: structuredClone(agent) };
@@ -308,26 +313,39 @@ export function createMemoryContractsClient(
         return { agentId: request.agentId };
       },
     },
+    agentImport: {
+      prepare: async () => {
+        throw new Error("agentImport.prepare not implemented in memory client");
+      },
+      commit: async () => {
+        throw new Error("agentImport.commit not implemented in memory client");
+      },
+    },
     skill: {
       list: async () => ({ skills: structuredClone(state.skills) }),
       get: async (request) => ({
-        skill: structuredClone(requireRecord(state.skills, request.skillId, "skill")),
+        skill: {
+          ...structuredClone(requireRecord(state.skills, request.skillId, "skill")),
+          content: requireRecord(state.skills, request.skillId, "skill").content ?? "",
+        },
       }),
       create: async (request) => {
-        const skill: Skill = {
+        const skill: Skill & { content: string } = {
           id: nextId("sk", state.skills),
           name: request.name,
           description: request.description,
+          content: request.content ?? "",
         };
         state.skills.push(skill);
         return { skill: structuredClone(skill) };
       },
       update: async (request) => {
         const index = requireRecordIndex(state.skills, request.skillId, "skill");
-        const skill: Skill = {
+        const skill: Skill & { content: string } = {
           id: request.skillId,
           name: request.name,
           description: request.description,
+          content: request.content ?? state.skills[index]!.content ?? "",
         };
         state.skills[index] = skill;
         return { skill: structuredClone(skill) };
