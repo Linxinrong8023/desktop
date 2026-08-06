@@ -23,6 +23,8 @@ pub struct AgentPath {
 pub struct UpdateAgentBody {
     name: String,
     description: String,
+    #[serde(default)]
+    content: Option<String>,
 }
 
 /// Creates one configurable agent type from its JSON payload.
@@ -74,6 +76,7 @@ pub async fn update_agent(
             agent_id: path.agent_id,
             name: body.name,
             description: body.description,
+            content: body.content,
         })
         .map(Json)
         .map_err(Into::into)

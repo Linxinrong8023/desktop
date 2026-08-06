@@ -44,7 +44,7 @@ where
             self.id_generator.generate_agent_definition_id(),
             request.name,
             request.description,
-            "",
+            request.content.unwrap_or_default(),
             AuditFields::new(now, now, false),
         )
         .map_err(ApplicationError::from_agent_definition_domain_error)?;
@@ -155,7 +155,7 @@ where
             agent_id,
             request.name,
             request.description,
-            existing.content,
+            request.content.unwrap_or(existing.content),
             AuditFields::new(
                 existing.audit_fields.created_at,
                 self.clock.now_timestamp_millis(),

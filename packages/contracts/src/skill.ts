@@ -3,7 +3,11 @@
 /**
  * Carries the public fields required to create a skill.
  */
-export type CreateSkillRequest = { name: string; description: string };
+export type CreateSkillRequest = {
+  name: string;
+  description: string;
+  content?: string;
+};
 
 /**
  * Returns one created skill.
@@ -62,6 +66,7 @@ export type UpdateSkillRequest = {
   skillId: string;
   name: string;
   description: string;
+  content?: string;
 };
 
 /**

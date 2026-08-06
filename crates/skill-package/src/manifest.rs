@@ -50,42 +50,51 @@ pub const MAX_DESCRIPTION_BYTES: usize = 4096;
 
 /// Renders the minimal `SKILL.md` manifest used for ordinary skill creation.
 pub fn render_minimal_manifest(name: &str, description: &str) -> String {
-    format!("{}---\n", render_front_matter(name, description))
+    render_manifest(name, description, "")
+}
+
+/// Renders a `SKILL.md` manifest with managed front matter and one Markdown body.
+pub fn render_manifest(name: &str, description: &str, body: &str) -> String {
+    format!("{}---\n{body}", render_front_matter(name, description))
 }
 
 /// Rewrites one existing manifest, replacing `name` and `description` while preserving unknown
 /// front-matter values and the Markdown body verbatim.
-///
-/// The front matter is re-serialized, so field order, quoting style, and comments are not
-/// guaranteed to survive; the body after the closing fence is kept byte-for-byte. When the
-/// existing file has no parseable front matter, a fresh block is prepended and the whole
-/// original content is preserved as body.
 pub fn rewrite_manifest(
     content: &[u8],
     name: &str,
     description: &str,
 ) -> Result<String, ManifestError> {
+    rewrite_manifest_impl(content, name, description, None)
+}
+
+/// Rewrites managed metadata and replaces the Markdown body while preserving unknown front matter.
+pub fn rewrite_manifest_body(
+    content: &[u8],
+    name: &str,
+    description: &str,
+    body: &str,
+) -> Result<String, ManifestError> {
+    rewrite_manifest_impl(content, name, description, Some(body))
+}
+
+fn rewrite_manifest_impl(
+    content: &[u8],
+    name: &str,
+    description: &str,
+    replacement_body: Option<&str>,
+) -> Result<String, ManifestError> {
     let text = std::str::from_utf8(content).map_err(|_| ManifestError::YamlInvalid)?;
     match split_front_matter_parts(text) {
         Ok((front_matter, body_start)) => {
-            let body = &text[body_start..];
+            let body = replacement_body.unwrap_or(&text[body_start..]);
             let mut value: Value = match serde_yaml::from_str(front_matter) {
                 Ok(value) => value,
-                Err(_) => {
-                    return Ok(format!(
-                        "{}---\n{text}",
-                        render_front_matter(name, description)
-                    ));
-                }
+                Err(_) => return Ok(render_manifest(name, description, body)),
             };
             let mapping = match value.as_mapping_mut() {
                 Some(mapping) => mapping,
-                None => {
-                    return Ok(format!(
-                        "{}---\n{text}",
-                        render_front_matter(name, description)
-                    ));
-                }
+                None => return Ok(render_manifest(name, description, body)),
             };
             mapping.insert(
                 Value::String("name".to_string()),
@@ -98,15 +107,14 @@ pub fn rewrite_manifest(
             let yaml = serde_yaml::to_string(&value).map_err(|_| ManifestError::YamlInvalid)?;
             Ok(format!("---\n{yaml}---\n{body}"))
         }
-        // No front matter present: preserve everything as body behind a fresh block.
-        Err(ManifestError::NameMissing) => Ok(format!(
-            "{}---\n{text}",
-            render_front_matter(name, description)
+        Err(ManifestError::NameMissing) => Ok(render_manifest(
+            name,
+            description,
+            replacement_body.unwrap_or(text),
         )),
         Err(error) => Err(error),
     }
 }
-
 /// Renders a `---\n<yaml>\n---\n` front-matter block with safe quoting of both values.
 fn render_front_matter(name: &str, description: &str) -> String {
     let mut mapping = serde_yaml::Mapping::new();

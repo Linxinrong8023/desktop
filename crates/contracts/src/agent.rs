@@ -29,6 +29,9 @@ pub struct AgentDetails {
 pub struct CreateAgentRequest {
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub content: Option<String>,
 }
 
 /// Returns one created configurable agent type.
@@ -77,6 +80,9 @@ pub struct UpdateAgentRequest {
     pub agent_id: String,
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub content: Option<String>,
 }
 
 /// Returns the replacement configurable agent type.
@@ -162,8 +168,9 @@ mod tests {
             &CreateAgentRequest {
                 name: agent.name.clone(),
                 description: agent.description.clone(),
+                content: Some("# Instructions".to_string()),
             },
-            json!({ "name": "opencode", "description": "OpenCode agent configuration" }),
+            json!({ "name": "opencode", "description": "OpenCode agent configuration", "content": "# Instructions" }),
         );
         assert_serialized_json(
             &CreateAgentResponse {
@@ -200,9 +207,23 @@ mod tests {
                 agent_id: "agent-1".to_string(),
                 name: "reviewer".to_string(),
                 description: "Reviews changes".to_string(),
+                content: Some("Updated instructions".to_string()),
             },
-            json!({ "agentId": "agent-1", "name": "reviewer", "description": "Reviews changes" }),
+            json!({ "agentId": "agent-1", "name": "reviewer", "description": "Reviews changes", "content": "Updated instructions" }),
         );
+        let legacy_create: CreateAgentRequest = serde_json::from_value(json!({
+            "name": "legacy",
+            "description": "Legacy agent"
+        }))
+        .unwrap();
+        assert_eq!(legacy_create.content, None);
+        let legacy_update: UpdateAgentRequest = serde_json::from_value(json!({
+            "agentId": "agent-1",
+            "name": "legacy",
+            "description": "Legacy agent"
+        }))
+        .unwrap();
+        assert_eq!(legacy_update.content, None);
         assert_serialized_json(
             &UpdateAgentResponse {
                 agent: Agent {

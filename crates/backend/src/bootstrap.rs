@@ -891,6 +891,7 @@ mod tests {
             .create_skill(CreateSkillRequest {
                 name: "review".to_string(),
                 description: "Review changes".to_string(),
+                content: None,
             })
             .expect("create skill")
             .skill;
@@ -899,6 +900,7 @@ mod tests {
                 skill_id: skill.id,
                 name: "review-code".to_string(),
                 description: "Review implementation changes".to_string(),
+                content: None,
             })
             .expect("update skill")
             .skill;
@@ -914,6 +916,7 @@ mod tests {
             .create_agent(CreateAgentRequest {
                 name: "codex".to_string(),
                 description: "Coding agent".to_string(),
+                content: None,
             })
             .expect("create agent")
             .agent;
@@ -922,6 +925,7 @@ mod tests {
                 agent_id: agent.id,
                 name: "codex-desktop".to_string(),
                 description: "Desktop coding agent".to_string(),
+                content: None,
             })
             .expect("update agent")
             .agent;
@@ -974,6 +978,7 @@ mod tests {
             .create_skill(CreateSkillRequest {
                 name: "review".to_string(),
                 description: "Reviews changes".to_string(),
+                content: None,
             })
             .expect("create skill")
             .skill;
@@ -987,6 +992,7 @@ mod tests {
                 skill_id: skill.id,
                 name: "review".to_string(),
                 description: "Reviews pull requests".to_string(),
+                content: None,
             })
             .expect("update skill")
             .skill;

@@ -18,7 +18,11 @@ export type AgentDetails = {
 /**
  * Carries the public fields required to create a configurable agent type.
  */
-export type CreateAgentRequest = { name: string; description: string };
+export type CreateAgentRequest = {
+  name: string;
+  description: string;
+  content?: string;
+};
 
 /**
  * Returns one created configurable agent type.
@@ -62,6 +66,7 @@ export type UpdateAgentRequest = {
   agentId: string;
   name: string;
   description: string;
+  content?: string;
 };
 
 /**

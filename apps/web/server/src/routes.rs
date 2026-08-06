@@ -1319,7 +1319,7 @@ mod tests {
             &app,
             Method::POST,
             "/api/skills",
-            json!({ "name": " review-guide ", "description": "Reviews guides" }),
+            json!({ "name": " review-guide ", "description": "Reviews guides", "content": "# Original skill" }),
         )
         .await;
         assert_eq!(skill_create.status(), StatusCode::OK);
@@ -1332,6 +1332,10 @@ mod tests {
         let skill_path = format!("/api/skills/{skill_id}");
         let skill_get = request_empty(&app, Method::GET, &skill_path).await;
         assert_eq!(skill_get.status(), StatusCode::OK);
+        assert_eq!(
+            response_json(skill_get).await["skill"]["content"],
+            "# Original skill"
+        );
         let skill_list = request_empty(&app, Method::GET, "/api/skills").await;
         assert_eq!(skill_list.status(), StatusCode::OK);
         let skill_update = request_json(
@@ -1345,6 +1349,24 @@ mod tests {
         assert_eq!(
             response_json(skill_update).await,
             json!({ "skill": { "id": skill_id, "name": "reviewer", "description": "Reviews changes" } })
+        );
+        let preserved_skill = request_empty(&app, Method::GET, &skill_path).await;
+        assert_eq!(
+            response_json(preserved_skill).await["skill"]["content"],
+            "# Original skill"
+        );
+        let skill_content_update = request_json(
+            &app,
+            Method::PUT,
+            &skill_path,
+            json!({ "name": "reviewer", "description": "Reviews changes", "content": "# Updated skill" }),
+        )
+        .await;
+        assert_eq!(skill_content_update.status(), StatusCode::OK);
+        let updated_skill = request_empty(&app, Method::GET, &skill_path).await;
+        assert_eq!(
+            response_json(updated_skill).await["skill"]["content"],
+            "# Updated skill"
         );
         let duplicate_skill = request_json(
             &app,
@@ -1385,7 +1407,7 @@ mod tests {
             &app,
             Method::POST,
             "/api/agents",
-            json!({ "name": "opencode", "description": "OpenCode" }),
+            json!({ "name": "opencode", "description": "OpenCode", "content": "# Original agent" }),
         )
         .await;
         assert_eq!(agent_create.status(), StatusCode::OK);
@@ -1401,9 +1423,11 @@ mod tests {
                 .status(),
             StatusCode::OK
         );
+        let agent_get = request_empty(&app, Method::GET, &agent_path).await;
+        assert_eq!(agent_get.status(), StatusCode::OK);
         assert_eq!(
-            request_empty(&app, Method::GET, &agent_path).await.status(),
-            StatusCode::OK
+            response_json(agent_get).await["agent"]["content"],
+            "# Original agent"
         );
         let agent_update = request_json(
             &app,
@@ -1413,6 +1437,24 @@ mod tests {
         )
         .await;
         assert_eq!(agent_update.status(), StatusCode::OK);
+        let preserved_agent = request_empty(&app, Method::GET, &agent_path).await;
+        assert_eq!(
+            response_json(preserved_agent).await["agent"]["content"],
+            "# Original agent"
+        );
+        let agent_content_update = request_json(
+            &app,
+            Method::PUT,
+            &agent_path,
+            json!({ "name": "review-agent", "description": "Reviews changes", "content": "# Updated agent" }),
+        )
+        .await;
+        assert_eq!(agent_content_update.status(), StatusCode::OK);
+        let updated_agent = request_empty(&app, Method::GET, &agent_path).await;
+        assert_eq!(
+            response_json(updated_agent).await["agent"]["content"],
+            "# Updated agent"
+        );
         assert_eq!(
             request_empty(&app, Method::DELETE, &agent_path)
                 .await

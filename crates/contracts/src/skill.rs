@@ -29,6 +29,9 @@ pub struct SkillDetails {
 pub struct CreateSkillRequest {
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub content: Option<String>,
 }
 
 /// Returns one created skill.
@@ -77,6 +80,9 @@ pub struct UpdateSkillRequest {
     pub skill_id: String,
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub content: Option<String>,
 }
 
 /// Returns the replacement skill.
@@ -162,8 +168,9 @@ mod tests {
             &CreateSkillRequest {
                 name: skill.name.clone(),
                 description: skill.description.clone(),
+                content: Some("# Instructions".to_string()),
             },
-            json!({ "name": "review", "description": "Reviews implementation changes" }),
+            json!({ "name": "review", "description": "Reviews implementation changes", "content": "# Instructions" }),
         );
         assert_serialized_json(
             &CreateSkillResponse {
@@ -200,9 +207,23 @@ mod tests {
                 skill_id: "skill-1".to_string(),
                 name: "code-review".to_string(),
                 description: "Reviews code changes".to_string(),
+                content: Some("Updated instructions".to_string()),
             },
-            json!({ "skillId": "skill-1", "name": "code-review", "description": "Reviews code changes" }),
+            json!({ "skillId": "skill-1", "name": "code-review", "description": "Reviews code changes", "content": "Updated instructions" }),
         );
+        let legacy_create: CreateSkillRequest = serde_json::from_value(json!({
+            "name": "legacy",
+            "description": "Legacy skill"
+        }))
+        .unwrap();
+        assert_eq!(legacy_create.content, None);
+        let legacy_update: UpdateSkillRequest = serde_json::from_value(json!({
+            "skillId": "skill-1",
+            "name": "legacy",
+            "description": "Legacy skill"
+        }))
+        .unwrap();
+        assert_eq!(legacy_update.content, None);
         assert_serialized_json(
             &UpdateSkillResponse {
                 skill: Skill {

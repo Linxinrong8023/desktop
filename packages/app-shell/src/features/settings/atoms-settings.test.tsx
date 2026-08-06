@@ -47,20 +47,41 @@ function renderSettings(kind: "agent" | "skill", configure?: (client: ReturnType
 }
 
 describe("atom settings content", () => {
-  it("loads Agent content as read-only when editing", async () => {
+  it("loads and updates editable Agent content", async () => {
     const user = userEvent.setup();
-    renderSettings("agent");
+    const update = vi.fn(async () => ({
+      agent: { id: "agent-1", name: "review-agent", description: "Reviews changes" },
+    }));
+    renderSettings("agent", (client) => {
+      client.agent.update = update;
+    });
 
     await user.click(await screen.findByRole("button", { name: "编辑" }));
 
     const content = await screen.findByLabelText("内容");
-    expect(content.querySelector("strong")?.textContent).toBe("Agent instructions");
-    expect(content.querySelector("textarea")).toBeNull();
+    expect(within(content).getByText("Agent instructions", { selector: "strong" })).toBeInTheDocument();
+    expect(content).toHaveAttribute("contenteditable", "true");
+    await user.clear(content);
+    await user.type(content, "# Updated agent");
+    expect(within(content).getByRole("heading", { level: 1, name: "Updated agent" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      name: "review-agent",
+      description: "Reviews changes",
+      content: "# Updated agent",
+    }));
   });
 
-  it("uses explicit outline actions and loads Skill content as read-only", async () => {
+  it("loads and clears editable Skill content", async () => {
     const user = userEvent.setup();
-    renderSettings("skill");
+    const update = vi.fn(async () => ({
+      skill: { id: "skill-1", name: "review-skill", description: "Reviews changes" },
+    }));
+    renderSettings("skill", (client) => {
+      client.skill.update = update;
+    });
 
     const importButton = await screen.findByRole("button", { name: "导入 Skill" });
     const newButton = screen.getByRole("button", { name: "新建 Skill" });
@@ -68,10 +89,63 @@ describe("atom settings content", () => {
     expect(newButton).toHaveClass("border");
 
     await user.click(await screen.findByRole("button", { name: "编辑" }));
-
     const content = await screen.findByLabelText("内容");
-    expect(content.querySelector("h2")?.textContent).toBe("Skill instructions");
-    expect(content.querySelector("textarea")).toBeNull();
+    expect(within(content).getByRole("heading", { level: 2, name: "Skill instructions" })).toBeInTheDocument();
+    await user.clear(content);
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith({
+      skillId: "skill-1",
+      name: "review-skill",
+      description: "Reviews changes",
+      content: "",
+    }));
+  });
+
+  it.each([
+    ["agent", "新建 Role", "标题", "new-role", "Role description", "# Role body"],
+    ["skill", "新建 Skill", "名称", "new-skill", "Skill description", "# Skill body"],
+  ] as const)("creates %s content from the shared editor", async (kind, buttonName, nameLabel, name, description, content) => {
+    const user = userEvent.setup();
+    const createAgent = vi.fn(async (request: { name: string; description: string; content?: string }) => ({
+      agent: { id: "agent-new", name: request.name, description: request.description },
+    }));
+    const createSkill = vi.fn(async (request: { name: string; description: string; content?: string }) => ({
+      skill: { id: "skill-new", name: request.name, description: request.description },
+    }));
+    const create = kind === "agent" ? createAgent : createSkill;
+    renderSettings(kind, (client) => {
+      if (kind === "agent") client.agent.create = createAgent;
+      else client.skill.create = createSkill;
+    });
+
+    await user.click(await screen.findByRole("button", { name: buttonName }));
+    await user.type(screen.getByLabelText(nameLabel), name);
+    await user.type(screen.getByLabelText("描述"), description);
+    const contentInput = screen.getByLabelText("内容");
+    expect(contentInput).toHaveTextContent("");
+    await user.type(contentInput, content);
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(create).toHaveBeenCalledWith({ name, description, content }));
+  });
+
+  it("blocks saving while Agent content is loading or failed", async () => {
+    const user = userEvent.setup();
+    let rejectLoad: ((reason?: unknown) => void) | undefined;
+    renderSettings("agent", (client) => {
+      client.agent.get = () => new Promise((_resolve, reject) => {
+        rejectLoad = reject;
+      });
+    });
+
+    await user.click(await screen.findByRole("button", { name: "编辑" }));
+    const save = screen.getByRole("button", { name: "保存" });
+    expect(screen.getByLabelText("内容")).toHaveAttribute("aria-disabled", "true");
+    expect(save).toBeDisabled();
+    rejectLoad?.(new Error("load failed"));
+    expect(await screen.findByText("无法加载内容。")).toBeInTheDocument();
+    expect(save).toBeDisabled();
   });
   it("imports one Agent Markdown file with an overwrite decision", async () => {
     const user = userEvent.setup();

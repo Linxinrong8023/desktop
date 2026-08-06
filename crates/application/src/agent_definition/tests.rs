@@ -20,6 +20,7 @@ fn creates_trimmed_agent_with_generated_id_and_updates_it_by_id() {
     .handle(CreateAgentRequest {
         name: " opencode ".to_string(),
         description: "OpenCode".to_string(),
+        content: None,
     })
     .unwrap();
     let updated = UpdateAgentDefinitionHandler::new(repository.clone(), FixedClock(20))
@@ -27,6 +28,7 @@ fn creates_trimmed_agent_with_generated_id_and_updates_it_by_id() {
             agent_id: created.agent.id.clone(),
             name: " reviewer ".to_string(),
             description: "Reviews".to_string(),
+            content: None,
         })
         .unwrap();
 
@@ -38,6 +40,41 @@ fn creates_trimmed_agent_with_generated_id_and_updates_it_by_id() {
 }
 
 #[test]
+fn creates_replaces_clears_and_preserves_agent_content() {
+    let repository = Rc::new(FakeAgentRepository::default());
+    let created = CreateAgentDefinitionHandler::new(
+        repository.clone(),
+        FixedAgentIdGenerator,
+        FixedClock(10),
+    )
+    .handle(CreateAgentRequest {
+        name: "reviewer".to_string(),
+        description: "Reviews".to_string(),
+        content: Some("# Original".to_string()),
+    })
+    .unwrap();
+
+    UpdateAgentDefinitionHandler::new(repository.clone(), FixedClock(20))
+        .handle(UpdateAgentRequest {
+            agent_id: created.agent.id.clone(),
+            name: "reviewer".to_string(),
+            description: "Reviews".to_string(),
+            content: None,
+        })
+        .unwrap();
+    assert_eq!(repository.agents.borrow()[0].content, "# Original");
+
+    UpdateAgentDefinitionHandler::new(repository.clone(), FixedClock(30))
+        .handle(UpdateAgentRequest {
+            agent_id: created.agent.id,
+            name: "reviewer".to_string(),
+            description: "Reviews".to_string(),
+            content: Some(String::new()),
+        })
+        .unwrap();
+    assert_eq!(repository.agents.borrow()[0].content, "");
+}
+#[test]
 fn reports_blank_name_not_found_repository_errors_and_soft_delete() {
     let blank = CreateAgentDefinitionHandler::new(
         Rc::new(FakeAgentRepository::default()),
@@ -47,6 +84,7 @@ fn reports_blank_name_not_found_repository_errors_and_soft_delete() {
     .handle(CreateAgentRequest {
         name: " ".to_string(),
         description: "Invalid".to_string(),
+        content: None,
     })
     .unwrap_err();
     let missing = GetAgentDefinitionHandler::new(Rc::new(FakeAgentRepository::default()))

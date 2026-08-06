@@ -48,7 +48,7 @@ import {
 import { SettingsHeading } from "./settings-heading";
 import { queryKeys } from "../../state/hooks/query-keys";
 import { SkillMarketplacePanel } from "./skill-marketplace-panel";
-import { MarkdownMessage } from "../chat/markdown-message";
+import { MarkdownEditor } from "./markdown-editor";
 
 type AtomRecord = Agent | Skill;
 type TablerIcon = typeof IconRobot;
@@ -64,8 +64,8 @@ interface AtomManagerConfig {
   items: AtomRecord[];
   loading: boolean;
   error: boolean;
-  onCreate: (name: string, description: string) => Promise<void>;
-  onUpdate: (item: AtomRecord, name: string, description: string) => Promise<void>;
+  onCreate: (name: string, description: string, content: string) => Promise<void>;
+  onUpdate: (item: AtomRecord, name: string, description: string, content: string) => Promise<void>;
   onDelete: (item: AtomRecord) => Promise<void>;
   extraAction?: ReactNode;
   /** Optional host-specific surface shown between the pane heading and local atom controls. */
@@ -92,8 +92,8 @@ export function RolesSettings() {
       loading={agentsQuery.isPending}
       error={agentsQuery.error !== null}
       extraAction={<Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><IconUpload />{t("settings.roles.import")}</Button>}
-      onCreate={(name, description) => createAgent.mutateAsync({ name, description }).then(() => undefined)}
-      onUpdate={(item, name, description) => updateAgent.mutateAsync({ agent: item as Agent, name, description }).then(() => undefined)}
+      onCreate={(name, description, content) => createAgent.mutateAsync({ name, description, content }).then(() => undefined)}
+      onUpdate={(item, name, description, content) => updateAgent.mutateAsync({ agent: item as Agent, name, description, content }).then(() => undefined)}
       onDelete={(item) => deleteAgent.mutateAsync({ agentId: item.id }).then(() => undefined)}
     />
     <AgentImportDialog
@@ -125,8 +125,8 @@ export function SkillsSettings() {
       error={skillsQuery.error !== null}
       extraAction={<Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><IconUpload />{t("settings.skills.import")}</Button>}
       intro={<SkillMarketplacePanel />}
-      onCreate={(name, description) => createSkill.mutateAsync({ name, description }).then(() => undefined)}
-      onUpdate={(item, name, description) => updateSkill.mutateAsync({ skill: item as Skill, name, description }).then(() => undefined)}
+      onCreate={(name, description, content) => createSkill.mutateAsync({ name, description, content }).then(() => undefined)}
+      onUpdate={(item, name, description, content) => updateSkill.mutateAsync({ skill: item as Skill, name, description, content }).then(() => undefined)}
       onDelete={(item) => deleteSkill.mutateAsync({ skillId: item.id }).then(() => undefined)}
     />
     <SkillImportDialog
@@ -156,9 +156,9 @@ function AtomManager({ tPrefix, icon, loadContent, items, loading, error, onCrea
     [needle, items],
   );
 
-  const save = async (name: string, description: string) => {
-    if (editing?.item) await onUpdate(editing.item, name, description);
-    else await onCreate(name, description);
+  const save = async (name: string, description: string, content: string) => {
+    if (editing?.item) await onUpdate(editing.item, name, description, content);
+    else await onCreate(name, description, content);
     setEditing(null);
   };
 
@@ -236,22 +236,19 @@ function AtomManager({ tPrefix, icon, loadContent, items, loading, error, onCrea
 /** Borderless field styling so name and description read as inline text inside the card. */
 const INLINE_FIELD = "border-transparent bg-transparent px-0 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent";
 
-/**
- * The full-surface create/edit form. Existing items also expose their persisted Markdown
- * content as a read-only field; metadata remains editable.
- */
+/** The full-surface create/edit form for metadata and Markdown body. */
 function AtomEditor({ tPrefix, loadContent, validatesSkill, item, onCancel, onSave }: {
   tPrefix: string;
   loadContent: (item: AtomRecord) => Promise<string>;
   validatesSkill: boolean;
   item: AtomRecord | null;
   onCancel: () => void;
-  onSave: (name: string, description: string) => Promise<void>;
+  onSave: (name: string, description: string, content: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState(() => item?.name ?? "");
   const [description, setDescription] = useState(() => item?.description ?? "");
-  const [content, setContent] = useState<string | null>(null);
+  const [content, setContent] = useState<string | null>(() => item ? null : "");
   const [contentError, setContentError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -275,14 +272,15 @@ function AtomEditor({ tPrefix, loadContent, validatesSkill, item, onCancel, onSa
   const nameIsValid = !validatesSkill || SKILL_NAME.test(normalizedName);
   const descriptionIsValid = !validatesSkill
     || (normalizedDescription.length > 0 && new TextEncoder().encode(normalizedDescription).length <= 4096);
+  const contentReady = content !== null && !contentError;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!normalizedName || !normalizedDescription || !nameIsValid || !descriptionIsValid || saving) return;
+    if (!normalizedName || !normalizedDescription || !nameIsValid || !descriptionIsValid || !contentReady || saving) return;
     setSaving(true);
     setError(null);
     try {
-      await onSave(normalizedName, normalizedDescription);
+      await onSave(normalizedName, normalizedDescription, content);
     } catch {
       setError(t(`${tPrefix}.saveError`));
       setSaving(false);
@@ -295,7 +293,7 @@ function AtomEditor({ tPrefix, loadContent, validatesSkill, item, onCancel, onSa
         <h3 className="text-sm font-medium">{item ? t(`${tPrefix}.editTitle`) : t(`${tPrefix}.createTitle`)}</h3>
         <div className="flex items-center gap-2">
           <Button type="button" variant="ghost" size="sm" disabled={saving} onClick={onCancel}>{t("common.cancel")}</Button>
-          <Button type="submit" variant="secondary" size="sm" disabled={saving || !normalizedName || !normalizedDescription || !nameIsValid || !descriptionIsValid}>{saving ? t("common.saving") : t("common.save")}</Button>
+          <Button type="submit" variant="secondary" size="sm" disabled={saving || !normalizedName || !normalizedDescription || !nameIsValid || !descriptionIsValid || !contentReady}>{saving ? t("common.saving") : t("common.save")}</Button>
         </div>
       </div>
 
@@ -314,24 +312,19 @@ function AtomEditor({ tPrefix, loadContent, validatesSkill, item, onCancel, onSa
         </div>
       </div>
 
-      {item && (
-        <div className="space-y-1.5">
-          <Label htmlFor="atom-content" className="px-1 text-muted-foreground">{t(`${tPrefix}.contentLabel`)}</Label>
-          <div aria-label={t(`${tPrefix}.contentLabel`)} className="min-h-56 rounded-xl border border-border bg-muted/20 p-4">
-            {content === null
-              ? <p className="text-sm text-muted-foreground">{t(`${tPrefix}.contentLoading`)}</p>
-              : <MarkdownMessage content={content} />}
-          </div>
-          <p className="px-1 text-[11px] leading-4 text-muted-foreground">{t(`${tPrefix}.contentHint`)}</p>
-          {contentError && <p className="px-1 text-xs text-destructive">{t(`${tPrefix}.contentLoadError`)}</p>}
-        </div>
-      )}
+      <div className="space-y-1.5">
+        <Label className="px-1 text-muted-foreground">{t(`${tPrefix}.contentLabel`)}</Label>
+        {content === null
+          ? <div aria-label={t(`${tPrefix}.contentLabel`)} aria-disabled="true" className="min-h-56 rounded-md border border-input px-3 py-2 text-sm text-muted-foreground opacity-50">{t(`${tPrefix}.contentLoading`)}</div>
+          : <MarkdownEditor ariaLabel={t(`${tPrefix}.contentLabel`)} value={content} onChange={setContent} disabled={!contentReady} />}
+        <p className="px-1 text-[11px] leading-4 text-muted-foreground">{t(`${tPrefix}.contentHint`)}</p>
+        {contentError && <p className="px-1 text-xs text-destructive">{t(`${tPrefix}.contentLoadError`)}</p>}
+      </div>
 
       {error && <p className="text-xs text-destructive">{error}</p>}
     </form>
   );
 }
-
 interface AgentImportPreview {
   fileName: string;
   content: string;

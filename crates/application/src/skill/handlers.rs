@@ -9,7 +9,7 @@ use ora_contracts::{
     UpdateSkillResponse,
 };
 use ora_domain::{AuditFields, Skill, SkillId};
-use ora_skill_package::manifest::{render_minimal_manifest, rewrite_manifest};
+use ora_skill_package::manifest::{render_manifest, rewrite_manifest, rewrite_manifest_body};
 use serde_json::Value;
 
 /// Handles atomic creation of a reusable skill definition (database plus formal directory).
@@ -67,7 +67,11 @@ where
             .storage
             .create_staging()
             .map_err(ApplicationError::from_skill_storage_error)?;
-        let manifest = render_minimal_manifest(&skill.name, &skill.description);
+        let manifest = render_manifest(
+            &skill.name,
+            &skill.description,
+            request.content.as_deref().unwrap_or(""),
+        );
         self.storage
             .write_manifest(&staging, manifest.as_bytes())
             .map_err(ApplicationError::from_skill_storage_error)?;
@@ -235,9 +239,18 @@ where
             .read_manifest(&existing.name)
             .map_err(ApplicationError::from_skill_storage_error)?
         {
-            Some(content) => rewrite_manifest(&content, &skill.name, &skill.description)
-                .map_err(ApplicationError::from_manifest_error)?,
-            None => render_minimal_manifest(&skill.name, &skill.description),
+            Some(content) => match request.content.as_deref() {
+                Some(body) => {
+                    rewrite_manifest_body(&content, &skill.name, &skill.description, body)
+                }
+                None => rewrite_manifest(&content, &skill.name, &skill.description),
+            }
+            .map_err(ApplicationError::from_manifest_error)?,
+            None => render_manifest(
+                &skill.name,
+                &skill.description,
+                request.content.as_deref().unwrap_or(""),
+            ),
         };
         self.storage
             .write_manifest(&staging, rewritten.as_bytes())

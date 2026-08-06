@@ -500,6 +500,25 @@ fn rewrites_manifest_preserving_unknown_fields_and_body() {
     assert!(rewritten.contains("depth: 3"));
     assert!(rewritten.contains("# Body line"));
     assert!(rewritten.contains("more **markdown**"));
+    let replaced = crate::manifest::rewrite_manifest_body(
+        rewritten.as_bytes(),
+        "reviewer",
+        "New description",
+        "# Replacement\n",
+    )
+    .unwrap();
+    assert!(replaced.contains("depth: 3"));
+    assert!(replaced.ends_with("# Replacement\n"));
+    assert!(!replaced.contains("more **markdown**"));
+
+    let empty = crate::manifest::rewrite_manifest_body(
+        replaced.as_bytes(),
+        "reviewer",
+        "New description",
+        "",
+    )
+    .unwrap();
+    assert!(empty.ends_with("---\n"));
 
     // A file without front matter gets a fresh block and keeps the whole body.
     let plain =
