@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@ora/ui";
+import { RemoteContractError } from "@ora/contracts";
 import { PlatformProvider } from "@ora/platform";
 import { createChatStore } from "@ora/chat";
 import { AppI18nProvider } from "../../i18n/i18n";
@@ -128,6 +129,26 @@ describe("atom settings content", () => {
     await user.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(create).toHaveBeenCalledWith({ name, description, content }));
+  });
+
+  it("shows the Role name conflict returned by the backend", async () => {
+    const user = userEvent.setup();
+    renderSettings("agent", (client) => {
+      client.agent.create = async () => {
+        throw new RemoteContractError({
+          code: "agent_name_conflict",
+          params: {},
+          requestId: "550e8400-e29b-41d4-a716-446655440000",
+        }, 409, null);
+      };
+    });
+
+    await user.click(await screen.findByRole("button", { name: "新建 Role" }));
+    await user.type(screen.getByLabelText("标题"), "review-agent");
+    await user.type(screen.getByLabelText("描述"), "Duplicate");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(await screen.findByText("已存在同名 Role。")).toBeInTheDocument();
   });
 
   it("blocks saving while Agent content is loading or failed", async () => {

@@ -281,8 +281,8 @@ function AtomEditor({ tPrefix, loadContent, validatesSkill, item, onCancel, onSa
     setError(null);
     try {
       await onSave(normalizedName, normalizedDescription, content);
-    } catch {
-      setError(t(`${tPrefix}.saveError`));
+    } catch (cause) {
+      setError(localizeContractError(cause, t));
       setSaving(false);
     }
   };

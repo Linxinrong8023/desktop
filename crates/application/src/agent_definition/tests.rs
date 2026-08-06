@@ -75,6 +75,62 @@ fn creates_replaces_clears_and_preserves_agent_content() {
     assert_eq!(repository.agents.borrow()[0].content, "");
 }
 #[test]
+fn rejects_case_insensitive_name_conflicts_on_create_and_rename() {
+    let repository = Rc::new(FakeAgentRepository::with_agents(vec![
+        agent("agent-1", "opencode", "OpenCode", 1, 1, false),
+        agent("agent-2", "reviewer", "Reviews", 2, 2, false),
+    ]));
+
+    let create_error = CreateAgentDefinitionHandler::new(
+        repository.clone(),
+        FixedAgentIdGenerator,
+        FixedClock(10),
+    )
+    .handle(CreateAgentRequest {
+        name: " OpenCode ".to_string(),
+        description: "Duplicate".to_string(),
+        content: None,
+    })
+    .unwrap_err();
+    let rename_error = UpdateAgentDefinitionHandler::new(repository.clone(), FixedClock(20))
+        .handle(UpdateAgentRequest {
+            agent_id: "agent-1".to_string(),
+            name: " REVIEWER ".to_string(),
+            description: "Duplicate".to_string(),
+            content: None,
+        })
+        .unwrap_err();
+    UpdateAgentDefinitionHandler::new(repository.clone(), FixedClock(30))
+        .handle(UpdateAgentRequest {
+            agent_id: "agent-1".to_string(),
+            name: "OpenCode".to_string(),
+            description: "Updated".to_string(),
+            content: None,
+        })
+        .unwrap();
+
+    assert_eq!(
+        create_error,
+        ApplicationError::AgentDefinitionNameConflict {
+            name: "OpenCode".to_string(),
+        }
+    );
+    assert_eq!(
+        rename_error,
+        ApplicationError::AgentDefinitionNameConflict {
+            name: "REVIEWER".to_string(),
+        }
+    );
+    assert_eq!(
+        repository.agents.borrow().clone(),
+        vec![
+            agent("agent-1", "OpenCode", "Updated", 1, 30, false),
+            agent("agent-2", "reviewer", "Reviews", 2, 2, false),
+        ]
+    );
+}
+
+#[test]
 fn reports_blank_name_not_found_repository_errors_and_soft_delete() {
     let blank = CreateAgentDefinitionHandler::new(
         Rc::new(FakeAgentRepository::default()),

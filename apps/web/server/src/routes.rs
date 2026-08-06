@@ -1455,6 +1455,40 @@ mod tests {
             response_json(updated_agent).await["agent"]["content"],
             "# Updated agent"
         );
+        let duplicate_agent = request_json(
+            &app,
+            Method::POST,
+            "/api/agents",
+            json!({ "name": " Review-Agent ", "description": "Duplicate" }),
+        )
+        .await;
+        assert_eq!(duplicate_agent.status(), StatusCode::CONFLICT);
+        assert_contract_error(&response_json(duplicate_agent).await, "agent_name_conflict");
+        let second_agent = response_json(
+            request_json(
+                &app,
+                Method::POST,
+                "/api/agents",
+                json!({ "name": "writer", "description": "Writes changes" }),
+            )
+            .await,
+        )
+        .await;
+        let second_agent_id = second_agent["agent"]["id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("response did not include a second agent id"));
+        let conflicting_rename = request_json(
+            &app,
+            Method::PUT,
+            &format!("/api/agents/{second_agent_id}"),
+            json!({ "name": "REVIEW-AGENT", "description": "Duplicate" }),
+        )
+        .await;
+        assert_eq!(conflicting_rename.status(), StatusCode::CONFLICT);
+        assert_contract_error(
+            &response_json(conflicting_rename).await,
+            "agent_name_conflict",
+        );
         assert_eq!(
             request_empty(&app, Method::DELETE, &agent_path)
                 .await
