@@ -110,6 +110,8 @@ const tauriCommands = {
   getSkillImport: "get_skill_import",
   commitSkillImport: "commit_skill_import",
   cancelSkillImport: "cancel_skill_import",
+  prepareAgentImport: "prepare_agent_import",
+  commitAgentImport: "commit_agent_import",
   createAgent: "create_agent",
   getAgent: "get_agent",
   listAgents: "list_agents",

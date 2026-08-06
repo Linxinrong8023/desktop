@@ -106,6 +106,8 @@ pub fn run() {
             commands::list_agents,
             commands::update_agent,
             commands::delete_agent,
+            commands::prepare_agent_import,
+            commands::commit_agent_import,
             // =============================================================================
             // gitIdentity
             // =============================================================================

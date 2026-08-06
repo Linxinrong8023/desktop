@@ -936,6 +936,20 @@ backend_command!(
     "Deletes one configurable agent through the shared Backend."
 );
 
+backend_command!(
+    prepare_agent_import,
+    PrepareAgentImportRequest,
+    PrepareAgentImportResponse,
+    prepare_agent_import,
+    "Prepares one agent Markdown import source."
+);
+backend_command!(
+    commit_agent_import,
+    CommitAgentImportRequest,
+    CommitAgentImportResponse,
+    commit_agent_import,
+    "Commits one prepared agent Markdown import."
+);
 // =============================================================================
 // gitIdentity
 // =============================================================================

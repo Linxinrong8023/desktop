@@ -62,6 +62,8 @@ describe("createTauriTransport", () => {
   it.each([
     ["switchSessionAgent", "switch_session_agent", { sessionId: "s1", agentCli: "claude" }],
     ["resumeSessionHistory", "resume_session_history", { sessionId: "s1" }],
+    ["prepareAgentImport", "prepare_agent_import", { content: "# Role" }],
+    ["commitAgentImport", "commit_agent_import", { content: "# Role", decision: null, expectedAgentId: null, expectedUpdatedAt: null }],
   ] as const)("routes %s to its desktop command", async (operationName, command, request) => {
     const invoke = vi.fn().mockResolvedValue({});
     const transport = createTauriTransport(invoke, () => ({ onmessage: () => undefined }));
