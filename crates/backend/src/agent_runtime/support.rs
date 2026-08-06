@@ -6,10 +6,11 @@ use ora_contracts::acp::permission::{
 };
 use ora_contracts::{
     AgentCli as ContractAgentCli, RespondToPermissionRequest, RespondToPermissionResponse,
-    Session as ContractSession, SessionStatus as ContractSessionStatus,
+    Session as ContractSession, SessionHistoryState as ContractSessionHistoryState,
+    SessionStatus as ContractSessionStatus,
 };
 use ora_contracts::{EmptyErrorParams, PublicError};
-use ora_domain::{AgentCli, Session, SessionStatus};
+use ora_domain::{AgentCli, HistoryState, Session, SessionStatus};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::process::ChildStdin;
@@ -55,6 +56,10 @@ pub(super) fn contract_session(session: Session) -> ContractSession {
             SessionStatus::Running => ContractSessionStatus::Running,
             SessionStatus::Stopped => ContractSessionStatus::Stopped,
         },
+        history_state: match session.history_state {
+            HistoryState::Writable => ContractSessionHistoryState::Writable,
+            HistoryState::Degraded { reason } => ContractSessionHistoryState::Degraded { reason },
+        },
     }
 }
 
@@ -64,6 +69,19 @@ pub(super) fn contract_agent_cli(agent_cli: AgentCli) -> ContractAgentCli {
         AgentCli::OpenCode => ContractAgentCli::OpenCode,
         AgentCli::Nga => ContractAgentCli::Nga,
         AgentCli::CodeAgentCli => ContractAgentCli::CodeAgentCli,
+        AgentCli::Claude => ContractAgentCli::Claude,
+        AgentCli::Codex => ContractAgentCli::Codex,
+    }
+}
+
+/// Maps the transport CLI identity into its stable persisted form.
+pub(super) fn domain_agent_cli(agent_cli: ContractAgentCli) -> AgentCli {
+    match agent_cli {
+        ContractAgentCli::OpenCode => AgentCli::OpenCode,
+        ContractAgentCli::Nga => AgentCli::Nga,
+        ContractAgentCli::CodeAgentCli => AgentCli::CodeAgentCli,
+        ContractAgentCli::Claude => AgentCli::Claude,
+        ContractAgentCli::Codex => AgentCli::Codex,
     }
 }
 
@@ -116,6 +134,8 @@ pub(super) fn resolve_agent_cli_path(
         AgentCli::OpenCode => ".opencode",
         AgentCli::Nga => ".nga",
         AgentCli::CodeAgentCli => ".codeagentcli",
+        AgentCli::Claude => ".claude",
+        AgentCli::Codex => ".codex",
     };
     Ok(home_directory
         .join(installation_directory)
@@ -199,10 +219,37 @@ pub(super) fn runtime_internal(code: &'static str, message: impl Into<String>) -
             ErrorClassification::Internal,
             PublicError::AgentRuntimeUnavailable(EmptyErrorParams {}),
         ),
+        "session_history_unreadable" => (
+            ErrorClassification::Conflict,
+            PublicError::SessionHistoryDegraded(EmptyErrorParams {}),
+        ),
         _ => (
             ErrorClassification::Internal,
             PublicError::InternalError(EmptyErrorParams {}),
         ),
     };
     BackendError::new(classification, public_error, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::runtime_internal;
+    use crate::ErrorClassification;
+    use ora_contracts::{EmptyErrorParams, PublicError};
+    use pretty_assertions::assert_eq;
+
+    /// Keeps unreadable session history on the same typed recovery path as a failed write.
+    #[test]
+    fn maps_unreadable_session_history_to_degraded_error() {
+        let error = runtime_internal(
+            "session_history_unreadable",
+            "session history could not be read",
+        );
+
+        assert_eq!(error.classification(), ErrorClassification::Conflict);
+        assert_eq!(
+            error.public_error(),
+            &PublicError::SessionHistoryDegraded(EmptyErrorParams {})
+        );
+    }
 }
