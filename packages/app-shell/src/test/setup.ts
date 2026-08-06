@@ -101,20 +101,6 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
-// jsdom does not implement the caret geometry APIs used by ProseMirror.
-if (!document.elementFromPoint) {
-  document.elementFromPoint = () => null;
-}
-if (!Range.prototype.getClientRects) {
-  Range.prototype.getClientRects = () => ({
-    length: 0,
-    item: () => null,
-    [Symbol.iterator]: function* iterator() {},
-  }) as DOMRectList;
-}
-if (!Range.prototype.getBoundingClientRect) {
-  Range.prototype.getBoundingClientRect = () => new DOMRect();
-}
 // jsdom does not implement the Web Animations API; Base UI's ScrollArea checks
 // it after mount before recalculating scrollbar geometry.
 if (!Element.prototype.getAnimations) {

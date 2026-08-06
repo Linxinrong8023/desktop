@@ -48,7 +48,6 @@ import {
 import { SettingsHeading } from "./settings-heading";
 import { queryKeys } from "../../state/hooks/query-keys";
 import { SkillMarketplacePanel } from "./skill-marketplace-panel";
-import { MarkdownEditor } from "./markdown-editor";
 
 type AtomRecord = Agent | Skill;
 type TablerIcon = typeof IconRobot;
@@ -313,10 +312,15 @@ function AtomEditor({ tPrefix, loadContent, validatesSkill, item, onCancel, onSa
       </div>
 
       <div className="space-y-1.5">
-        <Label className="px-1 text-muted-foreground">{t(`${tPrefix}.contentLabel`)}</Label>
-        {content === null
-          ? <div aria-label={t(`${tPrefix}.contentLabel`)} aria-disabled="true" className="min-h-56 rounded-md border border-input px-3 py-2 text-sm text-muted-foreground opacity-50">{t(`${tPrefix}.contentLoading`)}</div>
-          : <MarkdownEditor ariaLabel={t(`${tPrefix}.contentLabel`)} value={content} onChange={setContent} disabled={!contentReady} />}
+        <Label htmlFor="atom-content" className="px-1 text-muted-foreground">{t(`${tPrefix}.contentLabel`)}</Label>
+        <Textarea
+          id="atom-content"
+          value={content ?? ""}
+          onChange={(event) => setContent(event.target.value)}
+          disabled={!contentReady}
+          placeholder={content === null ? t(`${tPrefix}.contentLoading`) : undefined}
+          className="min-h-56 resize-y font-mono text-sm"
+        />
         <p className="px-1 text-[11px] leading-4 text-muted-foreground">{t(`${tPrefix}.contentHint`)}</p>
         {contentError && <p className="px-1 text-xs text-destructive">{t(`${tPrefix}.contentLoadError`)}</p>}
       </div>

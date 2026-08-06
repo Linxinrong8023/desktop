@@ -60,11 +60,10 @@ describe("atom settings content", () => {
     await user.click(await screen.findByRole("button", { name: "编辑" }));
 
     const content = await screen.findByLabelText("内容");
-    expect(within(content).getByText("Agent instructions", { selector: "strong" })).toBeInTheDocument();
-    expect(content).toHaveAttribute("contenteditable", "true");
+    expect(content).toHaveValue("**Agent instructions**");
+    expect(content).toBeEnabled();
     await user.clear(content);
     await user.type(content, "# Updated agent");
-    expect(within(content).getByRole("heading", { level: 1, name: "Updated agent" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(update).toHaveBeenCalledWith({
@@ -91,7 +90,7 @@ describe("atom settings content", () => {
 
     await user.click(await screen.findByRole("button", { name: "编辑" }));
     const content = await screen.findByLabelText("内容");
-    expect(within(content).getByRole("heading", { level: 2, name: "Skill instructions" })).toBeInTheDocument();
+    expect(content).toHaveValue("## Skill instructions");
     await user.clear(content);
     await user.click(screen.getByRole("button", { name: "保存" }));
 
@@ -124,7 +123,7 @@ describe("atom settings content", () => {
     await user.type(screen.getByLabelText(nameLabel), name);
     await user.type(screen.getByLabelText("描述"), description);
     const contentInput = screen.getByLabelText("内容");
-    expect(contentInput).toHaveTextContent("");
+    expect(contentInput).toHaveValue("");
     await user.type(contentInput, content);
     await user.click(screen.getByRole("button", { name: "保存" }));
 
@@ -162,7 +161,7 @@ describe("atom settings content", () => {
 
     await user.click(await screen.findByRole("button", { name: "编辑" }));
     const save = screen.getByRole("button", { name: "保存" });
-    expect(screen.getByLabelText("内容")).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByLabelText("内容")).toBeDisabled();
     expect(save).toBeDisabled();
     rejectLoad?.(new Error("load failed"));
     expect(await screen.findByText("无法加载内容。")).toBeInTheDocument();
