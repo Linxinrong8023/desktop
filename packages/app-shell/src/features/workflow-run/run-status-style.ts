@@ -5,12 +5,11 @@ export function isNodeWorking(status: GraphWorkflowRunStatus | GraphWorkflowNode
   return status === "running" || status === "awaiting_input";
 }
 
-/** Run-level terminal statuses (not node-level skipped). */
+/** Run-level terminal statuses. */
 export function isTerminalRunStatus(status: GraphWorkflowRunStatus): boolean {
   return (
     status === "succeeded"
     || status === "failed"
-    || status === "partial_failed"
     || status === "cancelled"
   );
 }
@@ -52,27 +51,12 @@ export function runStatusTone(status: GraphWorkflowRunStatus | GraphWorkflowNode
         badge: "border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-300",
         labelKey: "workflowRun.status.failed",
       };
-    case "partial_failed":
-      // Same rose family as failed, but badge copy and quiet mark differ.
-      return {
-        dot: "bg-rose-500/80",
-        ring: "border-rose-500/40 ring-rose-500/12",
-        badge: "border-rose-500/35 bg-rose-500/[0.08] text-rose-900 dark:text-rose-200",
-        labelKey: "workflowRun.status.partial_failed",
-      };
     case "cancelled":
       return {
         dot: "bg-zinc-400",
         ring: "border-zinc-400/45 ring-zinc-400/10",
         badge: "border-zinc-400/30 bg-zinc-500/10 text-zinc-700 dark:text-zinc-300",
         labelKey: "workflowRun.status.cancelled",
-      };
-    case "skipped":
-      return {
-        dot: "bg-muted-foreground/40",
-        ring: "border-border ring-transparent opacity-70",
-        badge: "border-border bg-muted text-muted-foreground",
-        labelKey: "workflowRun.nodeStatus.skipped",
       };
     case "pending":
       return {

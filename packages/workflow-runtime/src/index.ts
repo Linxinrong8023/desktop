@@ -43,6 +43,14 @@ export {
   type WorkflowDefinitionInputEdge,
   type WorkflowDefinitionInputNode,
 } from "./definition";
+export {
+  isoToWorkflowTimestamp,
+  parseWorkflowGraph,
+  serializeWorkflowGraph,
+  workflowTimestampToIso,
+  type WorkflowGraphEnvelope,
+} from "./graph-codec";
+export { projectNodeStatus, projectRunStatus } from "./run-projection";
 
 export type {
   WorkflowHostRepository,

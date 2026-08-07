@@ -1,6 +1,7 @@
 pub mod acp;
 
 pub mod agent;
+pub mod agent_import;
 pub mod error;
 pub mod file_system;
 pub mod frontend;
@@ -15,6 +16,7 @@ pub mod task;
 pub mod task_diff;
 pub mod workflow;
 pub mod workflow_run;
+pub use agent_import::*;
 
 pub use agent::*;
 pub use error::*;
@@ -42,6 +44,7 @@ pub fn export_typescript_bindings_to(
     output_directory: impl AsRef<Path>,
 ) -> Result<(), ExportError> {
     let config = Config::new().with_out_dir(output_directory.as_ref());
+    agent_import::export(&config)?;
 
     acp::export(&config)?;
     agent::export(&config)?;

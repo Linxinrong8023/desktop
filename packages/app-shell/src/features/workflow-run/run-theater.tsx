@@ -192,7 +192,6 @@ export function RunTheater({
     const done = states.filter(
       (state) =>
         state.status === "succeeded"
-        || state.status === "skipped"
         || state.status === "failed"
         || state.status === "cancelled",
     ).length;

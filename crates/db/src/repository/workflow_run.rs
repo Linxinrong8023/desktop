@@ -122,18 +122,24 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
                         None => return Ok(None),
                     }
                 };
-                // The display name lives on the run-task; a run created through create_run always
-                // has one, so an absent row is treated as an empty name rather than corruption.
-                let name = connection
+                // The display name and task id live on the run-task; a run created through
+                // create_run always has one, so an absent row degrades to empty values rather
+                // than corruption.
+                let (task_id, name) = connection
                     .query_row(
-                        "SELECT title FROM tasks WHERE workflow_run_id = ?1 AND is_deleted = 0",
+                        "SELECT id, title FROM tasks WHERE workflow_run_id = ?1 AND is_deleted = 0",
                         params![run_id.as_ref()],
-                        |row| row.get::<_, String>(0),
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                     )
                     .optional()?
                     .unwrap_or_default();
                 let nodes = list_node_runs(connection, run_id)?;
-                Ok(Some(WorkflowRunDetail { run, name, nodes }))
+                Ok(Some(WorkflowRunDetail {
+                    run,
+                    name,
+                    task_id: TaskId::new(task_id),
+                    nodes,
+                }))
             })
             .map_err(workflow_run_repository_error_from_database)
     }
@@ -152,6 +158,38 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
                      ORDER BY wr.created_at ASC, wr.id ASC",
                 )?;
                 let mut rows = statement.query(params![project_id.as_ref()])?;
+                let mut summaries = Vec::new();
+                while let Some(row) = rows.next()? {
+                    summaries.push(WorkflowRunSummary {
+                        id: WorkflowRunId::new(row.get::<_, String>("id")?),
+                        name: row.get::<_, String>("name")?,
+                        project_id: ProjectId::new(row.get::<_, String>("project_id")?),
+                        workflow_id: WorkflowId::new(row.get::<_, String>("workflow_id")?),
+                        status: WorkflowRunStatus::from_database_value(row.get("run_status")?)?,
+                        started_at: row.get("started_at")?,
+                        finished_at: row.get("finished_at")?,
+                        created_at: row.get("created_at")?,
+                    });
+                }
+                Ok(summaries)
+            })
+            .map_err(workflow_run_repository_error_from_database)
+    }
+
+    fn list_runs_by_workflow(
+        &self,
+        workflow_id: &WorkflowId,
+    ) -> Result<Vec<WorkflowRunSummary>, RepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT wr.id, t.title AS name, t.project_id, wr.workflow_id, wr.run_status, wr.started_at, wr.finished_at, wr.created_at
+                     FROM workflow_runs wr
+                     JOIN tasks t ON t.workflow_run_id = wr.id AND t.is_deleted = 0
+                     WHERE wr.workflow_id = ?1 AND wr.is_deleted = 0
+                     ORDER BY wr.created_at ASC, wr.id ASC",
+                )?;
+                let mut rows = statement.query(params![workflow_id.as_ref()])?;
                 let mut summaries = Vec::new();
                 while let Some(row) = rows.next()? {
                     summaries.push(WorkflowRunSummary {

@@ -124,6 +124,15 @@ pub trait WorkflowRepository {
         snapshot_id: &WorkflowSnapshotId,
     ) -> Result<Option<WorkflowSnapshot>, RepositoryError>;
 
+    /// Loads one visible snapshot by identifier alone, independent of its owning workflow.
+    ///
+    /// Snapshot ids are globally unique, so a caller holding only a run's frozen snapshot id can
+    /// resolve its graph without first knowing the workflow.
+    fn find_snapshot_any_workflow(
+        &self,
+        snapshot_id: &WorkflowSnapshotId,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError>;
+
     /// Lists published (non-draft, non-deleted) version summaries for a workflow,
     /// ordered by creation time descending.
     fn list_versions(

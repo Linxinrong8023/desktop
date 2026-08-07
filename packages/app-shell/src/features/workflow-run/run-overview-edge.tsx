@@ -8,7 +8,7 @@ import {
 import { cn } from "@ora/ui";
 
 interface RunOverviewEdgeData extends Record<string, unknown> {
-  /** True when both endpoints are active on the executed path (not skipped). */
+  /** True when the edge is on the executed path. */
   activePath?: boolean;
 }
 

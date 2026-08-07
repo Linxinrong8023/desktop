@@ -1,5 +1,5 @@
 use crate::{
-    AuditFields, DomainModelError, ProjectId, SessionId, WorkflowId, WorkflowNodeRunId,
+    AuditFields, DomainModelError, ProjectId, SessionId, TaskId, WorkflowId, WorkflowNodeRunId,
     WorkflowRunId, WorkflowSnapshotId,
 };
 use serde::{Deserialize, Serialize};
@@ -221,10 +221,11 @@ pub struct WorkflowRunSummary {
     pub created_at: i64,
 }
 
-/// Full run detail including the run record, its display name, and its node runs.
+/// Full run detail including the run record, its display name, its run-task id, and node runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkflowRunDetail {
     pub run: WorkflowRun,
     pub name: String,
+    pub task_id: TaskId,
     pub nodes: Vec<WorkflowNodeRun>,
 }

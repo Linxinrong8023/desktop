@@ -137,6 +137,12 @@ export function createContractsClient(
       update: (request, options) => executeOperation("updateAgent", request, transport, options),
       delete: (request, options) => executeOperation("deleteAgent", request, transport, options),
     },
+    agentImport: {
+      prepare: (request, options) =>
+        executeOperation("prepareAgentImport", request, transport, options),
+      commit: (request, options) =>
+        executeOperation("commitAgentImport", request, transport, options),
+    },
     fileSystem: {
       listDirectory: (request, options) =>
         executeOperation("listDirectory", request, transport, options),
@@ -190,6 +196,8 @@ export function createContractsClient(
         executeOperation("getVersion", request, transport, options),
       deleteSnapshot: (request, options) =>
         executeOperation("deleteSnapshot", request, transport, options),
+      getSnapshot: (request, options) =>
+        executeOperation("getWorkflowSnapshot", request, transport, options),
     },
     workflowRun: {
       create: (request, options) =>
@@ -198,6 +206,8 @@ export function createContractsClient(
         executeOperation("getWorkflowRun", request, transport, options),
       list: (request, options) =>
         executeOperation("listWorkflowRuns", request, transport, options),
+      listByWorkflow: (request, options) =>
+        executeOperation("listWorkflowRunsByWorkflow", request, transport, options),
       listNodeRuns: (request, options) =>
         executeOperation("listWorkflowNodeRuns", request, transport, options),
       delete: (request, options) =>

@@ -8,7 +8,7 @@ mod tests;
 
 pub use handlers::{
     CreateWorkflowRunHandler, DeleteWorkflowRunHandler, GetWorkflowRunHandler,
-    ListWorkflowNodeRunsHandler, ListWorkflowRunsHandler,
+    ListWorkflowNodeRunsHandler, ListWorkflowRunsByWorkflowHandler, ListWorkflowRunsHandler,
 };
 pub use id_generator::UuidWorkflowRunIdGenerator;
 pub use ports::{DeleteWorkflowRunResult, WorkflowRunIdGenerator, WorkflowRunRepository};

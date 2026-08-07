@@ -2,11 +2,12 @@
 
 use crate::frontend::{
     FrontendEndpoint, FrontendHttpMethod, NO_PATH_PARAMS, WORKFLOW_PATH_PARAMS,
-    WORKFLOW_VERSION_PATH_PARAMS,
+    WORKFLOW_SNAPSHOT_PATH_PARAMS, WORKFLOW_VERSION_PATH_PARAMS,
 };
 use ora_contracts::{
     WORKFLOW_ACTIVATE_PATH, WORKFLOW_DRAFT_PATH, WORKFLOW_PATH, WORKFLOW_PUBLISH_PATH,
-    WORKFLOW_ROLLBACK_PATH, WORKFLOW_VERSION_PATH, WORKFLOW_VERSIONS_PATH, WORKFLOWS_PATH,
+    WORKFLOW_ROLLBACK_PATH, WORKFLOW_SNAPSHOT_PATH, WORKFLOW_VERSION_PATH, WORKFLOW_VERSIONS_PATH,
+    WORKFLOWS_PATH,
 };
 
 const NAMESPACE: &str = "workflow";
@@ -153,6 +154,17 @@ pub(super) const ENDPOINTS: &[FrontendEndpoint] = &[
         request_type: "DeleteSnapshotRequest",
         response_type: "DeleteSnapshotResponse",
         path_params: WORKFLOW_VERSION_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
+        operation_name: "getWorkflowSnapshot",
+        namespace: NAMESPACE,
+        member_name: "getSnapshot",
+        method: FrontendHttpMethod::Get,
+        path_template: WORKFLOW_SNAPSHOT_PATH,
+        request_type: "GetWorkflowSnapshotRequest",
+        response_type: "GetWorkflowSnapshotResponse",
+        path_params: WORKFLOW_SNAPSHOT_PATH_PARAMS,
         has_json_body: false,
     },
 ];

@@ -12,6 +12,10 @@ export type CreateWorkflowRunRequest = {
   snapshotId?: string;
   kickoffInput?: string;
   name?: string;
+  /**
+   * Git reference the run-task's worktree is created from; defaults to the main branch.
+   */
+  baseBranch?: string;
 };
 
 /**
@@ -40,6 +44,7 @@ export type GetWorkflowRunRequest = { runId: string };
 export type GetWorkflowRunResponse = {
   run: WorkflowRun;
   name: string;
+  taskId: string;
   nodes: Array<WorkflowNodeRun>;
 };
 
@@ -52,6 +57,18 @@ export type ListWorkflowNodeRunsRequest = { runId: string };
  * Returns the node-run records of one run.
  */
 export type ListWorkflowNodeRunsResponse = { nodes: Array<WorkflowNodeRun> };
+
+/**
+ * Requests the workflow run summaries for one workflow.
+ */
+export type ListWorkflowRunsByWorkflowRequest = { workflowId: string };
+
+/**
+ * Returns the visible run summaries for the workflow.
+ */
+export type ListWorkflowRunsByWorkflowResponse = {
+  runs: Array<WorkflowRunSummary>;
+};
 
 /**
  * Requests the workflow run summaries for one project.

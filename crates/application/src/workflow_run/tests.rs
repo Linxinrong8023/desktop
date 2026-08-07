@@ -10,7 +10,7 @@ use crate::task::{
 use crate::workflow::WorkflowRepository;
 use crate::workflow_run::handlers::{
     CreateWorkflowRunHandler, DeleteWorkflowRunHandler, GetWorkflowRunHandler,
-    ListWorkflowNodeRunsHandler, ListWorkflowRunsHandler,
+    ListWorkflowNodeRunsHandler, ListWorkflowRunsByWorkflowHandler, ListWorkflowRunsHandler,
 };
 use crate::workflow_run::mapper::{map_node_run, map_run, map_run_summary};
 use crate::workflow_run::{DeleteWorkflowRunResult, WorkflowRunIdGenerator, WorkflowRunRepository};
@@ -19,7 +19,8 @@ use crate::{ApplicationError, Clock, RepositoryError};
 use ora_contracts::{
     CreateWorkflowRunRequest, DeleteWorkflowRunRequest, DeleteWorkflowRunResponse,
     GetWorkflowRunRequest, GetWorkflowRunResponse, ListWorkflowNodeRunsRequest,
-    ListWorkflowNodeRunsResponse, ListWorkflowRunsRequest, ListWorkflowRunsResponse,
+    ListWorkflowNodeRunsResponse, ListWorkflowRunsByWorkflowRequest,
+    ListWorkflowRunsByWorkflowResponse, ListWorkflowRunsRequest, ListWorkflowRunsResponse,
     WorkflowRunStatus as ContractRunStatus,
 };
 use ora_domain::{
@@ -59,6 +60,7 @@ fn creates_run_with_explicit_snapshot() {
             snapshot_id: Some("snapshot-a".to_string()),
             kickoff_input: Some("kickoff".to_string()),
             name: None,
+            base_branch: None,
         })
         .unwrap();
 
@@ -115,6 +117,7 @@ fn uses_published_snapshot_when_no_explicit_id() {
             snapshot_id: None,
             kickoff_input: None,
             name: Some("Manual name".to_string()),
+            base_branch: None,
         })
         .unwrap();
 
@@ -144,6 +147,7 @@ fn rejects_workflow_without_published_snapshot() {
             snapshot_id: None,
             kickoff_input: None,
             name: None,
+            base_branch: None,
         })
         .unwrap_err();
 
@@ -174,6 +178,7 @@ fn rejects_draft_snapshot() {
             snapshot_id: Some("draft-1".to_string()),
             kickoff_input: None,
             name: None,
+            base_branch: None,
         })
         .unwrap_err();
 
@@ -203,6 +208,7 @@ fn rejects_snapshot_not_in_workflow() {
             snapshot_id: Some("snapshot-missing".to_string()),
             kickoff_input: None,
             name: None,
+            base_branch: None,
         })
         .unwrap_err();
 
@@ -244,6 +250,7 @@ fn compensates_worktree_when_persistence_fails() {
             snapshot_id: Some("snapshot-a".to_string()),
             kickoff_input: None,
             name: None,
+            base_branch: None,
         })
         .unwrap_err();
 
@@ -292,6 +299,7 @@ fn reports_provisioning_failure() {
             snapshot_id: Some("snapshot-a".to_string()),
             kickoff_input: None,
             name: None,
+            base_branch: None,
         })
         .unwrap_err();
 
@@ -332,6 +340,7 @@ fn gets_run_detail() {
     repository.with_detail(WorkflowRunDetail {
         run: run.clone(),
         name: "Manual name".to_string(),
+        task_id: TaskId::new("task-1".to_string()),
         nodes: vec![node.clone()],
     });
     let handler = GetWorkflowRunHandler::new(Arc::new(repository));
@@ -347,6 +356,7 @@ fn gets_run_detail() {
         GetWorkflowRunResponse {
             run: map_run(run),
             name: "Manual name".to_string(),
+            task_id: "task-1".to_string(),
             nodes: vec![map_node_run(node)],
         }
     );
@@ -378,6 +388,37 @@ fn lists_runs_by_project() {
     assert_eq!(
         response,
         ListWorkflowRunsResponse {
+            runs: vec![map_run_summary(summary)],
+        }
+    );
+}
+
+/// Verifies run summaries are listed for a workflow in repository order.
+#[test]
+fn lists_runs_by_workflow() {
+    let summary = WorkflowRunSummary {
+        id: WorkflowRunId::new("run-1"),
+        name: "Manual name".to_string(),
+        project_id: ProjectId::new("project-1"),
+        workflow_id: WorkflowId::new("workflow-a"),
+        status: WorkflowRunStatus::Pending,
+        started_at: None,
+        finished_at: None,
+        created_at: 30,
+    };
+    let repository = MockWorkflowRunRepository::default();
+    repository.with_summaries(vec![summary.clone()]);
+    let handler = ListWorkflowRunsByWorkflowHandler::new(Arc::new(repository));
+
+    let response = handler
+        .handle(ListWorkflowRunsByWorkflowRequest {
+            workflow_id: "workflow-a".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        response,
+        ListWorkflowRunsByWorkflowResponse {
             runs: vec![map_run_summary(summary)],
         }
     );
@@ -679,6 +720,17 @@ impl WorkflowRepository for MockWorkflowRepository {
             .find(|snapshot| snapshot.id == *snapshot_id && snapshot.workflow_id == *workflow_id)
             .cloned())
     }
+
+    fn find_snapshot_any_workflow(
+        &self,
+        snapshot_id: &WorkflowSnapshotId,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        Ok(self
+            .snapshots
+            .iter()
+            .find(|snapshot| snapshot.id == *snapshot_id)
+            .cloned())
+    }
 }
 
 /// Records created runs and optionally fails the next create.
@@ -751,6 +803,13 @@ impl WorkflowRunRepository for MockWorkflowRunRepository {
     fn list_runs_by_project(
         &self,
         _project_id: &ProjectId,
+    ) -> Result<Vec<WorkflowRunSummary>, RepositoryError> {
+        Ok(self.summaries.lock().unwrap().clone())
+    }
+
+    fn list_runs_by_workflow(
+        &self,
+        _workflow_id: &WorkflowId,
     ) -> Result<Vec<WorkflowRunSummary>, RepositoryError> {
         Ok(self.summaries.lock().unwrap().clone())
     }

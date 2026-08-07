@@ -7,10 +7,11 @@ use ora_domain::{
 use pretty_assertions::assert_eq;
 
 use super::{
-    ActivateVersionResult, DeleteSnapshotResult, PublishSnapshotResult, PublishWorkflowHandler,
-    RollbackDraftResult, UpdateDraftResult, UpdateWorkflowResult, WorkflowIdGenerator,
-    WorkflowRepository,
+    ActivateVersionResult, DeleteSnapshotResult, GetWorkflowSnapshotHandler, PublishSnapshotResult,
+    PublishWorkflowHandler, RollbackDraftResult, UpdateDraftResult, UpdateWorkflowResult,
+    WorkflowIdGenerator, WorkflowRepository,
 };
+use crate::workflow::mapper::map_snapshot;
 use crate::{ApplicationError, Clock, RepositoryError};
 
 /// Verifies automatic versions derive from the injected clock used for snapshot timestamps.
@@ -240,6 +241,13 @@ impl WorkflowRepository for PublishRepository {
     ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
         unreachable!("publish tests never resolve snapshots by id")
     }
+
+    fn find_snapshot_any_workflow(
+        &self,
+        _snapshot_id: &WorkflowSnapshotId,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        unreachable!("publish tests never resolve snapshots by id")
+    }
 }
 
 /// Returns the draft copied by publish-handler tests.
@@ -277,4 +285,179 @@ impl Clock for FixedClock {
     fn now_timestamp_millis(&self) -> i64 {
         self.0
     }
+}
+
+/// Supplies a fixed snapshot (or none) for snapshot-by-id handler tests.
+#[derive(Debug)]
+struct SnapshotLookupRepository {
+    snapshot: Option<WorkflowSnapshot>,
+}
+
+impl SnapshotLookupRepository {
+    /// Builds the lookup fake around one resolvable snapshot.
+    fn found(snapshot: WorkflowSnapshot) -> Self {
+        Self {
+            snapshot: Some(snapshot),
+        }
+    }
+
+    /// Builds the lookup fake that resolves no snapshot.
+    fn missing() -> Self {
+        Self { snapshot: None }
+    }
+}
+
+impl WorkflowRepository for SnapshotLookupRepository {
+    fn create_workflow(
+        &self,
+        _workflow: Workflow,
+        _draft: WorkflowSnapshot,
+    ) -> Result<CreatedWorkflow, RepositoryError> {
+        unreachable!("snapshot lookup tests never create workflows")
+    }
+
+    fn find_workflow(
+        &self,
+        _workflow_id: &WorkflowId,
+    ) -> Result<Option<Workflow>, RepositoryError> {
+        unreachable!("snapshot lookup tests never load workflows")
+    }
+
+    fn get_workflow_detail(
+        &self,
+        _workflow_id: &WorkflowId,
+    ) -> Result<Option<WorkflowDetail>, RepositoryError> {
+        unreachable!("snapshot lookup tests never load workflow details")
+    }
+
+    fn list_workflows(&self) -> Result<Vec<WorkflowSummary>, RepositoryError> {
+        unreachable!("snapshot lookup tests never list workflows")
+    }
+
+    fn update_workflow(
+        &self,
+        _workflow_id: &WorkflowId,
+        _name: String,
+        _updated_at: i64,
+    ) -> Result<UpdateWorkflowResult, RepositoryError> {
+        unreachable!("snapshot lookup tests never update workflows")
+    }
+
+    fn soft_delete_workflow(
+        &self,
+        _workflow_id: &WorkflowId,
+        _deleted_at: i64,
+    ) -> Result<crate::DeleteWorkflowResult, RepositoryError> {
+        unreachable!("snapshot lookup tests never delete workflows")
+    }
+
+    fn find_snapshot_by_version(
+        &self,
+        _workflow_id: &WorkflowId,
+        _version: &str,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        unreachable!("snapshot lookup tests never resolve snapshots by version")
+    }
+
+    fn find_snapshot_by_id(
+        &self,
+        _workflow_id: &WorkflowId,
+        _snapshot_id: &WorkflowSnapshotId,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        unreachable!("snapshot lookup tests never resolve scoped snapshots")
+    }
+
+    fn find_snapshot_any_workflow(
+        &self,
+        _snapshot_id: &WorkflowSnapshotId,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        Ok(self.snapshot.clone())
+    }
+
+    fn list_versions(
+        &self,
+        _workflow_id: &WorkflowId,
+    ) -> Result<Vec<WorkflowVersion>, RepositoryError> {
+        unreachable!("snapshot lookup tests never list versions")
+    }
+
+    fn update_draft(
+        &self,
+        _workflow_id: &WorkflowId,
+        _graph: String,
+        _updated_at: i64,
+    ) -> Result<UpdateDraftResult, RepositoryError> {
+        unreachable!("snapshot lookup tests never update drafts")
+    }
+
+    fn publish_snapshot(
+        &self,
+        _workflow_id: &WorkflowId,
+        _snapshot_id: WorkflowSnapshotId,
+        _version: String,
+        _created_at: i64,
+    ) -> Result<PublishSnapshotResult, RepositoryError> {
+        unreachable!("snapshot lookup tests never publish snapshots")
+    }
+
+    fn rollback_draft(
+        &self,
+        _workflow_id: &WorkflowId,
+        _snapshot_id: &WorkflowSnapshotId,
+        _updated_at: i64,
+    ) -> Result<RollbackDraftResult, RepositoryError> {
+        unreachable!("snapshot lookup tests never roll back drafts")
+    }
+
+    fn activate_version(
+        &self,
+        _workflow_id: &WorkflowId,
+        _snapshot_id: &WorkflowSnapshotId,
+        _updated_at: i64,
+    ) -> Result<ActivateVersionResult, RepositoryError> {
+        unreachable!("snapshot lookup tests never activate versions")
+    }
+
+    fn soft_delete_snapshot(
+        &self,
+        _workflow_id: &WorkflowId,
+        _snapshot_id: &WorkflowSnapshotId,
+        _deleted_at: i64,
+    ) -> Result<DeleteSnapshotResult, RepositoryError> {
+        unreachable!("snapshot lookup tests never delete snapshots")
+    }
+}
+
+/// Verifies the snapshot-by-id handler returns the frozen graph for a run's snapshot.
+#[test]
+fn gets_snapshot_by_id() {
+    let snapshot = draft_snapshot();
+    let handler = GetWorkflowSnapshotHandler::new(Arc::new(SnapshotLookupRepository::found(
+        snapshot.clone(),
+    )));
+
+    let response = handler
+        .handle(ora_contracts::GetWorkflowSnapshotRequest {
+            snapshot_id: "draft-1".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(response.snapshot, map_snapshot(snapshot));
+}
+
+/// Verifies the snapshot-by-id handler reports not found for an unknown snapshot.
+#[test]
+fn gets_snapshot_by_id_reports_not_found() {
+    let handler = GetWorkflowSnapshotHandler::new(Arc::new(SnapshotLookupRepository::missing()));
+
+    let result = handler.handle(ora_contracts::GetWorkflowSnapshotRequest {
+        snapshot_id: "snapshot-missing".to_string(),
+    });
+
+    assert_eq!(
+        result.unwrap_err(),
+        ApplicationError::WorkflowSnapshotNotFoundById {
+            snapshot_id: "snapshot-missing".to_string(),
+        }
+    );
 }

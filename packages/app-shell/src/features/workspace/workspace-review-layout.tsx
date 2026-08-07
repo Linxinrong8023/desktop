@@ -98,7 +98,7 @@ export function WorkspaceReviewLayout({ context, children }: WorkspaceReviewLayo
   };
 
   const controls = (
-    <div role="group" aria-label={t("review.panels")} className="flex h-8 shrink-0 items-center gap-0.5 rounded-lg border border-border/70 bg-background/95 p-0.5 shadow-sm backdrop-blur">
+    <div role="group" aria-label={t("review.panels")} className="ora-diff-toolbar__view-group flex h-8 shrink-0 items-center gap-0.5 rounded-lg border border-border/70 bg-background/95 p-0.5 shadow-sm backdrop-blur">
       {open && (
         <>
           {panel === "changes" && expanded && (
@@ -170,7 +170,7 @@ export function WorkspaceReviewLayout({ context, children }: WorkspaceReviewLayo
 function PanelButton({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) {
   return (
     <Button size="sm" variant={active ? "secondary" : "ghost"} className="h-7 px-2.5 shadow-none" aria-pressed={active} onClick={onClick}>
-      {icon}{label}
+      {icon}<span className="ora-diff-toolbar__view-label">{label}</span>
     </Button>
   );
 }

@@ -936,6 +936,20 @@ backend_command!(
     "Deletes one configurable agent through the shared Backend."
 );
 
+backend_command!(
+    prepare_agent_import,
+    PrepareAgentImportRequest,
+    PrepareAgentImportResponse,
+    prepare_agent_import,
+    "Prepares one agent Markdown import source."
+);
+backend_command!(
+    commit_agent_import,
+    CommitAgentImportRequest,
+    CommitAgentImportResponse,
+    commit_agent_import,
+    "Commits one prepared agent Markdown import."
+);
 // =============================================================================
 // gitIdentity
 // =============================================================================
@@ -946,6 +960,109 @@ backend_command!(
     GitIdentityResponse,
     read_git_identity,
     "Reads the host's global Git identity through the shared Backend."
+);
+
+// =============================================================================
+// workflow
+// =============================================================================
+
+backend_command!(
+    create_workflow,
+    CreateWorkflowRequest,
+    CreateWorkflowResponse,
+    create_workflow,
+    "Creates one workflow through the shared Backend."
+);
+backend_command!(
+    get_workflow,
+    GetWorkflowRequest,
+    GetWorkflowResponse,
+    get_workflow,
+    "Gets one workflow through the shared Backend."
+);
+backend_command!(
+    list_workflows,
+    ListWorkflowsRequest,
+    ListWorkflowsResponse,
+    list_workflows,
+    "Lists workflows through the shared Backend."
+);
+backend_command!(
+    update_workflow,
+    UpdateWorkflowRequest,
+    UpdateWorkflowResponse,
+    update_workflow,
+    "Updates one workflow through the shared Backend."
+);
+backend_command!(
+    delete_workflow,
+    DeleteWorkflowRequest,
+    DeleteWorkflowResponse,
+    delete_workflow,
+    "Deletes one workflow through the shared Backend."
+);
+backend_command!(
+    get_workflow_draft,
+    GetDraftRequest,
+    GetDraftResponse,
+    get_workflow_draft,
+    "Gets one workflow's draft snapshot through the shared Backend."
+);
+backend_command!(
+    update_workflow_draft,
+    UpdateDraftRequest,
+    UpdateDraftResponse,
+    update_workflow_draft,
+    "Updates one workflow's draft graph through the shared Backend."
+);
+backend_command!(
+    publish_workflow,
+    PublishWorkflowRequest,
+    PublishWorkflowResponse,
+    publish_workflow,
+    "Publishes one workflow draft through the shared Backend."
+);
+backend_command!(
+    rollback_workflow,
+    RollbackWorkflowRequest,
+    RollbackWorkflowResponse,
+    rollback_workflow,
+    "Rolls back one workflow draft through the shared Backend."
+);
+backend_command!(
+    activate_workflow,
+    ActivateWorkflowRequest,
+    ActivateWorkflowResponse,
+    activate_workflow,
+    "Activates one workflow version through the shared Backend."
+);
+backend_command!(
+    list_workflow_versions,
+    ListVersionsRequest,
+    ListVersionsResponse,
+    list_workflow_versions,
+    "Lists one workflow's published versions through the shared Backend."
+);
+backend_command!(
+    get_workflow_version,
+    GetVersionRequest,
+    GetVersionResponse,
+    get_workflow_version,
+    "Gets one workflow version snapshot through the shared Backend."
+);
+backend_command!(
+    delete_workflow_snapshot,
+    DeleteSnapshotRequest,
+    DeleteSnapshotResponse,
+    delete_workflow_snapshot,
+    "Deletes one workflow snapshot through the shared Backend."
+);
+backend_command!(
+    get_workflow_snapshot,
+    GetWorkflowSnapshotRequest,
+    GetWorkflowSnapshotResponse,
+    get_workflow_snapshot,
+    "Gets one snapshot by id through the shared Backend."
 );
 
 // =============================================================================
@@ -972,6 +1089,13 @@ backend_command!(
     ListWorkflowRunsResponse,
     list_workflow_runs,
     "Lists workflow runs for one project through the shared Backend."
+);
+backend_command!(
+    list_workflow_runs_by_workflow,
+    ListWorkflowRunsByWorkflowRequest,
+    ListWorkflowRunsByWorkflowResponse,
+    list_workflow_runs_by_workflow,
+    "Lists workflow runs for one workflow through the shared Backend."
 );
 backend_command!(
     list_workflow_node_runs,

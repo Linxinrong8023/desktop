@@ -1,5 +1,6 @@
 export * as acp from "./acp/index.js";
 export * from "./agent.js";
+export * from "./agent-import.js";
 export * from "./client.js";
 export * from "./endpoints.js";
 export * from "./error.js";
@@ -14,3 +15,5 @@ export * from "./spec.js";
 export * from "./task.js";
 export * from "./task_diff.js";
 export * from "./transport.js";
+export * from "./workflow.js";
+export * from "./workflowRun.js";

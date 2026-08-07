@@ -23,7 +23,7 @@ import {
   useCreateSession,
   useDeleteSession,
 } from "../../state/hooks/use-workspace-mutations";
-import { useDeleteGraphWorkflowRun, useRenameGraphWorkflowRun } from "../../state/hooks/use-graph-workflow-runs";
+import { useDeleteWorkflowRun, useRenameWorkflowRun } from "../../state/hooks/use-workflow-runs";
 import { useUiStore, type DialogState, type DeleteTarget } from "../../state/stores/ui-store";
 import { useSettingsStore } from "../../state/stores/settings-store";
 import { localizeContractError } from "../../i18n/contract-error";
@@ -61,7 +61,7 @@ function DeleteEntityDialog({ target, onOpenChange }: { target: DeleteTarget | n
   const deleteProject = useDeleteProject();
   const deleteTask = useDeleteTask();
   const deleteSession = useDeleteSession();
-  const deleteWorkflowRun = useDeleteGraphWorkflowRun();
+  const deleteWorkflowRun = useDeleteWorkflowRun();
 
   const confirmDelete = async () => {
     if (!target || deleting) return;
@@ -134,7 +134,7 @@ function WorkspaceEntityDialog({ dialog, onOpenChange }: { dialog: DialogState; 
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const createSession = useCreateSession();
-  const renameWorkflowRun = useRenameGraphWorkflowRun();
+  const renameWorkflowRun = useRenameWorkflowRun();
   const settingsAgentCli = useSettingsStore((state) => state.settings.agentCli);
   const branchProjectId = dialog.kind === "task" && !dialog.entity ? dialog.projectId : null;
   const { data: projectBranches = [] } = useProjectBranches(branchProjectId);

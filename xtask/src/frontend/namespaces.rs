@@ -1,6 +1,7 @@
 //! Namespace-scoped endpoint declarations for the generated frontend SDK.
 
 mod agent;
+mod agent_import;
 mod agent_runtime;
 mod file_system;
 mod git;
@@ -30,6 +31,7 @@ pub(super) fn frontend_endpoints() -> Vec<FrontendEndpoint> {
         skill::ENDPOINTS,
         skill_import::ENDPOINTS,
         agent::ENDPOINTS,
+        agent_import::ENDPOINTS,
         file_system::ENDPOINTS,
         git::ENDPOINTS,
         spec::ENDPOINTS,

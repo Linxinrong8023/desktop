@@ -265,6 +265,21 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .map_err(workflow_repository_error_from_database)
     }
 
+    fn find_snapshot_any_workflow(
+        &self,
+        snapshot_id: &WorkflowSnapshotId,
+    ) -> Result<Option<WorkflowSnapshot>, RepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, workflow_id, version, graph, created_at, updated_at, is_deleted FROM workflow_snapshots WHERE id = ?1 AND is_deleted = 0",
+                )?;
+                let mut rows = statement.query(params![snapshot_id.as_ref()])?;
+                rows.next()?.map(map_snapshot_row).transpose()
+            })
+            .map_err(workflow_repository_error_from_database)
+    }
+
     fn list_versions(
         &self,
         workflow_id: &WorkflowId,

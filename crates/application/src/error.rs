@@ -63,6 +63,12 @@ pub enum ApplicationError {
     SkillImport(#[source] SkillImportError),
     #[error("agent definition name must not be blank")]
     AgentDefinitionNameBlank,
+    #[error("agent definition name already exists: {name}")]
+    AgentDefinitionNameConflict { name: String },
+    #[error("agent import Markdown is invalid")]
+    AgentImportInvalid,
+    #[error("agent import conflict decision is missing")]
+    AgentImportDecisionMissing,
     #[error("agent definition not found: {agent_id}")]
     AgentDefinitionNotFound { agent_id: String },
     #[error("agent definition repository operation failed")]
@@ -404,6 +410,8 @@ impl PartialEq for ApplicationError {
             | (SkillImport(_), SkillImport(_))
             | (AgentDefinitionNameBlank, AgentDefinitionNameBlank)
             | (SpecSourceInvalid, SpecSourceInvalid)
+            | (AgentImportInvalid, AgentImportInvalid)
+            | (AgentImportDecisionMissing, AgentImportDecisionMissing)
             | (TaskWorktreeRequiresGitRepository, TaskWorktreeRequiresGitRepository)
             | (TaskWorktreeRootUnavailable, TaskWorktreeRootUnavailable)
             | (WorkflowNameBlank, WorkflowNameBlank)
@@ -450,6 +458,10 @@ impl PartialEq for ApplicationError {
             (SkillStorageInconsistent { name: left }, SkillStorageInconsistent { name: right }) => {
                 left == right
             }
+            (
+                AgentDefinitionNameConflict { name: left },
+                AgentDefinitionNameConflict { name: right },
+            ) => left == right,
             (
                 AgentDefinitionNotFound { agent_id: left },
                 AgentDefinitionNotFound { agent_id: right },

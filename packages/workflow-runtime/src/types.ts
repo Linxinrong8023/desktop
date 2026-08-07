@@ -86,7 +86,6 @@ export type GraphWorkflowRunStatus =
   | "running"
   | "awaiting_input"
   | "succeeded"
-  | "partial_failed"
   | "failed"
   | "cancelled";
 
@@ -96,7 +95,6 @@ export type GraphWorkflowNodeStatus =
   | "running"
   | "succeeded"
   | "failed"
-  | "skipped"
   | "cancelled"
   | "awaiting_input";
 

@@ -81,6 +81,16 @@ export type GetWorkflowResponse = {
 };
 
 /**
+ * Identifies a snapshot by its stable identifier, independent of its workflow or version key.
+ */
+export type GetWorkflowSnapshotRequest = { snapshotId: string };
+
+/**
+ * Returns the snapshot including its full frozen graph.
+ */
+export type GetWorkflowSnapshotResponse = { snapshot: WorkflowSnapshot };
+
+/**
  * Identifies the workflow whose version history to retrieve.
  */
 export type ListVersionsRequest = { workflowId: string };

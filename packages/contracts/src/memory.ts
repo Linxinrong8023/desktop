@@ -7,14 +7,23 @@ import type { ProjectWorkContext } from "./project-work-context.js";
 import type { Session } from "./session.js";
 import type { Skill } from "./skill.js";
 import type { Task, TaskStatus } from "./task.js";
+import type { Workflow, WorkflowSnapshot, WorkflowSummary, WorkflowVersion } from "./workflow.js";
+
+/** One in-memory workflow with its editable draft and published snapshot history. */
+export interface MemoryWorkflowRecord {
+  workflow: Workflow;
+  draft: WorkflowSnapshot;
+  published: WorkflowSnapshot[];
+}
 
 /** Mutable records owned by one in-memory ContractsClient instance. */
 export interface MemoryContractsState {
   projects: Project[];
   tasks: Task[];
   sessions: Session[];
-  agents: Agent[];
-  skills: Skill[];
+  agents: Array<Agent & { content?: string }>;
+  skills: Array<Skill & { content?: string }>;
+  workflows: MemoryWorkflowRecord[];
   /** Warm sessions handed out but not yet attached, keyed by session id. */
   warmSessions: Map<string, AgentCli>;
   /** What every warm and persisted session reports as its configuration. */
@@ -31,6 +40,7 @@ export function createMemoryContractsState(
     sessions: structuredClone(seed.sessions ?? []),
     agents: structuredClone(seed.agents ?? []),
     skills: structuredClone(seed.skills ?? []),
+    workflows: structuredClone(seed.workflows ?? []),
     warmSessions: seed.warmSessions ?? new Map(),
     configOptions: structuredClone(seed.configOptions ?? [
       {
@@ -56,6 +66,20 @@ function nextId(prefix: string, records: readonly { id: string }[]): string {
     suffix += 1;
   }
   return `${prefix}${suffix}`;
+}
+
+/** Produces a millisecond-precision timestamp matching the contract's bigint wire type. */
+function nextTimestamp(): bigint {
+  return BigInt(Date.now());
+}
+
+/** Returns one workflow record or fails like the real not-found endpoint. */
+function requireWorkflow(state: MemoryContractsState, workflowId: string): MemoryWorkflowRecord {
+  const record = state.workflows.find((candidate) => candidate.workflow.id === workflowId);
+  if (record === undefined) {
+    throw new Error(`workflow ${workflowId} not found`);
+  }
+  return record;
 }
 
 /**
@@ -258,23 +282,28 @@ export function createMemoryContractsClient(
     agent: {
       list: async () => ({ agents: structuredClone(state.agents) }),
       get: async (request) => ({
-        agent: structuredClone(requireRecord(state.agents, request.agentId, "agent")),
+        agent: {
+          ...structuredClone(requireRecord(state.agents, request.agentId, "agent")),
+          content: requireRecord(state.agents, request.agentId, "agent").content ?? "",
+        },
       }),
       create: async (request) => {
-        const agent: Agent = {
+        const agent: Agent & { content: string } = {
           id: nextId("a", state.agents),
           name: request.name,
           description: request.description,
+          content: request.content ?? "",
         };
         state.agents.push(agent);
         return { agent: structuredClone(agent) };
       },
       update: async (request) => {
         const index = requireRecordIndex(state.agents, request.agentId, "agent");
-        const agent: Agent = {
+        const agent: Agent & { content: string } = {
           id: request.agentId,
           name: request.name,
           description: request.description,
+          content: request.content ?? state.agents[index]!.content ?? "",
         };
         state.agents[index] = agent;
         return { agent: structuredClone(agent) };
@@ -284,26 +313,39 @@ export function createMemoryContractsClient(
         return { agentId: request.agentId };
       },
     },
+    agentImport: {
+      prepare: async () => {
+        throw new Error("agentImport.prepare not implemented in memory client");
+      },
+      commit: async () => {
+        throw new Error("agentImport.commit not implemented in memory client");
+      },
+    },
     skill: {
       list: async () => ({ skills: structuredClone(state.skills) }),
       get: async (request) => ({
-        skill: structuredClone(requireRecord(state.skills, request.skillId, "skill")),
+        skill: {
+          ...structuredClone(requireRecord(state.skills, request.skillId, "skill")),
+          content: requireRecord(state.skills, request.skillId, "skill").content ?? "",
+        },
       }),
       create: async (request) => {
-        const skill: Skill = {
+        const skill: Skill & { content: string } = {
           id: nextId("sk", state.skills),
           name: request.name,
           description: request.description,
+          content: request.content ?? "",
         };
         state.skills.push(skill);
         return { skill: structuredClone(skill) };
       },
       update: async (request) => {
         const index = requireRecordIndex(state.skills, request.skillId, "skill");
-        const skill: Skill = {
+        const skill: Skill & { content: string } = {
           id: request.skillId,
           name: request.name,
           description: request.description,
+          content: request.content ?? state.skills[index]!.content ?? "",
         };
         state.skills[index] = skill;
         return { skill: structuredClone(skill) };
@@ -379,26 +421,180 @@ export function createMemoryContractsClient(
       }),
     },
     workflow: {
-      create: async () => { throw new Error("workflow not implemented in memory client"); },
-      get: async () => { throw new Error("workflow not implemented in memory client"); },
-      list: async () => { throw new Error("workflow not implemented in memory client"); },
-      update: async () => { throw new Error("workflow not implemented in memory client"); },
-      delete: async () => { throw new Error("workflow not implemented in memory client"); },
-      getDraft: async () => { throw new Error("workflow not implemented in memory client"); },
-      updateDraft: async () => { throw new Error("workflow not implemented in memory client"); },
-      publish: async () => { throw new Error("workflow not implemented in memory client"); },
-      rollback: async () => { throw new Error("workflow not implemented in memory client"); },
-      activate: async () => { throw new Error("workflow not implemented in memory client"); },
-      listVersions: async () => { throw new Error("workflow not implemented in memory client"); },
-      getVersion: async () => { throw new Error("workflow not implemented in memory client"); },
-      deleteSnapshot: async () => { throw new Error("workflow not implemented in memory client"); },
+      create: async (request) => {
+        const now = nextTimestamp();
+        const id = nextId(
+          "wf",
+          state.workflows.map((record) => ({ id: record.workflow.id })),
+        );
+        const workflow: Workflow = {
+          id,
+          name: request.name,
+          publishedSnapshotId: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const draft: WorkflowSnapshot = {
+          id: nextId("snap", []),
+          workflowId: id,
+          version: "draft",
+          graph: request.graph ?? "{}",
+          createdAt: now,
+          updatedAt: now,
+        };
+        state.workflows.push({ workflow, draft, published: [] });
+        return { workflow: structuredClone(workflow), draft: structuredClone(draft) };
+      },
+      get: async (request) => {
+        const record = requireWorkflow(state, request.workflowId);
+        const published = record.published.length > 0
+          ? structuredClone(record.published[record.published.length - 1])
+          : null;
+        return {
+          workflow: structuredClone(record.workflow),
+          draft: structuredClone(record.draft),
+          published,
+        };
+      },
+      list: async () => ({
+        workflows: state.workflows.map((record): WorkflowSummary => ({
+          id: record.workflow.id,
+          name: record.workflow.name,
+          publishedVersion: record.published.length > 0
+            ? record.published[record.published.length - 1].version
+            : null,
+          createdAt: record.workflow.createdAt,
+          updatedAt: record.workflow.updatedAt,
+        })),
+      }),
+      update: async (request) => {
+        const record = requireWorkflow(state, request.workflowId);
+        record.workflow = {
+          ...record.workflow,
+          name: request.name,
+          updatedAt: nextTimestamp(),
+        };
+        return { workflow: structuredClone(record.workflow) };
+      },
+      delete: async (request) => {
+        const index = state.workflows.findIndex(
+          (record) => record.workflow.id === request.workflowId,
+        );
+        if (index < 0) {
+          throw new Error(`workflow ${request.workflowId} not found`);
+        }
+        state.workflows.splice(index, 1);
+        return { workflowId: request.workflowId };
+      },
+      getDraft: async (request) => {
+        const record = requireWorkflow(state, request.workflowId);
+        return { snapshot: structuredClone(record.draft) };
+      },
+      updateDraft: async (request) => {
+        const record = requireWorkflow(state, request.workflowId);
+        record.draft = { ...record.draft, graph: request.graph, updatedAt: nextTimestamp() };
+        return { snapshot: structuredClone(record.draft) };
+      },
+      publish: async (request) => {
+        const record = requireWorkflow(state, request.workflowId);
+        const now = nextTimestamp();
+        const version = request.version ?? `v${now}`;
+        const snapshot: WorkflowSnapshot = {
+          id: nextId(
+            "snap",
+            record.published.map((item) => ({ id: item.id })),
+          ),
+          workflowId: record.workflow.id,
+          version,
+          graph: record.draft.graph,
+          createdAt: now,
+          updatedAt: null,
+        };
+        record.published.push(snapshot);
+        record.workflow = { ...record.workflow, publishedSnapshotId: snapshot.id, updatedAt: now };
+        return { snapshot: structuredClone(snapshot) };
+      },
+      listVersions: async (request) => {
+        const record = requireWorkflow(state, request.workflowId);
+        return {
+          versions: record.published.map((snapshot): WorkflowVersion => ({
+            id: snapshot.id,
+            version: snapshot.version,
+            createdAt: snapshot.createdAt,
+          })),
+        };
+      },
+      getVersion: async (request) => {
+        const record = requireWorkflow(state, request.workflowId);
+        const snapshot = record.published.find((item) => item.version === request.version);
+        if (snapshot === undefined) {
+          throw new Error(`workflow snapshot ${request.version} not found`);
+        }
+        return { snapshot: structuredClone(snapshot) };
+      },
+      rollback: async (request) => {
+        const record = requireWorkflow(state, request.workflowId);
+        const all = [...record.published, record.draft];
+        const snapshot = all.find((item) => item.id === request.snapshotId);
+        if (snapshot === undefined) {
+          throw new Error(`snapshot ${request.snapshotId} not found`);
+        }
+        record.draft = { ...record.draft, graph: snapshot.graph, updatedAt: nextTimestamp() };
+        return { snapshot: structuredClone(record.draft) };
+      },
+      activate: async (request) => {
+        const record = requireWorkflow(state, request.workflowId);
+        const snapshot = record.published.find((item) => item.id === request.snapshotId);
+        if (snapshot === undefined) {
+          throw new Error(`snapshot ${request.snapshotId} not found`);
+        }
+        record.workflow = {
+          ...record.workflow,
+          publishedSnapshotId: snapshot.id,
+          updatedAt: nextTimestamp(),
+        };
+        record.draft = { ...record.draft, graph: snapshot.graph, updatedAt: nextTimestamp() };
+        return { snapshot: structuredClone(record.draft) };
+      },
+      deleteSnapshot: async (request) => {
+        const record = requireWorkflow(state, request.workflowId);
+        const index = record.published.findIndex((item) => item.version === request.version);
+        if (index < 0) {
+          throw new Error(`snapshot ${request.version} not found`);
+        }
+        const [removed] = record.published.splice(index, 1);
+        return { snapshotId: removed.id, version: request.version };
+      },
+      getSnapshot: async (request) => {
+        for (const record of state.workflows) {
+          const all = [...record.published, record.draft];
+          const snapshot = all.find((item) => item.id === request.snapshotId);
+          if (snapshot !== undefined) {
+            return { snapshot: structuredClone(snapshot) };
+          }
+        }
+        throw new Error(`snapshot ${request.snapshotId} not found`);
+      },
     },
     workflowRun: {
-      create: async () => { throw new Error("workflowRun not implemented in memory client"); },
-      get: async () => { throw new Error("workflowRun not implemented in memory client"); },
-      list: async () => { throw new Error("workflowRun not implemented in memory client"); },
-      listNodeRuns: async () => { throw new Error("workflowRun not implemented in memory client"); },
-      delete: async () => { throw new Error("workflowRun not implemented in memory client"); },
+      create: async () => {
+        throw new Error("workflowRun.create not implemented in memory client");
+      },
+      get: async () => {
+        throw new Error("workflowRun.get not implemented in memory client");
+      },
+      list: async () => {
+        throw new Error("workflowRun.list not implemented in memory client");
+      },
+      listByWorkflow: async () => {
+        throw new Error("workflowRun.listByWorkflow not implemented in memory client");
+      },
+      listNodeRuns: async () => {
+        throw new Error("workflowRun.listNodeRuns not implemented in memory client");
+      },
+      delete: async () => {
+        throw new Error("workflowRun.delete not implemented in memory client");
+      },
     },
   };
 }

@@ -42,6 +42,17 @@ pub(super) const ENDPOINTS: &[FrontendEndpoint] = &[
         has_json_body: false,
     },
     FrontendEndpoint {
+        operation_name: "listWorkflowRunsByWorkflow",
+        namespace: NAMESPACE,
+        member_name: "listByWorkflow",
+        method: FrontendHttpMethod::Get,
+        path_template: WORKFLOW_RUNS_PATH,
+        request_type: "ListWorkflowRunsByWorkflowRequest",
+        response_type: "ListWorkflowRunsByWorkflowResponse",
+        path_params: NO_PATH_PARAMS,
+        has_json_body: false,
+    },
+    FrontendEndpoint {
         operation_name: "listWorkflowNodeRuns",
         namespace: NAMESPACE,
         member_name: "listNodeRuns",

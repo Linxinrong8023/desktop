@@ -13,8 +13,8 @@ use crate::{ApplicationError, Clock};
 use ora_contracts::{
     CreateWorkflowRunRequest, CreateWorkflowRunResponse, DeleteWorkflowRunRequest,
     DeleteWorkflowRunResponse, GetWorkflowRunRequest, GetWorkflowRunResponse,
-    ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse, ListWorkflowRunsRequest,
-    ListWorkflowRunsResponse,
+    ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse, ListWorkflowRunsByWorkflowRequest,
+    ListWorkflowRunsByWorkflowResponse, ListWorkflowRunsRequest, ListWorkflowRunsResponse,
 };
 use ora_domain::{
     AuditFields, ProjectId, Task, TaskId, TaskStatus, Workflow, WorkflowId, WorkflowRun,
@@ -140,11 +140,19 @@ where
         let branch_name = branch_name_for_task(&task_id);
         let worktree_path = worktree_path_for_task(&self.work_dir, &task_id);
 
+        // The run-task worktree is created from the requested branch (like a normal task);
+        // absent an explicit branch, keep the conventional main fallback for existing clients.
+        let base_reference_name = request
+            .base_branch
+            .as_deref()
+            .map(str::trim)
+            .filter(|branch| !branch.is_empty())
+            .unwrap_or(DEFAULT_RUN_BASE_REFERENCE);
         let provisioned = self
             .worktree_provisioner
             .create_task_worktree(CreateTaskWorktreeRequest {
                 branch_name: branch_name.clone(),
-                base_reference_name: DEFAULT_RUN_BASE_REFERENCE.to_string(),
+                base_reference_name: base_reference_name.to_string(),
                 worktree_path,
             })
             .map_err(ApplicationError::from_task_worktree_provisioner_error)?;
@@ -315,6 +323,7 @@ where
         Ok(GetWorkflowRunResponse {
             run: map_run(detail.run),
             name: detail.name,
+            task_id: detail.task_id.to_string(),
             nodes: detail.nodes.into_iter().map(map_node_run).collect(),
         })
     }
@@ -348,6 +357,39 @@ where
             .map_err(ApplicationError::from_workflow_run_repository_error)?;
 
         Ok(ListWorkflowRunsResponse {
+            runs: runs.into_iter().map(map_run_summary).collect(),
+        })
+    }
+}
+
+/// Handles listing of visible workflow runs for one workflow.
+pub struct ListWorkflowRunsByWorkflowHandler<Repository> {
+    repository: Arc<Repository>,
+}
+
+impl<Repository> ListWorkflowRunsByWorkflowHandler<Repository> {
+    /// Builds a list-runs-by-workflow handler over the shared run repository.
+    pub fn new(repository: Arc<Repository>) -> Self {
+        Self { repository }
+    }
+}
+
+impl<Repository> ListWorkflowRunsByWorkflowHandler<Repository>
+where
+    Repository: WorkflowRunRepository + Send + Sync + 'static,
+{
+    /// Lists run summaries for the requested workflow in stable order.
+    pub fn handle(
+        &self,
+        request: ListWorkflowRunsByWorkflowRequest,
+    ) -> Result<ListWorkflowRunsByWorkflowResponse, ApplicationError> {
+        let workflow_id = WorkflowId::new(request.workflow_id);
+        let runs = self
+            .repository
+            .list_runs_by_workflow(&workflow_id)
+            .map_err(ApplicationError::from_workflow_run_repository_error)?;
+
+        Ok(ListWorkflowRunsByWorkflowResponse {
             runs: runs.into_iter().map(map_run_summary).collect(),
         })
     }

@@ -160,8 +160,10 @@ function WorkflowCanvasInner({
   onExpandInspector,
   versionHistory,
   previewedVersion,
+  draftUpdatedAt,
   onPreviewVersion,
   onRestoreVersion,
+  onDeleteVersion,
   readOnly,
 }: WorkflowCanvasProps) {
   const { t } = useTranslation();
@@ -501,8 +503,10 @@ function WorkflowCanvasInner({
         <WorkflowVersionHistory
           versions={versionHistory}
           previewedVersion={previewedVersion}
+          draftUpdatedAt={draftUpdatedAt}
           onPreviewVersion={onPreviewVersion}
           onRestoreVersion={onRestoreVersion}
+          onDeleteVersion={onDeleteVersion}
         />
       </div>
 

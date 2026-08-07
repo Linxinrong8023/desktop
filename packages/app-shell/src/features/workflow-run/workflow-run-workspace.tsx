@@ -26,11 +26,11 @@ import { useUiStore } from "../../state/stores/ui-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
 import {
   useCancelGraphWorkflowRun,
-  useGraphWorkflowRun,
   useGraphWorkflowRunLive,
   useRerunGraphWorkflowRun,
   useStartGraphWorkflowRun,
 } from "../../state/hooks/use-graph-workflow-runs";
+import { useRealWorkflowRun } from "../../state/hooks/use-workflow-runs";
 import {
   resolveStageFocusNodeId,
   resolveTheaterFocus,
@@ -57,7 +57,7 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useUiStore((s) => s.setSidebarCollapsed);
   const selectWorkflowRun = useWorkspaceSelectionStore((s) => s.selectWorkflowRun);
-  const runQuery = useGraphWorkflowRun(runId);
+  const runQuery = useRealWorkflowRun(runId);
   const run = runQuery.data ?? null;
   const startRun = useStartGraphWorkflowRun();
   const cancelRun = useCancelGraphWorkflowRun();

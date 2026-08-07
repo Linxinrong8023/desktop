@@ -292,6 +292,24 @@ pub struct DeleteSnapshotResponse {
     pub version: String,
 }
 
+// ── Get snapshot by id ──
+
+/// Identifies a snapshot by its stable identifier, independent of its workflow or version key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflow.ts")]
+pub struct GetWorkflowSnapshotRequest {
+    pub snapshot_id: String,
+}
+
+/// Returns the snapshot including its full frozen graph.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflow.ts")]
+pub struct GetWorkflowSnapshotResponse {
+    pub snapshot: WorkflowSnapshot,
+}
+
 /// Exports every TypeScript binding declared in this module into the target directory.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     Workflow::export(config)?;
@@ -324,5 +342,7 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     GetVersionResponse::export(config)?;
     DeleteSnapshotRequest::export(config)?;
     DeleteSnapshotResponse::export(config)?;
+    GetWorkflowSnapshotRequest::export(config)?;
+    GetWorkflowSnapshotResponse::export(config)?;
     Ok(())
 }

@@ -103,7 +103,6 @@ export const RunOverviewNode = memo(function RunOverviewNode({
       frameClassName={cn(
         tone.ring,
         "ring-1 transition-[box-shadow,ring-color] duration-300",
-        state.status === "skipped" && "opacity-55",
         state.status === "running" && "ring-sky-500/35 theater-live-breathe",
         state.status === "awaiting_input"
           && "ring-amber-500/35 theater-live-breathe-amber",

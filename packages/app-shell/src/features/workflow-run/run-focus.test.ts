@@ -63,13 +63,6 @@ describe("shouldReleaseFocusToFollow", () => {
       shouldReleaseFocusToFollow(
         { nodeId: "understand", status: "running" },
         "understand",
-        "skipped",
-      ),
-    ).toBe(true);
-    expect(
-      shouldReleaseFocusToFollow(
-        { nodeId: "understand", status: "running" },
-        "understand",
         "cancelled",
       ),
     ).toBe(true);
@@ -194,7 +187,7 @@ describe("resolveTheaterFocus", () => {
         start: { status: "succeeded", finishedAt: "2026-08-01T12:00:01+08:00" },
         understand: { status: "succeeded", finishedAt: "2026-08-01T12:00:05+08:00" },
         quality: { status: "succeeded", finishedAt: "2026-08-01T12:00:03+08:00" },
-        tests: { status: "skipped" },
+        tests: { status: "idle" },
         review: { status: "idle" },
         output: { status: "idle" },
       },

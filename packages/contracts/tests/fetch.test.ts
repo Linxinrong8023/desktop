@@ -24,6 +24,7 @@ test("resolves paths against an absolute server base", () => {
 test("decodes known, unknown, and malformed remote payloads", () => {
   const requestId = "550e8400-e29b-41d4-a716-446655440000";
   assert.ok(decodeRemoteError({ code: "project_not_found", params: {}, requestId }, 404) instanceof RemoteContractError);
+  assert.ok(decodeRemoteError({ code: "agent_name_conflict", params: {}, requestId }, 409) instanceof RemoteContractError);
   assert.ok(decodeRemoteError({ code: "future_error", params: {}, requestId }, 500) instanceof UnknownRemoteError);
   assert.ok(decodeRemoteError({ code: "project_not_found", params: {} }, 404) instanceof LocalTransportError);
 });

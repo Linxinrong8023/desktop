@@ -320,7 +320,9 @@ export function createMockRunEngine(
       const preds = plan.predecessors[nodeId] ?? [];
       return preds.every((predId) => {
         const pred = run.nodeStates[predId];
-        return pred?.status === "succeeded" || pred?.status === "skipped";
+        // A non-taken condition branch is not part of the executed path: its nodes
+        // stay idle and never gate their downstream siblings.
+        return pred?.status === "succeeded" || plan.skipped.includes(predId);
       });
     });
 
@@ -337,9 +339,9 @@ export function createMockRunEngine(
       const status = latest.nodeStates[nodeId]?.status;
       return (
         status === "succeeded"
-        || status === "skipped"
         || status === "failed"
         || status === "cancelled"
+        || plan.skipped.includes(nodeId)
       );
     });
     if (allDone && timersFor(runId).size === 0 && latest.openHitls.length === 0) {
@@ -783,28 +785,18 @@ export function createMockRunEngine(
     );
     plans.set(runId, plan);
 
-    const nodeStates = { ...run.nodeStates };
-    for (const nodeId of plan.skipped) {
-      nodeStates[nodeId] = { status: "skipped" };
-    }
+    // Non-taken condition branches have no node-run row, matching the persisted
+    // backend model: those nodes stay idle instead of carrying a "skipped" status.
     const started: GraphWorkflowRun = {
       ...run,
       status: "running",
       openHitls: [],
-      nodeStates,
+      nodeStates: run.nodeStates,
       updatedAt: host.nowIso(),
     };
     host.setRun(started);
     host.notifyChanged(started);
     host.emit(runId, { type: "run_started", runId });
-    for (const nodeId of plan.skipped) {
-      host.emit(runId, {
-        type: "node_finished",
-        runId,
-        nodeId,
-        status: "skipped",
-      });
-    }
     pump(runId);
   }
 
@@ -1137,7 +1129,6 @@ function isTerminal(status: GraphWorkflowRun["status"]): boolean {
     status === "succeeded"
     || status === "failed"
     || status === "cancelled"
-    || status === "partial_failed"
   );
 }
 

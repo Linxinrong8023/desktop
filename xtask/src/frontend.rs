@@ -39,9 +39,17 @@ pub(crate) const WORKFLOW_RUN_ID_PATH_PARAM: FrontendPathParam = FrontendPathPar
     rust_field_name: "run_id",
     wire_name: "runId",
 };
+pub(crate) const WORKFLOW_SNAPSHOT_ID_PATH_PARAM: FrontendPathParam = FrontendPathParam {
+    rust_field_name: "snapshot_id",
+    wire_name: "snapshotId",
+};
 pub(crate) const WORKFLOW_RUN_PROJECT_QUERY_PARAM: FrontendQueryParam = FrontendQueryParam {
     rust_field_name: "project_id",
     wire_name: "projectId",
+};
+pub(crate) const WORKFLOW_RUN_WORKFLOW_QUERY_PARAM: FrontendQueryParam = FrontendQueryParam {
+    rust_field_name: "workflow_id",
+    wire_name: "workflowId",
 };
 pub(crate) const FILE_SYSTEM_DIRECTORY_PATH_QUERY_PARAM: FrontendQueryParam = FrontendQueryParam {
     rust_field_name: "path",
@@ -66,8 +74,12 @@ pub(crate) const WORKFLOW_PATH_PARAMS: &[FrontendPathParam] = &[WORKFLOW_ID_PATH
 pub(crate) const WORKFLOW_VERSION_PATH_PARAMS: &[FrontendPathParam] =
     &[WORKFLOW_ID_PATH_PARAM, WORKFLOW_VERSION_PATH_PARAM];
 pub(crate) const WORKFLOW_RUN_PATH_PARAMS: &[FrontendPathParam] = &[WORKFLOW_RUN_ID_PATH_PARAM];
+pub(crate) const WORKFLOW_SNAPSHOT_PATH_PARAMS: &[FrontendPathParam] =
+    &[WORKFLOW_SNAPSHOT_ID_PATH_PARAM];
 pub(crate) const WORKFLOW_RUN_PROJECT_QUERY_PARAMS: &[FrontendQueryParam] =
     &[WORKFLOW_RUN_PROJECT_QUERY_PARAM];
+pub(crate) const WORKFLOW_RUN_WORKFLOW_QUERY_PARAMS: &[FrontendQueryParam] =
+    &[WORKFLOW_RUN_WORKFLOW_QUERY_PARAM];
 pub(crate) const FILE_SYSTEM_DIRECTORY_QUERY_PARAMS: &[FrontendQueryParam] =
     &[FILE_SYSTEM_DIRECTORY_PATH_QUERY_PARAM];
 pub(crate) const TASK_DIFF_QUERY_PARAMS: &[FrontendQueryParam] = &[TASK_DIFF_SCOPE_QUERY_PARAM];
@@ -124,6 +136,7 @@ impl FrontendEndpoint {
             "listDirectory" => FILE_SYSTEM_DIRECTORY_QUERY_PARAMS,
             "getTaskDiff" => TASK_DIFF_QUERY_PARAMS,
             "listWorkflowRuns" => WORKFLOW_RUN_PROJECT_QUERY_PARAMS,
+            "listWorkflowRunsByWorkflow" => WORKFLOW_RUN_WORKFLOW_QUERY_PARAMS,
             _ => NO_QUERY_PARAMS,
         }
     }

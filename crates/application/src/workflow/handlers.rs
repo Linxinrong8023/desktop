@@ -4,10 +4,11 @@ use ora_contracts::{
     ActivateWorkflowRequest, ActivateWorkflowResponse, CreateWorkflowRequest,
     CreateWorkflowResponse, DeleteSnapshotRequest, DeleteSnapshotResponse, DeleteWorkflowRequest,
     DeleteWorkflowResponse, GetDraftRequest, GetDraftResponse, GetVersionRequest,
-    GetVersionResponse, GetWorkflowRequest, GetWorkflowResponse, ListVersionsRequest,
-    ListVersionsResponse, ListWorkflowsRequest, ListWorkflowsResponse, PublishWorkflowRequest,
-    PublishWorkflowResponse, RollbackWorkflowRequest, RollbackWorkflowResponse, UpdateDraftRequest,
-    UpdateDraftResponse, UpdateWorkflowRequest, UpdateWorkflowResponse,
+    GetVersionResponse, GetWorkflowRequest, GetWorkflowResponse, GetWorkflowSnapshotRequest,
+    GetWorkflowSnapshotResponse, ListVersionsRequest, ListVersionsResponse, ListWorkflowsRequest,
+    ListWorkflowsResponse, PublishWorkflowRequest, PublishWorkflowResponse,
+    RollbackWorkflowRequest, RollbackWorkflowResponse, UpdateDraftRequest, UpdateDraftResponse,
+    UpdateWorkflowRequest, UpdateWorkflowResponse,
 };
 use ora_domain::{AuditFields, Workflow, WorkflowId, WorkflowSnapshot, WorkflowSnapshotId};
 
@@ -709,5 +710,40 @@ where
             }
             DeleteSnapshotResult::SnapshotInUse => Err(ApplicationError::WorkflowSnapshotInUse),
         }
+    }
+}
+
+/// Handles retrieval of one snapshot by its stable identifier alone.
+pub struct GetWorkflowSnapshotHandler<Repository> {
+    repository: Arc<Repository>,
+}
+
+impl<Repository> GetWorkflowSnapshotHandler<Repository> {
+    pub fn new(repository: Arc<Repository>) -> Self {
+        Self { repository }
+    }
+}
+
+impl<Repository> GetWorkflowSnapshotHandler<Repository>
+where
+    Repository: WorkflowRepository + Send + Sync + 'static,
+{
+    /// Loads one snapshot (draft or published) by id, independent of its workflow.
+    pub fn handle(
+        &self,
+        request: GetWorkflowSnapshotRequest,
+    ) -> Result<GetWorkflowSnapshotResponse, ApplicationError> {
+        let snapshot_id = WorkflowSnapshotId::new(request.snapshot_id);
+        let snapshot = self
+            .repository
+            .find_snapshot_any_workflow(&snapshot_id)
+            .map_err(ApplicationError::from_workflow_repository_error)?
+            .ok_or_else(|| ApplicationError::WorkflowSnapshotNotFoundById {
+                snapshot_id: snapshot_id.to_string(),
+            })?;
+
+        Ok(GetWorkflowSnapshotResponse {
+            snapshot: map_snapshot(snapshot),
+        })
     }
 }

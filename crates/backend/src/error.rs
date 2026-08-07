@@ -153,7 +153,134 @@ impl From<ApplicationError> for BackendError {
                 PublicError::SkillStorageInconsistent(EmptyErrorParams {}),
                 "skill package storage is inconsistent",
             ),
-            ApplicationError::SkillImport(error) => skill_import_error(error),
+            ApplicationError::SkillImport(error) => {
+                let params = EmptyErrorParams {};
+                match error {
+                    SkillImportError::SkillManifestNotFound => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::SkillManifestNotFound(params),
+                        "skill import manifest was not found",
+                    ),
+                    SkillImportError::TooManySkills { .. } => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::TooManySkills(params),
+                        "skill import has too many manifests",
+                    ),
+                    SkillImportError::TooManyFiles { .. }
+                    | SkillImportError::TooManyEntries { .. } => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::InvalidRequest(params),
+                        "skill import has too many source entries",
+                    ),
+                    SkillImportError::DuplicateSkillNames { .. } => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::InvalidRequest(params),
+                        "skill import has duplicate names",
+                    ),
+                    SkillImportError::ArchiveFormatUnsupported => (
+                        ErrorClassification::InvalidRequest,
+                        PublicError::ArchiveFormatUnsupported(params),
+                        "skill archive format is unsupported",
+                    ),
+                    SkillImportError::ArchiveFormatMismatch => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::ArchiveFormatMismatch(params),
+                        "skill archive format does not match content",
+                    ),
+                    SkillImportError::ArchiveCorrupt => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::ArchiveCorrupt(params),
+                        "skill archive is corrupt",
+                    ),
+                    SkillImportError::ArchiveTooLarge
+                    | SkillImportError::TotalBytesExceeded
+                    | SkillImportError::ArchiveExpansionRatioExceeded => (
+                        ErrorClassification::PayloadTooLarge,
+                        PublicError::ArchiveExpansionRatioExceeded(params),
+                        "skill import exceeds source limits",
+                    ),
+                    SkillImportError::ArchiveEncryptedUnsupported => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::ArchiveEncryptedUnsupported(params),
+                        "encrypted skill archive is unsupported",
+                    ),
+                    SkillImportError::ArchiveSpecialEntryUnsupported => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::ArchiveSpecialEntryUnsupported(params),
+                        "skill archive contains a special entry",
+                    ),
+                    SkillImportError::ArchivePathEncodingInvalid => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::ArchivePathEncodingInvalid(params),
+                        "skill archive path encoding is invalid",
+                    ),
+                    SkillImportError::ArchivePathCaseConflict => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::ArchivePathCaseConflict(params),
+                        "skill source paths conflict",
+                    ),
+                    SkillImportError::PathSegmentTooLong => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::PathSegmentTooLong(params),
+                        "skill source path segment is too long",
+                    ),
+                    SkillImportError::PathTooLong => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::PathTooLong(params),
+                        "skill source path is too long",
+                    ),
+                    SkillImportError::PathTooDeep => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::PathTooDeep(params),
+                        "skill source path is too deep",
+                    ),
+                    SkillImportError::UnsafePath => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::InvalidRequest(params),
+                        "skill source path is unsafe",
+                    ),
+                    SkillImportError::PreparationTimeout => (
+                        ErrorClassification::Unprocessable,
+                        PublicError::ImportPreparationTimeout(params),
+                        "skill import preparation timed out",
+                    ),
+                    SkillImportError::SessionNotFound { .. } | SkillImportError::SessionExpired => {
+                        (
+                            ErrorClassification::NotFound,
+                            PublicError::ImportSessionExpired(params),
+                            "skill import session is unavailable",
+                        )
+                    }
+                    SkillImportError::SessionCancelled => (
+                        ErrorClassification::Conflict,
+                        PublicError::ImportSessionCancelled(params),
+                        "skill import session was cancelled",
+                    ),
+                    SkillImportError::CommitInProgress => (
+                        ErrorClassification::Conflict,
+                        PublicError::ImportSessionCommitInProgress(params),
+                        "skill import commit is in progress",
+                    ),
+                    SkillImportError::AlreadyCommitted => (
+                        ErrorClassification::Conflict,
+                        PublicError::ImportSessionAlreadyCommitted(params),
+                        "skill import session was already committed",
+                    ),
+                    SkillImportError::DecisionMissing { .. } => (
+                        ErrorClassification::InvalidRequest,
+                        PublicError::InvalidRequest(params),
+                        "skill import decisions are incomplete",
+                    ),
+                    SkillImportError::SourceUnavailable { .. }
+                    | SkillImportError::Storage { .. }
+                    | SkillImportError::Repository { .. }
+                    | SkillImportError::Internal { .. } => (
+                        ErrorClassification::Internal,
+                        PublicError::InternalError(params),
+                        "skill import operation failed",
+                    ),
+                }
+            }
             ApplicationError::SkillNotFound { .. } => (
                 ErrorClassification::NotFound,
                 PublicError::SkillNotFound(EmptyErrorParams {}),
@@ -215,6 +342,21 @@ impl From<ApplicationError> for BackendError {
                 ErrorClassification::InvalidRequest,
                 PublicError::AgentNameBlank(EmptyErrorParams {}),
                 "agent definition name must not be blank",
+            ),
+            ApplicationError::AgentDefinitionNameConflict { .. } => (
+                ErrorClassification::Conflict,
+                PublicError::AgentNameConflict(EmptyErrorParams {}),
+                "agent definition name already exists",
+            ),
+            ApplicationError::AgentImportInvalid => (
+                ErrorClassification::InvalidRequest,
+                PublicError::InvalidRequest(EmptyErrorParams {}),
+                "agent import Markdown is invalid",
+            ),
+            ApplicationError::AgentImportDecisionMissing => (
+                ErrorClassification::InvalidRequest,
+                PublicError::InvalidRequest(EmptyErrorParams {}),
+                "agent import conflict decision is missing",
             ),
             ApplicationError::AgentDefinitionNotFound { .. } => (
                 ErrorClassification::NotFound,
@@ -430,139 +572,10 @@ impl From<ApplicationError> for BackendError {
     }
 }
 
-/// Projects a transport-neutral import failure without exposing source paths or I/O diagnostics.
-fn skill_import_error(
-    error: &SkillImportError,
-) -> (ErrorClassification, PublicError, &'static str) {
-    let params = EmptyErrorParams {};
-    match error {
-        SkillImportError::SkillManifestNotFound => (
-            ErrorClassification::Unprocessable,
-            PublicError::SkillManifestNotFound(params),
-            "skill import manifest was not found",
-        ),
-        SkillImportError::TooManySkills { .. } => (
-            ErrorClassification::Unprocessable,
-            PublicError::TooManySkills(params),
-            "skill import has too many manifests",
-        ),
-        SkillImportError::TooManyFiles { .. } | SkillImportError::TooManyEntries { .. } => (
-            ErrorClassification::Unprocessable,
-            PublicError::InvalidRequest(params),
-            "skill import has too many source entries",
-        ),
-        SkillImportError::DuplicateSkillNames { .. } => (
-            ErrorClassification::Unprocessable,
-            PublicError::InvalidRequest(params),
-            "skill import has duplicate names",
-        ),
-        SkillImportError::ArchiveFormatUnsupported => (
-            ErrorClassification::InvalidRequest,
-            PublicError::ArchiveFormatUnsupported(params),
-            "skill archive format is unsupported",
-        ),
-        SkillImportError::ArchiveFormatMismatch => (
-            ErrorClassification::Unprocessable,
-            PublicError::ArchiveFormatMismatch(params),
-            "skill archive format does not match content",
-        ),
-        SkillImportError::ArchiveCorrupt => (
-            ErrorClassification::Unprocessable,
-            PublicError::ArchiveCorrupt(params),
-            "skill archive is corrupt",
-        ),
-        SkillImportError::ArchiveTooLarge
-        | SkillImportError::TotalBytesExceeded
-        | SkillImportError::ArchiveExpansionRatioExceeded => (
-            ErrorClassification::PayloadTooLarge,
-            PublicError::ArchiveExpansionRatioExceeded(params),
-            "skill import exceeds source limits",
-        ),
-        SkillImportError::ArchiveEncryptedUnsupported => (
-            ErrorClassification::Unprocessable,
-            PublicError::ArchiveEncryptedUnsupported(params),
-            "encrypted skill archive is unsupported",
-        ),
-        SkillImportError::ArchiveSpecialEntryUnsupported => (
-            ErrorClassification::Unprocessable,
-            PublicError::ArchiveSpecialEntryUnsupported(params),
-            "skill archive contains a special entry",
-        ),
-        SkillImportError::ArchivePathEncodingInvalid => (
-            ErrorClassification::Unprocessable,
-            PublicError::ArchivePathEncodingInvalid(params),
-            "skill archive path encoding is invalid",
-        ),
-        SkillImportError::ArchivePathCaseConflict => (
-            ErrorClassification::Unprocessable,
-            PublicError::ArchivePathCaseConflict(params),
-            "skill source paths conflict",
-        ),
-        SkillImportError::PathSegmentTooLong => (
-            ErrorClassification::Unprocessable,
-            PublicError::PathSegmentTooLong(params),
-            "skill source path segment is too long",
-        ),
-        SkillImportError::PathTooLong => (
-            ErrorClassification::Unprocessable,
-            PublicError::PathTooLong(params),
-            "skill source path is too long",
-        ),
-        SkillImportError::PathTooDeep => (
-            ErrorClassification::Unprocessable,
-            PublicError::PathTooDeep(params),
-            "skill source path is too deep",
-        ),
-        SkillImportError::UnsafePath => (
-            ErrorClassification::Unprocessable,
-            PublicError::InvalidRequest(params),
-            "skill source path is unsafe",
-        ),
-        SkillImportError::PreparationTimeout => (
-            ErrorClassification::Unprocessable,
-            PublicError::ImportPreparationTimeout(params),
-            "skill import preparation timed out",
-        ),
-        SkillImportError::SessionNotFound { .. } | SkillImportError::SessionExpired => (
-            ErrorClassification::NotFound,
-            PublicError::ImportSessionExpired(params),
-            "skill import session is unavailable",
-        ),
-        SkillImportError::SessionCancelled => (
-            ErrorClassification::Conflict,
-            PublicError::ImportSessionCancelled(params),
-            "skill import session was cancelled",
-        ),
-        SkillImportError::CommitInProgress => (
-            ErrorClassification::Conflict,
-            PublicError::ImportSessionCommitInProgress(params),
-            "skill import commit is in progress",
-        ),
-        SkillImportError::AlreadyCommitted => (
-            ErrorClassification::Conflict,
-            PublicError::ImportSessionAlreadyCommitted(params),
-            "skill import session was already committed",
-        ),
-        SkillImportError::DecisionMissing { .. } => (
-            ErrorClassification::InvalidRequest,
-            PublicError::InvalidRequest(params),
-            "skill import decisions are incomplete",
-        ),
-        SkillImportError::SourceUnavailable { .. }
-        | SkillImportError::Storage { .. }
-        | SkillImportError::Repository { .. }
-        | SkillImportError::Internal { .. } => (
-            ErrorClassification::Internal,
-            PublicError::InternalError(params),
-            "skill import operation failed",
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{BackendError, ErrorClassification};
-    use ora_application::{ApplicationError, RepositoryError};
+    use ora_application::{ApplicationError, RepositoryError, SkillImportError};
     use ora_contracts::{
         EmptyErrorParams, PublicError, SkillFolderConflictParams, SkillUploadTooManyFilesParams,
     };
@@ -610,6 +623,38 @@ mod tests {
                 PublicError::SkillFolderConflict(SkillFolderConflictParams {
                     name: "grilling".to_string(),
                 }),
+            )
+        );
+    }
+
+    /// Verifies wrapped skill import failures map through the main application error projection.
+    #[test]
+    fn maps_wrapped_skill_import_errors() {
+        let error = BackendError::from(ApplicationError::SkillImport(
+            SkillImportError::ArchiveCorrupt,
+        ));
+
+        assert_eq!(
+            (error.classification(), error.public_error().clone()),
+            (
+                ErrorClassification::Unprocessable,
+                PublicError::ArchiveCorrupt(EmptyErrorParams {})
+            )
+        );
+    }
+
+    /// Verifies duplicate Role names remain a public conflict instead of an internal repository error.
+    #[test]
+    fn maps_agent_name_conflicts_to_the_public_contract() {
+        let error = BackendError::from(ApplicationError::AgentDefinitionNameConflict {
+            name: "reviewer".to_string(),
+        });
+
+        assert_eq!(
+            (error.classification(), error.public_error().clone()),
+            (
+                ErrorClassification::Conflict,
+                PublicError::AgentNameConflict(EmptyErrorParams {})
             )
         );
     }

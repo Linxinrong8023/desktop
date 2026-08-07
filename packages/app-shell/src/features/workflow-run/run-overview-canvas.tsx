@@ -178,11 +178,7 @@ export function RunOverviewCanvas({
   const edges = useMemo((): Edge[] => {
     return snapshot.edges.map((edge) => {
       const sourceStatus = nodeStates[edge.source]?.status ?? "idle";
-      const targetStatus = nodeStates[edge.target]?.status ?? "idle";
-      const activePath =
-        sourceStatus !== "skipped"
-        && sourceStatus !== "idle"
-        && targetStatus !== "skipped";
+      const activePath = sourceStatus !== "idle";
       return {
         ...edge,
         type: EDGE_TYPE,

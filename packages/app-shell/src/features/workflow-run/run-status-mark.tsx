@@ -1,10 +1,8 @@
 import { useTranslation } from "react-i18next";
 import {
-  IconAlertTriangle,
   IconBan,
   IconCheck,
   IconLoader2,
-  IconMinus,
   IconX,
 } from "@tabler/icons-react";
 import { Badge, cn } from "@ora/ui";
@@ -19,15 +17,13 @@ type Status = GraphWorkflowRunStatus | GraphWorkflowNodeStatus;
 
 type TerminalStatus = Extract<
   Status,
-  "succeeded" | "failed" | "partial_failed" | "cancelled" | "skipped"
+  "succeeded" | "failed" | "cancelled"
 >;
 
 function isTerminal(status: Status): status is TerminalStatus {
   return status === "succeeded"
     || status === "failed"
-    || status === "partial_failed"
-    || status === "cancelled"
-    || status === "skipped";
+    || status === "cancelled";
 }
 
 const ICON_BOX = "size-3.5";
@@ -87,21 +83,6 @@ export function RunStatusMark({
     );
   }
 
-  // Quiet path/header: partial_failed uses a tiny triangle so it is not identical to failed.
-  if (quiet && status === "partial_failed") {
-    return (
-      <span
-        className={cn(
-          "inline-flex size-2.5 shrink-0 items-center justify-center text-rose-500",
-          className,
-        )}
-        aria-hidden
-      >
-        <IconAlertTriangle className="size-2.5" stroke={2.5} />
-      </span>
-    );
-  }
-
   return (
     <span
       className={cn("inline-flex size-1.5 shrink-0 rounded-full", tone.dot, className)}
@@ -151,12 +132,8 @@ function TerminalGlyph({
       return <IconCheck className={className} stroke={3} />;
     case "failed":
       return <IconX className={className} stroke={3} />;
-    case "partial_failed":
-      return <IconAlertTriangle className={className} stroke={2.5} />;
     case "cancelled":
       return <IconBan className={className} stroke={2.5} />;
-    case "skipped":
-      return <IconMinus className={className} stroke={2.5} />;
   }
 }
 
@@ -165,12 +142,9 @@ function terminalSurface(status: Status): string {
     case "succeeded":
       return "bg-emerald-500";
     case "failed":
-    case "partial_failed":
       return "bg-rose-500";
     case "cancelled":
       return "bg-zinc-400 dark:bg-zinc-500";
-    case "skipped":
-      return "bg-muted text-muted-foreground";
     default:
       return "bg-muted text-muted-foreground";
   }

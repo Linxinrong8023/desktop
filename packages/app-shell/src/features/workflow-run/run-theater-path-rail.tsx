@@ -75,7 +75,7 @@ export function RunTheaterPathRail({
               run.status === "running" && "bg-sky-600/80",
               run.status === "awaiting_input" && "bg-amber-600/80",
               run.status === "succeeded" && "bg-emerald-600/75",
-              (run.status === "failed" || run.status === "partial_failed")
+              run.status === "failed"
                 && "bg-rose-600/75",
               run.status === "cancelled" && "bg-zinc-500/60",
             )}
@@ -155,14 +155,12 @@ export function RunTheaterPathRail({
                         "theater-chip-pop bg-background shadow-sm",
                         run.status === "succeeded" && "border-emerald-500/45",
                         run.status === "failed" && "border-rose-500/45",
-                        run.status === "partial_failed" && "border-rose-500/40",
                         run.status === "cancelled" && "border-zinc-400/45",
                       )
                       : cn(
                         "bg-background/60 hover:bg-background",
                         run.status === "succeeded" && "border-emerald-500/25 hover:border-emerald-500/40",
                         run.status === "failed" && "border-rose-500/25 hover:border-rose-500/40",
-                        run.status === "partial_failed" && "border-rose-500/20 hover:border-rose-500/35",
                         run.status === "cancelled" && "border-zinc-400/25 hover:border-zinc-400/40",
                       ),
                   )}

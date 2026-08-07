@@ -8,7 +8,32 @@ import type {
   Skill,
   Task,
   TaskStatus,
+  Workflow,
+  WorkflowRun,
+  WorkflowSnapshot,
+  WorkflowSummary,
+  WorkflowVersion,
 } from "@ora/contracts";
+
+/** One in-memory workflow with its editable draft and published history. */
+export interface MockWorkflowRecord {
+  workflow: Workflow;
+  draft: WorkflowSnapshot;
+  published: WorkflowSnapshot[];
+}
+
+/** One in-memory workflow run used by run-hook tests. */
+export interface MockWorkflowRunRecord {
+  id: string;
+  projectId: string;
+  workflowId: string;
+  snapshotId: string;
+  name: string;
+  status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  taskId: string;
+  createdAt: bigint;
+  updatedAt: bigint;
+}
 
 /** In-memory state mutated by the mock client so tests can assert post-call state. */
 export interface MockClientState {
@@ -17,6 +42,8 @@ export interface MockClientState {
   sessions: Session[];
   agents: Agent[];
   skills: Skill[];
+  workflows: MockWorkflowRecord[];
+  workflowRuns: MockWorkflowRunRecord[];
   /** Warm sessions handed out but not yet attached, keyed by session id. */
   warmSessions: Map<string, AgentCli>;
   /** What every warm and persisted session reports as its configuration. */
@@ -37,6 +64,8 @@ export function createMockClientState(): MockClientState {
     sessions: [],
     agents: [],
     skills: [],
+    workflows: [],
+    workflowRuns: [],
     warmSessions: new Map(),
     configOptions: [
       {
@@ -56,6 +85,20 @@ export function createMockClientState(): MockClientState {
 
 function nextId(prefix: string, count: number): string {
   return `${prefix}${count + 1}`;
+}
+
+/** Produces a millisecond-precision timestamp matching the contract's bigint wire type. */
+function nextTimestamp(): bigint {
+  return BigInt(Date.now());
+}
+
+/** Returns one workflow record or fails like the real not-found endpoint. */
+function requireWorkflowRecord(state: MockClientState, workflowId: string): MockWorkflowRecord {
+  const record = state.workflows.find((candidate) => candidate.workflow.id === workflowId);
+  if (record === undefined) {
+    throw new Error(`workflow ${workflowId} not found`);
+  }
+  return record;
 }
 
 /**
@@ -215,7 +258,7 @@ export function createMockClient(state: MockClientState): ContractsClient {
     },
     agent: {
       list: async () => ({ agents: [...state.agents] }),
-      get: async (req) => ({ agent: state.agents.find((a) => a.id === req.agentId)! }),
+      get: async (req) => ({ agent: { ...state.agents.find((a) => a.id === req.agentId)!, content: "" } }),
       create: async (req) => {
         const agent: Agent = { id: nextId("a", state.agents.length), name: req.name, description: req.description };
         state.agents.push(agent);
@@ -234,9 +277,13 @@ export function createMockClient(state: MockClientState): ContractsClient {
         return { agentId: req.agentId };
       },
     },
+    agentImport: {
+      prepare: async () => { throw new Error("agentImport not implemented in mock"); },
+      commit: async () => { throw new Error("agentImport not implemented in mock"); },
+    },
     skill: {
       list: async () => ({ skills: [...state.skills] }),
-      get: async (req) => ({ skill: state.skills.find((s) => s.id === req.skillId)! }),
+      get: async (req) => ({ skill: { ...state.skills.find((s) => s.id === req.skillId)!, content: "" } }),
       create: async (req) => {
         const skill: Skill = { id: nextId("sk", state.skills.length), name: req.name, description: req.description };
         state.skills.push(skill);
@@ -309,26 +356,225 @@ export function createMockClient(state: MockClientState): ContractsClient {
       get: async () => ({ name: "Test User", email: "test@ora.local" }),
     },
     workflow: {
-      create: async () => { throw new Error("workflow not implemented in mock"); },
-      get: async () => { throw new Error("workflow not implemented in mock"); },
-      list: async () => { throw new Error("workflow not implemented in mock"); },
-      update: async () => { throw new Error("workflow not implemented in mock"); },
-      delete: async () => { throw new Error("workflow not implemented in mock"); },
-      getDraft: async () => { throw new Error("workflow not implemented in mock"); },
-      updateDraft: async () => { throw new Error("workflow not implemented in mock"); },
-      publish: async () => { throw new Error("workflow not implemented in mock"); },
-      rollback: async () => { throw new Error("workflow not implemented in mock"); },
-      activate: async () => { throw new Error("workflow not implemented in mock"); },
-      listVersions: async () => { throw new Error("workflow not implemented in mock"); },
-      getVersion: async () => { throw new Error("workflow not implemented in mock"); },
-      deleteSnapshot: async () => { throw new Error("workflow not implemented in mock"); },
+      create: async (req) => {
+        const now = nextTimestamp();
+        const id = nextId("wf", state.workflows.length);
+        const workflow: Workflow = {
+          id,
+          name: req.name,
+          publishedSnapshotId: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const draft: WorkflowSnapshot = {
+          id: nextId("snap", 0),
+          workflowId: id,
+          version: "draft",
+          graph: req.graph ?? "{}",
+          createdAt: now,
+          updatedAt: now,
+        };
+        state.workflows.push({ workflow, draft, published: [] });
+        return { workflow, draft };
+      },
+      get: async (req) => {
+        const record = requireWorkflowRecord(state, req.workflowId);
+        return {
+          workflow: record.workflow,
+          draft: record.draft,
+          published: record.published.length > 0
+            ? record.published[record.published.length - 1]
+            : null,
+        };
+      },
+      list: async () => ({
+        workflows: state.workflows.map((record): WorkflowSummary => ({
+          id: record.workflow.id,
+          name: record.workflow.name,
+          publishedVersion: record.published.length > 0
+            ? record.published[record.published.length - 1].version
+            : null,
+          createdAt: record.workflow.createdAt,
+          updatedAt: record.workflow.updatedAt,
+        })),
+      }),
+      update: async (req) => {
+        const record = requireWorkflowRecord(state, req.workflowId);
+        record.workflow = { ...record.workflow, name: req.name, updatedAt: nextTimestamp() };
+        return { workflow: record.workflow };
+      },
+      delete: async (req) => {
+        const idx = state.workflows.findIndex((record) => record.workflow.id === req.workflowId);
+        if (idx >= 0) state.workflows.splice(idx, 1);
+        return { workflowId: req.workflowId };
+      },
+      getDraft: async (req) => {
+        const record = requireWorkflowRecord(state, req.workflowId);
+        return { snapshot: record.draft };
+      },
+      updateDraft: async (req) => {
+        const record = requireWorkflowRecord(state, req.workflowId);
+        record.draft = { ...record.draft, graph: req.graph, updatedAt: nextTimestamp() };
+        return { snapshot: record.draft };
+      },
+      publish: async (req) => {
+        const record = requireWorkflowRecord(state, req.workflowId);
+        const now = nextTimestamp();
+        const version = req.version ?? `v${now}`;
+        const snapshot: WorkflowSnapshot = {
+          id: nextId("snap", record.published.length),
+          workflowId: record.workflow.id,
+          version,
+          graph: record.draft.graph,
+          createdAt: now,
+          updatedAt: null,
+        };
+        record.published.push(snapshot);
+        record.workflow = { ...record.workflow, publishedSnapshotId: snapshot.id, updatedAt: now };
+        return { snapshot };
+      },
+      rollback: async (req) => {
+        const record = requireWorkflowRecord(state, req.workflowId);
+        const all = [...record.published, record.draft];
+        const snapshot = all.find((item) => item.id === req.snapshotId);
+        if (snapshot === undefined) throw new Error(`snapshot ${req.snapshotId} not found`);
+        record.draft = { ...record.draft, graph: snapshot.graph, updatedAt: nextTimestamp() };
+        return { snapshot: record.draft };
+      },
+      activate: async (req) => {
+        const record = requireWorkflowRecord(state, req.workflowId);
+        const snapshot = record.published.find((item) => item.id === req.snapshotId);
+        if (snapshot === undefined) throw new Error(`snapshot ${req.snapshotId} not found`);
+        record.workflow = {
+          ...record.workflow,
+          publishedSnapshotId: snapshot.id,
+          updatedAt: nextTimestamp(),
+        };
+        record.draft = { ...record.draft, graph: snapshot.graph, updatedAt: nextTimestamp() };
+        return { snapshot: record.draft };
+      },
+      listVersions: async (req) => {
+        const record = requireWorkflowRecord(state, req.workflowId);
+        return {
+          versions: record.published.map((snapshot): WorkflowVersion => ({
+            id: snapshot.id,
+            version: snapshot.version,
+            createdAt: snapshot.createdAt,
+          })),
+        };
+      },
+      getVersion: async (req) => {
+        const record = requireWorkflowRecord(state, req.workflowId);
+        const snapshot = record.published.find((item) => item.version === req.version);
+        if (snapshot === undefined) throw new Error(`snapshot ${req.version} not found`);
+        return { snapshot };
+      },
+      deleteSnapshot: async (req) => {
+        const record = requireWorkflowRecord(state, req.workflowId);
+        const idx = record.published.findIndex((item) => item.version === req.version);
+        if (idx < 0) throw new Error(`snapshot ${req.version} not found`);
+        const [removed] = record.published.splice(idx, 1);
+        return { snapshotId: removed.id, version: req.version };
+      },
+      getSnapshot: async (req) => {
+        for (const record of state.workflows) {
+          const all = [...record.published, record.draft];
+          const snapshot = all.find((item) => item.id === req.snapshotId);
+          if (snapshot !== undefined) return { snapshot };
+        }
+        throw new Error(`snapshot ${req.snapshotId} not found`);
+      },
     },
     workflowRun: {
-      create: async () => { throw new Error("workflowRun not implemented in mock"); },
-      get: async () => { throw new Error("workflowRun not implemented in mock"); },
-      list: async () => { throw new Error("workflowRun not implemented in mock"); },
-      listNodeRuns: async () => { throw new Error("workflowRun not implemented in mock"); },
-      delete: async () => { throw new Error("workflowRun not implemented in mock"); },
+      create: async (req) => {
+        const id = nextId("run", state.workflowRuns.length);
+        const now = nextTimestamp();
+        const run: WorkflowRun = {
+          id,
+          workflowId: req.workflowId,
+          snapshotId: "snap-1",
+          status: "pending",
+          state: "{\"current_nodes\":[]}",
+          input: null,
+          output: null,
+          error: null,
+          payload: null,
+          startedAt: null,
+          finishedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        state.workflowRuns.push({
+          id,
+          projectId: req.projectId,
+          workflowId: req.workflowId,
+          snapshotId: run.snapshotId,
+          name: req.name ?? "",
+          status: "pending",
+          taskId: nextId("task", state.tasks.length),
+          createdAt: now,
+          updatedAt: now,
+        });
+        return { run, taskId: nextId("task", state.tasks.length) };
+      },
+      get: async (req) => {
+        const record = state.workflowRuns.find((candidate) => candidate.id === req.runId);
+        if (record === undefined) throw new Error(`workflow run ${req.runId} not found`);
+        return {
+          run: {
+            id: record.id,
+            workflowId: record.workflowId,
+            snapshotId: record.snapshotId,
+            status: record.status,
+            state: "{\"current_nodes\":[]}",
+            input: null,
+            output: null,
+            error: null,
+            payload: null,
+            startedAt: null,
+            finishedAt: null,
+            createdAt: record.createdAt,
+            updatedAt: record.updatedAt,
+          },
+          name: record.name,
+          taskId: record.taskId,
+          nodes: [],
+        };
+      },
+      list: async (req) => ({
+        runs: state.workflowRuns
+          .filter((record) => record.projectId === req.projectId)
+          .map((record) => ({
+            id: record.id,
+            name: record.name,
+            projectId: record.projectId,
+            workflowId: record.workflowId,
+            status: record.status,
+            startedAt: null,
+            finishedAt: null,
+            createdAt: record.createdAt,
+          })),
+      }),
+      listByWorkflow: async (req) => ({
+        runs: state.workflowRuns
+          .filter((record) => record.workflowId === req.workflowId)
+          .map((record) => ({
+            id: record.id,
+            name: record.name,
+            projectId: record.projectId,
+            workflowId: record.workflowId,
+            status: record.status,
+            startedAt: null,
+            finishedAt: null,
+            createdAt: record.createdAt,
+          })),
+      }),
+      listNodeRuns: async () => ({ nodes: [] }),
+      delete: async (req) => {
+        const idx = state.workflowRuns.findIndex((record) => record.id === req.runId);
+        if (idx >= 0) state.workflowRuns.splice(idx, 1);
+        return { runId: req.runId };
+      },
     },
   };
 }

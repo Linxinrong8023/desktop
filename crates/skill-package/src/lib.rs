@@ -21,7 +21,8 @@ pub use error::PrepareError;
 pub use folder::copy_folder_to;
 pub use limits::Limits;
 pub use manifest::{
-    Manifest, ManifestError, parse_manifest, render_minimal_manifest, rewrite_manifest,
+    Manifest, ManifestError, parse_manifest, render_manifest, render_minimal_manifest,
+    rewrite_manifest, rewrite_manifest_body,
 };
 pub use path::{
     MAX_DEPTH, MAX_PATH_BYTES, MAX_SEGMENT_BYTES, MAX_SEGMENT_UTF16_UNITS, PathValidationError,

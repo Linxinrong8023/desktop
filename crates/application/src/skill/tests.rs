@@ -6,7 +6,7 @@ use crate::skill::storage::{CreateHandle, DeleteHandle, SwapHandle, TransactionJ
 use crate::{ApplicationError, Clock, RepositoryError};
 use ora_contracts::{CreateSkillRequest, DeleteSkillRequest, GetSkillRequest, UpdateSkillRequest};
 use ora_domain::{AuditFields, Skill, SkillId};
-use ora_skill_package::manifest::render_minimal_manifest;
+use ora_skill_package::manifest::{render_manifest, render_minimal_manifest};
 use ora_skill_package::path::RelativePath;
 use pretty_assertions::assert_eq;
 use std::cell::{Cell, RefCell};
@@ -27,6 +27,7 @@ fn creates_trimmed_skill_with_generated_id_and_private_audit_fields() {
     .handle(CreateSkillRequest {
         name: " review ".to_string(),
         description: "Reviews changes".to_string(),
+        content: Some("# Skill body".to_string()),
     })
     .unwrap();
 
@@ -38,7 +39,7 @@ fn creates_trimmed_skill_with_generated_id_and_private_audit_fields() {
     );
     assert_eq!(
         storage.manifest("review"),
-        Some(render_minimal_manifest("review", "Reviews changes").into_bytes())
+        Some(render_manifest("review", "Reviews changes", "# Skill body").into_bytes())
     );
 }
 
@@ -53,6 +54,7 @@ fn updates_by_id_and_preserves_identity_and_creation_time() {
             skill_id: "skill-1".to_string(),
             name: " code-review ".to_string(),
             description: "Reviews code".to_string(),
+            content: Some("# Updated body".to_string()),
         })
         .unwrap();
 
@@ -72,10 +74,46 @@ fn updates_by_id_and_preserves_identity_and_creation_time() {
     assert!(storage.formal_exists("code-review"));
     assert_eq!(
         storage.manifest("code-review"),
-        Some(render_minimal_manifest("code-review", "Reviews code").into_bytes())
+        Some(render_manifest("code-review", "Reviews code", "# Updated body").into_bytes())
     );
 }
 
+#[test]
+fn preserves_or_clears_skill_body_without_losing_unknown_front_matter() {
+    let repository = Rc::new(FakeSkillRepository::with_skills(vec![skill(
+        "skill-1", "review", "Reviews", 10, 20, false,
+    )]));
+    let storage = Rc::new(FakeSkillStorage::default());
+    storage.formal.borrow_mut().insert(
+        "review".to_string(),
+        b"---\nname: review\ndescription: Reviews\ndepth: 3\n---\n# Existing body\n".to_vec(),
+    );
+
+    UpdateSkillHandler::new(repository.clone(), storage.clone(), FixedClock(30))
+        .handle(UpdateSkillRequest {
+            skill_id: "skill-1".to_string(),
+            name: "review".to_string(),
+            description: "Updated".to_string(),
+            content: None,
+        })
+        .unwrap();
+    let preserved = String::from_utf8(storage.manifest("review").unwrap()).unwrap();
+    assert!(preserved.contains("depth: 3"));
+    assert!(preserved.contains("# Existing body"));
+
+    UpdateSkillHandler::new(repository, storage.clone(), FixedClock(40))
+        .handle(UpdateSkillRequest {
+            skill_id: "skill-1".to_string(),
+            name: "review".to_string(),
+            description: "Updated".to_string(),
+            content: Some(String::new()),
+        })
+        .unwrap();
+    let cleared = String::from_utf8(storage.manifest("review").unwrap()).unwrap();
+    assert!(cleared.contains("depth: 3"));
+    assert!(cleared.ends_with("---\n"));
+    assert!(!cleared.contains("# Existing body"));
+}
 #[test]
 fn reports_blank_name_not_found_and_repository_errors() {
     let blank = CreateSkillHandler::new(
@@ -87,16 +125,20 @@ fn reports_blank_name_not_found_and_repository_errors() {
     .handle(CreateSkillRequest {
         name: " ".to_string(),
         description: "Invalid".to_string(),
+        content: None,
     })
     .unwrap_err();
-    let missing = GetSkillHandler::new(Rc::new(FakeSkillRepository::default()))
-        .handle(GetSkillRequest {
-            skill_id: "missing".to_string(),
-        })
-        .unwrap_err();
+    let missing = GetSkillHandler::new(
+        Rc::new(FakeSkillRepository::default()),
+        Rc::new(FakeSkillStorage::default()),
+    )
+    .handle(GetSkillRequest {
+        skill_id: "missing".to_string(),
+    })
+    .unwrap_err();
     let failing = Rc::new(FakeSkillRepository::default());
     failing.fail_next(RepositoryError::new(std::io::Error::other("unavailable")));
-    let repository_error = GetSkillHandler::new(failing)
+    let repository_error = GetSkillHandler::new(failing, Rc::new(FakeSkillStorage::default()))
         .handle(GetSkillRequest {
             skill_id: "skill-1".to_string(),
         })
@@ -135,6 +177,7 @@ fn rejects_non_slug_names_and_case_insensitive_conflicts() {
             .handle(CreateSkillRequest {
                 name: "bad/name".to_string(),
                 description: "Invalid".to_string(),
+                content: None,
             })
             .unwrap_err(),
         ApplicationError::SkillNameInvalid {
@@ -146,6 +189,7 @@ fn rejects_non_slug_names_and_case_insensitive_conflicts() {
             .handle(CreateSkillRequest {
                 name: "REVIEW".to_string(),
                 description: "Duplicate".to_string(),
+                content: None,
             })
             .unwrap_err(),
         ApplicationError::SkillNameConflict {
@@ -157,6 +201,7 @@ fn rejects_non_slug_names_and_case_insensitive_conflicts() {
             .handle(CreateSkillRequest {
                 name: "review".to_string(),
                 description: "Too long".to_string(),
+                content: None,
             })
             .unwrap_err(),
         ApplicationError::SkillNameConflict {
@@ -179,6 +224,7 @@ fn rejects_blank_and_oversized_descriptions() {
             .handle(CreateSkillRequest {
                 name: "review".to_string(),
                 description: "   ".to_string(),
+                content: None,
             })
             .unwrap_err(),
         ApplicationError::SkillDescriptionBlank
@@ -189,6 +235,7 @@ fn rejects_blank_and_oversized_descriptions() {
             .handle(CreateSkillRequest {
                 name: "review".to_string(),
                 description: oversized,
+                content: None,
             })
             .unwrap_err(),
         ApplicationError::SkillDescriptionTooLarge
@@ -208,7 +255,7 @@ fn soft_delete_hides_a_skill_by_id() {
         .unwrap();
 
     assert_eq!(
-        GetSkillHandler::new(repository).handle(GetSkillRequest {
+        GetSkillHandler::new(repository, storage.clone()).handle(GetSkillRequest {
             skill_id: "skill-1".to_string()
         }),
         Err(ApplicationError::SkillNotFound {
@@ -233,6 +280,7 @@ fn rolls_back_formal_directory_when_repository_persist_fails() {
     .handle(CreateSkillRequest {
         name: "review".to_string(),
         description: "Reviews".to_string(),
+        content: None,
     });
 
     assert!(matches!(
@@ -257,6 +305,7 @@ fn surfaces_storage_failures_without_half_staging() {
     .handle(CreateSkillRequest {
         name: "review".to_string(),
         description: "Reviews".to_string(),
+        content: None,
     });
 
     assert!(matches!(result, Err(ApplicationError::SkillStorage { .. })));

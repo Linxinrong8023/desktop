@@ -83,6 +83,7 @@ fn constructs_schema_backed_entities() {
         AgentDefinitionId::new("agent-definition-1"),
         "opencode",
         "OpenCode agent configuration",
+        "",
         audit_fields.clone(),
     )
     .unwrap();
@@ -190,6 +191,7 @@ fn constructs_schema_backed_entities() {
             id: AgentDefinitionId::new("agent-definition-1"),
             name: "opencode".to_string(),
             description: "OpenCode agent configuration".to_string(),
+            content: String::new(),
             audit_fields,
         }
     );
@@ -208,6 +210,7 @@ fn rejects_blank_skill_and_agent_definition_names() {
         AgentDefinition::new(
             AgentDefinitionId::new("agent-definition-1"),
             "\t",
+            "",
             "",
             audit_fields,
         ),

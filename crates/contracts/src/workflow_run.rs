@@ -102,6 +102,10 @@ pub struct CreateWorkflowRunRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub name: Option<String>,
+    /// Git reference the run-task's worktree is created from; defaults to the main branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub base_branch: Option<String>,
 }
 
 /// Returns the created run and its associated run-task identifier.
@@ -130,6 +134,7 @@ pub struct GetWorkflowRunRequest {
 pub struct GetWorkflowRunResponse {
     pub run: WorkflowRun,
     pub name: String,
+    pub task_id: String,
     pub nodes: Vec<WorkflowNodeRun>,
 }
 
@@ -148,6 +153,24 @@ pub struct ListWorkflowRunsRequest {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "workflowRun.ts")]
 pub struct ListWorkflowRunsResponse {
+    pub runs: Vec<WorkflowRunSummary>,
+}
+
+// ── List by workflow ──
+
+/// Requests the workflow run summaries for one workflow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct ListWorkflowRunsByWorkflowRequest {
+    pub workflow_id: String,
+}
+
+/// Returns the visible run summaries for the workflow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct ListWorkflowRunsByWorkflowResponse {
     pub runs: Vec<WorkflowRunSummary>,
 }
 
@@ -200,6 +223,8 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     GetWorkflowRunResponse::export(config)?;
     ListWorkflowRunsRequest::export(config)?;
     ListWorkflowRunsResponse::export(config)?;
+    ListWorkflowRunsByWorkflowRequest::export(config)?;
+    ListWorkflowRunsByWorkflowResponse::export(config)?;
     ListWorkflowNodeRunsRequest::export(config)?;
     ListWorkflowNodeRunsResponse::export(config)?;
     DeleteWorkflowRunRequest::export(config)?;
@@ -212,9 +237,10 @@ mod tests {
     use super::{
         CreateWorkflowRunRequest, CreateWorkflowRunResponse, DeleteWorkflowRunRequest,
         DeleteWorkflowRunResponse, GetWorkflowRunRequest, GetWorkflowRunResponse,
-        ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse, ListWorkflowRunsRequest,
-        ListWorkflowRunsResponse, WorkflowNodeRun, WorkflowNodeStatus, WorkflowRun,
-        WorkflowRunStatus, WorkflowRunSummary,
+        ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse,
+        ListWorkflowRunsByWorkflowRequest, ListWorkflowRunsByWorkflowResponse,
+        ListWorkflowRunsRequest, ListWorkflowRunsResponse, WorkflowNodeRun, WorkflowNodeStatus,
+        WorkflowRun, WorkflowRunStatus, WorkflowRunSummary,
     };
     use pretty_assertions::assert_eq;
     use serde::Serialize;
@@ -280,6 +306,7 @@ mod tests {
                 snapshot_id: None,
                 kickoff_input: None,
                 name: None,
+                base_branch: None,
             },
             json!({ "projectId": "project-1", "workflowId": "workflow-1" }),
         );
@@ -317,6 +344,7 @@ mod tests {
             &GetWorkflowRunResponse {
                 run: run.clone(),
                 name: "Workflow workflow-1 30".to_string(),
+                task_id: "task-1".to_string(),
                 nodes: vec![node.clone()],
             },
             json!({
@@ -336,6 +364,7 @@ mod tests {
                     "updatedAt": 30,
                 },
                 "name": "Workflow workflow-1 30",
+                "taskId": "task-1",
                 "nodes": [{
                     "id": "node-1",
                     "runId": "run-1",
@@ -362,6 +391,38 @@ mod tests {
         );
         assert_serialized_json(
             &ListWorkflowRunsResponse {
+                runs: vec![WorkflowRunSummary {
+                    id: "run-1".to_string(),
+                    name: "Workflow workflow-1 30".to_string(),
+                    project_id: "project-1".to_string(),
+                    workflow_id: "workflow-1".to_string(),
+                    status: WorkflowRunStatus::Pending,
+                    started_at: None,
+                    finished_at: None,
+                    created_at: 30,
+                }],
+            },
+            json!({
+                "runs": [{
+                    "id": "run-1",
+                    "name": "Workflow workflow-1 30",
+                    "projectId": "project-1",
+                    "workflowId": "workflow-1",
+                    "status": "pending",
+                    "startedAt": null,
+                    "finishedAt": null,
+                    "createdAt": 30,
+                }],
+            }),
+        );
+        assert_serialized_json(
+            &ListWorkflowRunsByWorkflowRequest {
+                workflow_id: "workflow-1".to_string(),
+            },
+            json!({ "workflowId": "workflow-1" }),
+        );
+        assert_serialized_json(
+            &ListWorkflowRunsByWorkflowResponse {
                 runs: vec![WorkflowRunSummary {
                     id: "run-1".to_string(),
                     name: "Workflow workflow-1 30".to_string(),

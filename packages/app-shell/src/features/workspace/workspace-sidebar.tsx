@@ -13,7 +13,6 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-  toast,
 } from "@ora/ui";
 import {
   IconChevronDown,
@@ -40,7 +39,7 @@ import { localizeContractError } from "../../i18n/contract-error";
 import { useProjects } from "../../state/hooks/use-projects";
 import { useTasks } from "../../state/hooks/use-tasks";
 import { useSessions } from "../../state/hooks/use-sessions";
-import { useGraphWorkflowRuns, useCancelGraphWorkflowRun } from "../../state/hooks/use-graph-workflow-runs";
+import { useWorkflowRunsByProject } from "../../state/hooks/use-workflow-runs";
 import { useUiStore } from "../../state/stores/ui-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
 import { useUnreadSessionsStore } from "../../state/stores/unread-sessions-store";
@@ -95,7 +94,9 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
 
   const visibleProjects = useMemo(() => projects.filter((project) => {
     if (!needle) return true;
-    const projectTasks = tasks.filter((task) => task.projectId === project.id);
+    const projectTasks = tasks.filter(
+      (task) => task.projectId === project.id && task.type !== "workflow",
+    );
     return project.name.toLowerCase().includes(needle)
       || projectTasks.some((task) => task.title.toLowerCase().includes(needle)
         || sessions.some((session) => session.taskId === task.id
@@ -219,7 +220,9 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
             <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t("sidebar.empty")}</p>
           )}
           {visibleProjects.map((project) => {
-            const projectTasks = tasks.filter((task) => task.projectId === project.id);
+            const projectTasks = tasks.filter(
+              (task) => task.projectId === project.id && task.type !== "workflow",
+            );
             const projectTaskIds = new Set(projectTasks.map((task) => task.id));
             const projectSessionIds = sessions
               .filter((session) => projectTaskIds.has(session.taskId))
@@ -513,7 +516,6 @@ function runStatusClass(status: GraphWorkflowRunStatus): string {
     case "succeeded":
       return "bg-emerald-500";
     case "failed":
-    case "partial_failed":
       return "bg-rose-500";
     case "cancelled":
       return "bg-zinc-400";
@@ -537,51 +539,34 @@ function ProjectWorkflowRunRows({
   onDeleteRun: (run: { id: string; name: string }) => void;
 }) {
   const { t } = useTranslation();
-  const runsQuery = useGraphWorkflowRuns(projectId);
-  const cancelRun = useCancelGraphWorkflowRun();
+  const runsQuery = useWorkflowRunsByProject(projectId);
   const runs = runsQuery.data ?? [];
   return (
     <>
-      {runs.map((run) => {
-        const canCancel =
-          run.status === "pending"
-          || run.status === "running"
-          || run.status === "awaiting_input";
-        return (
-          <TreeRow
-            key={run.id}
-            depth={1}
-            active={activeRunId === run.id}
-            icon={(
-              <span className="relative flex size-[18px] items-center justify-center">
-                <IconRoute className="size-4 text-muted-foreground" aria-hidden />
-                <span
-                  className={`absolute -right-0.5 -top-0.5 size-1.5 rounded-full ${runStatusClass(run.status)}`}
-                  aria-label={t(`workflowRun.status.${run.status}`)}
-                />
-              </span>
-            )}
-            label={run.name}
-            meta={run.status === "awaiting_input"
-              ? t("workflowRun.hitl.sidebarBadge")
-              : undefined}
-            onClick={() => onSelectRun(run.id)}
-            menu={(
-              <EntityMenu
-                onEdit={() => onEditRun({ id: run.id, name: run.name })}
-                onCancel={canCancel
-                  ? () => {
-                    cancelRun.mutate({ runId: run.id }, {
-                      onError: () => toast.error(t("workflowRun.cancelFailed")),
-                    });
-                  }
-                  : undefined}
-                onDelete={() => onDeleteRun({ id: run.id, name: run.name })}
+      {runs.map((run) => (
+        <TreeRow
+          key={run.id}
+          depth={1}
+          active={activeRunId === run.id}
+          icon={(
+            <span className="relative flex size-[18px] items-center justify-center">
+              <IconRoute className="size-4 text-muted-foreground" aria-hidden />
+              <span
+                className={`absolute -right-0.5 -top-0.5 size-1.5 rounded-full ${runStatusClass(run.status)}`}
+                aria-label={t(`workflowRun.status.${run.status}`)}
               />
-            )}
-          />
-        );
-      })}
+            </span>
+          )}
+          label={run.name}
+          onClick={() => onSelectRun(run.id)}
+          menu={(
+            <EntityMenu
+              onEdit={() => onEditRun({ id: run.id, name: run.name })}
+              onDelete={() => onDeleteRun({ id: run.id, name: run.name })}
+            />
+          )}
+        />
+      ))}
     </>
   );
 }

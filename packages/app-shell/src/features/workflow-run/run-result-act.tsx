@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Button, cn } from "@ora/ui";
 import {
-  IconAlertTriangle,
   IconBan,
   IconCheck,
   IconMap,
@@ -143,7 +142,7 @@ function ResultHeroMark({ status }: { status: GraphWorkflowRunStatus }) {
       className={cn(
         "mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-full text-white",
         status === "succeeded" && "bg-emerald-500",
-        (status === "failed" || status === "partial_failed") && "bg-rose-500",
+        status === "failed" && "bg-rose-500",
         status === "cancelled" && "bg-zinc-400 dark:bg-zinc-500",
         (status === "pending"
           || status === "running"
@@ -154,9 +153,6 @@ function ResultHeroMark({ status }: { status: GraphWorkflowRunStatus }) {
     >
       {status === "succeeded" && <IconCheck className={glyphClass} stroke={2.5} />}
       {status === "failed" && <IconX className={glyphClass} stroke={2.5} />}
-      {status === "partial_failed" && (
-        <IconAlertTriangle className={glyphClass} stroke={2.5} />
-      )}
       {status === "cancelled" && <IconBan className={glyphClass} stroke={2.5} />}
     </span>
   );

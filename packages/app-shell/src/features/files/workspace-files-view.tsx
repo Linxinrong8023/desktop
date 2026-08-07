@@ -348,15 +348,16 @@ export function WorkspaceFilesView({
           {t("files.search")}
         </Button>
         <div className="flex-1" />
-        {toolbar}
         <Button
           size="icon-sm"
           variant="ghost"
+          className="shrink-0"
           aria-label={t("files.refresh")}
           onClick={() => void refresh()}
         >
           <IconRefresh />
         </Button>
+        {toolbar}
       </header>
       {body}
     </section>

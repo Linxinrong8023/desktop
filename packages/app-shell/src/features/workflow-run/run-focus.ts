@@ -9,7 +9,6 @@ const ACTIVE_STATUSES: ReadonlySet<GraphWorkflowNodeStatus> = new Set([
 const TERMINAL_NODE_STATUSES: ReadonlySet<GraphWorkflowNodeStatus> = new Set([
   "succeeded",
   "failed",
-  "skipped",
   "cancelled",
 ]);
 

@@ -598,6 +598,23 @@ impl Backend {
     ) -> Result<DeleteAgentResponse, BackendError> {
         self.agent.delete(request).map_err(BackendError::from)
     }
+    pub fn prepare_agent_import(
+        &self,
+        request: PrepareAgentImportRequest,
+    ) -> Result<PrepareAgentImportResponse, BackendError> {
+        self.agent
+            .prepare_import(request)
+            .map_err(BackendError::from)
+    }
+
+    pub fn commit_agent_import(
+        &self,
+        request: CommitAgentImportRequest,
+    ) -> Result<CommitAgentImportResponse, BackendError> {
+        self.agent
+            .commit_import(request)
+            .map_err(BackendError::from)
+    }
 
     // =============================================================================
     // gitIdentity
@@ -715,6 +732,15 @@ impl Backend {
             .delete_snapshot(request)
             .map_err(BackendError::from)
     }
+    /// Gets one snapshot by its stable identifier through the shared application composition.
+    pub fn get_workflow_snapshot(
+        &self,
+        request: GetWorkflowSnapshotRequest,
+    ) -> Result<GetWorkflowSnapshotResponse, BackendError> {
+        self.workflow
+            .get_snapshot(request)
+            .map_err(BackendError::from)
+    }
 
     // =============================================================================
     // workflowRun
@@ -742,6 +768,15 @@ impl Backend {
         request: ListWorkflowRunsRequest,
     ) -> Result<ListWorkflowRunsResponse, BackendError> {
         self.workflow_run.list(request).map_err(BackendError::from)
+    }
+    /// Lists workflow runs for one workflow through the shared application composition.
+    pub fn list_workflow_runs_by_workflow(
+        &self,
+        request: ListWorkflowRunsByWorkflowRequest,
+    ) -> Result<ListWorkflowRunsByWorkflowResponse, BackendError> {
+        self.workflow_run
+            .list_by_workflow(request)
+            .map_err(BackendError::from)
     }
     /// Lists the node-run history of one run through the shared application composition.
     pub fn list_workflow_node_runs(
@@ -856,6 +891,7 @@ mod tests {
             .create_skill(CreateSkillRequest {
                 name: "review".to_string(),
                 description: "Review changes".to_string(),
+                content: None,
             })
             .expect("create skill")
             .skill;
@@ -864,6 +900,7 @@ mod tests {
                 skill_id: skill.id,
                 name: "review-code".to_string(),
                 description: "Review implementation changes".to_string(),
+                content: None,
             })
             .expect("update skill")
             .skill;
@@ -879,6 +916,7 @@ mod tests {
             .create_agent(CreateAgentRequest {
                 name: "codex".to_string(),
                 description: "Coding agent".to_string(),
+                content: None,
             })
             .expect("create agent")
             .agent;
@@ -887,6 +925,7 @@ mod tests {
                 agent_id: agent.id,
                 name: "codex-desktop".to_string(),
                 description: "Desktop coding agent".to_string(),
+                content: None,
             })
             .expect("update agent")
             .agent;
@@ -939,6 +978,7 @@ mod tests {
             .create_skill(CreateSkillRequest {
                 name: "review".to_string(),
                 description: "Reviews changes".to_string(),
+                content: None,
             })
             .expect("create skill")
             .skill;
@@ -952,6 +992,7 @@ mod tests {
                 skill_id: skill.id,
                 name: "review".to_string(),
                 description: "Reviews pull requests".to_string(),
+                content: None,
             })
             .expect("update skill")
             .skill;

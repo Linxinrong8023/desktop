@@ -2,8 +2,10 @@ import type { Edge, Node, ReactFlowJsonObject } from "@xyflow/react";
 import type { DemoWorkflow } from "./fixtures";
 import type { WorkflowNodeData } from "./node-data";
 
-/** Represents one immutable, published workflow graph used by the frontend-only version-history mock. */
+/** Represents one immutable, published workflow graph used by the version-history UI. */
 export interface MockWorkflowVersion {
+  /** Snapshot identifier used by rollback; absent on pre-persistence mock fixtures. */
+  id?: string;
   version: string;
   createdAt: string;
   graph: ReactFlowJsonObject<Node<WorkflowNodeData, "workflow">, Edge>;

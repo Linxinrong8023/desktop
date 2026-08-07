@@ -1,15 +1,16 @@
 use crate::clock::SystemClock;
 use ora_application::{
     ApplicationError, CreateWorkflowRunHandler, DeleteWorkflowRunHandler, GetWorkflowRunHandler,
-    GitTaskWorktreeProvisioner, ListWorkflowNodeRunsHandler, ListWorkflowRunsHandler,
-    ProjectRepository, RepositoryError, TaskRepository, UuidTaskIdGenerator,
-    UuidWorkflowRunIdGenerator, UuidWorktreeIdGenerator, WorkflowRunRepository,
+    GitTaskWorktreeProvisioner, ListWorkflowNodeRunsHandler, ListWorkflowRunsByWorkflowHandler,
+    ListWorkflowRunsHandler, ProjectRepository, RepositoryError, TaskRepository,
+    UuidTaskIdGenerator, UuidWorkflowRunIdGenerator, UuidWorktreeIdGenerator,
+    WorkflowRunRepository,
 };
 use ora_contracts::{
     CreateWorkflowRunRequest, CreateWorkflowRunResponse, DeleteWorkflowRunRequest,
     DeleteWorkflowRunResponse, GetWorkflowRunRequest, GetWorkflowRunResponse,
-    ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse, ListWorkflowRunsRequest,
-    ListWorkflowRunsResponse,
+    ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse, ListWorkflowRunsByWorkflowRequest,
+    ListWorkflowRunsByWorkflowResponse, ListWorkflowRunsRequest, ListWorkflowRunsResponse,
 };
 use ora_db::{
     RepositoryPool, SqliteProjectRepository, SqliteTaskRepository, SqliteWorkflowRepository,
@@ -25,6 +26,7 @@ pub(crate) struct WorkflowRunApi {
     worktree_root: Arc<RwLock<PathBuf>>,
     get: GetWorkflowRunHandler<SqliteWorkflowRunRepository>,
     list: ListWorkflowRunsHandler<SqliteWorkflowRunRepository>,
+    list_by_workflow: ListWorkflowRunsByWorkflowHandler<SqliteWorkflowRunRepository>,
     list_node_runs: ListWorkflowNodeRunsHandler<SqliteWorkflowRunRepository>,
     clock: SystemClock,
 }
@@ -43,6 +45,7 @@ impl WorkflowRunApi {
             worktree_root,
             get: GetWorkflowRunHandler::new(repository.clone()),
             list: ListWorkflowRunsHandler::new(repository.clone()),
+            list_by_workflow: ListWorkflowRunsByWorkflowHandler::new(repository.clone()),
             list_node_runs: ListWorkflowNodeRunsHandler::new(repository),
             clock,
         }
@@ -82,6 +85,14 @@ impl WorkflowRunApi {
         request: ListWorkflowRunsRequest,
     ) -> Result<ListWorkflowRunsResponse, ApplicationError> {
         self.list.handle(request)
+    }
+
+    /// Lists run summaries for the requested workflow.
+    pub(crate) fn list_by_workflow(
+        &self,
+        request: ListWorkflowRunsByWorkflowRequest,
+    ) -> Result<ListWorkflowRunsByWorkflowResponse, ApplicationError> {
+        self.list_by_workflow.handle(request)
     }
 
     /// Lists the node-run history of one run.

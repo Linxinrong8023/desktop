@@ -2,17 +2,18 @@ use crate::clock::SystemClock;
 use ora_application::{
     ActivateWorkflowHandler, ApplicationError, CreateWorkflowHandler, DeleteSnapshotHandler,
     DeleteWorkflowHandler, GetDraftHandler, GetVersionHandler, GetWorkflowHandler,
-    ListVersionsHandler, ListWorkflowsHandler, PublishWorkflowHandler, RollbackWorkflowHandler,
-    UpdateDraftHandler, UpdateWorkflowHandler, UuidWorkflowIdGenerator,
+    GetWorkflowSnapshotHandler, ListVersionsHandler, ListWorkflowsHandler, PublishWorkflowHandler,
+    RollbackWorkflowHandler, UpdateDraftHandler, UpdateWorkflowHandler, UuidWorkflowIdGenerator,
 };
 use ora_contracts::{
     ActivateWorkflowRequest, ActivateWorkflowResponse, CreateWorkflowRequest,
     CreateWorkflowResponse, DeleteSnapshotRequest, DeleteSnapshotResponse, DeleteWorkflowRequest,
     DeleteWorkflowResponse, GetDraftRequest, GetDraftResponse, GetVersionRequest,
-    GetVersionResponse, GetWorkflowRequest, GetWorkflowResponse, ListVersionsRequest,
-    ListVersionsResponse, ListWorkflowsRequest, ListWorkflowsResponse, PublishWorkflowRequest,
-    PublishWorkflowResponse, RollbackWorkflowRequest, RollbackWorkflowResponse, UpdateDraftRequest,
-    UpdateDraftResponse, UpdateWorkflowRequest, UpdateWorkflowResponse,
+    GetVersionResponse, GetWorkflowRequest, GetWorkflowResponse, GetWorkflowSnapshotRequest,
+    GetWorkflowSnapshotResponse, ListVersionsRequest, ListVersionsResponse, ListWorkflowsRequest,
+    ListWorkflowsResponse, PublishWorkflowRequest, PublishWorkflowResponse,
+    RollbackWorkflowRequest, RollbackWorkflowResponse, UpdateDraftRequest, UpdateDraftResponse,
+    UpdateWorkflowRequest, UpdateWorkflowResponse,
 };
 use ora_db::{RepositoryPool, SqliteWorkflowRepository};
 use std::sync::Arc;
@@ -31,6 +32,7 @@ pub(crate) struct WorkflowApi {
     activate: ActivateWorkflowHandler<SqliteWorkflowRepository, SystemClock>,
     list_versions: ListVersionsHandler<SqliteWorkflowRepository>,
     get_version: GetVersionHandler<SqliteWorkflowRepository>,
+    get_snapshot: GetWorkflowSnapshotHandler<SqliteWorkflowRepository>,
     delete_snapshot: DeleteSnapshotHandler<SqliteWorkflowRepository, SystemClock>,
 }
 
@@ -53,6 +55,7 @@ impl WorkflowApi {
             activate: ActivateWorkflowHandler::new(repository.clone(), clock),
             list_versions: ListVersionsHandler::new(repository.clone()),
             get_version: GetVersionHandler::new(repository.clone()),
+            get_snapshot: GetWorkflowSnapshotHandler::new(repository.clone()),
             delete_snapshot: DeleteSnapshotHandler::new(repository, clock),
         }
     }
@@ -146,5 +149,12 @@ impl WorkflowApi {
         request: DeleteSnapshotRequest,
     ) -> Result<DeleteSnapshotResponse, ApplicationError> {
         self.delete_snapshot.handle(request)
+    }
+
+    pub(crate) fn get_snapshot(
+        &self,
+        request: GetWorkflowSnapshotRequest,
+    ) -> Result<GetWorkflowSnapshotResponse, ApplicationError> {
+        self.get_snapshot.handle(request)
     }
 }

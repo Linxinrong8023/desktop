@@ -16,6 +16,7 @@ export type ContractError =
     | { "code": "skill_name_conflict"; "params": EmptyErrorParams }
     | { "code": "skill_not_found"; "params": EmptyErrorParams }
     | { "code": "agent_name_blank"; "params": EmptyErrorParams }
+    | { "code": "agent_name_conflict"; "params": EmptyErrorParams }
     | { "code": "agent_not_found"; "params": EmptyErrorParams }
     | { "code": "project_not_found"; "params": EmptyErrorParams }
     | { "code": "project_occupied"; "params": EmptyErrorParams }
@@ -160,6 +161,7 @@ export type PublicError =
   | { "code": "skill_name_conflict"; "params": EmptyErrorParams }
   | { "code": "skill_not_found"; "params": EmptyErrorParams }
   | { "code": "agent_name_blank"; "params": EmptyErrorParams }
+  | { "code": "agent_name_conflict"; "params": EmptyErrorParams }
   | { "code": "agent_not_found"; "params": EmptyErrorParams }
   | { "code": "project_not_found"; "params": EmptyErrorParams }
   | { "code": "project_occupied"; "params": EmptyErrorParams }

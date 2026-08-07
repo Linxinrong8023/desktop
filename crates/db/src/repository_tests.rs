@@ -568,6 +568,17 @@ fn workflow_repository_finds_snapshot_by_id_within_workflow() {
             .unwrap(),
         None
     );
+    // The snapshot must resolve by id alone, independent of its workflow, for run read models.
+    assert_eq!(
+        repository.find_snapshot_any_workflow(&snapshot.id).unwrap(),
+        Some(snapshot.clone())
+    );
+    assert_eq!(
+        repository
+            .find_snapshot_any_workflow(&WorkflowSnapshotId::new("snapshot-missing"))
+            .unwrap(),
+        None
+    );
 }
 
 /// Verifies a published snapshot referenced by a live run cannot be soft-deleted.
@@ -745,6 +756,7 @@ fn workflow_run_repository_creates_and_reads_run() {
         Some(WorkflowRunDetail {
             run: run.clone(),
             name: "Workflow workflow-a 30".to_string(),
+            task_id: task_id.clone(),
             nodes: Vec::new(),
         })
     );
@@ -752,6 +764,19 @@ fn workflow_run_repository_creates_and_reads_run() {
         run_repository
             .list_runs_by_project(&ProjectId::new("project-1"))
             .unwrap(),
+        vec![WorkflowRunSummary {
+            id: run_id.clone(),
+            name: "Workflow workflow-a 30".to_string(),
+            project_id: ProjectId::new("project-1"),
+            workflow_id: workflow.id.clone(),
+            status: WorkflowRunStatus::Pending,
+            started_at: None,
+            finished_at: None,
+            created_at: 30,
+        }]
+    );
+    assert_eq!(
+        run_repository.list_runs_by_workflow(&workflow.id).unwrap(),
         vec![WorkflowRunSummary {
             id: run_id.clone(),
             name: "Workflow workflow-a 30".to_string(),
@@ -1090,6 +1115,7 @@ fn agent(
         AgentDefinitionId::new(id),
         name,
         description,
+        "",
         AuditFields::new(created_at, updated_at, is_deleted),
     )
     .unwrap()

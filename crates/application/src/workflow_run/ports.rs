@@ -1,7 +1,7 @@
 use crate::RepositoryError;
 use ora_domain::{
-    ProjectId, Task, TaskId, WorkflowNodeRun, WorkflowRun, WorkflowRunDetail, WorkflowRunId,
-    WorkflowRunSummary, Worktree,
+    ProjectId, Task, TaskId, WorkflowId, WorkflowNodeRun, WorkflowRun, WorkflowRunDetail,
+    WorkflowRunId, WorkflowRunSummary, Worktree,
 };
 
 /// Describes the outcome of soft-deleting a workflow run while preserving aggregate invariants.
@@ -45,6 +45,12 @@ pub trait WorkflowRunRepository {
     fn list_runs_by_project(
         &self,
         project_id: &ProjectId,
+    ) -> Result<Vec<WorkflowRunSummary>, RepositoryError>;
+
+    /// Lists visible run summaries for a workflow, ordered by creation time.
+    fn list_runs_by_workflow(
+        &self,
+        workflow_id: &WorkflowId,
     ) -> Result<Vec<WorkflowRunSummary>, RepositoryError>;
 
     /// Lists the node-run records of one run in stable ascending order.

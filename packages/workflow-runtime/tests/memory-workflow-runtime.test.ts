@@ -56,7 +56,6 @@ function isTerminalRun(status: GraphWorkflowRun["status"]): boolean {
     status === "succeeded"
     || status === "failed"
     || status === "cancelled"
-    || status === "partial_failed"
   );
 }
 
@@ -681,7 +680,7 @@ describe("mock run engine", () => {
     );
   });
 
-  it("skips the validation branch when kickoff prefers documentation", async () => {
+  it("leaves the validation branch unexecuted when kickoff prefers documentation", async () => {
     const runtime = createMemoryWorkflowRuntime({
       nodeStepMs: 50,
       autoStart: false,
@@ -698,11 +697,11 @@ describe("mock run engine", () => {
       kickoffInput: "update README docs only",
     });
     expect(plan.skipped).toContain("tests");
-    expect((await runtime.runs.get(run.id))?.nodeStates.tests?.status).toBe("skipped");
+    expect((await runtime.runs.get(run.id))?.nodeStates.tests?.status).toBe("idle");
 
     const finished = await drainRun(runtime, run.id, 50);
     expect(finished?.status).toBe("succeeded");
-    expect(finished?.nodeStates.tests?.status).toBe("skipped");
+    expect(finished?.nodeStates.tests?.status).toBe("idle");
     expect(finished?.nodeStates.output?.status).toBe("succeeded");
   });
 

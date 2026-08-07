@@ -39,6 +39,39 @@ test("keeps CRUD stateful and avoids reusing an existing identifier", async () =
   );
 });
 
+test("persists Agent and Skill content in memory detail responses", async () => {
+  const client = createMemoryContractsClient();
+  const createdAgent = await client.agent.create({
+    name: "reviewer",
+    description: "Reviews changes",
+    content: "agent body",
+  });
+  const createdSkill = await client.skill.create({
+    name: "review-skill",
+    description: "Reviews changes",
+    content: "skill body",
+  });
+
+  assert.equal((await client.agent.get({ agentId: createdAgent.agent.id })).agent.content, "agent body");
+  assert.equal((await client.skill.get({ skillId: createdSkill.skill.id })).skill.content, "skill body");
+
+  await client.agent.update({
+    agentId: createdAgent.agent.id,
+    name: "reviewer",
+    description: "Reviews carefully",
+    content: "updated agent body",
+  });
+  await client.skill.update({
+    skillId: createdSkill.skill.id,
+    name: "review-skill",
+    description: "Reviews carefully",
+    content: "updated skill body",
+  });
+
+  assert.equal((await client.agent.get({ agentId: createdAgent.agent.id })).agent.content, "updated agent body");
+  assert.equal((await client.skill.get({ skillId: createdSkill.skill.id })).skill.content, "updated skill body");
+});
+
 test("opens and renews a project work-context lease in memory", async () => {
   const client = createMemoryContractsClient(createMemoryContractsState({
     projects: [{ id: "p1", name: "Prototype", rootPath: "/workspace/prototype" }],

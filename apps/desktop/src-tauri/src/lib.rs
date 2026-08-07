@@ -1,6 +1,7 @@
 mod commands;
 mod config;
 mod error;
+mod skill_marketplace;
 mod spec_commands;
 mod state;
 mod workspace_files;
@@ -92,6 +93,7 @@ pub fn run() {
             commands::list_skills,
             commands::update_skill,
             commands::delete_skill,
+            skill_marketplace::open_skill_marketplace,
             // =============================================================================
             // agent
             // =============================================================================
@@ -104,16 +106,36 @@ pub fn run() {
             commands::list_agents,
             commands::update_agent,
             commands::delete_agent,
+            commands::prepare_agent_import,
+            commands::commit_agent_import,
             // =============================================================================
             // gitIdentity
             // =============================================================================
             commands::get_git_identity,
+            // =============================================================================
+            // workflow
+            // =============================================================================
+            commands::create_workflow,
+            commands::get_workflow,
+            commands::list_workflows,
+            commands::update_workflow,
+            commands::delete_workflow,
+            commands::get_workflow_draft,
+            commands::update_workflow_draft,
+            commands::publish_workflow,
+            commands::rollback_workflow,
+            commands::activate_workflow,
+            commands::list_workflow_versions,
+            commands::get_workflow_version,
+            commands::delete_workflow_snapshot,
+            commands::get_workflow_snapshot,
             // =============================================================================
             // workflowRun
             // =============================================================================
             commands::create_workflow_run,
             commands::get_workflow_run,
             commands::list_workflow_runs,
+            commands::list_workflow_runs_by_workflow,
             commands::list_workflow_node_runs,
             commands::delete_workflow_run,
             // =============================================================================

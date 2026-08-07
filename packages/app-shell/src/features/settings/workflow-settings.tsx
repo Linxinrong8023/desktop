@@ -15,10 +15,20 @@ import {
   type XYPosition,
 } from "@xyflow/react";
 import {
+  IconDeviceFloppy,
   IconDownload,
   IconRoute,
+  IconSend,
 } from "@tabler/icons-react";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Button,
   Input,
   ResizableHandle,
@@ -28,24 +38,40 @@ import {
 } from "@ora/ui";
 import {
   createMockWorkflowCapabilities,
-  createDemoWorkflow,
   createMockWorkflowNode,
-  createMockWorkflowVersions,
-  createMockWorkflows,
-  parseDemoWorkflow,
   type DemoWorkflow,
   type MockWorkflowVersion,
   type WorkflowCapabilities,
   type WorkflowNodeData,
   type WorkflowNodeKind,
 } from "@ora/workflow-mock";
+import {
+  normalizeWorkflowDefinition,
+  parseWorkflowGraph,
+  serializeWorkflowGraph,
+  workflowTimestampToIso,
+} from "@ora/workflow-runtime";
 import { usePlatform } from "@ora/platform";
+import { useContractsClient } from "../../contracts-client-context";
 import { useAgents } from "../../state/hooks/use-agents";
 import { useSkills } from "../../state/hooks/use-skills";
 import { useWorkflowAgentModels } from "../../state/hooks/use-workflow-agent-models";
+import { localizeContractError } from "../../i18n/contract-error";
 import { WorkflowCanvas } from "./workflow-canvas";
 import { WorkflowInspector } from "./workflow-inspector";
 import { WorkflowManager } from "./workflow-manager";
+import {
+  useCreateWorkflow,
+  useDeleteWorkflow,
+  useDeleteWorkflowSnapshot,
+  usePublishWorkflow,
+  useRenameWorkflow,
+  useRollbackWorkflow,
+  useUpdateWorkflowDraft,
+  useWorkflowDraft,
+  useWorkflowLibrary,
+  useWorkflowVersions,
+} from "./workflow-definitions";
 import {
   animateWorkflowPanel,
   cancelWorkflowPanelAnimation,
@@ -100,12 +126,13 @@ export function WorkflowSettings(props: WorkflowSettingsProps = {}) {
   );
 }
 
-/** Owns the complete workflow demo as disposable, session-only React state. */
+/** Owns the persisted workflow library and the editor bound to the selected draft. */
 function WorkflowSettingsContent({
   capabilities: capabilitiesOverride,
 }: WorkflowSettingsProps) {
   const { i18n, t } = useTranslation();
   const platform = usePlatform();
+  const client = useContractsClient();
   const agentsQuery = useAgents();
   const skillsQuery = useSkills();
   const agentModelsCatalog = useWorkflowAgentModels();
@@ -155,18 +182,32 @@ function WorkflowSettingsContent({
     locale,
     skillsQuery.data,
   ]);
-  const agentModels = capabilities.agentModels;
   const agentModelsLoading = capabilitiesOverride === undefined && agentModelsCatalog.isLoading;
   const agentModelsError = capabilitiesOverride === undefined && agentModelsCatalog.isError;
+  const availableAgentModels = agentModelsCatalog.agentModels;
   const agentCatalogsLoading = agentsQuery.isPending || skillsQuery.isPending;
   const agentCatalogsError = agentsQuery.error !== null || skillsQuery.error !== null;
-  const [workflows, setWorkflows] = useState<DemoWorkflow[]>(() =>
-    createMockWorkflows(locale),
-  );
-  const [versionHistory] = useState(() => createMockWorkflowVersions(createMockWorkflows(locale)));
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>("code-review");
+
+  const library = useWorkflowLibrary();
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  const draftQuery = useWorkflowDraft(selectedWorkflowId);
+  const versionsQuery = useWorkflowVersions(selectedWorkflowId);
+  const createWorkflowMutation = useCreateWorkflow();
+  const renameWorkflowMutation = useRenameWorkflow();
+  const deleteWorkflowMutation = useDeleteWorkflow();
+  const updateDraftMutation = useUpdateWorkflowDraft();
+  const publishWorkflowMutation = usePublishWorkflow();
+  const rollbackWorkflowMutation = useRollbackWorkflow();
+  const deleteSnapshotMutation = useDeleteWorkflowSnapshot();
+
+  const [workflow, setWorkflow] = useState<DemoWorkflow | null>(null);
+  /** Tracks the hydrated draft's updated_at so render-phase resets re-run on save/rollback. */
+  const [hydratedDraftUpdatedAt, setHydratedDraftUpdatedAt] = useState<bigint | null>(null);
   const [previewedVersion, setPreviewedVersion] = useState<MockWorkflowVersion | null>(null);
   const [managerError, setManagerError] = useState<string | null>(null);
+  const [savePending, setSavePending] = useState(false);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [publishVersionName, setPublishVersionName] = useState("");
   const editorLayoutRef = useRef<HTMLDivElement>(null);
   const libraryPanelRef = useRef<ResizablePanelHandle | null>(null);
   const inspectorPanelRef = useRef<ResizablePanelHandle | null>(null);
@@ -182,30 +223,46 @@ function WorkflowSettingsContent({
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [libraryVisualWidth, setLibraryVisualWidth] = useState(initialLibraryWidth);
   const [inspectorVisualWidth, setInspectorVisualWidth] = useState(0);
-  // Demo fixtures predate backend discovery. Derive a normalized view that
-  // keeps the chosen Agent CLI — so a user pick is never silently reverted —
-  // and replaces only unavailable model ids. Without a discovered model for
-  // that CLI the pair stays as-is so the node remains visible and editable.
-  const normalizedWorkflows = useMemo(() => {
-    if (capabilitiesOverride !== undefined || agentModels.length === 0) {
-      return workflows;
-    }
-    return workflows.map((workflow) => ({
-      ...workflow,
-      nodes: workflow.nodes.map((node) => {
-        if (
-          node.data.kind !== "agent"
-          || node.data.agentConfig === undefined
-        ) {
+  /** Library rows for the manager, derived from persisted workflow summaries. */
+  const libraryWorkflows: DemoWorkflow[] = useMemo(
+    () => (library.data ?? []).map((summary) => ({
+      id: summary.id,
+      name: summary.name,
+      description: "",
+      updatedAt: workflowTimestampToIso(summary.updatedAt),
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [],
+      edges: [],
+    })),
+    [library.data],
+  );
+
+  // Render-phase adjustments (the documented "adjust state when props change"
+  // pattern): hydrate the selected workflow's draft when its server snapshot first
+  // arrives, and open the first workflow once the library loads. Running these
+  // during render instead of in an effect keeps the react-hooks/set-state-in-effect
+  // rule satisfied for async data that also carries local edits.
+  if (
+    draftQuery.data !== undefined
+    && draftQuery.data.workflow.id === selectedWorkflowId
+    && hydratedDraftUpdatedAt !== draftQuery.data.draft.updatedAt
+  ) {
+    const envelope = parseWorkflowGraph(draftQuery.data.draft.graph);
+    // Persisted drafts may reference a model that is no longer available. Keep the
+    // selected CLI stable and only substitute a discovered model for that same CLI.
+    const nodes = capabilitiesOverride !== undefined || availableAgentModels.length === 0
+      ? envelope.nodes
+      : envelope.nodes.map((node) => {
+        if (node.data.kind !== "agent" || node.data.agentConfig === undefined) {
           return node;
         }
         const { agentCli, modelId } = node.data.agentConfig.executor;
-        if (agentModels.some((model) =>
+        if (availableAgentModels.some((model) =>
           model.agentCli === agentCli && model.modelId === modelId,
         )) {
           return node;
         }
-        const modelForCli = agentModels.find((model) => model.agentCli === agentCli);
+        const modelForCli = availableAgentModels.find((model) => model.agentCli === agentCli);
         return {
           ...node,
           data: {
@@ -219,33 +276,63 @@ function WorkflowSettingsContent({
             },
           },
         };
-      }),
-    }));
-  }, [agentModels, capabilitiesOverride, workflows]);
-  const workflow = useMemo(
-    () => normalizedWorkflows.find((candidate) => candidate.id === selectedWorkflowId) ?? null,
-    [normalizedWorkflows, selectedWorkflowId],
+      });
+    setWorkflow({
+      id: draftQuery.data.workflow.id,
+      name: draftQuery.data.workflow.name,
+      description: envelope.description ?? "",
+      updatedAt: workflowTimestampToIso(draftQuery.data.workflow.updatedAt),
+      viewport: envelope.viewport,
+      nodes,
+      edges: envelope.edges,
+    });
+    setHydratedDraftUpdatedAt(draftQuery.data.draft.updatedAt);
+  }
+
+  if (
+    selectedWorkflowId === null
+    && library.data !== undefined
+    && library.data.length > 0
+  ) {
+    setSelectedWorkflowId(library.data[0].id);
+  }
+
+  /** Maps persisted version summaries into the editor's version-history shape. */
+  const versionHistory: MockWorkflowVersion[] = useMemo(
+    () => (versionsQuery.data ?? []).map((version) => ({
+      id: version.id,
+      version: version.version,
+      createdAt: new Intl.DateTimeFormat(i18n.resolvedLanguage, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date(Number(version.createdAt))),
+      graph: { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
+    })),
+    [versionsQuery.data, i18n.resolvedLanguage],
   );
+
+  /** Formatted last-edit time of the draft (workflow_snapshots.updated_at). */
+  const draftUpdatedAt = useMemo(() => {
+    const updatedAt = draftQuery.data?.draft.updatedAt;
+    if (updatedAt == null) {
+      return undefined;
+    }
+    return new Intl.DateTimeFormat(i18n.resolvedLanguage, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(Number(updatedAt)));
+  }, [draftQuery.data?.draft.updatedAt, i18n.resolvedLanguage]);
+
   const displayedWorkflow = useMemo(
     () => previewedVersion === null || workflow === null
       ? workflow
       : { ...workflow, ...previewedVersion.graph },
     [previewedVersion, workflow],
   );
-  // React's documented "adjusting state when a prop changes" pattern: track the
-  // previous workflows identity and repair the selection only when the list
-  // reference changes, so a deleted workflow cannot leave a dead editor state.
-  const [previousWorkflows, setPreviousWorkflows] = useState(workflows);
-  if (previousWorkflows !== workflows) {
-    setPreviousWorkflows(workflows);
-    if (
-      workflows.length > 0
-      && !workflows.some((candidate) => candidate.id === selectedWorkflowId)
-    ) {
-      setSelectedWorkflowId(workflows[0].id);
-    }
-  }
-
   const selectedNode = useMemo(
     () => previewedVersion === null
       ? workflow?.nodes.find((node) => node.selected === true) ?? null
@@ -274,8 +361,6 @@ function WorkflowSettingsContent({
       && (editorLayoutRef.current?.getBoundingClientRect().width ?? Number.POSITIVE_INFINITY)
         < NARROW_WORKFLOW_EDITOR_WIDTH
     ) {
-      // Sequencing the swap preserves canvas space and gives the inspector room
-      // to finish its exit instead of letting both panels fight the constraints.
       animateInspectorTo(0, () => {
         setLibraryCollapsed(false);
         animateLibraryTo(libraryWidthRef.current);
@@ -344,10 +429,12 @@ function WorkflowSettingsContent({
 
   /** Clears node context and collapses the inspector without affecting workflow edits. */
   function closeNodeInspector(): void {
-    updateWorkflow((current) => ({
-      ...current,
-      nodes: current.nodes.map((node) => ({ ...node, selected: false })),
-    }));
+    setWorkflow((current) => (current === null
+      ? current
+      : {
+          ...current,
+          nodes: current.nodes.map((node) => ({ ...node, selected: false })),
+        }));
     animateInspectorTo(0);
   }
 
@@ -377,15 +464,11 @@ function WorkflowSettingsContent({
     );
   }
 
-  /** Applies one graph or metadata mutation to the current in-memory demo. */
+  /** Applies one graph or metadata mutation to the open in-memory workflow. */
   function updateWorkflow(
     updater: (current: DemoWorkflow) => DemoWorkflow,
   ): void {
-    setWorkflows((current) =>
-      current.map((candidate) =>
-        candidate.id === selectedWorkflowId ? updater(candidate) : candidate,
-      ),
-    );
+    setWorkflow((current) => (current === null ? current : updater(current)));
   }
 
   /** Commits the mounted graph through React Flow's database-ready snapshot boundary. */
@@ -394,62 +477,156 @@ function WorkflowSettingsContent({
       return null;
     }
     const snapshot = { ...workflow, ...toObject() };
-    setWorkflows((current) => current.map((candidate) =>
-      candidate.id === snapshot.id ? snapshot : candidate,
-    ));
+    setWorkflow(snapshot);
     return snapshot;
   }
 
-  /** Switches the active graph while preserving its React Flow snapshot. */
+  /** Switches the active workflow; the draft query hydrates it on arrival. */
   function selectWorkflow(workflowId: string): void {
-    commitCurrentWorkflowSnapshot();
     setPreviewedVersion(null);
     setSelectedWorkflowId(workflowId);
     setManagerError(null);
   }
 
-  /** Creates a usable blank workflow and immediately opens it for editing. */
-  function createWorkflow(name: string): void {
+  /** Creates a persisted workflow and immediately opens it for editing. */
+  async function createWorkflow(name: string): Promise<void> {
     setManagerError(null);
-    const { id } = uniqueGraphId("workflow", workflows.map((item) => item.id));
-    const created = createDemoWorkflow(id, name, locale);
-    setWorkflows((current) => [...current, created]);
-    selectWorkflow(created.id);
+    try {
+      const result = await createWorkflowMutation.mutateAsync({ name });
+      selectWorkflow(result.workflow.id);
+    } catch (cause) {
+      setManagerError(localizeContractError(cause, t));
+    }
   }
 
-  /** Renames one workflow for the lifetime of the current demo session. */
-  function renameWorkflow(workflowId: string, name: string): void {
+  /** Renames one persisted workflow. */
+  async function renameWorkflow(workflowId: string, name: string): Promise<void> {
     const nextName = name.trim();
     if (nextName === "") {
       return;
     }
-    setWorkflows((current) =>
-      current.map((candidate) =>
-        candidate.id === workflowId ? { ...candidate, name: nextName } : candidate,
-      ),
-    );
-  }
-
-  /** Deletes a workflow and selects the nearest remaining item to avoid a dead editor state. */
-  function deleteWorkflow(workflowId: string): void {
     setManagerError(null);
-    setWorkflows((current) => current.filter((candidate) => candidate.id !== workflowId));
-    if (selectedWorkflowId === workflowId) {
-      setSelectedWorkflowId(null);
+    try {
+      await renameWorkflowMutation.mutateAsync({ workflowId, name: nextName });
+      setWorkflow((current) => (current === null || current.id !== workflowId
+        ? current
+        : { ...current, name: nextName }));
+    } catch (cause) {
+      setManagerError(localizeContractError(cause, t));
     }
   }
 
-  /** Parses and validates an exported workflow before adding it to session state. */
+  /** Soft-deletes a workflow and lets the library effect pick the next selection. */
+  async function deleteWorkflow(workflowId: string): Promise<void> {
+    setManagerError(null);
+    try {
+      await deleteWorkflowMutation.mutateAsync(workflowId);
+      if (selectedWorkflowId === workflowId) {
+        setSelectedWorkflowId(null);
+        setWorkflow(null);
+      }
+    } catch (cause) {
+      setManagerError(localizeContractError(cause, t));
+    }
+  }
+
+  /** Persists the current draft graph and name through the shared backend. */
+  async function saveWorkflow(): Promise<void> {
+    if (workflow === null || previewedVersion !== null) {
+      return;
+    }
+    const snapshot = commitCurrentWorkflowSnapshot();
+    if (snapshot === null) {
+      return;
+    }
+    setManagerError(null);
+    setSavePending(true);
+    try {
+      const definition = normalizeWorkflowDefinition({
+        id: snapshot.id,
+        name: snapshot.name,
+        description: snapshot.description,
+        updatedAt: snapshot.updatedAt,
+        viewport: snapshot.viewport,
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+      });
+      await updateDraftMutation.mutateAsync({
+        workflowId: snapshot.id,
+        graph: serializeWorkflowGraph({
+          nodes: definition.nodes,
+          edges: definition.edges,
+          viewport: definition.viewport,
+          description: definition.description,
+        }),
+      });
+      if (snapshot.name.trim() !== "") {
+        await renameWorkflowMutation.mutateAsync({
+          workflowId: snapshot.id,
+          name: snapshot.name.trim(),
+        });
+      }
+    } catch (cause) {
+      setManagerError(localizeContractError(cause, t));
+    } finally {
+      setSavePending(false);
+    }
+  }
+
+  /** Saves the draft then opens the publish dialog so a publish is never stale. */
+  async function openPublishDialog(): Promise<void> {
+    await saveWorkflow();
+    setPublishVersionName("");
+    setPublishDialogOpen(true);
+  }
+
+  /** Publishes the current draft as an immutable snapshot with an optional version name. */
+  async function confirmPublish(): Promise<void> {
+    if (workflow === null) {
+      return;
+    }
+    setPublishDialogOpen(false);
+    setManagerError(null);
+    const version = publishVersionName.trim();
+    try {
+      await publishWorkflowMutation.mutateAsync({
+        workflowId: workflow.id,
+        version: version === "" ? null : version,
+      });
+    } catch (cause) {
+      setManagerError(localizeContractError(cause, t));
+    }
+  }
+
+  /** Parses and validates an exported workflow before persisting it as a new workflow. */
   async function importWorkflow(file: File): Promise<void> {
     setManagerError(null);
     try {
-      const imported = parseDemoWorkflow(JSON.parse(await file.text()));
-      const ids = new Set(workflows.map((candidate) => candidate.id));
-      if (ids.has(imported.id)) {
-        imported.id = uniqueGraphId(`${imported.id}-imported`, ids).id;
+      const imported = JSON.parse(await file.text()) as DemoWorkflow;
+      const name = imported.name.trim();
+      if (name === "") {
+        setManagerError(t("settings.workflow.importError"));
+        return;
       }
-      setWorkflows((current) => [...current, imported]);
-      selectWorkflow(imported.id);
+      const definition = normalizeWorkflowDefinition({
+        id: imported.id,
+        name: imported.name,
+        description: imported.description,
+        updatedAt: imported.updatedAt,
+        viewport: imported.viewport,
+        nodes: imported.nodes,
+        edges: imported.edges,
+      });
+      const result = await createWorkflowMutation.mutateAsync({
+        name,
+        graph: serializeWorkflowGraph({
+          nodes: definition.nodes,
+          edges: definition.edges,
+          viewport: definition.viewport,
+          description: definition.description,
+        }),
+      });
+      selectWorkflow(result.workflow.id);
     } catch {
       setManagerError(t("settings.workflow.importError"));
     }
@@ -473,24 +650,65 @@ function WorkflowSettingsContent({
   }
 
   /** Opens a published graph in a read-only preview without mutating the editable draft. */
-  function previewWorkflowVersion(version: MockWorkflowVersion | null): void {
+  async function previewWorkflowVersion(version: MockWorkflowVersion | null): Promise<void> {
     commitCurrentWorkflowSnapshot();
-    setPreviewedVersion(version);
+    if (version === null || selectedWorkflowId === null) {
+      setPreviewedVersion(version);
+      return;
+    }
+    setManagerError(null);
+    try {
+      const { snapshot } = await client.workflow.getVersion({
+        workflowId: selectedWorkflowId,
+        version: version.version,
+      });
+      const envelope = parseWorkflowGraph(snapshot.graph);
+      setPreviewedVersion({
+        id: version.id,
+        version: version.version,
+        createdAt: version.createdAt,
+        graph: { nodes: envelope.nodes, edges: envelope.edges, viewport: envelope.viewport },
+      });
+    } catch (cause) {
+      setManagerError(localizeContractError(cause, t));
+    }
   }
 
-  /** Restores the selected immutable graph by copying it into the current in-memory draft. */
-  function restoreWorkflowVersion(version: MockWorkflowVersion): void {
+  /** Restores the selected immutable graph by copying it into the editable draft. */
+  async function restoreWorkflowVersion(version: MockWorkflowVersion): Promise<void> {
     if (workflow === null) {
       return;
     }
-    const restoredGraph = structuredClone(version.graph);
-    updateWorkflow((current) => ({
-      ...current,
-      ...restoredGraph,
-      nodes: restoredGraph.nodes.map((node) => ({ ...node, selected: false })),
-    }));
+    setManagerError(null);
+    try {
+      await rollbackWorkflowMutation.mutateAsync({
+        workflowId: workflow.id,
+        snapshotId: version.id ?? version.version,
+      });
+    } catch (cause) {
+      setManagerError(localizeContractError(cause, t));
+    }
     setPreviewedVersion(null);
     animateInspectorTo(0);
+  }
+
+  /** Soft-deletes a non-active published version. */
+  async function deleteWorkflowVersion(version: MockWorkflowVersion): Promise<void> {
+    if (workflow === null) {
+      return;
+    }
+    setManagerError(null);
+    try {
+      await deleteSnapshotMutation.mutateAsync({
+        workflowId: workflow.id,
+        version: version.version,
+      });
+      if (previewedVersion?.version === version.version) {
+        setPreviewedVersion(null);
+      }
+    } catch (cause) {
+      setManagerError(localizeContractError(cause, t));
+    }
   }
 
   /** Adds a catalog node at a canvas-provided position and selects it for immediate editing. */
@@ -565,7 +783,7 @@ function WorkflowSettingsContent({
 
   return (
     <div
-      className="flex h-full min-h-0 w-full min-w-0 flex-col bg-background"
+      className="flex h-full min-h-0 flex-col bg-background"
       onKeyDown={(event) => {
         if (
           event.key === "Escape"
@@ -613,6 +831,23 @@ function WorkflowSettingsContent({
           >
             <IconDownload />
             {t("settings.workflow.exportWorkflow")}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={workflow === null || savePending}
+            onClick={() => void saveWorkflow()}
+          >
+            <IconDeviceFloppy />
+            {t("settings.workflow.save")}
+          </Button>
+          <Button
+            size="sm"
+            disabled={workflow === null}
+            onClick={() => void openPublishDialog()}
+          >
+            <IconSend />
+            {t("settings.workflow.publish")}
           </Button>
           <DeployWorkflowButton workflow={workflow} />
         </div>
@@ -662,13 +897,13 @@ function WorkflowSettingsContent({
               }}
             >
               <WorkflowManager
-                workflows={workflows}
+                workflows={libraryWorkflows}
                 selectedWorkflowId={selectedWorkflowId}
                 error={managerError}
                 onSelect={selectWorkflow}
-                onCreate={createWorkflow}
-                onRename={renameWorkflow}
-                onDelete={deleteWorkflow}
+                onCreate={(name) => void createWorkflow(name)}
+                onRename={(workflowId, name) => void renameWorkflow(workflowId, name)}
+                onDelete={(workflowId) => void deleteWorkflow(workflowId)}
                 onImport={(file) => void importWorkflow(file)}
                 onCollapse={collapseLibrary}
               />
@@ -689,8 +924,8 @@ function WorkflowSettingsContent({
             {displayedWorkflow === null ? (
               <WorkflowEmpty
                 onCreate={() =>
-                  createWorkflow(
-                    t("settings.workflow.untitledWorkflow", { count: workflows.length + 1 }),
+                  void createWorkflow(
+                    t("settings.workflow.untitledWorkflow", { count: libraryWorkflows.length + 1 }),
                   )
                 }
               />
@@ -711,10 +946,12 @@ function WorkflowSettingsContent({
                 inspectorAvailable={inspectorAvailable}
                 onExpandLibrary={expandLibrary}
                 onExpandInspector={expandInspector}
-                versionHistory={versionHistory[displayedWorkflow.id] ?? []}
+                versionHistory={versionHistory}
                 previewedVersion={previewedVersion}
-                onPreviewVersion={previewWorkflowVersion}
-                onRestoreVersion={restoreWorkflowVersion}
+                draftUpdatedAt={draftUpdatedAt}
+                onPreviewVersion={(version) => void previewWorkflowVersion(version)}
+                onRestoreVersion={(version) => void restoreWorkflowVersion(version)}
+                onDeleteVersion={(version) => void deleteWorkflowVersion(version)}
                 readOnly={previewedVersion !== null}
               />
             )}
@@ -751,7 +988,7 @@ function WorkflowSettingsContent({
           >
             <div
               aria-hidden={inspectorCollapsed}
-              className="flex min-h-0 w-full min-w-0 flex-1 overflow-hidden"
+              className="flex min-h-0 flex-1"
               style={{
                 opacity: Math.max(
                   0,
@@ -794,6 +1031,36 @@ function WorkflowSettingsContent({
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
+      <AlertDialog open={publishDialogOpen} onOpenChange={setPublishDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.workflow.publishTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings.workflow.publishDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            value={publishVersionName}
+            onChange={(event) => setPublishVersionName(event.target.value)}
+            aria-label={t("settings.workflow.versionHistory")}
+            placeholder={t("settings.workflow.publishVersionPlaceholder")}
+            autoFocus
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void confirmPublish();
+              }
+            }}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmPublish()}>
+              <IconSend />
+              {t("settings.workflow.publish")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

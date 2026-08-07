@@ -1,14 +1,16 @@
-use crate::skill::mapper::map_skill;
+use crate::skill::mapper::{map_skill, map_skill_details};
 use crate::skill::ports::{SkillIdGenerator, SkillRepository};
 use crate::skill::storage::SkillStorage;
 use crate::{ApplicationError, Clock};
+use gray_matter::{Matter, ParsedEntity, engine::YAML};
 use ora_contracts::{
     CreateSkillRequest, CreateSkillResponse, DeleteSkillRequest, DeleteSkillResponse,
     GetSkillRequest, GetSkillResponse, ListSkillsRequest, ListSkillsResponse, UpdateSkillRequest,
     UpdateSkillResponse,
 };
 use ora_domain::{AuditFields, Skill, SkillId};
-use ora_skill_package::manifest::{render_minimal_manifest, rewrite_manifest};
+use ora_skill_package::manifest::{render_manifest, rewrite_manifest, rewrite_manifest_body};
+use serde_json::Value;
 
 /// Handles atomic creation of a reusable skill definition (database plus formal directory).
 pub struct CreateSkillHandler<Repository, Storage, IdGenerator, ClockSource> {
@@ -65,7 +67,11 @@ where
             .storage
             .create_staging()
             .map_err(ApplicationError::from_skill_storage_error)?;
-        let manifest = render_minimal_manifest(&skill.name, &skill.description);
+        let manifest = render_manifest(
+            &skill.name,
+            &skill.description,
+            request.content.as_deref().unwrap_or(""),
+        );
         self.storage
             .write_manifest(&staging, manifest.as_bytes())
             .map_err(ApplicationError::from_skill_storage_error)?;
@@ -88,19 +94,24 @@ where
 }
 
 /// Handles lookup of one reusable skill definition.
-pub struct GetSkillHandler<Repository> {
+pub struct GetSkillHandler<Repository, Storage> {
     repository: Repository,
+    storage: Storage,
 }
 
-impl<Repository> GetSkillHandler<Repository> {
-    pub fn new(repository: Repository) -> Self {
-        Self { repository }
+impl<Repository, Storage> GetSkillHandler<Repository, Storage> {
+    pub fn new(repository: Repository, storage: Storage) -> Self {
+        Self {
+            repository,
+            storage,
+        }
     }
 }
 
-impl<Repository> GetSkillHandler<Repository>
+impl<Repository, Storage> GetSkillHandler<Repository, Storage>
 where
     Repository: SkillRepository,
+    Storage: SkillStorage,
 {
     /// Loads one visible skill or reports a stable not-found error.
     pub fn handle(&self, request: GetSkillRequest) -> Result<GetSkillResponse, ApplicationError> {
@@ -113,8 +124,21 @@ where
                 skill_id: skill_id.to_string(),
             })?;
 
+        let manifest = self
+            .storage
+            .read_manifest(&skill.name)
+            .map_err(ApplicationError::from_skill_storage_error)?
+            .ok_or_else(|| ApplicationError::SkillStorageInconsistent {
+                name: skill.name.clone(),
+            })?;
+        let text = String::from_utf8(manifest).map_err(|_| {
+            ApplicationError::from_manifest_error(ora_skill_package::ManifestError::YamlInvalid)
+        })?;
+        let parsed: ParsedEntity<Value> = Matter::<YAML>::new().parse(&text).map_err(|_| {
+            ApplicationError::from_manifest_error(ora_skill_package::ManifestError::YamlInvalid)
+        })?;
         Ok(GetSkillResponse {
-            skill: map_skill(skill),
+            skill: map_skill_details(skill, parsed.content),
         })
     }
 }
@@ -215,9 +239,18 @@ where
             .read_manifest(&existing.name)
             .map_err(ApplicationError::from_skill_storage_error)?
         {
-            Some(content) => rewrite_manifest(&content, &skill.name, &skill.description)
-                .map_err(ApplicationError::from_manifest_error)?,
-            None => render_minimal_manifest(&skill.name, &skill.description),
+            Some(content) => match request.content.as_deref() {
+                Some(body) => {
+                    rewrite_manifest_body(&content, &skill.name, &skill.description, body)
+                }
+                None => rewrite_manifest(&content, &skill.name, &skill.description),
+            }
+            .map_err(ApplicationError::from_manifest_error)?,
+            None => render_manifest(
+                &skill.name,
+                &skill.description,
+                request.content.as_deref().unwrap_or(""),
+            ),
         };
         self.storage
             .write_manifest(&staging, rewritten.as_bytes())

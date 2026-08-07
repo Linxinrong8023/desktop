@@ -5,7 +5,6 @@ describe("isTerminalRunStatus", () => {
   it("marks finished run statuses only", () => {
     expect(isTerminalRunStatus("succeeded")).toBe(true);
     expect(isTerminalRunStatus("failed")).toBe(true);
-    expect(isTerminalRunStatus("partial_failed")).toBe(true);
     expect(isTerminalRunStatus("cancelled")).toBe(true);
     expect(isTerminalRunStatus("running")).toBe(false);
     expect(isTerminalRunStatus("awaiting_input")).toBe(false);
@@ -17,9 +16,6 @@ describe("runStatusTone", () => {
   it("maps terminal outcomes to distinct label keys", () => {
     expect(runStatusTone("succeeded").labelKey).toBe("workflowRun.status.succeeded");
     expect(runStatusTone("failed").labelKey).toBe("workflowRun.status.failed");
-    expect(runStatusTone("partial_failed").labelKey).toBe(
-      "workflowRun.status.partial_failed",
-    );
     expect(runStatusTone("cancelled").labelKey).toBe("workflowRun.status.cancelled");
   });
 

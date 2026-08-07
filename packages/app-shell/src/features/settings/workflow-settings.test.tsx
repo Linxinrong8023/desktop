@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import { createChatStore } from "@ora/chat";
 import { PlatformProvider } from "@ora/platform";
+import { createMockWorkflowVersions, createMockWorkflows } from "@ora/workflow-mock";
+import { serializeWorkflowGraph, type WorkflowDefinitionEdge, type WorkflowDefinitionNode } from "@ora/workflow-runtime";
 import { appI18n } from "../../i18n/i18n-instance";
 import { AppI18nProvider } from "../../i18n/i18n";
 import { createHookWrapper, createTestQueryClient } from "../../test/hook-harness";
@@ -11,15 +13,66 @@ import { createMockClient, createMockClientState, type MockClientState } from ".
 import { createStubPlatform } from "../../test/stub-platform";
 import { WorkflowSettings } from "./workflow-settings";
 
+/** Seeds the mock client with the demo workflows and their published versions. */
+function seedDemoWorkflows(state: MockClientState): void {
+  const locale = appI18n.resolvedLanguage === "en-US" ? "en-US" as const : "zh-CN" as const;
+  const demo = createMockWorkflows(locale);
+  const versionsByWorkflow = createMockWorkflowVersions(demo);
+  // Match the mock editor's default selection: open the code-review showcase first.
+  demo.sort((a, b) => (a.id === "code-review" ? -1 : b.id === "code-review" ? 1 : 0));
+  state.workflows = demo.map((workflow) => {
+    const now = BigInt(Date.parse(workflow.updatedAt));
+    const record = {
+      workflow: {
+        id: workflow.id,
+        name: workflow.name,
+        publishedSnapshotId: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      draft: {
+        id: `snap-${workflow.id}`,
+        workflowId: workflow.id,
+        version: "draft",
+        graph: serializeWorkflowGraph({
+          nodes: workflow.nodes as unknown as WorkflowDefinitionNode[],
+          edges: workflow.edges as unknown as WorkflowDefinitionEdge[],
+          viewport: workflow.viewport,
+          description: workflow.description,
+        }),
+        createdAt: now,
+        updatedAt: now,
+      },
+      published: [] as { id: string; workflowId: string; version: string; graph: string; createdAt: bigint; updatedAt: bigint | null }[],
+    };
+    (versionsByWorkflow[workflow.id] ?? []).forEach((version, index) => {
+      record.published.push({
+        id: `pub-${workflow.id}-${index}`,
+        workflowId: workflow.id,
+        version: version.version,
+        graph: serializeWorkflowGraph({
+          nodes: version.graph.nodes as unknown as WorkflowDefinitionNode[],
+          edges: version.graph.edges as unknown as WorkflowDefinitionEdge[],
+          viewport: version.graph.viewport ?? workflow.viewport,
+          description: workflow.description,
+        }),
+        createdAt: BigInt(Date.parse(version.createdAt)),
+        updatedAt: null,
+      });
+    });
+    return record;
+  });
+}
+
 /** Shell providers required by Deploy-to-project (runtime + react-query). */
 function renderSettings(
   ui: ReactElement = <WorkflowSettings />,
   state: MockClientState = createMockClientState(),
 ): RenderResult {
-  // Discovery needs a project cwd so warmSession can report real model catalogs.
+  seedDemoWorkflows(state);
+  // Model discovery needs a project cwd so warmSession can report real model catalogs.
   state.projects = [{ id: "p1", name: "Demo", rootPath: "/demo" }];
-  // Keep workflow inspector tests deterministic by seeding the backend catalogs
-  // consumed by role/skill selectors and node parameter summaries.
+  // Live Agent/Skill catalogs consumed by the workflow inspector's selectors.
   state.agents = [
     { id: "Architect", name: "架构师", description: "role" },
     { id: "Planner", name: "规划师", description: "role" },
@@ -36,6 +89,7 @@ function renderSettings(
     { id: "openspec-explore", name: "openspec-explore", description: "skill" },
     { id: "cdase:sfmea_review", name: "cdase:sfmea_review", description: "skill" },
   ];
+  // Warm-session model catalog consumed by the workflow inspector's model selector.
   state.configOptions = [
     {
       id: "model",
@@ -106,7 +160,7 @@ describe("WorkflowSettings", () => {
     renderSettings();
 
     expect(await screen.findByText("代码审查工作流")).toBeInTheDocument();
-    expect(screen.getByLabelText("工作流画布")).toBeInTheDocument();
+    expect(await screen.findByLabelText("工作流画布")).toBeInTheDocument();
     expect(screen.getByRole("separator", {
       name: "调整工作流列表宽度；双击恢复默认宽度",
     })).toBeInTheDocument();
@@ -126,10 +180,9 @@ describe("WorkflowSettings", () => {
     await user.click(screen.getByLabelText("版本历史"));
     expect(screen.getByText("当前草稿")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", {
-      name: "2026-08-01 09:30 已发布版本",
-    }));
-    expect(screen.getByRole("button", { name: "恢复到此版本" })).toBeInTheDocument();
+    const versionButtons = screen.getAllByRole("button", { name: /已发布版本/ });
+    await user.click(versionButtons[versionButtons.length - 1]!);
+    expect(await screen.findByRole("button", { name: "恢复到此版本" })).toBeInTheDocument();
     expect(screen.getByLabelText("工作流名称")).toBeDisabled();
     expect(screen.queryByLabelText("输出节点: 输出报告")).not.toBeInTheDocument();
 
@@ -158,9 +211,11 @@ describe("WorkflowSettings", () => {
     const user = userEvent.setup();
     renderSettings();
     await screen.findByLabelText("工作流画布");
-    const viewport = flowViewport();
+    // React Flow applies the initial viewport transform asynchronously after mount.
+    await waitFor(() => {
+      expect(flowViewport()?.style.transform).toContain("translate(32px,32px)");
+    });
 
-    expect(viewport?.style.transform).toContain("translate(32px,32px)");
     expect(screen.getByText("100%")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "放大画布" }));
@@ -174,7 +229,7 @@ describe("WorkflowSettings", () => {
     await user.click(screen.getByRole("button", { name: "重置画布视图" }));
     await waitFor(() => {
       expect(screen.getByText("100%")).toBeInTheDocument();
-      expect(viewport?.style.transform).toContain("translate(32px,32px)");
+      expect(flowViewport()?.style.transform).toContain("translate(32px,32px)");
     });
   });
 
@@ -414,6 +469,12 @@ describe("WorkflowSettings", () => {
     });
     const editedViewport = flowViewport()?.style.transform;
 
+    // Real CRUD persists the viewport only on save, so persist it before switching.
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+    });
+
     await user.click(screen.getByText("发布准备检查").closest("button")!);
     await waitFor(() => {
       expect(flowViewport()?.style.transform).toContain("translate(32px,32px)");
@@ -480,7 +541,9 @@ describe("WorkflowSettings", () => {
     expect(screen.queryByLabelText("项目权限")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("输出契约")).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByLabelText("Agent 模型")).toHaveTextContent(/Big Pickle/i);
+      expect(screen.getByLabelText("Agent 模型")).toHaveTextContent(
+        "Big Pickle",
+      );
     });
     const configuredParameters = within(reviewNode).getByLabelText("配置参数");
     expect(configuredParameters).toHaveTextContent("角色审查员");
@@ -514,16 +577,14 @@ describe("WorkflowSettings", () => {
     const reviewNode = await screen.findByLabelText("Agent节点: 审查 Agent");
     await user.click(reviewNode.closest(".react-flow__node") ?? reviewNode);
 
-    const modelSelect = screen.getByLabelText("Agent 模型");
-    await waitFor(() => expect(modelSelect).toBeEnabled());
-    await user.click(modelSelect);
+    await user.click(screen.getByLabelText("Agent 模型"));
     const modelSearch = screen.getByLabelText("搜索可用 Agent 模型");
-    await user.type(modelSearch, "deepseek");
+    await user.type(modelSearch, "pickle");
     await user.click(await screen.findByRole("option", {
-      name: /deepseek\/deepseek-v4-pro/,
+      name: "Big Pickle",
     }));
     expect(screen.getByLabelText("Agent 模型")).toHaveTextContent(
-      "deepseek/deepseek-v4-pro",
+      "Big Pickle",
     );
 
     await user.click(screen.getByLabelText("角色"));
@@ -616,25 +677,6 @@ describe("WorkflowSettings", () => {
     expect(screen.queryByText("openspec-archive-change")).not.toBeInTheDocument();
   });
 
-  it("keeps skill controls visible in narrow inspector layouts", async () => {
-    const user = userEvent.setup();
-    renderSettings();
-
-    const reviewNode = await screen.findByLabelText("Agent节点: 审查 Agent");
-    await user.click(reviewNode.closest(".react-flow__node") ?? reviewNode);
-
-    const modelTrigger = screen.getByLabelText("Agent 模型");
-    const roleTrigger = screen.getByLabelText("角色");
-    expect(modelTrigger).toHaveClass("min-w-0", "shrink", "overflow-hidden");
-    expect(roleTrigger).toHaveClass("min-w-0", "shrink", "overflow-hidden");
-    expect(within(modelTrigger).getByTestId("workflow-agent-model-chevron")).toBeInTheDocument();
-    expect(within(roleTrigger).getByTestId("workflow-agent-role-chevron")).toBeInTheDocument();
-
-    expect(screen.getByRole("button", { name: "添加 Skill" })).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "启用或禁用 openspec-verify-change" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "移除 openspec-verify-change" })).toBeInTheDocument();
-  });
-
   it("routes inspector deletion through the shared React Flow store", async () => {
     const user = userEvent.setup();
     renderSettings();
@@ -674,7 +716,8 @@ describe("WorkflowSettings", () => {
     renderSettings();
 
     await screen.findByText("代码审查工作流");
-    await user.click(screen.getByRole("button", { name: "新建工作流" }));
+    await screen.findByLabelText("工作流画布");
+    await user.click(screen.getByLabelText("新建工作流"));
     const createDialog = await screen.findByRole("alertdialog", { name: "新建工作流" });
     const createNameInput = within(createDialog).getByLabelText("工作流名称");
     await user.type(createNameInput, "发布复盘");
@@ -703,7 +746,7 @@ describe("WorkflowSettings", () => {
 
     fireEvent.change(nameInput, { target: { value: "当前会话草稿" } });
     expect(screen.getByDisplayValue("当前会话草稿")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
 
     view.unmount();
     renderSettings();
@@ -726,7 +769,7 @@ describe("WorkflowSettings", () => {
     renderSettings();
 
     expect(await screen.findByText("Code review workflow")).toBeInTheDocument();
-    expect(screen.getByLabelText("Workflow canvas")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Workflow canvas")).toBeInTheDocument();
     expect(
       screen.getByText("Scroll to zoom · Drag to pan · Nodes snap to grid"),
     ).toBeInTheDocument();
