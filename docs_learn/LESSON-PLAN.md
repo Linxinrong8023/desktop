@@ -1,15 +1,16 @@
 # 学习路线图（第 6 课起）
 
-> 本文件是 docs_learn 的**章节规划**，用于防止"学了没存档"。
+> 本文件是 docs_learn 的**章节规划**，用于防止“学了没存档”。
 > 每学完一课，把总结写入 `lesson-XX.md` 并在 [README.md](./README.md) 目录里登记。
-> 已学：第 1~5 课（lesson-01 ~ lesson-05）。
+> 已学：第 1~6 课（lesson-01 ~ lesson-06）。
+> 说明：第 1~6 课在“基础学习 session”中完成（本 session 开始时 workflow 尚未出现，lesson-06 的实际内容以本 session 的 gitlancer + Task/Worktree 为准，workflow 相关内容作为新专题按下文规划后续学习）。
 > 四个 ⭐ 专题为**必须单独学习**的环节（用户特别指定）。
 
 ---
 
 ## 第一段：Rust 后端纵深（业务 → 运行时 → 功能模块）
 
-### 第 6 课：Task 与 Git Worktree（gitlancer）
+### 第 6 课：Task 与 Git Worktree（gitlancer）—— ✅ 已完成（本 session）
 - **衔接**：第 5 课预告即本课。
 - **核心问题**：创建任务时怎么建 linked worktree？Task/Worktree 怎么关联？Git 失败时怎么补偿数据库写入？为什么删任务不删 Git？
 - **代码地图**：
@@ -17,7 +18,14 @@
   - `docs/task-worktrees.md`、`docs/task-workspace-files.md`
   - `crates/application/src/task/`、`crates/application/src/worktree/`
   - `crates/db/src/repository/worktree.rs`
-- **要点**：linked worktree 创建流程、worktree ↔ task 关联、任务创建时 git+db 的补偿（先 git 后 db / 失败回滚）、删除不动 Git（git 状态不是 Ora 所有物）、`git worktree list --porcelain` 解析 cwd。
+- **本 session 实际覆盖（以 lesson-06.md 为准）**：
+  - gitlancer 四层 + 请求/响应对象模式 + newtype 类型安全（BranchName/CommitId 防位置写反）
+  - 创建流程 7 步 + 8 位前缀冲突检查（目录/分支两道证据）
+  - 先 Git 后 DB + 三层补偿（Force 模式、返回原错误）
+  - 删除语义（当前分支：不碰 Git；PR #169 观察项）
+  - 路径解析（存 branch_name、问 git 权威）
+  - 深入追问 6 点见 lesson-06.md 第十五节
+- **⚠️ 观察项（PR #169）**：`fix(backend): clean up Git resources on aggregate deletion` 未合并——将把“删除不碰 Git”改为“删除时清理 worktree 目录 + ora/<prefix> 分支”。当前分支（project_learn）仍是旧行为；合并后需回看本课删除语义章节。
 
 ### 第 7 课：Agent Runtime 总览——ACP 协议与进程监督
 - **核心问题**：Backend 启动时怎么拉起 5 个 CLI 子进程（opencode/nga/codeagentcli/claude/codex）？ACP 是什么协议？initialize 握手怎么协商能力？事件怎么路由？背压和超时怎么设计？
