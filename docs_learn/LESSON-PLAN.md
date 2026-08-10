@@ -1,0 +1,156 @@
+# 学习路线图（第 6 课起）
+
+> 本文件是 docs_learn 的**章节规划**，用于防止"学了没存档"。
+> 每学完一课，把总结写入 `lesson-XX.md` 并在 [README.md](./README.md) 目录里登记。
+> 已学：第 1~5 课（lesson-01 ~ lesson-05）。
+> 四个 ⭐ 专题为**必须单独学习**的环节（用户特别指定）。
+
+---
+
+## 第一段：Rust 后端纵深（业务 → 运行时 → 功能模块）
+
+### 第 6 课：Task 与 Git Worktree（gitlancer）
+- **衔接**：第 5 课预告即本课。
+- **核心问题**：创建任务时怎么建 linked worktree？Task/Worktree 怎么关联？Git 失败时怎么补偿数据库写入？为什么删任务不删 Git？
+- **代码地图**：
+  - `crates/gitlancer/`（domain / exec / git / parse 四层，GitRunner trait 静态分发）
+  - `docs/task-worktrees.md`、`docs/task-workspace-files.md`
+  - `crates/application/src/task/`、`crates/application/src/worktree/`
+  - `crates/db/src/repository/worktree.rs`
+- **要点**：linked worktree 创建流程、worktree ↔ task 关联、任务创建时 git+db 的补偿（先 git 后 db / 失败回滚）、删除不动 Git（git 状态不是 Ora 所有物）、`git worktree list --porcelain` 解析 cwd。
+
+### 第 7 课：Agent Runtime 总览——ACP 协议与进程监督
+- **核心问题**：Backend 启动时怎么拉起 5 个 CLI 子进程（opencode/nga/codeagentcli/claude/codex）？ACP 是什么协议？initialize 握手怎么协商能力？事件怎么路由？背压和超时怎么设计？
+- **代码地图**：
+  - `crates/backend/src/agent_runtime/`（connection.rs 的 ConnectionSupervisor、manager、actor）
+  - `crates/acp/`（reader / peer / pending / trace）
+  - `docs/agent-runtime.md` 前半（Process and Session Lifecycle、Flow Control、Timeouts）
+- **要点**：每 CLI 一个受监督子进程 + 独立重试（250ms 翻倍到 30s）、连接丢失只影响该 CLI、按 provider session id 路由事件、每会话 256 FIFO、8MiB 帧、30s 非活动超时、`agent_runtime_unavailable`。
+
+### 第 8 课：Session 生命周期与 Warm Session
+- **核心问题**：一个会话从打开到对话经历了什么？warm session 为什么存在？attach / load / prompt / stop 的状态机？为什么一个会话同时只允许一个操作？
+- **代码地图**：
+  - `crates/backend/src/session.rs`、`crates/backend/src/agent_runtime/manager.rs`
+  - `docs/agent-runtime.md` "Warm Sessions" 节
+- **要点**：warm 键 `(target, agent_cli, client_id)`、attach 按 identifier 命名 vs 切换按 key 命名（为什么）、Running/Stopped 状态、会话标题获取窗口、warm 只活在内存不落库、同会话操作串行。
+
+### 第 9 课：⭐ 保存上下文信息——ora-history 会话历史与 transcript（关键专题 1）
+- **核心问题**：Ora 怎么保存一段对话？为什么自己记、不靠 agent 复述？文件格式和顺序规则？写失败（degraded）怎么办？换 agent 时上下文怎么带过去（handoff transcript）？
+- **代码地图**：
+  - `crates/history/` 全部（assembler / writer / record / handoff / path / reader）
+  - `crates/backend/src/session_history.rs`
+  - `docs/agent-runtime.md` "Session History" / "Degraded History" 节
+  - 前端 `packages/chat/src/store.ts` 的 `HistoryBuilder`
+- **要点**：每会话一个 append-only JSONL、`<root>/<id[0..2]>/<id[2..4]>/<id>.jsonl` 分片路径、positions 定义时间线（重复 position = 修正）、只记 settled 内容（不记注入的上下文）、`TurnEnded` 带 stopReason（provider 从不带）、Gap 记录 + `resumeSessionHistory`、"Ora owns the transcript; the agent owns the model context"。
+
+### 第 10 课：⭐ 模型选择与切换（Model Selector）（关键专题 2）
+- **核心问题**：前端模型选择器怎么知道有哪些模型？为什么"必须先有 session 才能选模型"？选完模型会话怎么记住？切模型在时间线里怎么体现？
+- **代码地图**：
+  - 前端：`packages/chat/src/model-option.ts`、`packages/chat/src/store.ts`（`setSessionConfig` / `recordModelChange` / `adoptSwitchedAgent`）、`packages/app-shell/src/features/chat/model-selector.tsx`、`model-catalog.ts`、`state/hooks/use-workflow-agent-models.ts`
+  - 后端：config options 机制（`initialize` 握手广告 config-option 能力、`setConfig` 操作、`config_option_update` 更新）
+- **要点**：ACP 只在 `session/new` / `session/load` 回复里报告 config options → 打开聊天面就先 warm；model selector = category "model" 的 select 选项（兜底：唯一 select）；agent 的回复是权威（可能调整/拒绝请求值）；前端在 transcript 里记 `modelChanges` 分隔线（首轮前/换绑前不记）；workflow 节点也复用同一模型目录。
+
+### 第 11 课：⭐ 切换 Agent（会话换绑）（关键专题 3）
+- **核心问题**：怎么把一段对话换到另一个 CLI？warm pool 怎么认领？为什么 transcript 懒注入而不是重放？为什么不保留旧绑定？
+- **代码地图**：
+  - 后端：`docs/agent-runtime.md` "Switching Agents" 整节、`crates/backend/src/agent_runtime/` 的 switch 逻辑、`switchSessionAgent` 契约
+  - 前端：`packages/app-shell/src/state/stores/pending-agent-store.ts`、`packages/chat/src/store.ts` 的 `adoptSwitchedAgent`、workspace 的 agent picker
+- **要点**：会话保留 id / Task / 历史，只有 binding 变；新绑定从 warm pool 按同 key **认领**（不是现握手），模型选择在换绑前已做 → 换绑后保留；pick 记录 vs commit（下一条消息才真正提交，选中 CLI 时先 warm 对方）；认领失败不动原绑定；懒注入 transcript（换绑不发送任何东西，下一条 prompt 前插一段 leading content block）；不保留旧绑定（上下文停在离开那一刻）；`session_agent_unchanged` 提前拒绝。
+
+### 第 12 课：Skill 体系与 AgentDefinition
+- **核心问题**：技能包怎么发现、导入、校验、落库？Skill / AgentDefinition / skill_import 各管什么？
+- **代码地图**：
+  - `crates/skill-package/`（README 的职责/边界）
+  - `crates/application/src/skill/`、`crates/application/src/skill_import/`
+  - `crates/backend/src/skill_reconciliation.rs`
+  - desktop 的 skill_marketplace、`docs/application-contracts.md` 相关部分
+- **要点**：zip-slip 防护、扩展比预算、SKILL.md front matter 校验、最近 manifest 归属规则、导入会话生命周期（prepare / preview / commit / cancel）、200MiB 上限、技能落库与 reconciliation。
+
+### 第 13 课：Spec 管理与租约（ProjectWorkContext）
+- **核心问题**：Spec 目录怎么发现和索引？窗口租约机制怎么工作？scheduler 干什么？
+- **代码地图**：
+  - `crates/application/src/spec/`、`docs/spec-management.md`
+  - `crates/application/src/project_work_context/`、`docs/project-work-contexts.md`
+  - `crates/scheduler/`
+- **要点**：SpecTarget（project/task）、默认候选目录（OpenSpec/Superpowers/自定义）、只读预览、遍历/越权防护；租约 120s 自动过期、窗口独占、Web 合成占座 vs Desktop 不支持；scheduler 的清理待办。
+
+### 第 14 课：task_diff 与文件系统层
+- **核心问题**：diff 视图的数据哪来的？`ora-fs` 提供什么？工作区文件浏览怎么限制？
+- **代码地图**：
+  - `crates/application/src/task_diff/`、`crates/backend/src/task_diff.rs`
+  - `crates/fs/`、workspace explorer（web 端）
+  - `docs/task-workspace-files.md`
+- **要点**：每轮 agent 的增量文件变化（additions/deletions）、turn diff 与工具调用关联、ripgrep 注入、15s / 8MiB / 10000 结果限制、截断上报。
+
+---
+
+## 第二段：Workflow 专线
+
+### 第 15 课：Workflow 定义与版本管理
+- **核心问题**：workflow 怎么存？draft / publish / version 生命周期？为什么草稿可改、发布快照不可变？
+- **代码地图**：
+  - `docs/workflow.md`、`crates/application/src/workflow/`
+  - `crates/contracts/src/workflow.rs`、相关 db 迁移
+- **要点**：Workflow + WorkflowSnapshot 两实体、draft 保留字符串、publish 复制不可变（published.updated_at 为 NULL）、rollback / activate、版本命名规则（用户自定义 vs `v{timestamp}`、URL 安全、部分唯一索引）、graph 作为不透明 React Flow JSON、读取模型不带 graph。
+
+### 第 16 课：Workflow 运行引擎
+- **核心问题**：一个 workflow 怎么跑起来？run CRUD、node run、HITL、串行状态机怎么设计？
+- **代码地图**：
+  - `crates/application/src/workflow_run/engine/`（engine.rs / ports.rs / graph.rs / node_type.rs / README.md）
+  - `crates/backend/src/workflow_run_engine.rs`、`workflow_run_executor.rs`、`workflow_run_prerequisites.rs`
+  - `docs/workflow.md` "Workflow runs" 节
+- **要点**：快照钉住（run 冻结发布版本）、专用 run-task + Git worktree、5 值状态枚举（Pending/Running/Succeeded/Failed/Cancelled）、petgraph DAG 解析与校验、`NodeExecutor` 委托 agent 会话、完成通过 `complete_node`/`fail_node` 回调、**每 run 一个串行 executor 保证状态转换串行**、HITL（start/restart/cancel）、`current_nodes` 锚点、快照保护（SnapshotInUse / ActiveRuns）。
+
+### 第 17 课：⭐ Workflow 前端设计模式（关键专题 4）
+- **核心问题**：前端怎么画 workflow 图？设计模式是什么：原生 React Flow 形状、ports 抽象、内存适配器、UI-free runtime？
+- **代码地图**：
+  - `packages/workflow-mock/`（node-factory、node-data、validation、capabilities、demo、version-history、README）
+  - `packages/workflow-runtime/`（ports、graph-codec、workflow-path-order、memory、run-projection、README）
+  - `packages/app-shell/src/features/workflow-run/`（theater、run-act-*、HITL composer）
+- **要点**：**React Flow 原生形状 = 单一数据源**（不复制 DTO、无 adapter 层）、可执行字段放 `data` 扩展点、agentConfig 版本化（CLI/模型/Role/Skill/自定义 prompt）、`createMockWorkflowNode` 拥有默认值、导入校验（唯一 id/合法端点/单 Start）；`@ora/workflow-runtime` 定义 Host/Run ports + 共享 run 类型、graph-codec 归一化为 `WorkflowDefinition`、`workflowPathOrder`（拓扑优先 + 画布位置决胜）、`createMemoryWorkflowRuntime` 内存适配器（生产代码只允许在组合根用 memory 子路径）、事件带序列/游标（未来 NDJSON 重连不丢）；Theater 舞台 UI（act / stage / HITL composer）。
+
+---
+
+## 第三段：前端 / Web / 桌面
+
+### 第 18 课：前端契约 SDK（@ora/contracts）
+- **核心问题**：前端怎么调用后端？哪些生成、哪些手写？三种 transport？错误怎么解码和本地化？
+- **代码地图**：`docs/frontend-contract-sdk.md`、`packages/contracts/src/`（client.ts / transport.ts / fetch.ts / endpoints.ts）、`xtask` 的 export-contracts
+- **要点**：endpoints manifest（operation_name / namespace / method / path / request/response 类型）、ts-rs 生成 DTO、ts-to-zod 派生 error.schema、客户端与 Rust 编译期锁步（漏改 client.ts 会 tsc 报错）、fetch vs Tauri transport、decodeRemoteError（RemoteContractError / UnknownRemoteError / LocalTransportError）、i18n 本地化、`stream_already_consumed`。
+
+### 第 19 课：app-shell 与聊天状态管理
+- **核心问题**：Web/桌面共享的壳怎么组装？聊天状态怎么管？流式响应怎么变成 UI？
+- **代码地图**：`packages/app-shell/src/`（app-shell.tsx、chat-store-context、contracts-client-context、features/chat、features/workspace）、`packages/chat/`
+- **要点**：app-shell 装配（分店接线）、chat store（zustand vanilla）、乐观回合（先上屏再发 prompt）、流式文本批处理（4KiB 上限 + 16ms 刷屏）、工具调用时间线（pending→in_progress→终态）、turn 结束兜底结算、load 重放重建 transcript（HistoryBuilder）。
+
+### 第 20 课：Web 服务器运行时
+- **核心问题**：HTTP 服务器怎么工作？路由、中间件、NDJSON 流、健康检查？
+- **代码地图**：`docs/web-server-runtime.md`、`apps/web/server/src/`（routes.rs / app_state.rs / error.rs / handlers/sessions.rs / bootstrap.rs）
+- **要点**：axum 路由（共享路径常量）、AppState 注入、request context 中间件（request_id + span）、NDJSON data/error/end 帧、DeferredCompletion、watchAppEvents 事件流、ORA_DATA_DIR 派生全部路径、时区处理。
+
+### 第 21 课：桌面运行时（Tauri）
+- **核心问题**：桌面版和 Web 版差在哪？IPC、Channel 流、配置、平台专属命令？
+- **代码地图**：`docs/desktop-runtime.md`、`apps/desktop/src-tauri/`（commands.rs / lib.rs / config.rs / error.rs / state.rs）
+- **要点**：独立 Cargo workspace（有自己的 Cargo.lock）、Tauri transport 映射命令 + Channel 帧、`unsupported_operation`（PWC 三操作 + listDirectory）、平台专属命令（get_desktop_config / set_worktree_root / resolve_task_cwd / open_location）、app_data_dir 全部路径（sqlite/config/logs/worktrees/sessions/skills）、config.json 版本化原子写、时区固定一次。
+
+---
+
+## 待确认/后续可展开（非必修）
+
+- `crates/plugin-manager`（插件发现，较小）
+- `docs/application-contracts.md`、`docs/domain-models.md`（可作第 2、3 课的补充回看）
+- `docs/gitlancer-architecture.md` 全文精读（可并入第 6 课）
+- `docs/runtime-logging.md`（可并入第 20/21 课）
+- `packages/plugin-sdk`、`packages/ui`（工具组件库）
+- `apps/web/client` 路由与页面装配（可并入第 19 课）
+
+---
+
+## 四个关键专题速查（为什么必须单独一课）
+
+| 专题 | 学完能回答 | 核心代码 |
+|---|---|---|
+| 保存上下文信息 | 对话存在哪、怎么记、写坏了怎么办、换 agent 怎么带过去 | `crates/history/`、`session_history.rs` |
+| 模型选择与切换 | 模型列表哪来的、为什么先 warm 才能选、切换怎么留痕 | `model-option.ts`、`store.ts`、`model-selector.tsx` |
+| 切换 Agent | 换绑走什么流程、warm pool 认领、为什么懒注入 | `agent-runtime.md` Switching Agents、`pending-agent-store.ts` |
+| Workflow 设计模式 | 前端为何不复制 DTO、ports/内存适配器/UI-free 怎么用、引擎怎么保证串行 | `workflow-mock/`、`workflow-runtime/`、`workflow_run/engine/` |
