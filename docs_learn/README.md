@@ -13,9 +13,10 @@
 - [第 4 课：错误体系 + 请求生命周期 + Backend 生命周期（总结）](./lesson-04.md)
 - [第 5 课：数据库持久化——迁移、连接池、repository（总结）](./lesson-05.md)
 - [第 6 课：Task 与 Git Worktree（gitlancer 与任务工作树）（总结）](./lesson-06.md)
-- [第 7 课：ACP Agent Runtime（进行中：第一、二讲 + warm/attach）](./lesson-07.md)
+- [第 7 课：ACP Agent Runtime（完整：三讲全部完成）](./lesson-07.md)
 
 ## 学习路线图
 
 - [第 6 课起的章节规划（含四个关键专题）](./LESSON-PLAN.md)
-- 已学完第 1~6 课；从第 7 课（Agent Runtime 总览）继续。
+- [Agent 教学引导（如何给用户讲解）](./AGENT-TEACHING-GUIDE.md)
+- 已学完第 1~7 课；从第 8 课（Session 生命周期与 Warm Session 深入）继续。
