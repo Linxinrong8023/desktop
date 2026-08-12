@@ -134,6 +134,14 @@ SQL 行 ──repository──▶ 领域模型 ──mapper──▶ 契约 DTO 
 
 Enum（枚举）、Newtype（新类型）、Mapper（映射器）、Serde、HTTP Method/Status Code（405 等）、Route（路由）；"Migration"条目补充"新字段第一步是迁移"。详见桌面临时术语表。
 
+## 七·五、检查题答案（主课 5 题）
+
+1. **三份 Project 字段**：数据库 6 列（id/name/root_path/created_at/updated_at/is_deleted）、领域 4 字段（id/name/root_path/audit_fields）、契约 3 字段（id/name/rootPath）；审计字段在数据库和领域，契约没有；
+2. **契约 id 用 String**：JSON 世界没有 newtype 概念；类型安全是 Rust 编译期的事，离开 Rust 就只剩通用 String；
+3. **转换**：数据库行→领域 = ora-db（map_project_row）；领域→契约 = ora-application（mapper）；
+4. **Task 状态**：数据库 0/1/2、领域枚举 Todo/Doing/Done、契约字符串 "todo"/"doing"/"done"；存 99 → from_database_value 报 InvalidTaskStatus；
+5. **显示创建时间**：契约加字段 → 重新生成 TS → mapper 传递 → 前端显示（数据库和领域不用改——数据一直在，只是没印上名片）。
+
 ## 八、B 补全课：领域层全貌 + 契约错误 + 租约概念
 
 ### 0. 分支事故的教训（意外收获的实战课）

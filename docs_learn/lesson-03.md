@@ -211,6 +211,15 @@ pub struct AppState {
 
 Generic（泛型）、Port（接口角色/接缝）、Fake/Mock（假实现）、Static Dispatch（静态分发，已深化）、Extractor（提取器）、Fail Fast（快速失败）、Composition Root（已深化）、Monomorphization（单态化）等。
 
+## 十一·五、检查题答案（6 题）
+
+1. **ports.rs 三个接口**：ProjectRepository（存取）、ProjectIdGenerator（造 ID）、Clock（时间）；
+2. **handle 5 步**：① clock 要时间 → ② id_generator 造 ID → ③ 构造领域模型（AuditFields）→ ④ repository 存库（接口调用）→ ⑤ mapper 映射回契约；
+3. **ProjectNotFound vs ProjectRepository**：语义错误（业务判断，前端可展示）vs 基础设施错误（包一层，source 保留根因给诊断）；
+4. **Fake 为什么能互换**：实现了同一个 ProjectRepository 接口（接缝），组合根决定焊谁；
+5. **为什么用 FixedClock**：固定值，断言精确、测试可复现；
+6. **为什么能测**：接口（ports）+ 依赖注入（handler 不自己造）+ Fake（内存实现）+ 组合根（生产焊真线）——测试和生产跨同一接缝。
+
 ## 十二、下一课预告
 
 > `ora-backend` 的 error 体系：`ApplicationError → BackendError → PublicError` 怎么转换？`ErrorClassification` 如何决定 HTTP 状态码和日志级别？RequestLifecycle（请求生命周期）如何保证只记一次完成事件？

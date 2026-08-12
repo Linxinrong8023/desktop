@@ -214,6 +214,34 @@ ProjectApi 内部 `self.get.handle(request)` 里：
 
 Connection Pool（连接池，本课正式条目）、Migration（已深化：对账/三道检查）、PRAGMA（SQLite 设置）、SQL Injection（SQL 注入，已口头讲）、r2d2/rusqlite（第三方库，了解即可）。
 
+## 六·五、检查题答案（迁移 + 连接池 + repository）
+
+### 迁移 7 题
+
+1. **三个角色**：Migration（图纸：版本+up+down）、MigrationCatalog（目录：构建时校验）、migrations 表（账本：记已执行）；
+2. **对账发现顺序不对**：前缀对比 → DivergedMigrationHistory 硬错误（不猜、不跳、不重排）；
+3. **SQL 和账本同一事务**：失败全回滚，不会"表建了一半、账本说没建"；
+4. **连接池配置集中**：一致性（防不同仓储用不同配置）+ 改一处全生效；
+5. **聚合删除用 Immediate 事务**：先拿写锁再检查 Running 会话——防竞态（检查时说没有、删除前突然变 Running）；
+6. **CascadeDeleteOutcome 用枚举**：数据库只报告事实（Deleted/NotFound/ActiveSession），调用方决定公开含义（ActiveSession→resource_in_use）；
+7. **PWC 用 DELETE 不是软删**：租约制，过期直接删，不需要删除标记。
+
+### 连接池 5 题
+
+1. **出生时机**：启动时 Backend::open → bootstrap_repository_pool；刚建好 0 条连接（懒加载）；
+2. **真正打开**：第一次借时，SqliteConnectionManager::connect（打开文件 + 统一配置 4 条规矩）；
+3. **发水卡**：pool.clone() 复印给所有仓库共享；
+4. **借-用-还**：get() 借 → 闭包用 → 变量销毁自动回池（Rust 所有权）；
+5. **第二次借**：直接拿回那条活的已配置的连接（is_valid 检查），不重开不重配；销毁时机：进程退出/连接坏/（Ora 未配 idle 回收）。
+
+### repository 5 题
+
+1. **AND is_deleted=0**：过滤软删除，已删的查不出来；
+2. **map_project_row**：类型转换（0/1→bool、TEXT→newtype）+ 组装领域模型（AuditFields）；
+3. **soft_delete 返回 bool**：区分"删成功" vs "本来就不存在"（后者应报 not_found）；
+4. **is_deleted 两道门**：查询过滤（进不来）+ 映射丢弃（audit_fields 不带出去）——前端永远不知道；
+5. **?1+params! 为什么安全**：值永远当"数据"传，不拼进 SQL 代码（拼接版可被注入 `'; DROP TABLE...`）。
+
 ## 七、下一课预告
 
 > Task 与 Git Worktree：创建任务时怎么建 linked worktree？Task/Worktree 怎么关联？Git 失败时怎么补偿数据库写入？为什么删任务不删 Git？
