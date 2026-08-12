@@ -130,7 +130,10 @@ fn fails_creation_and_compensates_when_worktree_initialization_fails() {
         })
         .unwrap_err();
 
-    assert!(matches!(error, ApplicationError::WorkflowRunStartFailed { .. }));
+    assert!(matches!(
+        error,
+        ApplicationError::WorkflowRunStartFailed { .. }
+    ));
     // The provisioned worktree must be removed so no orphan branch is left behind.
     assert_eq!(
         provisioner.deleted_requests(),
@@ -395,6 +398,7 @@ fn gets_run_detail() {
     repository.with_detail(WorkflowRunDetail {
         run: run.clone(),
         name: "Manual name".to_string(),
+        project_id: ProjectId::new("project-1"),
         task_id: TaskId::new("task-1".to_string()),
         nodes: vec![node.clone()],
     });
@@ -411,6 +415,7 @@ fn gets_run_detail() {
         GetWorkflowRunResponse {
             run: map_run(run),
             name: "Manual name".to_string(),
+            project_id: "project-1".to_string(),
             task_id: "task-1".to_string(),
             nodes: vec![map_node_run(node)],
         }
@@ -910,7 +915,10 @@ impl WorkflowRunWorktreeInitializer for MockWorktreeInitializer {
         _graph: &WorkflowGraph,
         worktree_root: &Path,
     ) -> Result<(), StartPrerequisitesError> {
-        self.worktrees.lock().unwrap().push(worktree_root.to_path_buf());
+        self.worktrees
+            .lock()
+            .unwrap()
+            .push(worktree_root.to_path_buf());
         if self.fail {
             return Err(StartPrerequisitesError::SkillMaterializationError {
                 message: "boom".to_string(),

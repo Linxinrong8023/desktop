@@ -59,17 +59,12 @@ export function useWorkflowAgentModels(): WorkflowAgentModelsCatalog {
     })),
   });
 
-  const openCodeOptions = warmQueries[0]?.data?.configOptions;
-  const ngaOptions = warmQueries[1]?.data?.configOptions;
-  const codeAgentOptions = warmQueries[2]?.data?.configOptions;
   const agentModels = useMemo(() => {
+    // Derive from AGENT_CLI_ORDER, the same single list the chat picker renders,
+    // so a CLI added there is discovered here too without a second list to sync.
     const models: WorkflowAgentModel[] = [];
-    const byCli: Array<{ agentCli: (typeof AGENT_CLI_ORDER)[number]; options: typeof openCodeOptions }> = [
-      { agentCli: "open_code", options: openCodeOptions },
-      { agentCli: "nga", options: ngaOptions },
-      { agentCli: "code_agent_cli", options: codeAgentOptions },
-    ];
-    for (const { agentCli, options } of byCli) {
+    for (const [index, agentCli] of AGENT_CLI_ORDER.entries()) {
+      const options = warmQueries[index]?.data?.configOptions;
       if (options === undefined) {
         continue;
       }
@@ -86,7 +81,7 @@ export function useWorkflowAgentModels(): WorkflowAgentModelsCatalog {
       }
     }
     return models;
-  }, [codeAgentOptions, ngaOptions, openCodeOptions]);
+  }, [warmQueries]);
 
   const modelsByCli = useMemo(() => {
     const byCli = new Map<AgentCli, WorkflowAgentModel[]>();

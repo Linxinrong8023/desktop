@@ -3,8 +3,8 @@ use crate::project::Clock;
 use crate::workflow_run::engine::graph::{GraphError, WorkflowGraph, WorkflowGraphNode};
 use crate::workflow_run::engine::node_type::NodeType;
 use crate::workflow_run::engine::ports::{
-    AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, FileChange, NodeRunToStart,
-    RestartWorkflowRunResult, StartWorkflowRunResult, UpdateWorkflowRunInputResult,
+    AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, FileChange,
+    NodeRunToStart, RestartWorkflowRunResult, StartWorkflowRunResult, UpdateWorkflowRunInputResult,
     WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository,
 };
 use ora_domain::{WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId};
@@ -105,12 +105,7 @@ pub struct WorkflowRunEngine<R, E, G, C> {
 
 impl<R, E, G, C> WorkflowRunEngine<R, E, G, C> {
     /// Builds an engine from its ports.
-    pub fn new(
-        repository: R,
-        node_executor: E,
-        node_run_id_generator: G,
-        clock: C,
-    ) -> Self {
+    pub fn new(repository: R, node_executor: E, node_run_id_generator: G, clock: C) -> Self {
         Self {
             repository,
             node_executor,
@@ -170,8 +165,9 @@ where
         }
     }
 
-    /// Cancels a running run. Stopping the running sessions is orchestrated by the backend before
-    /// this commits the `Cancelled` transition.
+    /// Cancels a running run. The backend orchestrates stopping the run's live sessions around
+    /// this; the `Cancelled` transition is committed here, and a late session stop makes the
+    /// executor's in-flight callbacks no-ops against the already-cancelled node runs.
     pub fn cancel(&self, run_id: &WorkflowRunId) -> Result<CancelWorkflowRunResult, EngineError> {
         let now = self.clock.now_timestamp_millis();
         Ok(self.repository.cancel_run(run_id, now)?)
@@ -254,8 +250,13 @@ where
                     && matches!(node.node_type, NodeType::Start | NodeType::Output)
                 {
                     let output = control_node_output(&graph, node, &node_runs, &context);
-                    self.repository
-                        .complete_node(&node_run.id, Some(output), None, Vec::new(), now)?;
+                    self.repository.complete_node(
+                        &node_run.id,
+                        Some(output),
+                        None,
+                        Vec::new(),
+                        now,
+                    )?;
                 }
             }
 
