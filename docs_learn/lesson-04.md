@@ -133,6 +133,15 @@ enum StreamFrame<Event> { Data{data}, Error{error: ContractError}, End }
 
 Middleware（中间件）、IntoResponse（已在课内解释）、Error Chain（错误链/source 链）、Stream Frame（流帧）、AtomicBool/compare_exchange（原子操作）、Arc（共享引用）、strong_count（引用计数）、NDJSON（已在待讲清单，本课补全）。
 
-## 十三、下一课预告
+## 十三·五、检查题答案（6 题）
+
+1. **BackendError 四字段**：classification（适配器→HTTP 状态码/日志级别）、public_error（→前端 {code,params}）、context（日志一句话）、source（诊断链）；
+2. **四分类**：InvalidRequest→400、NotFound→404、Conflict→409、Internal→500；日志级别 Internal→error、Conflict→warn、其他→info；
+3. **为什么统一 internal_error**：前端只需知道"服务器内部出错"（500），具体哪个仓库挂是内部细节——进日志（source 链）不进响应；
+4. **不检查 source 链**：映射只看枚举变体，绝不靠错误字符串判断（文案一改就崩，脆弱）；source 链只保留给日志；
+5. **前端用途**：code→i18n 字典翻译成用户话、params→插值、requestId→关联后端日志排查；
+6. **只记一次**：claim_completion 用 AtomicBool::compare_exchange(false, true)——谁先抢到谁记，别人看到 true 就跳过。
+
+## 十四、下一课预告
 
 > 数据库持久化（`ora-db`）：迁移（migration）怎么工作？连接池怎么管理？每个实体的 repository 怎么读写？聚合删除（cascade）为什么需要事务？软删除怎么隐藏？
