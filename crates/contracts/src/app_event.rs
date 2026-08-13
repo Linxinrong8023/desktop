@@ -6,19 +6,17 @@ use ts_rs::TS;
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export_to = "app_event.ts")]
 pub enum AppEvent {
-    /// Confirms that the client owns the application stream and may mount the shell.
+    /// Confirms that the application stream is subscribed and may be consumed.
     Ready,
     /// Tells clients that the persisted session row should be queried again.
     SessionTitleUpdated { session_id: String },
 }
 
-/// Identifies the in-memory browser document or Desktop window requesting the app stream.
+/// Opens the application event stream without filtering or ownership metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "app_event.ts")]
-pub struct WatchAppEventsRequest {
-    pub client_instance_id: String,
-}
+pub struct WatchAppEventsRequest {}
 
 /// Exports the application event contract family for the generated frontend package.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
@@ -51,15 +49,12 @@ mod tests {
         );
     }
 
-    /// Verifies client ownership uses the dedicated in-memory request field.
+    /// Verifies the application stream request carries no browser ownership state.
     #[test]
-    fn serializes_watch_request_in_camel_case() {
+    fn serializes_empty_watch_request() {
         assert_eq!(
-            serde_json::to_value(WatchAppEventsRequest {
-                client_instance_id: "client-1".to_string(),
-            })
-            .expect("watch request serializes"),
-            serde_json::json!({ "clientInstanceId": "client-1" }),
+            serde_json::to_value(WatchAppEventsRequest {}).expect("watch request serializes"),
+            serde_json::json!({}),
         );
     }
 }

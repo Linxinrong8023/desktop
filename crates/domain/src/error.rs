@@ -7,8 +7,6 @@ use crate::SessionTitleError;
 pub enum DomainModelError {
     #[error("worktree baseline commit must not be empty")]
     EmptyWorktreeBaseline,
-    #[error("invalid project work context surface value: {0}")]
-    InvalidProjectWorkContextSurface(String),
     #[error("invalid task status value: {0}")]
     InvalidTaskStatus(i64),
     #[error("invalid task type value: {0}")]
@@ -19,6 +17,8 @@ pub enum DomainModelError {
     InvalidWorkflowNodeStatus(i64),
     #[error("invalid worktree activity value: {0}")]
     InvalidWorktreeActivity(i64),
+    #[error("invalid git cleanup job state value: {0}")]
+    InvalidGitCleanupJobState(String),
     #[error("invalid virtual entry kind value: {0}")]
     InvalidVirtualEntryKind(i64),
     #[error("invalid session status value: {0}")]

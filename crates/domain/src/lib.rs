@@ -2,9 +2,9 @@ mod agent_definition;
 mod artifact;
 mod audit_fields;
 mod error;
+mod git_cleanup;
 mod ids;
 mod project;
-mod project_work_context;
 mod session;
 mod session_title;
 mod skill;
@@ -24,13 +24,16 @@ pub use agent_definition::AgentDefinition;
 pub use artifact::Artifact;
 pub use audit_fields::AuditFields;
 pub use error::DomainModelError;
+pub use git_cleanup::{
+    GitCleanupJob, GitCleanupJobState, MAX_CLEANUP_JOB_ERROR_CHARS, WorktreeProvisioningLease,
+    truncate_cleanup_error,
+};
 pub use ids::{
-    AgentDefinitionId, ArtifactId, ProjectId, ProjectSpecSourceOverrideId, ProjectWorkContextId,
+    AgentDefinitionId, ArtifactId, GitCleanupJobId, ProjectId, ProjectSpecSourceOverrideId,
     SessionId, SkillId, TaskDiffCommentId, TaskId, VirtualEntryId, VirtualFolderId, WorkflowId,
-    WorkflowNodeRunId, WorkflowRunId, WorkflowSnapshotId, WorktreeId,
+    WorkflowNodeRunId, WorkflowRunId, WorkflowSnapshotId, WorktreeId, WorktreeProvisioningLeaseId,
 };
 pub use project::Project;
-pub use project_work_context::{ProjectWorkContext, ProjectWorkContextSurface};
 pub use session::{AgentCli, HistoryState, Session, SessionStatus};
 pub use session_title::{MAX_SESSION_TITLE_CHARS, SessionTitle, SessionTitleError};
 pub use skill::{

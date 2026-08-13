@@ -9,6 +9,6 @@ export type AppEvent = { "type": "ready" } | {
 };
 
 /**
- * Identifies the in-memory browser document or Desktop window requesting the app stream.
+ * Opens the application event stream without filtering or ownership metadata.
  */
-export type WatchAppEventsRequest = { clientInstanceId: string };
+export type WatchAppEventsRequest = Record<symbol, never>;

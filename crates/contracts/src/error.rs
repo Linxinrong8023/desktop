@@ -107,8 +107,6 @@ pub enum PublicError {
     AgentNameConflict(EmptyErrorParams),
     AgentNotFound(EmptyErrorParams),
     ProjectNotFound(EmptyErrorParams),
-    ProjectOccupied(EmptyErrorParams),
-    ProjectWorkContextNotFound(EmptyErrorParams),
     TaskNotFound(EmptyErrorParams),
     ResourceInUse(EmptyErrorParams),
     WorktreeRequiresGitRepository(EmptyErrorParams),
@@ -130,7 +128,6 @@ pub enum PublicError {
     SessionLoadUnsupported(EmptyErrorParams),
     SessionHistoryDegraded(EmptyErrorParams),
     SessionAgentUnchanged(EmptyErrorParams),
-    MultipleClientsUnsupported(EmptyErrorParams),
     PermissionRequestNotPending(EmptyErrorParams),
     PermissionOptionInvalid(EmptyErrorParams),
     PromptEmpty(EmptyErrorParams),
@@ -221,8 +218,6 @@ impl PublicError {
             Self::AgentNameConflict(_) => "agent_name_conflict",
             Self::AgentNotFound(_) => "agent_not_found",
             Self::ProjectNotFound(_) => "project_not_found",
-            Self::ProjectOccupied(_) => "project_occupied",
-            Self::ProjectWorkContextNotFound(_) => "project_work_context_not_found",
             Self::TaskNotFound(_) => "task_not_found",
             Self::ResourceInUse(_) => "resource_in_use",
             Self::WorktreeRequiresGitRepository(_) => "worktree_requires_git_repository",
@@ -244,7 +239,6 @@ impl PublicError {
             Self::SessionLoadUnsupported(_) => "session_load_unsupported",
             Self::SessionHistoryDegraded(_) => "session_history_degraded",
             Self::SessionAgentUnchanged(_) => "session_agent_unchanged",
-            Self::MultipleClientsUnsupported(_) => "multiple_clients_unsupported",
             Self::PermissionRequestNotPending(_) => "permission_request_not_pending",
             Self::PermissionOptionInvalid(_) => "permission_option_invalid",
             Self::PromptEmpty(_) => "prompt_empty",
@@ -414,8 +408,6 @@ mod tests {
             PublicError::AgentNameConflict(empty),
             PublicError::AgentNotFound(empty),
             PublicError::ProjectNotFound(empty),
-            PublicError::ProjectOccupied(empty),
-            PublicError::ProjectWorkContextNotFound(empty),
             PublicError::TaskNotFound(empty),
             PublicError::ResourceInUse(empty),
             PublicError::WorktreeRequiresGitRepository(empty),
@@ -439,7 +431,6 @@ mod tests {
             PublicError::SessionLoadUnsupported(empty),
             PublicError::SessionHistoryDegraded(empty),
             PublicError::SessionAgentUnchanged(empty),
-            PublicError::MultipleClientsUnsupported(empty),
             PublicError::PermissionRequestNotPending(empty),
             PublicError::PermissionOptionInvalid(empty),
             PublicError::PromptEmpty(empty),
@@ -529,8 +520,6 @@ mod tests {
                 | PublicError::AgentNameConflict(_)
                 | PublicError::AgentNotFound(_)
                 | PublicError::ProjectNotFound(_)
-                | PublicError::ProjectOccupied(_)
-                | PublicError::ProjectWorkContextNotFound(_)
                 | PublicError::TaskNotFound(_)
                 | PublicError::ResourceInUse(_)
                 | PublicError::WorktreeRequiresGitRepository(_)
@@ -552,7 +541,6 @@ mod tests {
                 | PublicError::SessionLoadUnsupported(_)
                 | PublicError::SessionHistoryDegraded(_)
                 | PublicError::SessionAgentUnchanged(_)
-                | PublicError::MultipleClientsUnsupported(_)
                 | PublicError::PermissionRequestNotPending(_)
                 | PublicError::PermissionOptionInvalid(_)
                 | PublicError::PromptEmpty(_)
@@ -634,7 +622,7 @@ mod tests {
     #[test]
     fn public_error_codes_match_serde_tags_for_every_variant() {
         let samples = public_error_samples();
-        assert_eq!(samples.len(), 101);
+        assert_eq!(samples.len(), 98);
 
         for error in samples {
             let serialized = serde_json::to_value(&error).unwrap();

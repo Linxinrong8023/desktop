@@ -45,10 +45,6 @@ pub enum WebBootstrapError {
     InvalidDatabasePathEmpty,
     #[error("failed to resolve the current directory")]
     CurrentDirectory(#[source] std::io::Error),
-    #[error("ORA_PROJECT_NAME must not be empty")]
-    InvalidProjectNameEmpty,
-    #[error("ORA_PROJECT_PATH must not be empty")]
-    InvalidProjectPathEmpty,
     #[error("ORA_LOG_MAX_DAYS must be greater than zero")]
     InvalidLogMaxDaysZero,
     #[error("server user home directory is unavailable")]
@@ -59,16 +55,15 @@ pub enum WebBootstrapError {
     DataDirectoryCreate(#[source] std::io::Error),
     #[error("failed to bootstrap SQLite database")]
     DatabaseBootstrap(#[source] ora_db::DatabaseError),
-    #[error("failed to reconcile bootstrap project")]
-    ProjectBootstrap {
-        #[source]
-        source: Box<dyn std::error::Error + Send + Sync + 'static>,
-    },
+    #[error("failed to initialize backend runtime")]
+    BackendRuntimeBootstrap(#[source] ora_backend::BackendError),
     #[error("failed to reconcile skill storage")]
     SkillStorageReconcile {
         #[source]
         source: ora_application::ApplicationError,
     },
+    #[error("failed to reconcile skill storage")]
+    SkillStorageReconciliation(#[source] ora_backend::SkillStorageReconciliationError),
     #[error(transparent)]
     LoggingInit(#[from] ora_logging::LoggingInitError),
     #[error("failed to bind HTTP listener")]

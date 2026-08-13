@@ -9,22 +9,21 @@ use ora_application::{
     ActivateVersionResult, AdvanceWorkflowRunResult, AgentDefinitionRepository,
     CancelWorkflowRunResult, Clock, DeleteSnapshotResult, DeleteWorkflowResult,
     DeleteWorkflowRunResult, EngineError, ExecutionContext, NodeExecutor, NodeRunToStart, NodeType,
-    ProjectRepository, ProjectSpecSourceOverrideRepository, ProjectWorkContextRepository,
-    PublishSnapshotResult, RepositoryError, RestartWorkflowRunResult, RollbackDraftResult,
-    SessionRepository, SkillRepository, StartWorkflowRunResult, TaskRepository,
-    UpdateWorkflowRunInputResult, WorkflowGraphNode, WorkflowNodeRunIdGenerator,
-    WorkflowRepository, WorkflowRunControlHandler, WorkflowRunEngine, WorkflowRunEngineRepository,
+    ProjectRepository, ProjectSpecSourceOverrideRepository, PublishSnapshotResult, RepositoryError,
+    RestartWorkflowRunResult, RollbackDraftResult, SessionRepository, SkillRepository,
+    StartWorkflowRunResult, TaskRepository, UpdateWorkflowRunInputResult, WorkflowGraphNode,
+    WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunControlHandler,
+    WorkflowRunCreateOutcome, WorkflowRunEngine, WorkflowRunEngineRepository,
     WorkflowRunRepository, WorkflowValidationError, WorktreeRepository,
 };
 use ora_contracts::{StartWorkflowRunRequest, WorkflowRunStatus as ContractRunStatus};
 use ora_domain::{
     AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Project, ProjectId,
-    ProjectSpecSourceOverride, ProjectSpecSourceOverrideId, ProjectWorkContext,
-    ProjectWorkContextId, ProjectWorkContextSurface, Session, SessionId, SessionStatus,
+    ProjectSpecSourceOverride, ProjectSpecSourceOverrideId, Session, SessionId, SessionStatus,
     SessionTitle, Skill, SkillId, SpecSourceVisibility, SpecWorkflow, Task, TaskId, TaskStatus,
     Workflow, WorkflowId, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRun, WorkflowRunDetail,
     WorkflowRunId, WorkflowRunStatus, WorkflowRunSummary, WorkflowSnapshot, WorkflowSnapshotId,
-    Worktree, WorktreeActivity, WorktreeBaseline, WorktreeId,
+    Worktree, WorktreeActivity, WorktreeBaseline, WorktreeId, WorktreeProvisioningLeaseId,
 };
 use ora_logging::with_trace_logging;
 use pretty_assertions::assert_eq;
@@ -33,10 +32,10 @@ use tempfile::TempDir;
 use crate::{
     CascadeDeleteOutcome, DatabaseBootstrapper, DatabaseError, DatabaseLocation, RepositoryPool,
     SqliteAgentDefinitionRepository, SqliteCascadeRepository, SqliteProjectRepository,
-    SqliteProjectSpecSourceOverrideRepository, SqliteProjectWorkContextRepository,
-    SqliteSessionRepository, SqliteSkillRepository, SqliteTaskRepository, SqliteWorkflowRepository,
-    SqliteWorkflowRunEngineRepository, SqliteWorkflowRunRepository, SqliteWorktreeRepository,
-    TimestampSource, default_migration_catalog,
+    SqliteProjectSpecSourceOverrideRepository, SqliteSessionRepository, SqliteSkillRepository,
+    SqliteTaskRepository, SqliteWorkflowRepository, SqliteWorkflowRunEngineRepository,
+    SqliteWorkflowRunRepository, SqliteWorktreeRepository, TimestampSource,
+    default_migration_catalog,
 };
 
 /// Verifies source replacement is atomic at the collection boundary and hides prior rows.
@@ -699,6 +698,7 @@ fn workflow_repository_snapshot_in_use_guard_yields_to_draft_and_active() {
 #[test]
 fn workflow_run_repository_creates_and_reads_run() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
+    ensure_project(&pool, "project-1");
     let workflow_repository = SqliteWorkflowRepository::new(pool.clone());
     let run_repository = SqliteWorkflowRunRepository::new(pool.clone());
 
@@ -746,6 +746,7 @@ fn workflow_run_repository_creates_and_reads_run() {
         worktree_id.clone(),
         task_id.clone(),
         Some("ora/task-1".to_string()),
+        None,
         WorktreeBaseline::recorded("base-commit").unwrap(),
         WorktreeActivity::Active,
         AuditFields::new(30, 30, /*is_deleted*/ false),
@@ -753,9 +754,14 @@ fn workflow_run_repository_creates_and_reads_run() {
 
     assert_eq!(
         run_repository
-            .create_run(run.clone(), task.clone(), worktree.clone())
+            .create_run(
+                run.clone(),
+                task.clone(),
+                worktree.clone(),
+                &WorktreeProvisioningLeaseId::new("lease-absent"),
+            )
             .unwrap(),
-        run.clone()
+        WorkflowRunCreateOutcome::Created(Box::new(run.clone()))
     );
     assert_eq!(run_repository.find_run(&run_id).unwrap(), Some(run.clone()));
     assert_eq!(
@@ -826,6 +832,8 @@ fn workflow_run_repository_requires_run_row_before_task_row() {
 fn create_pending_run_fixture(pool: &RepositoryPool) -> (WorkflowRunId, TaskId, WorktreeId) {
     let workflow_repository = SqliteWorkflowRepository::new(pool.clone());
     let run_repository = SqliteWorkflowRunRepository::new(pool.clone());
+    // create_run re-validates project visibility, so the owning project must exist.
+    ensure_project(pool, "project-1");
     let (workflow, draft) = workflow_with_draft("workflow-a", "{\"nodes\":[]}", 10);
     workflow_repository
         .create_workflow(workflow.clone(), draft.clone())
@@ -870,12 +878,39 @@ fn create_pending_run_fixture(pool: &RepositoryPool) -> (WorkflowRunId, TaskId, 
         worktree_id.clone(),
         task_id.clone(),
         Some("ora/task-1".to_string()),
+        None,
         WorktreeBaseline::recorded("base-commit").unwrap(),
         WorktreeActivity::Active,
         AuditFields::new(30, 30, /*is_deleted*/ false),
     );
-    run_repository.create_run(run, task, worktree).unwrap();
+    run_repository
+        .create_run(
+            run,
+            task,
+            worktree,
+            &WorktreeProvisioningLeaseId::new("lease-absent"),
+        )
+        .unwrap();
     (run_id, task_id, worktree_id)
+}
+
+/// Inserts a visible project row when a fixture needs an owning project.
+fn ensure_project(pool: &RepositoryPool, project_id: &str) {
+    let repository = SqliteProjectRepository::new(pool.clone());
+    if repository
+        .find_project(&ProjectId::new(project_id))
+        .unwrap()
+        .is_none()
+    {
+        repository
+            .create_project(Project::new(
+                ProjectId::new(project_id),
+                "Fixture project",
+                "/tmp/fixture-project",
+                AuditFields::new(1, 1, false),
+            ))
+            .unwrap();
+    }
 }
 
 /// Builds the node-run descriptor for a run's `start` node.
@@ -1643,6 +1678,8 @@ fn create_pending_run_with_graph(
 ) -> (WorkflowRunId, TaskId, WorktreeId) {
     let workflow_repository = SqliteWorkflowRepository::new(pool.clone());
     let run_repository = SqliteWorkflowRunRepository::new(pool.clone());
+    // create_run re-validates project visibility, so the owning project must exist.
+    ensure_project(pool, "project-1");
     let (workflow, draft) = workflow_with_draft("workflow-engine", graph_json, 10);
     workflow_repository
         .create_workflow(workflow.clone(), draft.clone())
@@ -1687,11 +1724,19 @@ fn create_pending_run_with_graph(
         worktree_id.clone(),
         task_id.clone(),
         Some("ora/task-1".to_string()),
+        None,
         WorktreeBaseline::recorded("base-commit").unwrap(),
         WorktreeActivity::Active,
         AuditFields::new(30, 30, /*is_deleted*/ false),
     );
-    run_repository.create_run(run, task, worktree).unwrap();
+    run_repository
+        .create_run(
+            run,
+            task,
+            worktree,
+            &WorktreeProvisioningLeaseId::new("lease-absent"),
+        )
+        .unwrap();
     (run_id, task_id, worktree_id)
 }
 
@@ -2315,12 +2360,6 @@ fn project_repository_supports_crud_and_soft_delete() {
         Some(created_project.clone())
     );
     assert_eq!(
-        repository
-            .find_project_by_name(&created_project.name)
-            .unwrap(),
-        Some(created_project.clone())
-    );
-    assert_eq!(
         repository.list_projects().unwrap(),
         vec![created_project.clone()]
     );
@@ -2342,147 +2381,12 @@ fn project_repository_supports_crud_and_soft_delete() {
     );
     assert_eq!(
         repository
-            .find_project_by_name(&updated_project.name)
-            .unwrap(),
-        Some(updated_project.clone())
-    );
-    assert_eq!(
-        repository
             .soft_delete_project(&updated_project.id, /*deleted_at*/ 30)
             .unwrap(),
         true
     );
     assert_eq!(repository.find_project(&updated_project.id).unwrap(), None);
-    assert_eq!(
-        repository
-            .find_project_by_name(&updated_project.name)
-            .unwrap(),
-        None
-    );
     assert_eq!(repository.list_projects().unwrap(), Vec::<Project>::new());
-}
-
-/// Verifies the SQLite-backed project repository can load one visible project by exact name.
-#[test]
-fn project_repository_finds_visible_project_by_name() {
-    let (_temp_dir, pool) = bootstrapped_repository_pool();
-    let repository = SqliteProjectRepository::new(pool);
-    let project = Project::new(
-        ProjectId::new("project-1"),
-        "Ora",
-        "/tmp/ora",
-        AuditFields::new(14, 14, false),
-    );
-
-    repository.create_project(project.clone()).unwrap();
-
-    assert_eq!(
-        repository.find_project_by_name("Ora").unwrap(),
-        Some(project)
-    );
-    assert_eq!(repository.find_project_by_name("Missing").unwrap(), None);
-}
-
-/// Verifies the SQLite-backed project repository hides soft-deleted rows during name-based lookup.
-#[test]
-fn project_repository_ignores_soft_deleted_projects_during_name_lookup() {
-    let (_temp_dir, pool) = bootstrapped_repository_pool();
-    let repository = SqliteProjectRepository::new(pool);
-    let project = Project::new(
-        ProjectId::new("project-1"),
-        "Ora",
-        "/tmp/ora",
-        AuditFields::new(15, 15, false),
-    );
-
-    repository.create_project(project.clone()).unwrap();
-    repository
-        .soft_delete_project(&project.id, /*deleted_at*/ 16)
-        .unwrap();
-
-    assert_eq!(repository.find_project_by_name("Ora").unwrap(), None);
-}
-
-/// Verifies the SQLite-backed project work context repository preserves lease-aware rows and cleanup.
-#[test]
-fn project_work_context_repository_supports_active_lookup_and_cleanup() {
-    let (_temp_dir, pool) = bootstrapped_repository_pool();
-    let repository = SqliteProjectWorkContextRepository::new(pool);
-    let created_context = ProjectWorkContext::new(
-        ProjectWorkContextId::new("context-1"),
-        ProjectWorkContextSurface::Tauri,
-        "window-1",
-        ProjectId::new("project-1"),
-        120,
-        10,
-        10,
-    );
-
-    assert_eq!(
-        repository
-            .create_project_work_context(created_context.clone())
-            .unwrap(),
-        created_context.clone()
-    );
-    assert_eq!(
-        repository
-            .find_project_work_context(ProjectWorkContextSurface::Tauri, "window-1")
-            .unwrap(),
-        Some(created_context.clone())
-    );
-    assert_eq!(
-        repository
-            .find_active_project_work_context_for_project(&created_context.project_id, 100)
-            .unwrap(),
-        Some(created_context.clone())
-    );
-    assert_eq!(
-        repository
-            .find_active_project_work_context_for_project(&created_context.project_id, 120)
-            .unwrap(),
-        None
-    );
-
-    let updated_context = ProjectWorkContext::new(
-        created_context.id.clone(),
-        created_context.surface,
-        created_context.window_id.clone(),
-        ProjectId::new("project-2"),
-        240,
-        created_context.created_at,
-        40,
-    );
-
-    assert_eq!(
-        repository
-            .update_project_work_context(updated_context.clone())
-            .unwrap(),
-        updated_context.clone()
-    );
-    assert_eq!(
-        repository
-            .find_active_project_work_context_for_project(&ProjectId::new("project-2"), 200)
-            .unwrap(),
-        Some(updated_context.clone())
-    );
-    assert_eq!(
-        repository
-            .delete_expired_project_work_contexts(200)
-            .unwrap(),
-        0
-    );
-    assert_eq!(
-        repository
-            .delete_project_work_context(ProjectWorkContextSurface::Tauri, "window-1")
-            .unwrap(),
-        true
-    );
-    assert_eq!(
-        repository
-            .find_project_work_context(ProjectWorkContextSurface::Tauri, "window-1")
-            .unwrap(),
-        None
-    );
 }
 
 /// Verifies the SQLite-backed task repository preserves CRUD snapshots and hides soft-deleted rows.
@@ -2776,6 +2680,7 @@ fn worktree_repository_supports_crud_and_soft_delete() {
         WorktreeId::new("worktree-1"),
         TaskId::new("task-1"),
         Some("feature/db-pool".to_string()),
+        Some("/worktrees/task-1".to_string()),
         ora_domain::WorktreeBaseline::recorded("base-commit").unwrap(),
         WorktreeActivity::Inactive,
         AuditFields::new(13, 13, false),
@@ -2799,6 +2704,7 @@ fn worktree_repository_supports_crud_and_soft_delete() {
     let updated_worktree = Worktree::new(
         created_worktree.id.clone(),
         created_worktree.task_id.clone(),
+        None,
         None,
         ora_domain::WorktreeBaseline::recorded("updated-base-commit").unwrap(),
         WorktreeActivity::Active,
@@ -2862,6 +2768,7 @@ fn repository_pool_composes_all_repository_adapters() {
         WorktreeId::new("worktree-1"),
         task.id.clone(),
         Some("feature/composition".to_string()),
+        None,
         ora_domain::WorktreeBaseline::recorded("base-commit").unwrap(),
         WorktreeActivity::Active,
         AuditFields::new(43, 43, false),
@@ -2911,7 +2818,7 @@ fn task_cascade_delete_is_atomic_and_does_not_require_git() {
         repository.delete_task(&TaskId::new("task-1"), 20).unwrap(),
         CascadeDeleteOutcome::ActiveSession
     );
-    assert_eq!(cascade_flags(&pool), (0, 0, 0, 0, 0, 1));
+    assert_eq!(cascade_flags(&pool), (0, 0, 0, 0, 0));
     pool.with_connection(|connection| {
         connection.execute(
             "UPDATE sessions SET status = ?1 WHERE id = 'session-1'",
@@ -2925,12 +2832,12 @@ fn task_cascade_delete_is_atomic_and_does_not_require_git() {
         repository.delete_task(&TaskId::new("task-1"), 30).unwrap(),
         CascadeDeleteOutcome::Deleted
     );
-    assert_eq!(cascade_flags(&pool), (0, 1, 1, 1, 0, 1));
+    assert_eq!(cascade_flags(&pool), (0, 1, 1, 1, 0));
 }
 
-/// Verifies project deletion removes its transient lease and soft-deletes the full Ora aggregate.
+/// Verifies project deletion soft-deletes the full Ora aggregate without touching external state.
 #[test]
-fn project_cascade_delete_removes_work_context_without_touching_external_state() {
+fn project_cascade_delete_soft_deletes_aggregate_without_touching_external_state() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     insert_cascade_fixture(&pool, SessionStatus::Stopped);
     let repository = SqliteCascadeRepository::new(pool.clone());
@@ -2941,7 +2848,7 @@ fn project_cascade_delete_removes_work_context_without_touching_external_state()
             .unwrap(),
         CascadeDeleteOutcome::Deleted
     );
-    assert_eq!(cascade_flags(&pool), (1, 1, 1, 1, 1, 0));
+    assert_eq!(cascade_flags(&pool), (1, 1, 1, 1, 1));
 }
 
 /// Inserts one complete aggregate using only Ora-owned rows, deliberately without Git fixtures.
@@ -2953,8 +2860,7 @@ fn insert_cascade_fixture(pool: &RepositoryPool, session_status: SessionStatus) 
              VALUES ('task-1', 'project-1', 'Task', 0, 'worktree-1', 1, 1, 0);
              INSERT INTO worktrees (
                  id, task_id, branch_name, is_active, created_at, updated_at, is_deleted, base_commit_id
-             ) VALUES ('worktree-1', 'task-1', 'ora/task-1', 1, 1, 1, 0, 'base-commit');
-             INSERT INTO project_work_contexts VALUES ('context-1', 'web', 'main', 'project-1', 100, 1, 1);",
+             ) VALUES ('worktree-1', 'task-1', 'ora/task-1', 1, 1, 1, 0, 'base-commit');",
         )?;
         connection.execute(
             "INSERT INTO project_spec_source_overrides (
@@ -2975,8 +2881,8 @@ fn insert_cascade_fixture(pool: &RepositoryPool, session_status: SessionStatus) 
     .unwrap();
 }
 
-/// Reads all aggregate deletion markers plus the remaining transient work-context count.
-fn cascade_flags(pool: &RepositoryPool) -> (i64, i64, i64, i64, i64, i64) {
+/// Reads all aggregate deletion markers touched by a cascade.
+fn cascade_flags(pool: &RepositoryPool) -> (i64, i64, i64, i64, i64) {
     pool.with_connection(|connection| {
         Ok((
             connection.query_row(
@@ -3004,9 +2910,6 @@ fn cascade_flags(pool: &RepositoryPool) -> (i64, i64, i64, i64, i64, i64) {
                 [],
                 |row| row.get(0),
             )?,
-            connection.query_row("SELECT COUNT(*) FROM project_work_contexts", [], |row| {
-                row.get(0)
-            })?,
         ))
     })
     .unwrap()

@@ -59,27 +59,6 @@ impl ProjectRepository for SqliteProjectRepository {
             .map_err(project_repository_error_from_database)
     }
 
-    /// Loads one visible project row by its exact persisted name.
-    fn find_project_by_name(&self, project_name: &str) -> Result<Option<Project>, RepositoryError> {
-        self.pool
-            .with_connection(|connection| {
-                let mut statement = connection.prepare(
-                    "SELECT id, name, root_path, created_at, updated_at, is_deleted
-                     FROM projects
-                     WHERE name = ?1 AND is_deleted = 0
-                     ORDER BY created_at, id
-                     LIMIT 1",
-                )?;
-                let mut rows = statement.query(params![project_name])?;
-
-                match rows.next()? {
-                    Some(row) => Ok(Some(map_project_row(row)?)),
-                    None => Ok(None),
-                }
-            })
-            .map_err(project_repository_error_from_database)
-    }
-
     /// Lists every visible project row in stable storage order.
     fn list_projects(&self) -> Result<Vec<Project>, RepositoryError> {
         self.pool

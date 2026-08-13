@@ -77,6 +77,7 @@ pub struct Backend {
     workflow_run: Arc<WorkflowRunApi>,
     workflow_run_engine: Arc<ConcreteWorkflowRunControl>,
     app_events: Arc<AppEventHub>,
+    git_cleanup: crate::git_cleanup::GitCleanupHandle,
 }
 
 impl Backend {
@@ -116,6 +117,12 @@ impl Backend {
         // Crash recovery: fail orphaned node runs and running runs left by a previous process
         // before serving new commands (best-effort; a failure must not block startup).
         run_workflow_run_boot_sweep(&pool, clock);
+        // Durable Git cleanup: the worker's first pass replays every cleanup job
+        // and expired provisioning lease a previous process left behind.
+        let git_cleanup_worker =
+            crate::git_cleanup::GitCleanupWorker::new(pool.clone(), worktree_root.clone(), clock);
+        let repository_gates = git_cleanup_worker.repository_gates();
+        let git_cleanup = git_cleanup_worker.spawn();
 
         let workflow_run_engine = build_workflow_run_engine(
             agent_runtime.clone(),
@@ -131,9 +138,10 @@ impl Backend {
                 pool.clone(),
                 worktree_root.clone(),
                 sessions_root,
+                repository_gates.clone(),
                 clock,
             )),
-            task_diff: Arc::new(TaskDiffApi::new(pool.clone(), clock)),
+            task_diff: Arc::new(TaskDiffApi::new(pool.clone(), clock, git_cleanup.clone())),
             session: Arc::new(SessionApi::new(pool.clone())),
             agent_runtime,
             skill: Arc::new(SkillApi::new(
@@ -142,16 +150,22 @@ impl Backend {
                 clock,
             )),
             agent: Arc::new(AgentApi::new(pool.clone(), clock)),
-            spec: Arc::new(SpecApi::new(pool.clone(), paths.ripgrep_path)),
+            spec: Arc::new(SpecApi::new(
+                pool.clone(),
+                paths.ripgrep_path,
+                git_cleanup.clone(),
+            )),
             workflow: Arc::new(WorkflowApi::new(pool.clone(), clock)),
             workflow_run: Arc::new(WorkflowRunApi::new(
                 pool.clone(),
                 worktree_root.clone(),
                 paths.skills_root,
+                repository_gates,
                 clock,
             )),
             workflow_run_engine,
             app_events,
+            git_cleanup,
             pool,
             worktree_root,
         })
@@ -347,6 +361,8 @@ impl Backend {
             project_id: response.project_id.clone(),
         });
         self.agent_runtime.discard_warm_sessions(&targets).await;
+        // The cascade registered the cleanup jobs; this only trims their latency.
+        self.git_cleanup.notify();
         Ok(response)
     }
 
@@ -392,6 +408,8 @@ impl Backend {
                 task_id: response.task_id.clone(),
             }])
             .await;
+        // The cascade registered the cleanup job; this only trims its latency.
+        self.git_cleanup.notify();
         Ok(response)
     }
 
@@ -556,12 +574,9 @@ impl Backend {
         self.agent_runtime.load_session(request).await
     }
 
-    /// Opens the application event stream after acquiring the backend's client lease.
-    pub async fn watch_app_events(
-        &self,
-        request: WatchAppEventsRequest,
-    ) -> Result<SessionEventStream<AppEvent>, BackendError> {
-        self.app_events.subscribe(request.client_instance_id)
+    /// Opens one subscriber to the shared application event stream.
+    pub fn watch_app_events(&self) -> SessionEventStream<AppEvent> {
+        self.app_events.subscribe()
     }
 
     /// Streams one structured ACP prompt turn for a running session.

@@ -44,9 +44,9 @@ fn bootstraps_empty_database_with_default_catalog() {
         vec![
             "agents".to_string(),
             "artifacts".to_string(),
+            "git_cleanup_jobs".to_string(),
             "migrations".to_string(),
             "project_spec_source_overrides".to_string(),
-            "project_work_contexts".to_string(),
             "projects".to_string(),
             "sessions".to_string(),
             "skills".to_string(),
@@ -58,6 +58,7 @@ fn bootstraps_empty_database_with_default_catalog() {
             "workflow_runs".to_string(),
             "workflow_snapshots".to_string(),
             "workflows".to_string(),
+            "worktree_provisioning_leases".to_string(),
             "worktrees".to_string(),
         ]
     );
@@ -73,8 +74,60 @@ fn bootstraps_empty_database_with_default_catalog() {
             AppliedMigration::new("0007", 1_700_000_000_000),
             AppliedMigration::new("0008", 1_700_000_000_000),
             AppliedMigration::new("0009", 1_700_000_000_000),
+            AppliedMigration::new("0010", 1_700_000_000_000),
+            AppliedMigration::new("0011", 1_700_000_000_000),
         ]
     );
+}
+
+/// Verifies the removal migration drops only multi-client context state during an upgrade.
+#[test]
+fn removes_project_work_context_schema_without_changing_project_data() {
+    let temp_dir = TempDir::new().unwrap();
+    let database_path = temp_dir.path().join("remove-project-work-context.sqlite3");
+    let catalog = default_migration_catalog().unwrap();
+    let pre_removal_versions = [
+        "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010",
+    ];
+    let migrations = pre_removal_versions
+        .iter()
+        .chain(["0011"].iter())
+        .map(|version| {
+            catalog
+                .migration(version)
+                .cloned()
+                .unwrap_or_else(|| panic!("missing migration {version}"))
+        })
+        .collect::<Vec<_>>();
+    let pre_removal_catalog =
+        MigrationCatalog::with_target_versions(migrations, pre_removal_versions.to_vec()).unwrap();
+
+    bootstrap_file_database(&database_path, pre_removal_catalog, 100);
+    let connection = Connection::open(&database_path).unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at, is_deleted)
+             VALUES ('project-1', 'Ora', '/workspace/ora', 1, 1, 0);
+             INSERT INTO project_work_contexts (id, surface, window_id, project_id, lease_expires_at, created_at, updated_at)
+             VALUES ('context-1', 'web', 'main', 'project-1', 100, 1, 1);",
+        )
+        .unwrap();
+    drop(connection);
+
+    bootstrap_file_database(&database_path, default_migration_catalog().unwrap(), 200);
+    let connection = Connection::open(&database_path).unwrap();
+
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT name FROM projects WHERE id = 'project-1'",
+                [],
+                |row| { row.get::<_, String>(0) }
+            )
+            .unwrap(),
+        "Ora"
+    );
+    assert_eq!(table_exists(&connection, "project_work_contexts"), false);
 }
 
 /// Verifies session lifecycle and display-title columns are installed and rolled back predictably.
@@ -84,7 +137,7 @@ fn manages_session_columns_lifecycle() {
     let database_path = temp_dir.path().join("session-history.sqlite3");
     let catalog = default_migration_catalog().unwrap();
     let migrations = [
-        "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009",
+        "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011",
     ]
     .map(|version| {
         catalog
@@ -118,14 +171,15 @@ fn manages_session_columns_lifecycle() {
     assert!(!load_table_column_names(&connection, "sessions").contains(&"title".to_string()));
 }
 
-/// Verifies the catalog creates ID-keyed schema without name indexes and removes it during rollback.
+/// Verifies the catalog creates ID-keyed schema without name indexes, removes it during rollback,
+/// and restores the project work context schema that migration `0011` drops.
 #[test]
 fn manages_skill_and_agent_definition_schema_lifecycle() {
     let temp_dir = TempDir::new().unwrap();
     let database_path = temp_dir.path().join("skill-agent.sqlite3");
     let catalog = default_migration_catalog().unwrap();
     let migrations = [
-        "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009",
+        "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011",
     ]
     .map(|version| {
         catalog
@@ -211,6 +265,19 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
     let connection = Connection::open(&database_path).unwrap();
     assert_eq!(table_exists(&connection, "skills"), false);
     assert_eq!(table_exists(&connection, "agents"), false);
+    assert_eq!(table_exists(&connection, "project_work_contexts"), true);
+    assert_eq!(
+        load_table_column_names(&connection, "project_work_contexts"),
+        vec![
+            "id".to_string(),
+            "surface".to_string(),
+            "window_id".to_string(),
+            "project_id".to_string(),
+            "lease_expires_at".to_string(),
+            "created_at".to_string(),
+            "updated_at".to_string(),
+        ]
+    );
 }
 
 /// Verifies the runner applies only the missing tail of a linear migration history in ascending order.

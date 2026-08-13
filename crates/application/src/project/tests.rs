@@ -268,17 +268,6 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
             .cloned())
     }
 
-    fn find_project_by_name(&self, project_name: &str) -> Result<Option<Project>, RepositoryError> {
-        self.take_error()?;
-
-        Ok(self
-            .projects
-            .borrow()
-            .iter()
-            .find(|project| project.name == project_name && !project.audit_fields.is_deleted)
-            .cloned())
-    }
-
     fn list_projects(&self) -> Result<Vec<Project>, RepositoryError> {
         self.take_error()?;
 

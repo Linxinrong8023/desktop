@@ -69,12 +69,6 @@ export const contractErrorSchema = z.object({
         "code": z.literal("project_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("project_occupied"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("project_work_context_not_found"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
         "code": z.literal("task_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -136,9 +130,6 @@ export const contractErrorSchema = z.object({
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("session_agent_unchanged"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("multiple_clients_unsupported"),
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("permission_request_not_pending"),
@@ -395,12 +386,6 @@ export const publicErrorSchema = z.union([z.object({
         "code": z.literal("project_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("project_occupied"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("project_work_context_not_found"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
         "code": z.literal("task_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -462,9 +447,6 @@ export const publicErrorSchema = z.union([z.object({
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("session_agent_unchanged"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("multiple_clients_unsupported"),
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("permission_request_not_pending"),

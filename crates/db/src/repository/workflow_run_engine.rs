@@ -62,7 +62,7 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
                 };
                 let worktree = {
                     let mut statement = connection.prepare(
-                        "SELECT id, task_id, branch_name, base_commit_id, is_active, created_at, updated_at, is_deleted
+                        "SELECT id, task_id, branch_name, checkout_root, base_commit_id, is_active, created_at, updated_at, is_deleted
                          FROM worktrees WHERE task_id = ?1 AND is_deleted = 0",
                     )?;
                     require_row(&mut statement.query(params![task.id.as_ref()])?, map_worktree_row)?

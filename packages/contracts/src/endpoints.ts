@@ -6,7 +6,6 @@ import type { ListDirectoryRequest, ListDirectoryResponse, ListWorkspaceDirector
 import type { GetGitIdentityRequest, GitIdentityResponse } from "./git.js";
 import type { ListInstalledPluginsRequest, ListInstalledPluginsResponse } from "./plugin.js";
 import type { CreateProjectRequest, CreateProjectResponse, DeleteProjectRequest, DeleteProjectResponse, GetProjectRequest, GetProjectResponse, ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse, UpdateProjectRequest, UpdateProjectResponse } from "./project.js";
-import type { OpenProjectWorkContextRequest, OpenProjectWorkContextResponse, RenewProjectWorkContextRequest, RenewProjectWorkContextResponse } from "./project-work-context.js";
 import type { AttachSessionRequest, AttachSessionResponse, DeleteSessionRequest, DeleteSessionResponse, GetAgentRuntimeStatusRequest, GetAgentRuntimeStatusResponse, GetSessionRequest, GetSessionResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionEvent, LoadSessionRequest, PromptSessionEvent, PromptSessionRequest, RespondToPermissionRequest, RespondToPermissionResponse, ResumeSessionHistoryRequest, ResumeSessionHistoryResponse, SetSessionConfigRequest, SetSessionConfigResponse, StopSessionRequest, StopSessionResponse, SwitchSessionAgentRequest, SwitchSessionAgentResponse, WarmSessionRequest, WarmSessionResponse } from "./session.js";
 import type { CreateSkillRequest, CreateSkillResponse, DeleteSkillRequest, DeleteSkillResponse, GetSkillRequest, GetSkillResponse, ListSkillsRequest, ListSkillsResponse, UpdateSkillRequest, UpdateSkillResponse } from "./skill.js";
 import type { CancelSkillImportRequest, CancelSkillImportResponse, CommitSkillImportRequest, CommitSkillImportResponse, GetSkillImportSessionRequest, GetSkillImportSessionResponse, PrepareSkillImportRequest, PrepareSkillImportResponse } from "./skill-import.js";
@@ -48,8 +47,6 @@ export type RequestByOperation = {
   listProjectBranches: ListProjectBranchesRequest;
   updateProject: UpdateProjectRequest;
   deleteProject: DeleteProjectRequest;
-  openProjectWorkContext: OpenProjectWorkContextRequest;
-  renewProjectWorkContext: RenewProjectWorkContextRequest;
   createTask: CreateTaskRequest;
   getTask: GetTaskRequest;
   listTasks: ListTasksRequest;
@@ -138,8 +135,6 @@ export type ResponseByOperation = {
   listProjectBranches: ListProjectBranchesResponse;
   updateProject: UpdateProjectResponse;
   deleteProject: DeleteProjectResponse;
-  openProjectWorkContext: OpenProjectWorkContextResponse;
-  renewProjectWorkContext: RenewProjectWorkContextResponse;
   createTask: CreateTaskResponse;
   getTask: GetTaskResponse;
   listTasks: ListTasksResponse;
@@ -301,32 +296,6 @@ export const endpoints = {
     pathParams: [{ rustFieldName: "project_id", wireName: "projectId" }],
     queryParams: [],
     hasJsonBody: false,
-  },
-  openProjectWorkContext: {
-    operationName: "openProjectWorkContext",
-    namespace: "projectWorkContext",
-    memberName: "open",
-    method: "POST",
-    pathTemplate: "/api/project-work-contexts/open",
-    requestType: "OpenProjectWorkContextRequest",
-    responseType: "OpenProjectWorkContextResponse",
-    responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
-  },
-  renewProjectWorkContext: {
-    operationName: "renewProjectWorkContext",
-    namespace: "projectWorkContext",
-    memberName: "renew",
-    method: "POST",
-    pathTemplate: "/api/project-work-contexts/renew",
-    requestType: "RenewProjectWorkContextRequest",
-    responseType: "RenewProjectWorkContextResponse",
-    responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   createTask: {
     operationName: "createTask",
@@ -670,14 +639,14 @@ export const endpoints = {
     operationName: "watchAppEvents",
     namespace: "appEvents",
     memberName: "watch",
-    method: "POST",
+    method: "GET",
     pathTemplate: "/api/app-events/watch",
     requestType: "WatchAppEventsRequest",
     responseType: "AppEvent",
     responseMode: "stream",
     pathParams: [],
     queryParams: [],
-    hasJsonBody: true,
+    hasJsonBody: false,
   },
   createSkill: {
     operationName: "createSkill",

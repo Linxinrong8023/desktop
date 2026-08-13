@@ -7,8 +7,6 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
 const DATA_DIR_ENV_VAR: &str = "ORA_DATA_DIR";
-const PROJECT_NAME_ENV_VAR: &str = "ORA_PROJECT_NAME";
-const PROJECT_PATH_ENV_VAR: &str = "ORA_PROJECT_PATH";
 const HOST_ENV_VAR: &str = "ORA_HOST";
 const PORT_ENV_VAR: &str = "ORA_PORT";
 const LOG_LEVEL_ENV_VAR: &str = "ORA_LOG_LEVEL";
@@ -32,7 +30,7 @@ pub struct RuntimeConfig {
     database: DatabaseConfig,
     history: HistoryConfig,
     file_system: FileSystemConfig,
-    project: ProjectConfig,
+    worktree: WorktreeConfig,
     server: ServerConfig,
     logging: LoggingConfig,
     timezone_source: TimezoneSource,
@@ -55,9 +53,9 @@ impl RuntimeConfig {
         &self.history
     }
 
-    /// Returns the configured bootstrap project identity used during startup reconciliation.
-    pub fn project(&self) -> &ProjectConfig {
-        &self.project
+    /// Returns the filesystem root used for task-owned linked worktrees.
+    pub fn worktree(&self) -> &WorktreeConfig {
+        &self.worktree
     }
 
     /// Returns the filesystem configuration used by server-side path browsing.
@@ -90,10 +88,11 @@ impl RuntimeConfig {
         mut read_variable: impl FnMut(&str) -> Option<String>,
     ) -> Result<Self, WebBootstrapError> {
         let database = DatabaseConfig::from_reader(&mut read_variable)?;
+        let worktree = WorktreeConfig::from_database(&database);
         let resolved_timezone = crate::timezone::resolve(&mut read_variable);
 
         Ok(Self {
-            project: ProjectConfig::from_reader(&mut read_variable, &database)?,
+            worktree,
             history: HistoryConfig::from_reader(&mut read_variable)?,
             file_system: FileSystemConfig::from_reader(&mut read_variable)?,
             database,
@@ -182,49 +181,22 @@ impl HistoryConfig {
     }
 }
 
-/// Describes the bootstrap project identity that startup reconciles into persistent storage.
-pub struct ProjectConfig {
-    name: String,
-    path: PathBuf,
-    work_dir: PathBuf,
+/// Describes the global filesystem root used for task-owned linked worktrees.
+pub struct WorktreeConfig {
+    root: PathBuf,
 }
 
-impl ProjectConfig {
-    /// Returns the configured project name used for bootstrap reconciliation.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Returns the configured project root path used for bootstrap reconciliation.
-    pub fn path(&self) -> &Path {
-        self.path.as_path()
-    }
-
+impl WorktreeConfig {
     /// Returns the configured linked-worktree root used for task-owned worktree provisioning.
-    pub fn work_dir(&self) -> &Path {
-        self.work_dir.as_path()
+    pub fn root(&self) -> &Path {
+        self.root.as_path()
     }
 
-    /// Loads the bootstrap project identity from a caller-provided variable reader for testability.
-    fn from_reader(
-        mut read_variable: impl FnMut(&str) -> Option<String>,
-        database_config: &DatabaseConfig,
-    ) -> Result<Self, WebBootstrapError> {
-        let work_dir = default_work_dir(database_config.path());
-
-        Ok(Self {
-            name: read_required_non_empty_variable(
-                &mut read_variable,
-                PROJECT_NAME_ENV_VAR,
-                WebBootstrapError::InvalidProjectNameEmpty,
-            )?,
-            path: PathBuf::from(read_required_non_empty_variable(
-                &mut read_variable,
-                PROJECT_PATH_ENV_VAR,
-                WebBootstrapError::InvalidProjectPathEmpty,
-            )?),
-            work_dir,
-        })
+    /// Derives the linked-worktree root from the shared runtime data directory.
+    fn from_database(database_config: &DatabaseConfig) -> Self {
+        Self {
+            root: default_worktree_root(database_config.path()),
+        }
     }
 }
 
@@ -252,7 +224,7 @@ fn read_data_dir_root(
 }
 
 /// Derives the default linked-worktree root from the configured SQLite database location.
-fn default_work_dir(database_path: &Path) -> PathBuf {
+fn default_worktree_root(database_path: &Path) -> PathBuf {
     database_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
@@ -366,27 +338,12 @@ fn read_log_max_days(
     NonZeroUsize::new(parsed_value).ok_or(WebBootstrapError::InvalidLogMaxDaysZero)
 }
 
-/// Reads one required environment variable and rejects blank values before bootstrap proceeds.
-fn read_required_non_empty_variable(
-    mut read_variable: impl FnMut(&str) -> Option<String>,
-    variable_name: &str,
-    empty_error: WebBootstrapError,
-) -> Result<String, WebBootstrapError> {
-    let value = read_variable(variable_name).unwrap_or_default();
-
-    if value.trim().is_empty() {
-        return Err(empty_error);
-    }
-
-    Ok(value)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         DATA_DIR_ENV_VAR, DEFAULT_HOST, DEFAULT_PORT, DatabaseConfig, FileSystemConfig,
-        HOME_ENV_VAR, HOST_ENV_VAR, LOG_MODE_ENV_VAR, PORT_ENV_VAR, PROJECT_NAME_ENV_VAR,
-        PROJECT_PATH_ENV_VAR, ProjectConfig, RuntimeConfig, ServerConfig,
+        HOME_ENV_VAR, HOST_ENV_VAR, LOG_MODE_ENV_VAR, PORT_ENV_VAR, RuntimeConfig, ServerConfig,
+        WorktreeConfig,
     };
     use crate::error::WebBootstrapError;
     use crate::timezone::{TimezoneSource, TimezoneWarning};
@@ -447,109 +404,33 @@ mod tests {
         assert!(matches!(error, WebBootstrapError::InvalidDatabasePathEmpty));
     }
 
-    /// Verifies bootstrap project configuration requires both a non-empty name and path.
-    #[test]
-    fn rejects_missing_project_configuration() {
-        let database_config = DatabaseConfig::from_reader(|_| None).unwrap();
-        let error = match ProjectConfig::from_reader(|_| None, &database_config) {
-            Ok(_) => panic!("expected missing project configuration to fail"),
-            Err(error) => error,
-        };
-
-        assert!(matches!(error, WebBootstrapError::InvalidProjectNameEmpty));
-    }
-
-    /// Verifies blank bootstrap project paths fail with a typed bootstrap error.
-    #[test]
-    fn rejects_empty_project_path_configuration() {
-        let error = match ProjectConfig::from_reader(
-            |key| match key {
-                PROJECT_NAME_ENV_VAR => Some("Ora".to_string()),
-                PROJECT_PATH_ENV_VAR => Some("   ".to_string()),
-                _ => None,
-            },
-            &DatabaseConfig::from_reader(|_| None).unwrap(),
-        ) {
-            Ok(_) => panic!("expected empty project path configuration to fail"),
-            Err(error) => error,
-        };
-
-        assert!(matches!(error, WebBootstrapError::InvalidProjectPathEmpty));
-    }
-
-    /// Verifies bootstrap project configuration exposes the configured identity unchanged.
-    #[test]
-    fn loads_project_configuration() {
-        let temp_dir = TempDir::new().unwrap();
-        let project_path = temp_dir.path().join("ora");
-        let data_dir = temp_dir.path().join("ora-worktrees");
-        let config = ProjectConfig::from_reader(
-            |key| match key {
-                PROJECT_NAME_ENV_VAR => Some("Ora".to_string()),
-                PROJECT_PATH_ENV_VAR => Some(project_path.to_string_lossy().to_string()),
-                _ => None,
-            },
-            &DatabaseConfig::from_reader(|key| match key {
-                DATA_DIR_ENV_VAR => Some(data_dir.to_string_lossy().to_string()),
-                _ => None,
-            })
-            .unwrap(),
-        )
-        .unwrap_or_else(|error| panic!("expected project configuration to load: {error}"));
-
-        let expected_work_dir = data_dir.join("worktrees");
-
-        assert_eq!(config.name(), "Ora");
-        assert_eq!(config.path(), project_path.as_path());
-        assert_eq!(config.work_dir(), expected_work_dir.as_path());
-    }
-
     /// Verifies the linked-worktree root falls back to an absolute path in the current directory when unset.
     #[test]
-    fn loads_default_work_dir_from_current_directory() {
+    fn loads_default_worktree_root_from_current_directory() {
         let database_config = DatabaseConfig::from_reader(|_| None)
             .unwrap_or_else(|error| panic!("expected database configuration to load: {error}"));
-        let temp_dir = TempDir::new().unwrap();
-        let project_path = temp_dir.path().join("ora");
-        let config = ProjectConfig::from_reader(
-            |key| match key {
-                PROJECT_NAME_ENV_VAR => Some("Ora".to_string()),
-                PROJECT_PATH_ENV_VAR => Some(project_path.to_string_lossy().to_string()),
-                _ => None,
-            },
-            &database_config,
-        )
-        .unwrap_or_else(|error| panic!("expected project configuration to load: {error}"));
+        let config = WorktreeConfig::from_database(&database_config);
 
-        let expected_work_dir = std::env::current_dir().unwrap().join("worktrees");
+        let expected_root = std::env::current_dir().unwrap().join("worktrees");
 
-        assert_eq!(config.work_dir(), expected_work_dir.as_path());
+        assert_eq!(config.root(), expected_root.as_path());
     }
 
     /// Verifies the linked-worktree root defaults to a `worktrees` sibling of the SQLite database path.
     #[test]
-    fn defaults_work_dir_next_to_database_path() {
+    fn defaults_worktree_root_next_to_database_path() {
         let temp_dir = TempDir::new().unwrap();
         let data_dir = temp_dir.path().join("state");
-        let project_path = temp_dir.path().join("ora");
         let database_config = DatabaseConfig::from_reader(|key| match key {
             DATA_DIR_ENV_VAR => Some(data_dir.to_string_lossy().to_string()),
             _ => None,
         })
         .unwrap_or_else(|error| panic!("expected database configuration to load: {error}"));
-        let config = ProjectConfig::from_reader(
-            |key| match key {
-                PROJECT_NAME_ENV_VAR => Some("Ora".to_string()),
-                PROJECT_PATH_ENV_VAR => Some(project_path.to_string_lossy().to_string()),
-                _ => None,
-            },
-            &database_config,
-        )
-        .unwrap_or_else(|error| panic!("expected project configuration to load: {error}"));
+        let config = WorktreeConfig::from_database(&database_config);
 
-        let expected_work_dir = data_dir.join("worktrees");
+        let expected_root = data_dir.join("worktrees");
 
-        assert_eq!(config.work_dir(), expected_work_dir.as_path());
+        assert_eq!(config.root(), expected_root.as_path());
     }
 
     /// Verifies the logging configuration derives the file path from `ORA_DATA_DIR`.
@@ -612,11 +493,8 @@ mod tests {
     #[test]
     fn loads_runtime_configuration() {
         let temp_dir = TempDir::new().unwrap();
-        let project_path = temp_dir.path().join("ora");
         let data_dir = temp_dir.path().join("state");
         let config = RuntimeConfig::from_reader(|key| match key {
-            PROJECT_NAME_ENV_VAR => Some("Ora".to_string()),
-            PROJECT_PATH_ENV_VAR => Some(project_path.to_string_lossy().to_string()),
             DATA_DIR_ENV_VAR => Some(data_dir.to_string_lossy().to_string()),
             LOG_MODE_ENV_VAR => Some("file".to_string()),
             HOME_ENV_VAR => Some(temp_dir.path().to_string_lossy().to_string()),
@@ -625,13 +503,11 @@ mod tests {
         .unwrap_or_else(|error| panic!("expected runtime configuration to load: {error}"));
 
         let expected_database_path = data_dir.join("ora.sqlite3");
-        let expected_work_dir = data_dir.join("worktrees");
+        let expected_worktree_root = data_dir.join("worktrees");
         let expected_log_path = data_dir.join("logs").join("ora.log");
 
         assert_eq!(config.database().path(), expected_database_path.as_path());
-        assert_eq!(config.project().name(), "Ora");
-        assert_eq!(config.project().path(), project_path.as_path());
-        assert_eq!(config.project().work_dir(), expected_work_dir.as_path());
+        assert_eq!(config.worktree().root(), expected_worktree_root.as_path());
         assert_eq!(config.file_system().home_directory(), temp_dir.path());
         assert_eq!(config.logging().timezone, chrono_tz::Asia::Shanghai);
         assert_eq!(config.timezone_source(), TimezoneSource::Default);

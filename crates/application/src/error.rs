@@ -98,15 +98,6 @@ pub enum ApplicationError {
         #[source]
         source: BoxRepositorySource,
     },
-    #[error("project is already occupied: {project_id}")]
-    ProjectOccupied { project_id: String },
-    #[error("project work context not found for {surface}/{window_id}")]
-    ProjectWorkContextNotFound { surface: String, window_id: String },
-    #[error("project work context repository operation failed")]
-    ProjectWorkContextRepository {
-        #[source]
-        source: RepositoryError,
-    },
     #[error("task not found: {task_id}")]
     TaskNotFound { task_id: String },
     #[error("task repository operation failed")]
@@ -314,11 +305,6 @@ impl ApplicationError {
         }
     }
 
-    /// Maps project work context repository failures into stable application errors.
-    pub(crate) fn from_project_work_context_repository_error(error: RepositoryError) -> Self {
-        Self::ProjectWorkContextRepository { source: error }
-    }
-
     /// Maps task repository failures into stable application errors.
     pub(crate) fn from_task_repository_error(error: RepositoryError) -> Self {
         Self::TaskRepository { source: error }
@@ -474,7 +460,6 @@ impl PartialEq for ApplicationError {
             | (AgentDefinitionRepository { .. }, AgentDefinitionRepository { .. })
             | (ProjectRepository { .. }, ProjectRepository { .. })
             | (ProjectBranchListing { .. }, ProjectBranchListing { .. })
-            | (ProjectWorkContextRepository { .. }, ProjectWorkContextRepository { .. })
             | (TaskRepository { .. }, TaskRepository { .. })
             | (TaskWorktreeProvisioner { .. }, TaskWorktreeProvisioner { .. })
             | (TaskDiffStale, TaskDiffStale)
@@ -509,20 +494,9 @@ impl PartialEq for ApplicationError {
                 AgentDefinitionNotFound { agent_id: left },
                 AgentDefinitionNotFound { agent_id: right },
             ) => left == right,
-            (ProjectNotFound { project_id: left }, ProjectNotFound { project_id: right })
-            | (ProjectOccupied { project_id: left }, ProjectOccupied { project_id: right }) => {
+            (ProjectNotFound { project_id: left }, ProjectNotFound { project_id: right }) => {
                 left == right
             }
-            (
-                ProjectWorkContextNotFound {
-                    surface: left_surface,
-                    window_id: left_window,
-                },
-                ProjectWorkContextNotFound {
-                    surface: right_surface,
-                    window_id: right_window,
-                },
-            ) => left_surface == right_surface && left_window == right_window,
             (TaskNotFound { task_id: left }, TaskNotFound { task_id: right }) => left == right,
             (TaskBaseBranchRequired, TaskBaseBranchRequired) => true,
             (

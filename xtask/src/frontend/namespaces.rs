@@ -8,7 +8,6 @@ mod file_system;
 mod git;
 mod plugin;
 mod project;
-mod project_work_context;
 mod session;
 mod skill;
 mod skill_import;
@@ -26,7 +25,6 @@ use super::FrontendEndpoint;
 pub(super) fn frontend_endpoints() -> Vec<FrontendEndpoint> {
     [
         project::ENDPOINTS,
-        project_work_context::ENDPOINTS,
         task::ENDPOINTS,
         session::ENDPOINTS,
         agent_runtime::ENDPOINTS,

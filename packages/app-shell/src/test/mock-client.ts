@@ -1,5 +1,5 @@
+import type * as acp from "@agentclientprotocol/sdk";
 import type {
-  acp,
   Agent,
   AgentCli,
   ContractsClient,
@@ -152,10 +152,6 @@ export function createMockClient(state: MockClientState): ContractsClient {
         if (idx >= 0) state.projects.splice(idx, 1);
         return { projectId: req.projectId };
       },
-    },
-    projectWorkContext: {
-      open: async () => { throw new Error("projectWorkContext not implemented in mock"); },
-      renew: async () => { throw new Error("projectWorkContext not implemented in mock"); },
     },
     task: {
       list: async () => ({ tasks: [...state.tasks] }),

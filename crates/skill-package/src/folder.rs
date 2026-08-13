@@ -53,6 +53,10 @@ fn copy_tree(
         } else if file_type.is_file() {
             let file = fs::File::open(entry.path()).map_err(map_io)?;
             writer.add_file(child.as_str(), file)?;
+        } else if file_type.is_symlink() {
+            // Links are intentionally omitted: following one could copy data outside the
+            // submitted folder, while preserving it would require an unsafe snapshot format.
+            continue;
         } else {
             return Err(PrepareError::ArchiveSpecialEntryUnsupported);
         }

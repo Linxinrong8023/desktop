@@ -3,7 +3,6 @@ pub mod file_system;
 pub mod git;
 pub mod health;
 pub mod plugins;
-pub mod project_work_contexts;
 pub mod projects;
 pub mod sessions;
 pub mod skill_imports;

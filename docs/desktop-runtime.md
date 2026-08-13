@@ -16,17 +16,15 @@ Task workspace lookup and Spec management are part of that shared contract surfa
 
 Backend construction immediately attempts supervised `opencode acp`, `nga acp`, `codeagentcli acp`, `claude-agent-acp`, and `codex-acp` children in the user's home directory. Sessions share the connection selected by their current `agentCli` while retaining their own ACP session id and Task worktree `cwd`. `switch_session_agent` moves a live conversation to another CLI and `resume_session_history` recovers one whose history writes failed. Each CLI retries independently; failures leave the Desktop shell and healthy CLIs available, while operations targeting an unavailable CLI report `agent_runtime_unavailable`. Executable lookup is platform-specific — see [ACP Agent Runtime](agent-runtime.md).
 
-The Desktop App Shell waits for the `Ready` frame before mounting normal queries and watchers. Its in-memory `clientInstanceId` owns the single application-event stream; another main window receives `multiple_clients_unsupported` and can only take ownership after the active stream is gone and the user presses the retry action. The stream carries best-effort session-title invalidations rather than persisted events.
+The Desktop App Shell waits for the `Ready` frame before mounting normal queries and watchers. The native platform adapter grants application-window ownership immediately because Tauri owns one main window; browser hosts implement the same frontend seam with a Web Lock. The application stream itself is a multi-subscriber, best-effort session-title invalidation broadcast rather than a page lease or persisted event log.
 
 Beyond the shared contract surface, Desktop registers four platform-only commands with no HTTP counterpart: `get_desktop_config`, `set_worktree_root`, `resolve_task_cwd`, and `open_location`.
 
-Three contract operations are not implemented on Desktop:
+One contract operation is not implemented on Desktop:
 
-- opening a project work context;
-- renewing a project work context;
 - listing a server filesystem directory.
 
-No Tauri command exists for them. The contracts transport rejects them with `unsupported_operation` before any IPC call is made, so the exclusion is enforced client-side rather than by a stub command. `ProjectWorkContext` remains outside this extraction; see [Project Work Contexts](project-work-contexts.md).
+No Tauri command exists for it. The contracts transport rejects it with `unsupported_operation` before any IPC call is made, so the exclusion is enforced client-side rather than by a stub command.
 
 ## Skill imports
 

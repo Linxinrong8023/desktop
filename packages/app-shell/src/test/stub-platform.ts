@@ -10,6 +10,12 @@ import type { PlatformAdapter } from "@ora/platform";
  */
 export function createStubPlatform(): PlatformAdapter {
   return {
+    appWindowOwnership: {
+      acquire: async ({ signal }) => {
+        if (signal.aborted) throw signal.reason;
+        return { release: () => undefined };
+      },
+    },
     worktreeStorage: { kind: "unsupported" },
     windowControls: { kind: "none" },
     locationActions: { kind: "unsupported" },

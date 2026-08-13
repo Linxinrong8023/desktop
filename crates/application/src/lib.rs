@@ -1,7 +1,6 @@
 mod agent_definition;
 mod error;
 mod project;
-mod project_work_context;
 mod repository_error;
 mod session;
 mod skill;
@@ -23,10 +22,6 @@ pub use project::{
     BranchLister, BranchListingError, BranchReference, Clock, CreateProjectHandler,
     GetProjectHandler, ListProjectBranchesHandler, ListProjectsHandler, ProjectIdGenerator,
     ProjectRepository, UpdateProjectHandler, UuidProjectIdGenerator,
-};
-pub use project_work_context::{
-    OpenProjectWorkContextHandler, ProjectWorkContextIdGenerator, ProjectWorkContextRepository,
-    RenewProjectWorkContextHandler, UuidProjectWorkContextIdGenerator,
 };
 pub use repository_error::{BoxRepositorySource, RepositoryError};
 pub use session::{
@@ -50,11 +45,16 @@ pub use spec::{
     UuidProjectSpecSourceOverrideIdGenerator,
 };
 pub use task::{
-    CreateTaskHandler, CreateTaskWorktreeRequest, CreateTaskWorktreeResponse,
-    DeleteTaskWorktreeRequest, GetTaskHandler, GitTaskWorktreeProvisioner, ListTasksHandler,
-    TaskIdGenerator, TaskRepository, TaskWorktreeDeletionMode, TaskWorktreeProvisioner,
-    TaskWorktreeProvisionerError, UpdateTaskHandler, UuidTaskIdGenerator,
+    CleanupJobDisposition, CleanupStage, CreateTaskHandler, CreateTaskWorktreeRequest,
+    CreateTaskWorktreeResponse, DeleteTaskWorktreeRequest, GetTaskHandler, GitCleanupError,
+    GitTaskResourceCleaner, GitTaskWorktreeProvisioner, ListTasksHandler, RemoveTaskBranchRequest,
+    RemoveTaskWorktreeRequest, ResourceRemoval, TaskGitResourceCleaner, TaskIdGenerator,
+    TaskRepository, TaskWorktreeDeletionMode, TaskWorktreeProvisioner,
+    TaskWorktreeProvisionerError, UpdateTaskHandler, UuidTaskIdGenerator, WorkspaceCommitOutcome,
+    WorktreeProvisioningLeaseStore, WorktreeRemoval, branch_name_for_task, legacy_checkout_probe,
+    reduce_cleanup_outcomes, validate_cleanup_identity,
 };
+pub use task::{PROVISIONING_LEASE_DURATION_MS, ProvisioningLeaseRenewal, TaskWorkspaceCommit};
 pub use task_diff::{
     CommitTaskChangesHandler, CommitTaskGitRequest, CreateTaskDiffCommentHandler,
     GitTaskDiffReader, GitTaskGitWriter, ListTaskDiffCommentsHandler, PushTaskBranchHandler,
@@ -80,8 +80,8 @@ pub use workflow_run::{
     NodeType, RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult,
     UnknownNodeType, UpdateWorkflowRunInputResult, UuidWorkflowNodeRunIdGenerator,
     UuidWorkflowRunIdGenerator, WorkflowGraph, WorkflowGraphNode, WorkflowNodeRunIdGenerator,
-    WorkflowRunCallback, WorkflowRunControlHandler, WorkflowRunEngine, WorkflowRunEngineRepository,
-    WorkflowRunIdGenerator, WorkflowRunRepository, WorkflowRunWorktreeInitializer,
-    WorkflowValidationError,
+    WorkflowRunCallback, WorkflowRunControlHandler, WorkflowRunCreateOutcome, WorkflowRunEngine,
+    WorkflowRunEngineRepository, WorkflowRunIdGenerator, WorkflowRunRepository,
+    WorkflowRunWorktreeInitializer, WorkflowValidationError,
 };
 pub use worktree::{UuidWorktreeIdGenerator, WorktreeIdGenerator, WorktreeRepository};

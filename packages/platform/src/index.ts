@@ -17,3 +17,7 @@ export {
   type WindowManagerOs,
   type WorktreeStorageCapability,
 } from "./types";
+export type {
+  AppWindowOwnershipCapability,
+  AppWindowOwnershipLease,
+} from "./app-window-ownership";

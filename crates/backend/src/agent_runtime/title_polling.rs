@@ -5,12 +5,12 @@ use super::super::support::contract_session;
 use super::super::title_acquisition::PollAttempt;
 use super::RuntimeActor;
 use super::permission_not_pending;
+use agent_client_protocol_schema::v1::AGENT_METHOD_NAMES;
+use agent_client_protocol_schema::v1::StopReason;
+use agent_client_protocol_schema::v1::{ListSessionsRequest, ListSessionsResponse, SessionUpdate};
 use ora_application::{Clock, SessionRepository};
 use ora_contracts::AppEvent;
 use ora_contracts::StopSessionResponse;
-use ora_contracts::acp::literals::AGENT_METHOD_NAMES;
-use ora_contracts::acp::prompt::StopReason;
-use ora_contracts::acp::session::{ListSessionsRequest, ListSessionsResponse, SessionUpdate};
 use ora_domain::SessionTitle;
 use ora_logging::{ora_debug, ora_warn};
 use std::time::Duration;
@@ -60,8 +60,9 @@ impl RuntimeActor {
                         RuntimeCommand::Load { operation_id, events, accepted } => {
                             self.channel = Some(channel);
                             self.title_acquisition.preempt_attempt(attempt);
-                            let _ = accepted.send(Ok(()));
-                            self.run_load(operation_id, events).await;
+                            // run_load resolves `accepted` only after the Running
+                            // row is persisted (see actor.rs for the ordering).
+                            self.run_load(operation_id, events, accepted).await;
                             return;
                         }
                         RuntimeCommand::Prompt { operation_id, prompt, events, accepted } => {

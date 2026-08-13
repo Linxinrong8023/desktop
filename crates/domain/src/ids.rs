@@ -32,12 +32,13 @@ define_id!(
     ProjectSpecSourceOverrideId,
     "Identifies a persisted project specification source override."
 );
-define_id!(
-    ProjectWorkContextId,
-    "Identifies a persisted project work context."
-);
 define_id!(TaskId, "Identifies a persisted task.");
 define_id!(WorktreeId, "Identifies a persisted worktree.");
+define_id!(GitCleanupJobId, "Identifies a persisted Git cleanup job.");
+define_id!(
+    WorktreeProvisioningLeaseId,
+    "Identifies a persisted worktree provisioning lease."
+);
 define_id!(
     TaskDiffCommentId,
     "Identifies a persisted task diff comment."

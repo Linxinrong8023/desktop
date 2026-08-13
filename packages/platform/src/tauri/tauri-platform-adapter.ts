@@ -15,6 +15,7 @@ import {
   type SkillMarketplaceProvider,
   type SkillMarketplaceStatus,
 } from "../types";
+import { createSingleWindowOwnership } from "../app-window-ownership";
 
 const SKILL_MARKETPLACE_STATUS_EVENT = "skill-marketplace://status";
 
@@ -106,6 +107,7 @@ function createTauriLocationActions(): LocationActionsCapability {
 
 /** Delegates path selection to the desktop operating system's native open dialog. */
 export class TauriPlatformAdapter implements PlatformAdapter {
+  readonly appWindowOwnership = createSingleWindowOwnership();
   private selectionInProgress = false;
 
   readonly windowControls: WindowControlsCapability = createTauriWindowControls();

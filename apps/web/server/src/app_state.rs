@@ -1,4 +1,4 @@
-use crate::service::{FileSystemApi, ProjectWorkContextApi, WorkspaceFileApi};
+use crate::service::{FileSystemApi, WorkspaceFileApi};
 use ora_backend::Backend;
 use ora_plugin_manager::PluginManager;
 use std::sync::Arc;
@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub struct AppState {
     backend: Backend,
     file_system_api: Arc<FileSystemApi>,
-    project_work_context_api: Arc<ProjectWorkContextApi>,
     workspace_file_api: Arc<WorkspaceFileApi>,
     plugin_manager: Arc<PluginManager>,
     ready: Arc<AtomicBool>,
@@ -20,14 +19,12 @@ impl AppState {
     pub fn new(
         backend: Backend,
         file_system_api: Arc<FileSystemApi>,
-        project_work_context_api: Arc<ProjectWorkContextApi>,
         workspace_file_api: Arc<WorkspaceFileApi>,
         plugin_manager: Arc<PluginManager>,
     ) -> Self {
         Self {
             backend,
             file_system_api,
-            project_work_context_api,
             workspace_file_api,
             plugin_manager,
             ready: Arc::new(AtomicBool::new(false)),
@@ -42,11 +39,6 @@ impl AppState {
     /// Returns the shared read-only filesystem API used by the web path picker.
     pub fn file_system_api(&self) -> &Arc<FileSystemApi> {
         &self.file_system_api
-    }
-
-    /// Returns the shared project work context API that routes delegate into.
-    pub fn project_work_context_api(&self) -> &Arc<ProjectWorkContextApi> {
-        &self.project_work_context_api
     }
 
     /// Returns the shared task-workspace filesystem API used by explorer and viewer routes.

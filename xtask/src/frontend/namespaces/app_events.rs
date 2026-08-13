@@ -9,10 +9,10 @@ pub(super) const ENDPOINTS: &[FrontendEndpoint] = &[FrontendEndpoint {
     operation_name: "watchAppEvents",
     namespace: NAMESPACE,
     member_name: "watch",
-    method: FrontendHttpMethod::Post,
+    method: FrontendHttpMethod::Get,
     path_template: APP_EVENT_WATCH_PATH,
     request_type: "WatchAppEventsRequest",
     response_type: "AppEvent",
     path_params: NO_PATH_PARAMS,
-    has_json_body: true,
+    has_json_body: false,
 }];

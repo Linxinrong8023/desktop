@@ -13,7 +13,6 @@
 - It provides read-only server filesystem listings for the Web platform path picker.
 - It provides a task-scoped, read-only workspace explorer with bounded file reads, ripgrep search, and native refresh events.
 - It exposes the shared project/task Spec catalog, safe Markdown reads, project-wide source configuration, and mounted-only refresh streams.
-- It owns the project work context routes, which are outside `ora-backend`.
 
 ## Data root configuration
 
@@ -31,26 +30,18 @@ Every other runtime path is derived from it — there is no separate variable fo
 
 Two Ora processes must not share one data root. SQLite tolerates it, but session history files are written on a single-writer assumption that only holds within one process. See [ACP Agent Runtime](agent-runtime.md).
 
-Startup asks `ora-backend` to create the required directories, bootstrap the database, apply the active migration catalog, and construct the shared composition before the runtime is marked ready. A SQLite database that cannot be opened, migrated, or pooled fails startup with a typed bootstrap error rather than serving requests from a partially initialized runtime. The server retains direct composition only for the Web-only project work context and filesystem services.
+Startup asks `ora-backend` to create the required directories, bootstrap the database, apply the active migration catalog, and construct the shared composition before the runtime is marked ready. A SQLite database that cannot be opened, migrated, or pooled fails startup with a typed bootstrap error rather than serving requests from a partially initialized runtime. The server retains direct composition only for the Web-only filesystem services.
 
-## Project configuration
+## Project and worktree configuration
 
-The web server also requires a bootstrap project identity:
+The web server does not require a bootstrap project. A new database starts with an empty project
+catalog, and users add repositories through the project API or Web UI.
 
-- `ORA_PROJECT_NAME`: persisted workspace project name. Required.
-- `ORA_PROJECT_PATH`: persisted workspace root path. Required.
-
-A blank or missing value for either fails startup with a typed bootstrap error rather than serving requests with an unknown workspace identity.
-
-Startup reconciles this configured project into the `projects` table before the runtime is marked ready:
-
-- If no visible project exists with the configured name, startup creates one row.
-- If a visible project exists with the configured name but a different stored path, startup fails, because project roots are immutable.
-- If both the configured name and path already match, startup leaves the row unchanged.
-
-After reconciliation, startup opens the synthetic web work context `surface = web`, `window_id = main` for that project and refreshes its lease immediately.
-
-Task creation resolves the project named in the request and provisions linked worktrees under `<ORA_DATA_DIR>/worktrees/<full-task-id>`. Agent session startup instead resolves Task → Worktree → branch name and then asks Git for the authoritative linked-worktree path, which becomes the ACP session `cwd`. See [Task Worktrees](task-worktrees.md).
+The global worktree root is `<ORA_DATA_DIR>/worktrees`. Task creation resolves the project identified
+by the request and provisions linked worktrees under `<ORA_DATA_DIR>/worktrees/<full-task-id>`.
+Agent session startup instead resolves Task → Worktree → branch name and then asks Git for the
+authoritative linked-worktree path, which becomes the ACP session `cwd`. See
+[Task Worktrees](task-worktrees.md).
 
 ## Bind configuration
 
@@ -66,7 +57,8 @@ Logging variables are documented in [Runtime Logging](runtime-logging.md).
 - `GET /health/live`: confirms that the process is running
 - `GET /health/ready`: confirms that application-state bootstrap completed successfully
 
-`/health/ready` does not return success until the runtime finishes constructing its application state.
+`/health/ready` does not return success until the runtime finishes constructing its application
+state. An empty project catalog is ready for use.
 
 ## HTTP API
 
@@ -79,11 +71,6 @@ Route paths come from shared `ora-contracts` path constants, while the generatio
 - `GET /api/projects/{projectId}`
 - `PUT /api/projects/{projectId}`
 - `DELETE /api/projects/{projectId}`
-
-### projectWorkContext
-
-- `POST /api/project-work-contexts/open`
-- `POST /api/project-work-contexts/renew`
 
 ### task
 
@@ -110,16 +97,15 @@ Route paths come from shared `ora-contracts` path constants, while the generatio
 
 ### appEvents
 
-- `POST /api/app-events/watch` with `{ "clientInstanceId": "..." }`
+- `GET /api/app-events/watch`
 
-The first data frame is `Ready`. During an idle connection the Web adapter may write blank NDJSON lines as transport-only heartbeats; they are not application events. One backend process grants the stream to one active client instance. A second instance receives `multiple_clients_unsupported`, and a disconnected stream releases the lease. Events are not persisted or replayed, so clients refetch sessions after initial subscription, stream loss, lag, or queue overflow.
+The first data frame is `Ready`. The backend broadcasts subsequent invalidations to every active subscriber and does not use the HTTP connection as a browser-page lease. Events are not persisted or replayed, so clients refetch sessions after initial subscription, stream loss, lag, or queue overflow. The Web App Shell separately uses a same-origin Web Lock to ensure only one browser tab mounts normal application work.
 
 ### agentRuntime
 
 - `GET /api/agent-runtime/status`
 
 ### skill
-
 
 - `POST /api/skills`
 - `GET /api/skills`
@@ -199,14 +185,6 @@ Preparation snapshots and safely scans the source, rejects unsafe paths, links a
 
 Each created, updated, overwritten, or deleted skill is atomic across its SQLite row and `<ORA_DATA_DIR>/atoms/skills/<name>/` package. The package transaction uses a same-filesystem staging directory and backup, while import sources remain in OS temp because it may be a different filesystem. Startup recovers interrupted package transactions, removes unowned package directories, and refuses to start if a visible row lacks its package or root `SKILL.md`.
 
-### Project work contexts
-
-- `open` creates or switches one `(surface, window_id)` context into a project and refreshes its lease immediately.
-- `renew` extends an existing context lease using backend time.
-- Occupied-project conflicts return a stable HTTP `409` without exposing the owning surface or window id in the response.
-
-See [Project Work Contexts](project-work-contexts.md) for lease timing and current wiring.
-
 ### Filesystem browsing
 
 The filesystem directory route supports the custom Web path picker.
@@ -232,18 +210,10 @@ Shared backend failures project to the same typed `{ code, params, requestId }` 
 
 Task workspace failures use the same mapping: missing task or workspace path returns a typed not-found response, invalid relative paths and unreadable text return a typed bad request, and bounded-output failures retain their native `413`/`422` classification. Watch failures are emitted as `{ "type": "error", "error": { "code", "params", "requestId" } }` frames rather than raw filesystem messages.
 
-## Frontend development modes
+## Frontend development
 
-- `task run:web-backend` starts the Rust HTTP backend on its default port.
-- `task run:web-frontend` starts Vite with the fetch contracts transport and expects the backend to run separately.
-- `task run:web-proto` starts Vite with an isolated in-memory `ContractsClient` and never calls `/api/*`.
-- Running `pnpm --filter @ora/web-client dev` directly also defaults to the in-memory client.
-
-Development defaults to `mock`; production builds default to `fetch`. Set
-`VITE_ORA_CONTRACT_TRANSPORT` explicitly to `mock` or `fetch` when overriding
-that behavior. Mock records live only for the current page lifetime and reset
-on refresh; the explicit fetch mode remains the integration path for the Rust
-HTTP backend.
+- `task run:backend` starts the Rust HTTP backend on its default port.
+- `task run:frontend` starts Vite and expects the backend to run separately.
 
 Long-lived task workspace watch responses defer completion until an end or error frame so the request id, error payload, and log event remain correlated. This keeps the watcher aligned with the ACP stream lifecycle and prevents an early success event followed by a duplicate failure event.
 
@@ -252,5 +222,5 @@ Long-lived task workspace watch responses defer completion until an end or error
 The runtime uses a file-backed SQLite database bootstrapped through `ora-db`.
 
 - Data persists across process restarts as long as the same `ORA_DATA_DIR` is reused.
-- Readiness depends on successful database bootstrap, repository-pool construction, bootstrap-project reconciliation, and synthetic web work context reconciliation.
+- Readiness depends on successful database bootstrap, repository-pool construction, and bootstrap-project reconciliation.
 - The request seam emits at most one correlated completion event. Ordinary success is `INFO`, health and readiness success are `DEBUG`, and failure levels derive from the shared backend classification.

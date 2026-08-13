@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AppI18nProvider } from "../../i18n/i18n";
+import { createStubPlatform } from "../../test/stub-platform";
 import { EntityDialog, type EntityField } from "./entity-dialog";
 
 const fields: EntityField[] = [
@@ -40,12 +41,8 @@ describe("EntityDialog path field", () => {
     const user = userEvent.setup();
     const selectPath = vi.fn().mockResolvedValue("/home/ora/new");
     renderDialog({
+      ...createStubPlatform(),
       selectPath,
-      worktreeStorage: { kind: "unsupported" },
-      windowControls: { kind: "none" },
-      locationActions: { kind: "unsupported" },
-      skillMarketplace: { kind: "unsupported" },
-      saveTextFile: vi.fn().mockResolvedValue(false),
     });
 
     await user.click(screen.getByRole("button", { name: /Browse|浏览/ }));
@@ -60,12 +57,8 @@ describe("EntityDialog path field", () => {
   it("preserves the typed path when the selection is cancelled", async () => {
     const user = userEvent.setup();
     renderDialog({
+      ...createStubPlatform(),
       selectPath: vi.fn().mockResolvedValue(null),
-      worktreeStorage: { kind: "unsupported" },
-      windowControls: { kind: "none" },
-      locationActions: { kind: "unsupported" },
-      skillMarketplace: { kind: "unsupported" },
-      saveTextFile: vi.fn().mockResolvedValue(false),
     });
 
     const pathInput = screen.getByLabelText("Path");

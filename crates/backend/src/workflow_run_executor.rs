@@ -7,17 +7,17 @@ use crate::clock::SystemClock;
 use crate::error::BackendError;
 use crate::task::resolve_task_cwd;
 use crate::workflow_run_prerequisites::resolve_executable_skill_name;
+use agent_client_protocol_schema::v1::SessionUpdate;
+use agent_client_protocol_schema::v1::StopReason;
+use agent_client_protocol_schema::v1::{ContentBlock, TextContent};
+use agent_client_protocol_schema::v1::{
+    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
+    SessionConfigSelectOptions,
+};
 use ora_application::{
     AgentDefinitionRepository, AgentSkill, Clock, ExecutionContext, FileChange,
     FilesystemSkillStorage, NodeExecutor, RepositoryError, WorkflowGraph, WorkflowGraphNode,
     WorkflowRunCallback, WorkflowRunEngineRepository,
-};
-use ora_contracts::acp::content::{ContentBlock, TextContent};
-use ora_contracts::acp::prompt::StopReason;
-use ora_contracts::acp::session::SessionUpdate;
-use ora_contracts::acp::session_config_options::{
-    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOption,
-    SessionConfigSelectOptions,
 };
 use ora_contracts::{
     AgentCli as ContractAgentCli, AttachSessionRequest, PromptSessionEvent, PromptSessionRequest,
@@ -395,6 +395,14 @@ fn report_outcome(
         StopReason::Cancelled => {
             // A cancelled turn belongs to the cancel flow; the driver must not complete the node.
         }
+        // A newer ACP stop reason has semantics this executor cannot safely map to a
+        // successful workflow transition.
+        _ => callback.fail_node(
+            run_id,
+            node_run_id,
+            "agent stopped for a reason this Ora version does not recognize".to_string(),
+            outcome.output,
+        ),
     }
 }
 
@@ -448,6 +456,14 @@ fn match_model_value(
             .iter()
             .flat_map(|group| group.options.iter())
             .collect(),
+        // New option container shapes require an explicit selection policy before
+        // workflow execution can choose a model from them.
+        _ => {
+            return Err(NodeExecutionError::WorkflowModelNotFound {
+                agent_cli: agent_cli.to_string(),
+                model_id: model_id.to_string(),
+            });
+        }
     };
     let matched = options
         .iter()
@@ -670,7 +686,7 @@ fn last_assistant_message(output: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ora_contracts::acp::session_config_options::{
+    use agent_client_protocol_schema::v1::{
         SessionConfigId, SessionConfigSelect, SessionConfigValueId,
     };
     use pretty_assertions::assert_eq;
@@ -774,16 +790,15 @@ mod tests {
     }
 
     fn model_option(options: Vec<SessionConfigSelectOption>) -> SessionConfigOption {
-        SessionConfigOption {
-            id: SessionConfigId::new("model".to_string()),
-            name: "Model".to_string(),
-            description: None,
-            category: Some(SessionConfigOptionCategory::Model),
-            kind: SessionConfigKind::Select(SessionConfigSelect::new(
+        SessionConfigOption::new(
+            SessionConfigId::new("model".to_string()),
+            "Model",
+            SessionConfigKind::Select(SessionConfigSelect::new(
                 SessionConfigValueId::new("current".to_string()),
                 SessionConfigSelectOptions::Ungrouped(options),
             )),
-        }
+        )
+        .category(SessionConfigOptionCategory::Model)
     }
 
     #[test]
@@ -828,16 +843,14 @@ mod tests {
 
     #[test]
     fn match_model_value_falls_back_to_the_lone_select() {
-        let option = SessionConfigOption {
-            id: SessionConfigId::new("model".to_string()),
-            name: "Model".to_string(),
-            description: None,
-            category: None,
-            kind: SessionConfigKind::Select(SessionConfigSelect::new(
+        let option = SessionConfigOption::new(
+            SessionConfigId::new("model".to_string()),
+            "Model",
+            SessionConfigKind::Select(SessionConfigSelect::new(
                 SessionConfigValueId::new("smart".to_string()),
                 SessionConfigSelectOptions::Ungrouped(vec![select_option("smart", "Smart")]),
             )),
-        };
+        );
         assert_eq!(
             match_model_value(&[option], "open_code", "smart").unwrap(),
             ("model".to_string(), "smart".to_string())

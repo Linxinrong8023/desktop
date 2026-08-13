@@ -135,26 +135,8 @@ tasks:
   ############# Run Development Servers #############
   ###################################################
 
-  run:prepare:
-    desc: Ensure the local .data workspace and rustun repository exist
-    cmds:
-      - mkdir -p .data
-      - |
-        if [ ! -d .data/rustun ]; then
-          git clone https://github.com/ora-space/rustun.git .data/rustun
-        fi
-
-  run:web-frontend:
+  run:frontend:
     desc: Run the web frontend against the real HTTP backend
-    env:
-      VITE_ORA_CONTRACT_TRANSPORT: fetch
-    cmds:
-      - pnpm --filter @ora/web-client dev
-
-  run:web-proto:
-    desc: Run the web frontend with the in-memory contracts client
-    env:
-      VITE_ORA_CONTRACT_TRANSPORT: mock
     cmds:
       - pnpm --filter @ora/web-client dev
 
@@ -165,22 +147,21 @@ tasks:
 
   run:desktop:
     desc: Run the desktop Tauri app in development mode
+    env:
+      ORA_DATA_DIR: "{{.ROOT_DIR}}/.data"
     cmds:
       - pnpm --filter @ora/desktop tauri dev
 
-  run:web-backend:
+  run:backend:
     desc: Run the web server backend in development mode
     env:
       ORA_DATA_DIR: .data
-      ORA_PROJECT_NAME: rustun
-      ORA_PROJECT_PATH: .data/rustun
       ORA_LOG_LEVEL: '{{.LOG_LEVEL | default "debug"}}'
       ORA_LOG_MODE: '{{.LOG_MODE | default "file"}}'
     cmds:
-      - task: run:prepare
       - cargo run --bin ora_web_server
 
-  log:backend:
+  logdy:
     desc: Follow Ora backend's daily logs in the local Logdy UI
     preconditions:
       - sh: command -v logdy >/dev/null 2>&1
@@ -200,32 +181,8 @@ tasks:
             [Console]::Out.WriteLine($_)
             [Console]::Out.Flush()
           }
-        ' | logdy --ui-ip 127.0.0.1 --port {{.PORT | default "8080"}} --no-analytics --no-updates --config logdy.config.json
+        ' | logdy --ui-ip 127.0.0.1 --port {{.PORT | default "8090"}} --no-analytics --no-updates --config logdy.config.json
         {{else}}
         set -- .data/logs/ora.log.*
-        logdy follow --full-read "$@" --ui-ip 127.0.0.1 --port {{.PORT | default "8080"}} --no-analytics --no-updates --config logdy.config.json
-        {{end}}
-
-  log:desktop:
-    desc: Follow Ora Desktop's daily logs in the local Logdy UI
-    preconditions:
-      - sh: command -v logdy >/dev/null 2>&1
-        msg: "Logdy is not available on PATH. Provide Logdy before running this task."
-      - sh: '{{if eq OS "windows"}}command -v pwsh >/dev/null 2>&1{{else}}true{{end}}'
-        msg: "PowerShell 7 is required to follow log files reliably on Windows. Install pwsh and ensure it is available on PATH."
-    cmds:
-      - |
-        {{if eq OS "windows"}}
-        # Logdy 0.17.1 can miss NTFS append notifications, so let PowerShell own the file watch.
-        pwsh -NoProfile -Command '
-          $logs = @(Get-ChildItem -Path "~/AppData/Roaming/space.ora.desktop/logs/ora.log.*" -File | Sort-Object Name)
-          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-          Get-Content -LiteralPath $logs[-1].FullName -Encoding UTF8 -Wait | ForEach-Object {
-            [Console]::Out.WriteLine($_)
-            [Console]::Out.Flush()
-          }
-        ' | logdy --ui-ip 127.0.0.1 --port {{.PORT | default "8080"}} --no-analytics --no-updates --config logdy.config.json
-        {{else}}
-        set -- .data/logs/ora.log.*
-        logdy follow --full-read "$@" --ui-ip 127.0.0.1 --port {{.PORT | default "8080"}} --no-analytics --no-updates --config logdy.config.json
+        logdy follow --full-read "$@" --ui-ip 127.0.0.1 --port {{.PORT | default "8090"}} --no-analytics --no-updates --config logdy.config.json
         {{end}}

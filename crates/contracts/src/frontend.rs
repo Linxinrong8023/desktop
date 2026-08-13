@@ -10,8 +10,6 @@ pub use spec::{
 pub const PROJECTS_PATH: &str = "/api/projects";
 pub const PROJECT_PATH: &str = "/api/projects/{projectId}";
 pub const PROJECT_BRANCHES_PATH: &str = "/api/projects/{projectId}/branches";
-pub const PROJECT_WORK_CONTEXT_OPEN_PATH: &str = "/api/project-work-contexts/open";
-pub const PROJECT_WORK_CONTEXT_RENEW_PATH: &str = "/api/project-work-contexts/renew";
 pub const TASKS_PATH: &str = "/api/tasks";
 pub const TASK_PATH: &str = "/api/tasks/{taskId}";
 pub const TASK_WORKSPACE_PATH: &str = "/api/tasks/{taskId}/workspace";

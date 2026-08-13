@@ -1,3 +1,5 @@
+import type { AppWindowOwnershipCapability } from "./app-window-ownership";
+
 export type PathSelectionKind = "file" | "directory";
 
 export interface SelectPathOptions {
@@ -98,8 +100,9 @@ export type SkillMarketplaceCapability =
       onStatus(listener: (status: SkillMarketplaceStatus) => void): Promise<() => void>;
     };
 
-/** Abstracts one single-path selection interaction across Web and Tauri hosts. */
+/** Collects the host capabilities consumed by the shared application shell. */
 export interface PlatformAdapter {
+  readonly appWindowOwnership: AppWindowOwnershipCapability;
   readonly worktreeStorage: WorktreeStorageCapability;
   readonly windowControls: WindowControlsCapability;
   readonly locationActions: LocationActionsCapability;

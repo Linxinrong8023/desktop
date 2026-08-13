@@ -9,6 +9,7 @@ import {
   type SelectPathOptions,
 } from "../types";
 import { WebPathPickerHost } from "./web-path-picker-host";
+import { createWebLockWindowOwnership } from "../app-window-ownership";
 
 interface ActivePathSelection {
   requestId: number;
@@ -23,6 +24,7 @@ export type WebPlatformSnapshot =
 
 /** Coordinates Promise-based platform calls with the React-owned Web path picker dialog. */
 export class WebPlatformAdapter implements PlatformAdapter, PlatformHostRenderer {
+  readonly appWindowOwnership = createWebLockWindowOwnership();
   readonly worktreeStorage = { kind: "unsupported" as const };
   // The browser owns its own chrome, so the shell paints no window controls.
   readonly windowControls = { kind: "none" as const };
