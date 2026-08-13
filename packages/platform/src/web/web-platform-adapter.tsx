@@ -1,6 +1,9 @@
 import type { ContractsClient } from "@ora/contracts";
 import { type ReactNode } from "react";
-import { renderPlatformHost, type PlatformHostRenderer } from "../platform-host-renderer";
+import {
+  renderPlatformHost,
+  type PlatformHostRenderer,
+} from "../platform-host-renderer";
 import {
   PathSelectionInProgressError,
   type PlatformAdapter,
@@ -23,7 +26,9 @@ export type WebPlatformSnapshot =
   | { kind: "selecting"; requestId: number; options: SelectPathOptions };
 
 /** Coordinates Promise-based platform calls with the React-owned Web path picker dialog. */
-export class WebPlatformAdapter implements PlatformAdapter, PlatformHostRenderer {
+export class WebPlatformAdapter
+  implements PlatformAdapter, PlatformHostRenderer
+{
   readonly appWindowOwnership = createWebLockWindowOwnership();
   readonly worktreeStorage = { kind: "unsupported" as const };
   // The browser owns its own chrome, so the shell paints no window controls.
@@ -52,7 +57,8 @@ export class WebPlatformAdapter implements PlatformAdapter, PlatformHostRenderer
         requestId,
         options,
         restoreFocusTo:
-          typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+          typeof document !== "undefined" &&
+          document.activeElement instanceof HTMLElement
             ? document.activeElement
             : null,
         resolve,
@@ -67,7 +73,9 @@ export class WebPlatformAdapter implements PlatformAdapter, PlatformHostRenderer
     if (typeof document === "undefined") {
       return false;
     }
-    const url = URL.createObjectURL(new Blob([options.content], { type: "application/json" }));
+    const url = URL.createObjectURL(
+      new Blob([options.content], { type: "application/json" }),
+    );
     const link = document.createElement("a");
     link.href = url;
     link.download = options.defaultFileName;
@@ -113,6 +121,8 @@ export class WebPlatformAdapter implements PlatformAdapter, PlatformHostRenderer
 }
 
 /** Creates the Web platform adapter around the same contracts client injected into AppShell. */
-export function createWebPlatformAdapter(client: ContractsClient): WebPlatformAdapter {
+export function createWebPlatformAdapter(
+  client: ContractsClient,
+): WebPlatformAdapter {
   return new WebPlatformAdapter(client);
 }

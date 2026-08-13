@@ -49,7 +49,10 @@ import { PluginsSettings } from "./plugins-settings";
 import { SettingsHeading } from "./settings-heading";
 import { WorkflowSettings } from "./workflow-settings";
 import { useUiStore } from "../../state/stores/ui-store";
-import { useSettingsStore, type SettingsPreferences } from "../../state/stores/settings-store";
+import {
+  useSettingsStore,
+  type SettingsPreferences,
+} from "../../state/stores/settings-store";
 import { useChatStore } from "../../chat-store-context";
 import { useStore } from "zustand";
 import type {
@@ -79,13 +82,25 @@ export function SettingsDialog() {
   const clearConversations = useStore(chatStore, (state) => state.clearAll);
   const [category, setCategory] = useState<SettingsCategory>("appearance");
 
-  const categories: Array<{ id: SettingsCategory; icon: typeof IconAdjustments; label: string }> = [
-    { id: "appearance", icon: IconAdjustments, label: t("settings.nav.appearance") },
+  const categories: Array<{
+    id: SettingsCategory;
+    icon: typeof IconAdjustments;
+    label: string;
+  }> = [
+    {
+      id: "appearance",
+      icon: IconAdjustments,
+      label: t("settings.nav.appearance"),
+    },
     { id: "roles", icon: IconRobot, label: t("settings.nav.roles") },
     { id: "skills", icon: IconSparkles, label: t("settings.nav.skills") },
     { id: "plugins", icon: IconPuzzle, label: t("settings.nav.plugins") },
     { id: "workflow", icon: IconRoute, label: t("settings.nav.workflow") },
-    { id: "permissions", icon: IconShieldCheck, label: t("settings.nav.permissions") },
+    {
+      id: "permissions",
+      icon: IconShieldCheck,
+      label: t("settings.nav.permissions"),
+    },
     { id: "privacy", icon: IconDatabase, label: t("settings.nav.privacy") },
   ];
 
@@ -96,9 +111,9 @@ export function SettingsDialog() {
         className={cn(
           "max-w-none gap-0 overflow-hidden p-0 transition-[width,height] duration-200 sm:max-w-none",
           category === "workflow"
-            // Keep clear of the frameless titlebar controls so the app close
-            // button stays reachable beside this near-fullscreen editor.
-            ? "h-[calc(100dvh-6rem)] w-[calc(100vw-3rem)]"
+            ? // Keep clear of the frameless titlebar controls so the app close
+              // button stays reachable beside this near-fullscreen editor.
+              "h-[calc(100dvh-6rem)] w-[calc(100vw-3rem)]"
             : "h-[min(720px,calc(100dvh-2rem))] w-[min(1040px,calc(100vw-2rem))]",
         )}
       >
@@ -126,10 +141,17 @@ export function SettingsDialog() {
                 category === "workflow" && "px-1.5",
               )}
             >
-              <div className="flex size-7 items-center justify-center rounded-md bg-foreground text-background"><IconAdjustments className="size-4" /></div>
-              <span className="text-sm font-semibold">{t("common.settings")}</span>
+              <div className="flex size-7 items-center justify-center rounded-md bg-foreground text-background">
+                <IconAdjustments className="size-4" />
+              </div>
+              <span className="text-sm font-semibold">
+                {t("common.settings")}
+              </span>
             </div>
-            <nav className="flex gap-1 overflow-x-auto sm:mt-3 sm:flex-col" aria-label={t("common.settings")}>
+            <nav
+              className="flex gap-1 overflow-x-auto sm:mt-3 sm:flex-col"
+              aria-label={t("common.settings")}
+            >
               {categories.map((item) => {
                 const Icon = item.icon;
                 return (
@@ -142,7 +164,9 @@ export function SettingsDialog() {
                       category === "workflow"
                         ? "sm:w-full sm:px-2"
                         : "sm:w-full",
-                      category === item.id ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                      category === item.id
+                        ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                        : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
                     )}
                   >
                     <Icon className="size-4" />
@@ -157,7 +181,9 @@ export function SettingsDialog() {
                 category === "workflow" && "sm:hidden",
               )}
             >
-              {t("settings.productName")}<br />{t("settings.prototypeLabel")}
+              {t("settings.productName")}
+              <br />
+              {t("settings.prototypeLabel")}
             </p>
           </aside>
 
@@ -168,12 +194,28 @@ export function SettingsDialog() {
           ) : (
             <ScrollArea className="min-h-0">
               <div className="mx-auto w-full max-w-3xl p-5 pb-12 sm:p-8 sm:pb-12">
-                {category === "appearance" && <AppearanceSettings settings={settings} onUpdate={updateSettings} />}
+                {category === "appearance" && (
+                  <AppearanceSettings
+                    settings={settings}
+                    onUpdate={updateSettings}
+                  />
+                )}
                 {category === "roles" && <RolesSettings />}
                 {category === "skills" && <SkillsSettings />}
                 {category === "plugins" && <PluginsSettings />}
-                {category === "permissions" && <PermissionSettings settings={settings} onUpdate={updateSettings} />}
-                {category === "privacy" && <PrivacySettings settings={settings} onUpdate={updateSettings} onClearHistory={clearConversations} />}
+                {category === "permissions" && (
+                  <PermissionSettings
+                    settings={settings}
+                    onUpdate={updateSettings}
+                  />
+                )}
+                {category === "privacy" && (
+                  <PrivacySettings
+                    settings={settings}
+                    onUpdate={updateSettings}
+                    onClearHistory={clearConversations}
+                  />
+                )}
               </div>
             </ScrollArea>
           )}
@@ -184,19 +226,39 @@ export function SettingsDialog() {
 }
 
 /** Applies visual and locale preferences immediately so users can evaluate the result in context. */
-function AppearanceSettings({ settings, onUpdate }: { settings: SettingsPreferences; onUpdate: (patch: Partial<SettingsPreferences>) => void }) {
+function AppearanceSettings({
+  settings,
+  onUpdate,
+}: {
+  settings: SettingsPreferences;
+  onUpdate: (patch: Partial<SettingsPreferences>) => void;
+}) {
   const { i18n, t } = useTranslation();
   const locale: Locale = i18n.resolvedLanguage === "en-US" ? "en-US" : "zh-CN";
-  const themes: Array<{ value: ThemeMode; icon: typeof IconSun; label: string }> = [
-    { value: "system", icon: IconDeviceDesktop, label: t("settings.appearance.system") },
+  const themes: Array<{
+    value: ThemeMode;
+    icon: typeof IconSun;
+    label: string;
+  }> = [
+    {
+      value: "system",
+      icon: IconDeviceDesktop,
+      label: t("settings.appearance.system"),
+    },
     { value: "light", icon: IconSun, label: t("settings.appearance.light") },
     { value: "dark", icon: IconMoon, label: t("settings.appearance.dark") },
   ];
 
   return (
     <div className="space-y-7">
-      <SettingsHeading title={t("settings.appearance.title")} description={t("settings.appearance.description")} />
-      <SettingsGroup title={t("settings.appearance.theme")} description={t("settings.appearance.themeDescription")}>
+      <SettingsHeading
+        title={t("settings.appearance.title")}
+        description={t("settings.appearance.description")}
+      />
+      <SettingsGroup
+        title={t("settings.appearance.theme")}
+        description={t("settings.appearance.themeDescription")}
+      >
         <div className="grid grid-cols-3 gap-2">
           {themes.map((theme) => {
             const Icon = theme.icon;
@@ -207,29 +269,98 @@ function AppearanceSettings({ settings, onUpdate }: { settings: SettingsPreferen
                 type="button"
                 aria-pressed={selected}
                 onClick={() => onUpdate({ theme: theme.value })}
-                className={cn("relative overflow-hidden rounded-md border p-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring", selected ? "border-foreground" : "border-border hover:border-foreground/40")}
+                className={cn(
+                  "relative overflow-hidden rounded-md border p-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  selected
+                    ? "border-foreground"
+                    : "border-border hover:border-foreground/40",
+                )}
               >
-                <div className={cn("mb-2 h-14 rounded-sm border p-1.5", theme.value === "dark" ? "border-zinc-700 bg-zinc-950" : theme.value === "light" ? "bg-white" : "bg-gradient-to-r from-white from-50% to-zinc-950 to-50%") }>
-                  <div className={cn("h-1.5 w-8 rounded-full", theme.value === "dark" ? "bg-zinc-600" : "bg-zinc-300")} />
-                  <div className={cn("mt-2 h-5 rounded-sm border", theme.value === "dark" ? "border-zinc-700 bg-zinc-900" : "border-zinc-200 bg-zinc-50")} />
+                <div
+                  className={cn(
+                    "mb-2 h-14 rounded-sm border p-1.5",
+                    theme.value === "dark"
+                      ? "border-zinc-700 bg-zinc-950"
+                      : theme.value === "light"
+                        ? "bg-white"
+                        : "bg-gradient-to-r from-white from-50% to-zinc-950 to-50%",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "h-1.5 w-8 rounded-full",
+                      theme.value === "dark" ? "bg-zinc-600" : "bg-zinc-300",
+                    )}
+                  />
+                  <div
+                    className={cn(
+                      "mt-2 h-5 rounded-sm border",
+                      theme.value === "dark"
+                        ? "border-zinc-700 bg-zinc-900"
+                        : "border-zinc-200 bg-zinc-50",
+                    )}
+                  />
                 </div>
-                <span className="flex items-center gap-1.5 text-xs font-medium"><Icon className="size-3.5" />{theme.label}</span>
-                {selected && <IconCheck className="absolute right-2 top-2 size-3.5" />}
+                <span className="flex items-center gap-1.5 text-xs font-medium">
+                  <Icon className="size-3.5" />
+                  {theme.label}
+                </span>
+                {selected && (
+                  <IconCheck className="absolute right-2 top-2 size-3.5" />
+                )}
               </button>
             );
           })}
         </div>
       </SettingsGroup>
-      <SettingsRow icon={IconLanguage} title={t("settings.appearance.language")} description={t("settings.appearance.languageDescription")}>
-        <Select value={locale} onValueChange={(value) => void i18n.changeLanguage(value as Locale)}>
-          <SelectTrigger className="w-40"><span className="flex-1 text-left">{locale === "zh-CN" ? t("account.switchChinese") : t("account.switchEnglish")}</span></SelectTrigger>
-          <SelectContent><SelectItem value="zh-CN">{t("account.switchChinese")}</SelectItem><SelectItem value="en-US">{t("account.switchEnglish")}</SelectItem></SelectContent>
+      <SettingsRow
+        icon={IconLanguage}
+        title={t("settings.appearance.language")}
+        description={t("settings.appearance.languageDescription")}
+      >
+        <Select
+          value={locale}
+          onValueChange={(value) => void i18n.changeLanguage(value as Locale)}
+        >
+          <SelectTrigger className="w-40">
+            <span className="flex-1 text-left">
+              {locale === "zh-CN"
+                ? t("account.switchChinese")
+                : t("account.switchEnglish")}
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="zh-CN">{t("account.switchChinese")}</SelectItem>
+            <SelectItem value="en-US">{t("account.switchEnglish")}</SelectItem>
+          </SelectContent>
         </Select>
       </SettingsRow>
-      <SettingsRow icon={IconAdjustments} title={t("settings.appearance.density")} description={t("settings.appearance.densityDescription")}>
-        <Select value={settings.density} onValueChange={(value) => onUpdate({ density: value as InterfaceDensity })}>
-          <SelectTrigger className="w-40"><span className="flex-1 text-left">{settings.density === "comfortable" ? t("settings.appearance.comfortable") : t("settings.appearance.compact")}</span></SelectTrigger>
-          <SelectContent><SelectItem value="comfortable">{t("settings.appearance.comfortable")}</SelectItem><SelectItem value="compact">{t("settings.appearance.compact")}</SelectItem></SelectContent>
+      <SettingsRow
+        icon={IconAdjustments}
+        title={t("settings.appearance.density")}
+        description={t("settings.appearance.densityDescription")}
+      >
+        <Select
+          value={settings.density}
+          onValueChange={(value) =>
+            onUpdate({ density: value as InterfaceDensity })
+          }
+        >
+          <SelectTrigger className="w-40">
+            <span className="flex-1 text-left">
+              {settings.density === "comfortable"
+                ? t("settings.appearance.comfortable")
+                : t("settings.appearance.compact")}
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="comfortable">
+              {t("settings.appearance.comfortable")}
+            </SelectItem>
+            <SelectItem value="compact">
+              {t("settings.appearance.compact")}
+            </SelectItem>
+          </SelectContent>
         </Select>
       </SettingsRow>
     </div>
@@ -237,30 +368,108 @@ function AppearanceSettings({ settings, onUpdate }: { settings: SettingsPreferen
 }
 
 /** Captures the approval and capability controls expected before running agent commands. */
-function PermissionSettings({ settings, onUpdate }: { settings: SettingsPreferences; onUpdate: (patch: Partial<SettingsPreferences>) => void }) {
+function PermissionSettings({
+  settings,
+  onUpdate,
+}: {
+  settings: SettingsPreferences;
+  onUpdate: (patch: Partial<SettingsPreferences>) => void;
+}) {
   const { t } = useTranslation();
   return (
     <div className="space-y-7">
-      <SettingsHeading title={t("settings.permissions.title")} description={t("settings.permissions.description")} />
-      <SettingsRow icon={IconShieldCheck} title={t("settings.permissions.approval")} description={t("settings.permissions.approvalDescription")}>
-        <Select value={settings.approvalPolicy} onValueChange={(value) => onUpdate({ approvalPolicy: value as ApprovalPolicy })}>
-          <SelectTrigger className="w-48"><span className="flex-1 text-left">{settings.approvalPolicy === "always" ? t("settings.permissions.always") : settings.approvalPolicy === "risky" ? t("settings.permissions.risky") : t("settings.permissions.trusted")}</span></SelectTrigger>
-          <SelectContent><SelectItem value="always">{t("settings.permissions.always")}</SelectItem><SelectItem value="risky">{t("settings.permissions.risky")}</SelectItem><SelectItem value="trusted">{t("settings.permissions.trusted")}</SelectItem></SelectContent>
+      <SettingsHeading
+        title={t("settings.permissions.title")}
+        description={t("settings.permissions.description")}
+      />
+      <SettingsRow
+        icon={IconShieldCheck}
+        title={t("settings.permissions.approval")}
+        description={t("settings.permissions.approvalDescription")}
+      >
+        <Select
+          value={settings.approvalPolicy}
+          onValueChange={(value) =>
+            onUpdate({ approvalPolicy: value as ApprovalPolicy })
+          }
+        >
+          <SelectTrigger className="w-48">
+            <span className="flex-1 text-left">
+              {settings.approvalPolicy === "always"
+                ? t("settings.permissions.always")
+                : settings.approvalPolicy === "risky"
+                  ? t("settings.permissions.risky")
+                  : t("settings.permissions.trusted")}
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="always">
+              {t("settings.permissions.always")}
+            </SelectItem>
+            <SelectItem value="risky">
+              {t("settings.permissions.risky")}
+            </SelectItem>
+            <SelectItem value="trusted">
+              {t("settings.permissions.trusted")}
+            </SelectItem>
+          </SelectContent>
         </Select>
       </SettingsRow>
       <div className="divide-y divide-border border-y border-border">
-        <SwitchRow title={t("settings.permissions.terminal")} description={t("settings.permissions.terminalDescription")} checked={settings.terminalAccess} onCheckedChange={(terminalAccess) => onUpdate({ terminalAccess })} />
-        <SwitchRow title={t("settings.permissions.files")} description={t("settings.permissions.filesDescription")} checked={settings.fileWriteAccess} onCheckedChange={(fileWriteAccess) => onUpdate({ fileWriteAccess })} />
-        <SwitchRow title={t("settings.permissions.network")} description={t("settings.permissions.networkDescription")} checked={settings.networkAccess} onCheckedChange={(networkAccess) => onUpdate({ networkAccess })} />
+        <SwitchRow
+          title={t("settings.permissions.terminal")}
+          description={t("settings.permissions.terminalDescription")}
+          checked={settings.terminalAccess}
+          onCheckedChange={(terminalAccess) => onUpdate({ terminalAccess })}
+        />
+        <SwitchRow
+          title={t("settings.permissions.files")}
+          description={t("settings.permissions.filesDescription")}
+          checked={settings.fileWriteAccess}
+          onCheckedChange={(fileWriteAccess) => onUpdate({ fileWriteAccess })}
+        />
+        <SwitchRow
+          title={t("settings.permissions.network")}
+          description={t("settings.permissions.networkDescription")}
+          checked={settings.networkAccess}
+          onCheckedChange={(networkAccess) => onUpdate({ networkAccess })}
+        />
       </div>
-      <SettingsRow icon={IconLock} title={t("settings.permissions.timeout")} description={t("settings.permissions.timeoutDescription")}>
-        <Select value={settings.commandTimeout} onValueChange={(commandTimeout) => onUpdate({ commandTimeout: commandTimeout as string })}>
-          <SelectTrigger className="w-36"><span className="flex-1 text-left">{settings.commandTimeout === "30" ? t("settings.permissions.timeoutSeconds", { count: 30 }) : settings.commandTimeout === "120" ? t("settings.permissions.timeoutMinutes", { count: 2 }) : settings.commandTimeout === "300" ? t("settings.permissions.timeoutMinutes", { count: 5 }) : t("settings.permissions.noTimeout")}</span></SelectTrigger>
+      <SettingsRow
+        icon={IconLock}
+        title={t("settings.permissions.timeout")}
+        description={t("settings.permissions.timeoutDescription")}
+      >
+        <Select
+          value={settings.commandTimeout}
+          onValueChange={(commandTimeout) =>
+            onUpdate({ commandTimeout: commandTimeout as string })
+          }
+        >
+          <SelectTrigger className="w-36">
+            <span className="flex-1 text-left">
+              {settings.commandTimeout === "30"
+                ? t("settings.permissions.timeoutSeconds", { count: 30 })
+                : settings.commandTimeout === "120"
+                  ? t("settings.permissions.timeoutMinutes", { count: 2 })
+                  : settings.commandTimeout === "300"
+                    ? t("settings.permissions.timeoutMinutes", { count: 5 })
+                    : t("settings.permissions.noTimeout")}
+            </span>
+          </SelectTrigger>
           <SelectContent>
-            <SelectItem value="30">{t("settings.permissions.timeoutSeconds", { count: 30 })}</SelectItem>
-            <SelectItem value="120">{t("settings.permissions.timeoutMinutes", { count: 2 })}</SelectItem>
-            <SelectItem value="300">{t("settings.permissions.timeoutMinutes", { count: 5 })}</SelectItem>
-            <SelectItem value="0">{t("settings.permissions.noTimeout")}</SelectItem>
+            <SelectItem value="30">
+              {t("settings.permissions.timeoutSeconds", { count: 30 })}
+            </SelectItem>
+            <SelectItem value="120">
+              {t("settings.permissions.timeoutMinutes", { count: 2 })}
+            </SelectItem>
+            <SelectItem value="300">
+              {t("settings.permissions.timeoutMinutes", { count: 5 })}
+            </SelectItem>
+            <SelectItem value="0">
+              {t("settings.permissions.noTimeout")}
+            </SelectItem>
           </SelectContent>
         </Select>
       </SettingsRow>
@@ -269,7 +478,15 @@ function PermissionSettings({ settings, onUpdate }: { settings: SettingsPreferen
 }
 
 /** Groups local retention and diagnostic controls, including a confirmed history reset. */
-function PrivacySettings({ settings, onUpdate, onClearHistory }: { settings: SettingsPreferences; onUpdate: (patch: Partial<SettingsPreferences>) => void; onClearHistory: () => void }) {
+function PrivacySettings({
+  settings,
+  onUpdate,
+  onClearHistory,
+}: {
+  settings: SettingsPreferences;
+  onUpdate: (patch: Partial<SettingsPreferences>) => void;
+  onClearHistory: () => void;
+}) {
   const { t } = useTranslation();
   const platform = usePlatform();
   const [confirmClear, setConfirmClear] = useState(false);
@@ -329,38 +546,116 @@ function PrivacySettings({ settings, onUpdate, onClearHistory }: { settings: Set
 
   return (
     <div className="space-y-7">
-      <SettingsHeading title={t("settings.privacy.title")} description={t("settings.privacy.description")} />
+      <SettingsHeading
+        title={t("settings.privacy.title")}
+        description={t("settings.privacy.description")}
+      />
       {worktreeStorage.kind === "configurable" && (
-        <SettingsRow icon={IconFolder} title={t("settings.privacy.worktreeRoot")} description={t("settings.privacy.worktreeRootDescription")}>
+        <SettingsRow
+          icon={IconFolder}
+          title={t("settings.privacy.worktreeRoot")}
+          description={t("settings.privacy.worktreeRootDescription")}
+        >
           <div className="flex max-w-sm flex-col items-end gap-2">
-            <code data-selectable className="max-w-full break-all text-right text-xs text-muted-foreground">
+            <code
+              data-selectable
+              className="max-w-full break-all text-right text-xs text-muted-foreground"
+            >
               {worktreeRoot ?? t("settings.privacy.worktreeRootLoading")}
             </code>
-            <Button variant="outline" disabled={worktreeRoot === null || worktreeSaving} onClick={changeWorktreeRoot}>
+            <Button
+              variant="outline"
+              disabled={worktreeRoot === null || worktreeSaving}
+              onClick={changeWorktreeRoot}
+            >
               <IconFolder />
-              {worktreeSaving ? t("common.saving") : t("settings.privacy.changeWorktreeRoot")}
+              {worktreeSaving
+                ? t("common.saving")
+                : t("settings.privacy.changeWorktreeRoot")}
             </Button>
-            {worktreeError !== null && <p data-selectable className="text-right text-xs text-destructive">{worktreeError}</p>}
+            {worktreeError !== null && (
+              <p
+                data-selectable
+                className="text-right text-xs text-destructive"
+              >
+                {worktreeError}
+              </p>
+            )}
           </div>
         </SettingsRow>
       )}
-      <SettingsRow icon={IconDatabase} title={t("settings.privacy.retention")} description={t("settings.privacy.retentionDescription")}>
-        <Select value={settings.historyRetention} onValueChange={(value) => onUpdate({ historyRetention: value as HistoryRetention })}>
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="30-days">{t("settings.privacy.days30")}</SelectItem><SelectItem value="90-days">{t("settings.privacy.days90")}</SelectItem><SelectItem value="forever">{t("settings.privacy.forever")}</SelectItem></SelectContent>
+      <SettingsRow
+        icon={IconDatabase}
+        title={t("settings.privacy.retention")}
+        description={t("settings.privacy.retentionDescription")}
+      >
+        <Select
+          value={settings.historyRetention}
+          onValueChange={(value) =>
+            onUpdate({ historyRetention: value as HistoryRetention })
+          }
+        >
+          <SelectTrigger className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="30-days">
+              {t("settings.privacy.days30")}
+            </SelectItem>
+            <SelectItem value="90-days">
+              {t("settings.privacy.days90")}
+            </SelectItem>
+            <SelectItem value="forever">
+              {t("settings.privacy.forever")}
+            </SelectItem>
+          </SelectContent>
         </Select>
       </SettingsRow>
       <div className="border-y border-border">
-        <SwitchRow title={t("settings.privacy.diagnostics")} description={t("settings.privacy.diagnosticsDescription")} checked={settings.diagnostics} onCheckedChange={(diagnostics) => onUpdate({ diagnostics })} />
+        <SwitchRow
+          title={t("settings.privacy.diagnostics")}
+          description={t("settings.privacy.diagnosticsDescription")}
+          checked={settings.diagnostics}
+          onCheckedChange={(diagnostics) => onUpdate({ diagnostics })}
+        />
       </div>
       <div className="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-center">
-        <div className="min-w-0 flex-1"><p className="text-sm font-medium">{t("settings.privacy.clearHistory")}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{t("settings.privacy.clearHistoryDescription")}</p></div>
-        <Button variant="destructive" onClick={() => setConfirmClear(true)}><IconTrash />{t("settings.privacy.clear")}</Button>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">
+            {t("settings.privacy.clearHistory")}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            {t("settings.privacy.clearHistoryDescription")}
+          </p>
+        </div>
+        <Button variant="destructive" onClick={() => setConfirmClear(true)}>
+          <IconTrash />
+          {t("settings.privacy.clear")}
+        </Button>
       </div>
       <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
         <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>{t("settings.privacy.clearTitle")}</AlertDialogTitle><AlertDialogDescription>{t("settings.privacy.clearConfirm")}</AlertDialogDescription></AlertDialogHeader>
-          <AlertDialogFooter><AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => { onClearHistory(); setConfirmClear(false); }}><IconTrash />{t("settings.privacy.clear")}</AlertDialogAction></AlertDialogFooter>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("settings.privacy.clearTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings.privacy.clearConfirm")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                onClearHistory();
+                setConfirmClear(false);
+              }}
+            >
+              <IconTrash />
+              {t("settings.privacy.clear")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>
@@ -368,16 +663,75 @@ function PrivacySettings({ settings, onUpdate, onClearHistory }: { settings: Set
 }
 
 /** Labels a grouped control without introducing nested decorative cards. */
-function SettingsGroup({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
-  return <section><div className="mb-3"><h3 className="text-sm font-medium">{title}</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p></div>{children}</section>;
+function SettingsGroup({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div className="mb-3">
+        <h3 className="text-sm font-medium">{title}</h3>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      {children}
+    </section>
+  );
 }
 
 /** Aligns a preference description with its compact trailing control. */
-function SettingsRow({ icon: Icon, title, description, children }: { icon: typeof IconAdjustments; title: string; description: string; children: React.ReactNode }) {
-  return <div className="flex flex-col gap-3 border-y border-border py-4 sm:flex-row sm:items-center"><Icon className="hidden size-4 shrink-0 text-muted-foreground sm:block" /><div className="min-w-0 flex-1"><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p></div><div className="shrink-0">{children}</div></div>;
+function SettingsRow({
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  icon: typeof IconAdjustments;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-3 border-y border-border py-4 sm:flex-row sm:items-center">
+      <Icon className="hidden size-4 shrink-0 text-muted-foreground sm:block" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
 }
 
 /** Uses a switch for one self-contained runtime capability. */
-function SwitchRow({ title, description, checked, onCheckedChange }: { title: string; description: string; checked: boolean; onCheckedChange: (checked: boolean) => void }) {
-  return <div className="flex items-center gap-4 py-4"><div className="min-w-0 flex-1"><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p></div><Switch checked={checked} onCheckedChange={onCheckedChange} /></div>;
+function SwitchRow({
+  title,
+  description,
+  checked,
+  onCheckedChange,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center gap-4 py-4">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
 }

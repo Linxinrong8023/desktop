@@ -70,13 +70,15 @@ export type LocationActionsCapability =
     };
 
 /** A native marketplace integration exposed by Ora Desktop. */
-export type SkillMarketplaceProvider =
-  | "skillHub"
-  | "huaweiAgentCenter";
+export type SkillMarketplaceProvider = "skillHub" | "huaweiAgentCenter";
 
 /** Reports the download lifecycle controlled by a provider-specific native marketplace window. */
 export type SkillMarketplaceStatus =
-  | { status: "downloading"; provider: SkillMarketplaceProvider; fileName: string }
+  | {
+      status: "downloading";
+      provider: SkillMarketplaceProvider;
+      fileName: string;
+    }
   | {
       status: "downloaded";
       provider: SkillMarketplaceProvider;
@@ -97,7 +99,9 @@ export type SkillMarketplaceCapability =
   | {
       kind: "supported";
       open(provider: SkillMarketplaceProvider): Promise<void>;
-      onStatus(listener: (status: SkillMarketplaceStatus) => void): Promise<() => void>;
+      onStatus(
+        listener: (status: SkillMarketplaceStatus) => void,
+      ): Promise<() => void>;
     };
 
 /** Collects the host capabilities consumed by the shared application shell. */

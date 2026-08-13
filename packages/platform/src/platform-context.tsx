@@ -10,5 +10,9 @@ export function PlatformProvider({
   adapter: PlatformAdapter;
   children: ReactNode;
 }) {
-  return <PlatformContext.Provider value={adapter}>{children}</PlatformContext.Provider>;
+  return (
+    <PlatformContext.Provider value={adapter}>
+      {children}
+    </PlatformContext.Provider>
+  );
 }

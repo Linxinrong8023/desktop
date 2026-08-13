@@ -2,7 +2,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { createChatStore } from "@ora/chat";
-import { createMockClient, createMockClientState } from "../../test/mock-client";
+import {
+  createMockClient,
+  createMockClientState,
+} from "../../test/mock-client";
 import {
   createHookWrapper,
   createTestQueryClient,
@@ -32,7 +35,11 @@ const AGENT_DATA: WorkflowNodeData = {
 function renderInspector() {
   const state = createMockClientState();
   state.agents = [
-    { id: "ag-researcher", name: "研究员", description: "只读探索项目现状和影响范围" },
+    {
+      id: "ag-researcher",
+      name: "研究员",
+      description: "只读探索项目现状和影响范围",
+    },
   ];
   state.skills = [
     {
@@ -77,21 +84,33 @@ describe("RunActInspector agent config", () => {
     const { user } = renderInspector();
 
     await waitFor(() => {
-      expect(screen.getByText("OpenCode · deepseek/deepseek-v4-pro")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "查看角色「研究员」简介" }))
-        .toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "查看 Skill「openspec-explore」简介" }))
-        .toBeInTheDocument();
+      expect(
+        screen.getByText("OpenCode · deepseek/deepseek-v4-pro"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "查看角色「研究员」简介" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", {
+          name: "查看 Skill「openspec-explore」简介",
+        }),
+      ).toBeInTheDocument();
     });
     expect(screen.getByText("阅读相关代码并输出风险。")).toBeInTheDocument();
     expect(screen.queryByText("hidden-skill")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "查看角色「研究员」简介" }));
-    expect(await screen.findByText("只读探索项目现状和影响范围")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "查看角色「研究员」简介" }),
+    );
+    expect(
+      await screen.findByText("只读探索项目现状和影响范围"),
+    ).toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("button", { name: "查看 Skill「openspec-explore」简介" }),
+      screen.getByRole("button", {
+        name: "查看 Skill「openspec-explore」简介",
+      }),
     );
     expect(await screen.findByText("探索仓库结构与约束")).toBeInTheDocument();
   });

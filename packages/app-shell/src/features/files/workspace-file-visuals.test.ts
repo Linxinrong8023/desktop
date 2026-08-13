@@ -10,6 +10,9 @@ describe("workspaceFileVisual", () => {
     ["Dockerfile", "docker", "DOCKER"],
   ])("maps %s to a consistent language and label", (path, language, label) => {
     const visual = workspaceFileVisual(path);
-    expect({ language: visual.language, label: visual.label }).toEqual({ language, label });
+    expect({ language: visual.language, label: visual.label }).toEqual({
+      language,
+      label,
+    });
   });
 });

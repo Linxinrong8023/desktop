@@ -10,7 +10,9 @@ const plugins: InstalledPlugin[] = [
     version: "0.1.0",
     kind: "agent",
     main: "dist/index.js",
-    agents: [{ id: "reviewer", displayName: "Review Agent", contractVersion: 1 }],
+    agents: [
+      { id: "reviewer", displayName: "Review Agent", contractVersion: 1 },
+    ],
   },
   {
     id: "ora.planner",
@@ -34,7 +36,9 @@ describe("filterDiscoveredPlugins", () => {
     ["Ora id", "ora.reviewer", "ora.reviewer"],
     ["agent display name", "plan agent", "ora.planner"],
   ])("searches by %s", (_field, query, expectedId) => {
-    expect(filterDiscoveredPlugins(plugins, query).map((plugin) => plugin.id)).toEqual([expectedId]);
+    expect(
+      filterDiscoveredPlugins(plugins, query).map((plugin) => plugin.id),
+    ).toEqual([expectedId]);
   });
 
   it("returns no dynamic packages when the query does not match", () => {

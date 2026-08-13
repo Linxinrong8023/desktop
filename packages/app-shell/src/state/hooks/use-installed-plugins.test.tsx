@@ -1,6 +1,9 @@
 import { waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { createMockClient, createMockClientState } from "../../test/mock-client";
+import {
+  createMockClient,
+  createMockClientState,
+} from "../../test/mock-client";
 import { renderHookWithClient } from "../../test/hook-harness";
 import { queryKeys } from "./query-keys";
 import { useInstalledPlugins } from "./use-installed-plugins";
@@ -24,6 +27,8 @@ describe("useInstalledPlugins", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(state.installedPlugins);
-    expect(queryClient.getQueryData(queryKeys.installedPlugins)).toEqual(state.installedPlugins);
+    expect(queryClient.getQueryData(queryKeys.installedPlugins)).toEqual(
+      state.installedPlugins,
+    );
   });
 });

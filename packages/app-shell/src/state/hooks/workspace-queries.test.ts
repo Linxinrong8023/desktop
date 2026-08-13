@@ -3,7 +3,10 @@ import { waitFor } from "@testing-library/react";
 import { useProjects } from "./use-projects";
 import { useTasks } from "./use-tasks";
 import { useSessions } from "./use-sessions";
-import { createMockClient, createMockClientState } from "../../test/mock-client";
+import {
+  createMockClient,
+  createMockClientState,
+} from "../../test/mock-client";
 import { renderHookWithClient } from "../../test/hook-harness";
 
 describe("useProjects", () => {
@@ -13,7 +16,9 @@ describe("useProjects", () => {
     const client = createMockClient(state);
     const { result } = renderHookWithClient(() => useProjects(), client);
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual([{ id: "p1", name: "Ora", rootPath: "/ora" }]);
+    expect(result.current.data).toEqual([
+      { id: "p1", name: "Ora", rootPath: "/ora" },
+    ]);
   });
 
   it("starts pending with no data", () => {
@@ -27,9 +32,10 @@ describe("useProjects", () => {
   it("surfaces transport errors as isError", async () => {
     const state = createMockClientState();
     const client = createMockClient(state);
-    (client.project as unknown as { list: () => Promise<never> }).list = async () => {
-      throw new Error("boom");
-    };
+    (client.project as unknown as { list: () => Promise<never> }).list =
+      async () => {
+        throw new Error("boom");
+      };
     const { result } = renderHookWithClient(() => useProjects(), client);
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.error).toBeInstanceOf(Error);
@@ -39,11 +45,31 @@ describe("useProjects", () => {
 describe("useTasks", () => {
   it("returns the task list from the client", async () => {
     const state = createMockClientState();
-    state.tasks = [{ id: "t1", projectId: "p1", title: "Refactor", status: "todo", workspaceMode: "worktree", type: "default", workflowRunId: null }];
+    state.tasks = [
+      {
+        id: "t1",
+        projectId: "p1",
+        title: "Refactor",
+        status: "todo",
+        workspaceMode: "worktree",
+        type: "default",
+        workflowRunId: null,
+      },
+    ];
     const client = createMockClient(state);
     const { result } = renderHookWithClient(() => useTasks(), client);
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual([{ id: "t1", projectId: "p1", title: "Refactor", status: "todo", workspaceMode: "worktree", type: "default", workflowRunId: null }]);
+    expect(result.current.data).toEqual([
+      {
+        id: "t1",
+        projectId: "p1",
+        title: "Refactor",
+        status: "todo",
+        workspaceMode: "worktree",
+        type: "default",
+        workflowRunId: null,
+      },
+    ]);
   });
 });
 

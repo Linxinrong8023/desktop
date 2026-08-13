@@ -12,7 +12,11 @@ export type DefaultLocationTarget = LocationTarget;
 const DEFAULT_TARGET: DefaultLocationTarget = "explorer";
 const STORAGE_KEY = "ora.location-actions.v1";
 
-const VALID_TARGETS: readonly DefaultLocationTarget[] = ["explorer", "terminal", "vscode"] as const;
+const VALID_TARGETS: readonly DefaultLocationTarget[] = [
+  "explorer",
+  "terminal",
+  "vscode",
+] as const;
 
 interface LocationActionsState {
   /** The opener the folder/main button executes, remembered across sessions. */
@@ -37,11 +41,14 @@ export const useLocationActionsStore = create<LocationActionsState>()(
       storage: createJSONStorage(() => window.localStorage),
       // Fall back to Explorer if the persisted value is missing or no longer a known target.
       merge: (persisted, current) => {
-        const persistedTarget = (persisted as Partial<LocationActionsState> | undefined)
-          ?.defaultTarget;
+        const persistedTarget = (
+          persisted as Partial<LocationActionsState> | undefined
+        )?.defaultTarget;
         return {
           ...current,
-          defaultTarget: VALID_TARGETS.includes(persistedTarget as DefaultLocationTarget)
+          defaultTarget: VALID_TARGETS.includes(
+            persistedTarget as DefaultLocationTarget,
+          )
             ? (persistedTarget as DefaultLocationTarget)
             : DEFAULT_TARGET,
         };

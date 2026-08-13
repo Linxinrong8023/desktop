@@ -17,10 +17,10 @@ Keep these stacks separate — shared chrome only where noted.
    **run** workspace after deploy. Consumes `@ora/workflow-runtime` via React
    context; owns Theater / Overview / hooks only.
 
-| | Settings RF | OpenSpec / `workflow-store` | `workflow-run` | `@ora/workflow-runtime` |
-| --- | --- | --- | --- | --- |
-| Owns | Definition edit, deploy entry | Spec stepper state | Theater UI + context | Ports, memory engine, events |
-| Must not | Drive live run Theater | Mutate `GraphWorkflowRun` | Reuse settings `WorkflowCanvas` | Own React / Theater |
+|          | Settings RF                   | OpenSpec / `workflow-store` | `workflow-run`                  | `@ora/workflow-runtime`      |
+| -------- | ----------------------------- | --------------------------- | ------------------------------- | ---------------------------- |
+| Owns     | Definition edit, deploy entry | Spec stepper state          | Theater UI + context            | Ports, memory engine, events |
+| Must not | Drive live run Theater        | Mutate `GraphWorkflowRun`   | Reuse settings `WorkflowCanvas` | Own React / Theater          |
 
 ## Responsibilities
 

@@ -73,7 +73,9 @@ export function EntityDialog({
   const [submitting, setSubmitting] = useState(false);
   const [validationError, setValidationError] = useState(false);
   const [selectingField, setSelectingField] = useState<string | null>(null);
-  const [pathSelectionError, setPathSelectionError] = useState<string | null>(null);
+  const [pathSelectionError, setPathSelectionError] = useState<string | null>(
+    null,
+  );
   const [submissionError, setSubmissionError] = useState<string | null>(null);
 
   const resolvedValues = useMemo(() => {
@@ -127,12 +129,19 @@ export function EntityDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => (!submitting || nextOpen) && onOpenChange(nextOpen)}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) =>
+        (!submitting || nextOpen) && onOpenChange(nextOpen)
+      }
+    >
       <DialogContent>
         <form onSubmit={handleSubmit} className="contents">
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
-            {description && <DialogDescription>{description}</DialogDescription>}
+            {description && (
+              <DialogDescription>{description}</DialogDescription>
+            )}
           </DialogHeader>
           <div className="grid gap-3">
             {fields.map((field) => (
@@ -141,14 +150,24 @@ export function EntityDialog({
                 {field.kind === "select" ? (
                   <Select
                     value={resolvedValues[field.name] ?? ""}
-                    onValueChange={(value) => setValues((current) => ({ ...current, [field.name]: value ?? "" }))}
+                    onValueChange={(value) =>
+                      setValues((current) => ({
+                        ...current,
+                        [field.name]: value ?? "",
+                      }))
+                    }
                   >
-                    <SelectTrigger id={`entity-${field.name}`} className="w-full">
+                    <SelectTrigger
+                      id={`entity-${field.name}`}
+                      className="w-full"
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       {field.options.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -159,9 +178,14 @@ export function EntityDialog({
                       className="min-w-0 flex-1"
                       value={values[field.name] ?? ""}
                       placeholder={field.placeholder}
-                      aria-invalid={validationError && !resolvedValues[field.name]?.trim()}
+                      aria-invalid={
+                        validationError && !resolvedValues[field.name]?.trim()
+                      }
                       onChange={(event) => {
-                        setValues((current) => ({ ...current, [field.name]: event.target.value }));
+                        setValues((current) => ({
+                          ...current,
+                          [field.name]: event.target.value,
+                        }));
                         setValidationError(false);
                         setPathSelectionError(null);
                       }}
@@ -182,27 +206,57 @@ export function EntityDialog({
                     id={`entity-${field.name}`}
                     value={resolvedValues[field.name] ?? ""}
                     placeholder={field.placeholder}
-                    aria-invalid={validationError && !resolvedValues[field.name]?.trim()}
+                    aria-invalid={
+                      validationError && !resolvedValues[field.name]?.trim()
+                    }
                     onChange={(event) => {
-                      setValues((current) => ({ ...current, [field.name]: event.target.value }));
+                      setValues((current) => ({
+                        ...current,
+                        [field.name]: event.target.value,
+                      }));
                       setValidationError(false);
                     }}
                     autoFocus={field === fields[0]}
                   />
                 )}
                 {pathSelectionError === field.name && (
-                  <p role="alert" data-selectable className="text-xs text-destructive">
+                  <p
+                    role="alert"
+                    data-selectable
+                    className="text-xs text-destructive"
+                  >
                     {t("dialog.pathSelectionError")}
                   </p>
                 )}
               </div>
             ))}
           </div>
-          {validationError && <p role="alert" className="text-xs text-destructive">{t("dialog.required")}</p>}
-          {submissionError && <p role="alert" data-selectable className="text-xs text-destructive">{submissionError}</p>}
+          {validationError && (
+            <p role="alert" className="text-xs text-destructive">
+              {t("dialog.required")}
+            </p>
+          )}
+          {submissionError && (
+            <p
+              role="alert"
+              data-selectable
+              className="text-xs text-destructive"
+            >
+              {submissionError}
+            </p>
+          )}
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? t("common.saving") : submitLabel}</Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={submitting}
+              onClick={() => onOpenChange(false)}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? t("common.saving") : submitLabel}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

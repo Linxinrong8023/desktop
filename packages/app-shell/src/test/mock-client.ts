@@ -43,7 +43,7 @@ function mockWorkflowRun(record: MockWorkflowRunRecord): WorkflowRun {
     workflowId: record.workflowId,
     snapshotId: record.snapshotId,
     status: record.status,
-    state: "{\"current_nodes\":[]}",
+    state: '{"current_nodes":[]}',
     input: null,
     output: null,
     error: null,
@@ -115,8 +115,13 @@ function nextTimestamp(): bigint {
 }
 
 /** Returns one workflow record or fails like the real not-found endpoint. */
-function requireWorkflowRecord(state: MockClientState, workflowId: string): MockWorkflowRecord {
-  const record = state.workflows.find((candidate) => candidate.workflow.id === workflowId);
+function requireWorkflowRecord(
+  state: MockClientState,
+  workflowId: string,
+): MockWorkflowRecord {
+  const record = state.workflows.find(
+    (candidate) => candidate.workflow.id === workflowId,
+  );
   if (record === undefined) {
     throw new Error(`workflow ${workflowId} not found`);
   }
@@ -132,11 +137,19 @@ export function createMockClient(state: MockClientState): ContractsClient {
     project: {
       list: async () => ({ projects: [...state.projects] }),
       listBranches: async () => ({
-        branches: [{ name: "main", refName: "origin/main", displayName: "main" }],
+        branches: [
+          { name: "main", refName: "origin/main", displayName: "main" },
+        ],
       }),
-      get: async (req) => ({ project: state.projects.find((p) => p.id === req.projectId)! }),
+      get: async (req) => ({
+        project: state.projects.find((p) => p.id === req.projectId)!,
+      }),
       create: async (req) => {
-        const project: Project = { id: nextId("p", state.projects.length), name: req.name, rootPath: req.rootPath };
+        const project: Project = {
+          id: nextId("p", state.projects.length),
+          name: req.name,
+          rootPath: req.rootPath,
+        };
         state.projects.push(project);
         return { project };
       },
@@ -155,7 +168,9 @@ export function createMockClient(state: MockClientState): ContractsClient {
     },
     task: {
       list: async () => ({ tasks: [...state.tasks] }),
-      get: async (req) => ({ task: state.tasks.find((t) => t.id === req.taskId)! }),
+      get: async (req) => ({
+        task: state.tasks.find((t) => t.id === req.taskId)!,
+      }),
       create: async (req) => {
         const task: Task = {
           id: nextId("t", state.tasks.length),
@@ -216,16 +231,22 @@ export function createMockClient(state: MockClientState): ContractsClient {
     },
     session: {
       list: async () => ({ sessions: [...state.sessions] }),
-      get: async (req) => ({ session: state.sessions.find((s) => s.id === req.sessionId)! }),
+      get: async (req) => ({
+        session: state.sessions.find((s) => s.id === req.sessionId)!,
+      }),
       warm: async (req) => {
-        const sessionId = nextId("s", state.sessions.length + state.warmSessions.size);
+        const sessionId = nextId(
+          "s",
+          state.sessions.length + state.warmSessions.size,
+        );
         state.warmSessions.set(sessionId, req.agentCli);
         const perCli = state.warmModelsByCli?.[req.agentCli];
         return {
           sessionId,
           // A CLI mapped to null reports an empty catalog, which is how the
           // contract expresses "no models" after a failed warm handshake.
-          configOptions: perCli === undefined ? state.configOptions : (perCli ?? []),
+          configOptions:
+            perCli === undefined ? state.configOptions : (perCli ?? []),
         };
       },
       setConfig: async () => ({ configOptions: state.configOptions }),
@@ -243,20 +264,34 @@ export function createMockClient(state: MockClientState): ContractsClient {
         return { session, availableCommands: [] };
       },
       switchAgent: async (req) => {
-        const session = state.sessions.find((candidate) => candidate.id === req.sessionId)!;
+        const session = state.sessions.find(
+          (candidate) => candidate.id === req.sessionId,
+        )!;
         session.agentCli = req.agentCli;
-        return { session, availableCommands: [], configOptions: state.configOptions };
+        return {
+          session,
+          availableCommands: [],
+          configOptions: state.configOptions,
+        };
       },
       resumeHistory: async (req) => {
-        const session = state.sessions.find((candidate) => candidate.id === req.sessionId)!;
+        const session = state.sessions.find(
+          (candidate) => candidate.id === req.sessionId,
+        )!;
         session.historyState = { type: "writable" };
         return { session };
       },
-      load: async function* () { yield { type: "completed" as const }; },
-      prompt: async function* () { yield { type: "completed" as const, stopReason: "end_turn" as const }; },
+      load: async function* () {
+        yield { type: "completed" as const };
+      },
+      prompt: async function* () {
+        yield { type: "completed" as const, stopReason: "end_turn" as const };
+      },
       respondToPermission: async () => ({}),
       stop: async (req) => {
-        const session = state.sessions.find((candidate) => candidate.id === req.sessionId)!;
+        const session = state.sessions.find(
+          (candidate) => candidate.id === req.sessionId,
+        )!;
         session.status = "stopped";
         return { session };
       },
@@ -294,16 +329,29 @@ export function createMockClient(state: MockClientState): ContractsClient {
     },
     agent: {
       list: async () => ({ agents: [...state.agents] }),
-      get: async (req) => ({ agent: { ...state.agents.find((a) => a.id === req.agentId)!, content: "" } }),
+      get: async (req) => ({
+        agent: {
+          ...state.agents.find((a) => a.id === req.agentId)!,
+          content: "",
+        },
+      }),
       create: async (req) => {
-        const agent: Agent = { id: nextId("a", state.agents.length), name: req.name, description: req.description };
+        const agent: Agent = {
+          id: nextId("a", state.agents.length),
+          name: req.name,
+          description: req.description,
+        };
         state.agents.push(agent);
         return { agent };
       },
       update: async (req) => {
         const idx = state.agents.findIndex((a) => a.id === req.agentId);
         if (idx < 0) throw new Error(`agent ${req.agentId} not found`);
-        const updated: Agent = { id: req.agentId, name: req.name, description: req.description };
+        const updated: Agent = {
+          id: req.agentId,
+          name: req.name,
+          description: req.description,
+        };
         state.agents[idx] = updated;
         return { agent: updated };
       },
@@ -314,21 +362,38 @@ export function createMockClient(state: MockClientState): ContractsClient {
       },
     },
     agentImport: {
-      prepare: async () => { throw new Error("agentImport not implemented in mock"); },
-      commit: async () => { throw new Error("agentImport not implemented in mock"); },
+      prepare: async () => {
+        throw new Error("agentImport not implemented in mock");
+      },
+      commit: async () => {
+        throw new Error("agentImport not implemented in mock");
+      },
     },
     skill: {
       list: async () => ({ skills: [...state.skills] }),
-      get: async (req) => ({ skill: { ...state.skills.find((s) => s.id === req.skillId)!, content: "" } }),
+      get: async (req) => ({
+        skill: {
+          ...state.skills.find((s) => s.id === req.skillId)!,
+          content: "",
+        },
+      }),
       create: async (req) => {
-        const skill: Skill = { id: nextId("sk", state.skills.length), name: req.name, description: req.description };
+        const skill: Skill = {
+          id: nextId("sk", state.skills.length),
+          name: req.name,
+          description: req.description,
+        };
         state.skills.push(skill);
         return { skill };
       },
       update: async (req) => {
         const idx = state.skills.findIndex((s) => s.id === req.skillId);
         if (idx < 0) throw new Error(`skill ${req.skillId} not found`);
-        const updated: Skill = { id: req.skillId, name: req.name, description: req.description };
+        const updated: Skill = {
+          id: req.skillId,
+          name: req.name,
+          description: req.description,
+        };
         state.skills[idx] = updated;
         return { skill: updated };
       },
@@ -368,9 +433,10 @@ export function createMockClient(state: MockClientState): ContractsClient {
         sizeBytes: 0,
       }),
       searchWorkspace: async () => ({ results: [], truncated: false }),
-      watchWorkspace: () => (async function* () {
-        yield* [];
-      })(),
+      watchWorkspace: () =>
+        (async function* () {
+          yield* [];
+        })(),
     },
     spec: {
       catalog: async () => ({ sources: [], documents: [], truncated: false }),
@@ -384,9 +450,10 @@ export function createMockClient(state: MockClientState): ContractsClient {
         workflow: { kind: "custom", name: "Custom" },
       }),
       updateProjectSources: async (request) => ({ sources: request.sources }),
-      watch: () => (async function* () {
-        yield* [];
-      })(),
+      watch: () =>
+        (async function* () {
+          yield* [];
+        })(),
     },
     gitIdentity: {
       get: async () => ({ name: "Test User", email: "test@ora.local" }),
@@ -415,9 +482,12 @@ export function createMockClient(state: MockClientState): ContractsClient {
       },
       get: async (req) => {
         const record = requireWorkflowRecord(state, req.workflowId);
-        const published = record.workflow.publishedSnapshotId == null
-          ? null
-          : record.published.find((item) => item.id === record.workflow.publishedSnapshotId) ?? null;
+        const published =
+          record.workflow.publishedSnapshotId == null
+            ? null
+            : (record.published.find(
+                (item) => item.id === record.workflow.publishedSnapshotId,
+              ) ?? null);
         return {
           workflow: record.workflow,
           draft: record.draft,
@@ -428,21 +498,29 @@ export function createMockClient(state: MockClientState): ContractsClient {
         workflows: state.workflows.map((record): WorkflowSummary => ({
           id: record.workflow.id,
           name: record.workflow.name,
-          publishedVersion: record.workflow.publishedSnapshotId == null
-            ? null
-            : record.published.find((item) => item.id === record.workflow.publishedSnapshotId)?.version
-              ?? null,
+          publishedVersion:
+            record.workflow.publishedSnapshotId == null
+              ? null
+              : (record.published.find(
+                  (item) => item.id === record.workflow.publishedSnapshotId,
+                )?.version ?? null),
           createdAt: record.workflow.createdAt,
           updatedAt: record.workflow.updatedAt,
         })),
       }),
       update: async (req) => {
         const record = requireWorkflowRecord(state, req.workflowId);
-        record.workflow = { ...record.workflow, name: req.name, updatedAt: nextTimestamp() };
+        record.workflow = {
+          ...record.workflow,
+          name: req.name,
+          updatedAt: nextTimestamp(),
+        };
         return { workflow: record.workflow };
       },
       delete: async (req) => {
-        const idx = state.workflows.findIndex((record) => record.workflow.id === req.workflowId);
+        const idx = state.workflows.findIndex(
+          (record) => record.workflow.id === req.workflowId,
+        );
         if (idx >= 0) state.workflows.splice(idx, 1);
         return { workflowId: req.workflowId };
       },
@@ -452,7 +530,11 @@ export function createMockClient(state: MockClientState): ContractsClient {
       },
       updateDraft: async (req) => {
         const record = requireWorkflowRecord(state, req.workflowId);
-        record.draft = { ...record.draft, graph: req.graph, updatedAt: nextTimestamp() };
+        record.draft = {
+          ...record.draft,
+          graph: req.graph,
+          updatedAt: nextTimestamp(),
+        };
         return { snapshot: record.draft };
       },
       publish: async (req) => {
@@ -468,27 +550,43 @@ export function createMockClient(state: MockClientState): ContractsClient {
           updatedAt: null,
         };
         record.published.push(snapshot);
-        record.workflow = { ...record.workflow, publishedSnapshotId: snapshot.id, updatedAt: now };
+        record.workflow = {
+          ...record.workflow,
+          publishedSnapshotId: snapshot.id,
+          updatedAt: now,
+        };
         return { snapshot };
       },
       rollback: async (req) => {
         const record = requireWorkflowRecord(state, req.workflowId);
         const all = [...record.published, record.draft];
         const snapshot = all.find((item) => item.id === req.snapshotId);
-        if (snapshot === undefined) throw new Error(`snapshot ${req.snapshotId} not found`);
-        record.draft = { ...record.draft, graph: snapshot.graph, updatedAt: nextTimestamp() };
+        if (snapshot === undefined)
+          throw new Error(`snapshot ${req.snapshotId} not found`);
+        record.draft = {
+          ...record.draft,
+          graph: snapshot.graph,
+          updatedAt: nextTimestamp(),
+        };
         return { snapshot: record.draft };
       },
       activate: async (req) => {
         const record = requireWorkflowRecord(state, req.workflowId);
-        const snapshot = record.published.find((item) => item.id === req.snapshotId);
-        if (snapshot === undefined) throw new Error(`snapshot ${req.snapshotId} not found`);
+        const snapshot = record.published.find(
+          (item) => item.id === req.snapshotId,
+        );
+        if (snapshot === undefined)
+          throw new Error(`snapshot ${req.snapshotId} not found`);
         record.workflow = {
           ...record.workflow,
           publishedSnapshotId: snapshot.id,
           updatedAt: nextTimestamp(),
         };
-        record.draft = { ...record.draft, graph: snapshot.graph, updatedAt: nextTimestamp() };
+        record.draft = {
+          ...record.draft,
+          graph: snapshot.graph,
+          updatedAt: nextTimestamp(),
+        };
         return { snapshot: record.draft };
       },
       listVersions: async (req) => {
@@ -503,13 +601,18 @@ export function createMockClient(state: MockClientState): ContractsClient {
       },
       getVersion: async (req) => {
         const record = requireWorkflowRecord(state, req.workflowId);
-        const snapshot = record.published.find((item) => item.version === req.version);
-        if (snapshot === undefined) throw new Error(`snapshot ${req.version} not found`);
+        const snapshot = record.published.find(
+          (item) => item.version === req.version,
+        );
+        if (snapshot === undefined)
+          throw new Error(`snapshot ${req.version} not found`);
         return { snapshot };
       },
       deleteSnapshot: async (req) => {
         const record = requireWorkflowRecord(state, req.workflowId);
-        const idx = record.published.findIndex((item) => item.version === req.version);
+        const idx = record.published.findIndex(
+          (item) => item.version === req.version,
+        );
         if (idx < 0) throw new Error(`snapshot ${req.version} not found`);
         const [removed] = record.published.splice(idx, 1);
         return { snapshotId: removed.id, version: req.version };
@@ -532,7 +635,7 @@ export function createMockClient(state: MockClientState): ContractsClient {
           workflowId: req.workflowId,
           snapshotId: "snap-1",
           status: "pending",
-          state: "{\"current_nodes\":[]}",
+          state: '{"current_nodes":[]}',
           input: null,
           output: null,
           error: null,
@@ -556,15 +659,18 @@ export function createMockClient(state: MockClientState): ContractsClient {
         return { run, taskId: nextId("task", state.tasks.length) };
       },
       get: async (req) => {
-        const record = state.workflowRuns.find((candidate) => candidate.id === req.runId);
-        if (record === undefined) throw new Error(`workflow run ${req.runId} not found`);
+        const record = state.workflowRuns.find(
+          (candidate) => candidate.id === req.runId,
+        );
+        if (record === undefined)
+          throw new Error(`workflow run ${req.runId} not found`);
         return {
           run: {
             id: record.id,
             workflowId: record.workflowId,
             snapshotId: record.snapshotId,
             status: record.status,
-            state: "{\"current_nodes\":[]}",
+            state: '{"current_nodes":[]}',
             input: null,
             output: null,
             error: null,
@@ -581,23 +687,35 @@ export function createMockClient(state: MockClientState): ContractsClient {
         };
       },
       start: async (req) => {
-        const record = state.workflowRuns.find((candidate) => candidate.id === req.runId);
-        if (record === undefined) throw new Error(`workflow run ${req.runId} not found`);
+        const record = state.workflowRuns.find(
+          (candidate) => candidate.id === req.runId,
+        );
+        if (record === undefined)
+          throw new Error(`workflow run ${req.runId} not found`);
         return { run: mockWorkflowRun(record) };
       },
       cancel: async (req) => {
-        const record = state.workflowRuns.find((candidate) => candidate.id === req.runId);
-        if (record === undefined) throw new Error(`workflow run ${req.runId} not found`);
+        const record = state.workflowRuns.find(
+          (candidate) => candidate.id === req.runId,
+        );
+        if (record === undefined)
+          throw new Error(`workflow run ${req.runId} not found`);
         return { run: mockWorkflowRun(record) };
       },
       restart: async (req) => {
-        const record = state.workflowRuns.find((candidate) => candidate.id === req.runId);
-        if (record === undefined) throw new Error(`workflow run ${req.runId} not found`);
+        const record = state.workflowRuns.find(
+          (candidate) => candidate.id === req.runId,
+        );
+        if (record === undefined)
+          throw new Error(`workflow run ${req.runId} not found`);
         return { run: mockWorkflowRun(record) };
       },
       updateInput: async (req) => {
-        const record = state.workflowRuns.find((candidate) => candidate.id === req.runId);
-        if (record === undefined) throw new Error(`workflow run ${req.runId} not found`);
+        const record = state.workflowRuns.find(
+          (candidate) => candidate.id === req.runId,
+        );
+        if (record === undefined)
+          throw new Error(`workflow run ${req.runId} not found`);
         return { run: mockWorkflowRun(record) };
       },
       list: async (req) => ({
@@ -630,7 +748,9 @@ export function createMockClient(state: MockClientState): ContractsClient {
       }),
       listNodeRuns: async () => ({ nodes: [] }),
       delete: async (req) => {
-        const idx = state.workflowRuns.findIndex((record) => record.id === req.runId);
+        const idx = state.workflowRuns.findIndex(
+          (record) => record.id === req.runId,
+        );
         if (idx >= 0) state.workflowRuns.splice(idx, 1);
         return { runId: req.runId };
       },

@@ -14,11 +14,7 @@ import {
   type NodeChange,
   type XYPosition,
 } from "@xyflow/react";
-import {
-  IconDownload,
-  IconRoute,
-  IconVersions,
-} from "@tabler/icons-react";
+import { IconDownload, IconRoute, IconVersions } from "@tabler/icons-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -101,7 +97,10 @@ export interface WorkflowSettingsProps {
 }
 
 /** Finds the first readable graph ID that does not collide with session elements. */
-function uniqueGraphId(prefix: string, existingIds: Iterable<string>): {
+function uniqueGraphId(
+  prefix: string,
+  existingIds: Iterable<string>,
+): {
   id: string;
   sequence: number;
 } {
@@ -125,23 +124,25 @@ function workflowExportFileName(name: string): string {
  * Picks a publish version for an imported file: prefer the filename stem (matching export
  * naming), then the workflow title, else let the backend mint an automatic version.
  */
-function importPublishVersion(fileName: string, workflowName: string): string | null {
+function importPublishVersion(
+  fileName: string,
+  workflowName: string,
+): string | null {
   const stem = fileName
     .replace(/\.reactflow\.json$/i, "")
     .replace(/\.json$/i, "")
     .trim();
   const candidate = (stem !== "" ? stem : workflowName).trim();
   if (
-    candidate === ""
-    || candidate === "draft"
-    || candidate === "."
-    || candidate === ".."
-    || candidate.length > 128
-    || [...candidate].some((character) => (
-      character === "/"
-      || character === "\\"
-      || character.charCodeAt(0) < 32
-    ))
+    candidate === "" ||
+    candidate === "draft" ||
+    candidate === "." ||
+    candidate === ".." ||
+    candidate.length > 128 ||
+    [...candidate].some(
+      (character) =>
+        character === "/" || character === "\\" || character.charCodeAt(0) < 32,
+    )
   ) {
     return null;
   }
@@ -167,8 +168,12 @@ function WorkflowSettingsContent({
   const agentsQuery = useAgents();
   const skillsQuery = useSkills();
   const agentModelsCatalog = useWorkflowAgentModels();
-  const { deleteElements, toObject } = useReactFlow<Node<WorkflowNodeData, "workflow">, Edge>();
-  const locale = i18n.resolvedLanguage === "en-US" ? "en-US" as const : "zh-CN" as const;
+  const { deleteElements, toObject } = useReactFlow<
+    Node<WorkflowNodeData, "workflow">,
+    Edge
+  >();
+  const locale =
+    i18n.resolvedLanguage === "en-US" ? ("en-US" as const) : ("zh-CN" as const);
   /**
    * Uses backend-managed Agent/Skill catalogs and warm-session model discovery
    * for node configuration while preserving demo-only tool catalogs.
@@ -205,11 +210,11 @@ function WorkflowSettingsContent({
         ...(defaultExecutor === undefined
           ? {}
           : {
-            executor: {
-              agentCli: defaultExecutor.agentCli,
-              modelId: defaultExecutor.modelId,
-            },
-          }),
+              executor: {
+                agentCli: defaultExecutor.agentCli,
+                modelId: defaultExecutor.modelId,
+              },
+            }),
         // Roles are optional; a new agent node starts with no role selected.
         roleId: "",
         mcps: [],
@@ -222,14 +227,19 @@ function WorkflowSettingsContent({
     locale,
     skillsQuery.data,
   ]);
-  const agentModelsLoading = capabilitiesOverride === undefined && agentModelsCatalog.isLoading;
-  const agentModelsError = capabilitiesOverride === undefined && agentModelsCatalog.isError;
+  const agentModelsLoading =
+    capabilitiesOverride === undefined && agentModelsCatalog.isLoading;
+  const agentModelsError =
+    capabilitiesOverride === undefined && agentModelsCatalog.isError;
   const availableAgentModels = agentModelsCatalog.agentModels;
   const agentCatalogsLoading = agentsQuery.isPending || skillsQuery.isPending;
-  const agentCatalogsError = agentsQuery.error !== null || skillsQuery.error !== null;
+  const agentCatalogsError =
+    agentsQuery.error !== null || skillsQuery.error !== null;
 
   const library = useWorkflowLibrary();
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
+    null,
+  );
   const draftQuery = useWorkflowDraft(selectedWorkflowId);
   const versionsQuery = useWorkflowVersions(selectedWorkflowId);
   const createWorkflowMutation = useCreateWorkflow();
@@ -242,8 +252,11 @@ function WorkflowSettingsContent({
 
   const [workflow, setWorkflow] = useState<DemoWorkflow | null>(null);
   /** Selected workflow id whose draft is currently mounted in the editor. */
-  const [hydratedWorkflowId, setHydratedWorkflowId] = useState<string | null>(null);
-  const [previewedVersion, setPreviewedVersion] = useState<MockWorkflowVersion | null>(null);
+  const [hydratedWorkflowId, setHydratedWorkflowId] = useState<string | null>(
+    null,
+  );
+  const [previewedVersion, setPreviewedVersion] =
+    useState<MockWorkflowVersion | null>(null);
   const [managerError, setManagerError] = useState<string | null>(null);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [publishVersionName, setPublishVersionName] = useState("");
@@ -266,7 +279,8 @@ function WorkflowSettingsContent({
   const inspectorCurrentWidthRef = useRef(0);
   const [libraryCollapsed, setLibraryCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
-  const [libraryVisualWidth, setLibraryVisualWidth] = useState(initialLibraryWidth);
+  const [libraryVisualWidth, setLibraryVisualWidth] =
+    useState(initialLibraryWidth);
   const [inspectorVisualWidth, setInspectorVisualWidth] = useState(0);
 
   // Autosave flush reads these after render; keep them current without render-time writes.
@@ -277,15 +291,16 @@ function WorkflowSettingsContent({
 
   /** Library rows for the manager, derived from persisted workflow summaries. */
   const libraryWorkflows: DemoWorkflow[] = useMemo(
-    () => (library.data ?? []).map((summary) => ({
-      id: summary.id,
-      name: summary.name,
-      description: "",
-      updatedAt: workflowTimestampToIso(summary.updatedAt),
-      viewport: { x: 0, y: 0, zoom: 1 },
-      nodes: [],
-      edges: [],
-    })),
+    () =>
+      (library.data ?? []).map((summary) => ({
+        id: summary.id,
+        name: summary.name,
+        description: "",
+        updatedAt: workflowTimestampToIso(summary.updatedAt),
+        viewport: { x: 0, y: 0, zoom: 1 },
+        nodes: [],
+        edges: [],
+      })),
     [library.data],
   );
 
@@ -294,9 +309,9 @@ function WorkflowSettingsContent({
   // not remount the canvas, so timestamp-only draft updates are ignored here;
   // activate clears hydratedWorkflowId to force a same-id reload.
   if (
-    draftQuery.data !== undefined
-    && draftQuery.data.workflow.id === selectedWorkflowId
-    && hydratedWorkflowId !== selectedWorkflowId
+    draftQuery.data !== undefined &&
+    draftQuery.data.workflow.id === selectedWorkflowId &&
+    hydratedWorkflowId !== selectedWorkflowId
   ) {
     const envelope = parseWorkflowGraph(draftQuery.data.draft.graph);
     // Persisted drafts may reference a model that is no longer available. Keep the
@@ -304,42 +319,61 @@ function WorkflowSettingsContent({
     // Agent nodes without a contract (legacy prompt/model graphs folded into Agent
     // on parse) get the default executor so the inspector stays editable.
     const nodes = normalizeWorkflowNodeAgentConfigs(
-      envelope.nodes.map((node) => {
-        if (node.data.kind !== "agent" || node.data.agentConfig !== undefined) {
-          return node;
-        }
-        return {
-          ...node,
-          data: { ...node.data, agentConfig: capabilities.defaultAgentConfig },
-        };
-      }).map((node) => {
-        if (node.data.kind !== "agent" || node.data.agentConfig === undefined) {
-          return node;
-        }
-        if (capabilitiesOverride !== undefined || availableAgentModels.length === 0) {
-          return node;
-        }
-        const { agentCli, modelId } = node.data.agentConfig.executor;
-        if (availableAgentModels.some((model) =>
-          model.agentCli === agentCli && model.modelId === modelId,
-        )) {
-          return node;
-        }
-        const modelForCli = availableAgentModels.find((model) => model.agentCli === agentCli);
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            agentConfig: {
-              ...node.data.agentConfig,
-              executor: {
-                agentCli,
-                modelId: modelForCli?.modelId ?? modelId,
+      envelope.nodes
+        .map((node) => {
+          if (
+            node.data.kind !== "agent" ||
+            node.data.agentConfig !== undefined
+          ) {
+            return node;
+          }
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              agentConfig: capabilities.defaultAgentConfig,
+            },
+          };
+        })
+        .map((node) => {
+          if (
+            node.data.kind !== "agent" ||
+            node.data.agentConfig === undefined
+          ) {
+            return node;
+          }
+          if (
+            capabilitiesOverride !== undefined ||
+            availableAgentModels.length === 0
+          ) {
+            return node;
+          }
+          const { agentCli, modelId } = node.data.agentConfig.executor;
+          if (
+            availableAgentModels.some(
+              (model) =>
+                model.agentCli === agentCli && model.modelId === modelId,
+            )
+          ) {
+            return node;
+          }
+          const modelForCli = availableAgentModels.find(
+            (model) => model.agentCli === agentCli,
+          );
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              agentConfig: {
+                ...node.data.agentConfig,
+                executor: {
+                  agentCli,
+                  modelId: modelForCli?.modelId ?? modelId,
+                },
               },
             },
-          },
-        };
-      }),
+          };
+        }),
     );
     setWorkflow({
       id: draftQuery.data.workflow.id,
@@ -357,27 +391,28 @@ function WorkflowSettingsContent({
   }
 
   if (
-    selectedWorkflowId === null
-    && library.data !== undefined
-    && library.data.length > 0
+    selectedWorkflowId === null &&
+    library.data !== undefined &&
+    library.data.length > 0
   ) {
     setSelectedWorkflowId(library.data[0].id);
   }
 
   /** Maps persisted version summaries into the editor's version-history shape. */
   const versionHistory: MockWorkflowVersion[] = useMemo(
-    () => (versionsQuery.data ?? []).map((version) => ({
-      id: version.id,
-      version: version.version,
-      createdAt: new Intl.DateTimeFormat(i18n.resolvedLanguage, {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }).format(new Date(Number(version.createdAt))),
-      graph: { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
-    })),
+    () =>
+      (versionsQuery.data ?? []).map((version) => ({
+        id: version.id,
+        version: version.version,
+        createdAt: new Intl.DateTimeFormat(i18n.resolvedLanguage, {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }).format(new Date(Number(version.createdAt))),
+        graph: { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } },
+      })),
     [versionsQuery.data, i18n.resolvedLanguage],
   );
 
@@ -397,15 +432,17 @@ function WorkflowSettingsContent({
   }, [draftQuery.data?.draft.updatedAt, i18n.resolvedLanguage]);
 
   const displayedWorkflow = useMemo(
-    () => previewedVersion === null || workflow === null
-      ? workflow
-      : { ...workflow, ...previewedVersion.graph },
+    () =>
+      previewedVersion === null || workflow === null
+        ? workflow
+        : { ...workflow, ...previewedVersion.graph },
     [previewedVersion, workflow],
   );
   const selectedNode = useMemo(
-    () => previewedVersion === null
-      ? workflow?.nodes.find((node) => node.selected === true) ?? null
-      : null,
+    () =>
+      previewedVersion === null
+        ? (workflow?.nodes.find((node) => node.selected === true) ?? null)
+        : null,
     [previewedVersion, workflow],
   );
   const inspectorAvailable = selectedNode !== null;
@@ -426,9 +463,9 @@ function WorkflowSettingsContent({
   /** Restores the workflow library to the last width chosen by the user. */
   function expandLibrary(): void {
     if (
-      inspectorAvailable
-      && (editorLayoutRef.current?.getBoundingClientRect().width ?? Number.POSITIVE_INFINITY)
-        < NARROW_WORKFLOW_EDITOR_WIDTH
+      inspectorAvailable &&
+      (editorLayoutRef.current?.getBoundingClientRect().width ??
+        Number.POSITIVE_INFINITY) < NARROW_WORKFLOW_EDITOR_WIDTH
     ) {
       animateInspectorTo(0, () => {
         setLibraryCollapsed(false);
@@ -473,8 +510,8 @@ function WorkflowSettingsContent({
   /** Opens the contextual inspector and yields library space first on narrow editors. */
   const expandInspector = useCallback((): void => {
     if (
-      (editorLayoutRef.current?.getBoundingClientRect().width ?? Number.POSITIVE_INFINITY)
-      < NARROW_WORKFLOW_EDITOR_WIDTH
+      (editorLayoutRef.current?.getBoundingClientRect().width ??
+        Number.POSITIVE_INFINITY) < NARROW_WORKFLOW_EDITOR_WIDTH
     ) {
       animateLibraryTo(0, () => {
         setInspectorCollapsed(false);
@@ -498,12 +535,14 @@ function WorkflowSettingsContent({
 
   /** Clears node context and collapses the inspector without affecting workflow edits. */
   function closeNodeInspector(): void {
-    setWorkflow((current) => (current === null
-      ? current
-      : {
-          ...current,
-          nodes: current.nodes.map((node) => ({ ...node, selected: false })),
-        }));
+    setWorkflow((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            nodes: current.nodes.map((node) => ({ ...node, selected: false })),
+          },
+    );
     animateInspectorTo(0);
   }
 
@@ -561,7 +600,9 @@ function WorkflowSettingsContent({
    * Reads workflow through a ref so a flush right after setState still sees the
    * latest name/description while toObject() supplies live graph geometry.
    */
-  const persistDraft = useCallback(async (): Promise<"saved" | "stale" | "skipped" | "failed"> => {
+  const persistDraft = useCallback(async (): Promise<
+    "saved" | "stale" | "skipped" | "failed"
+  > => {
     const current = workflowRef.current;
     if (current === null || previewedVersionRef.current !== null) {
       return "skipped";
@@ -648,7 +689,10 @@ function WorkflowSettingsContent({
   }
 
   /** Renames one persisted workflow. */
-  async function renameWorkflow(workflowId: string, name: string): Promise<void> {
+  async function renameWorkflow(
+    workflowId: string,
+    name: string,
+  ): Promise<void> {
     const nextName = name.trim();
     if (nextName === "") {
       return;
@@ -657,9 +701,11 @@ function WorkflowSettingsContent({
     try {
       await renameWorkflowMutation.mutateAsync({ workflowId, name: nextName });
       persistedNameRef.current = nextName;
-      setWorkflow((current) => (current === null || current.id !== workflowId
-        ? current
-        : { ...current, name: nextName }));
+      setWorkflow((current) =>
+        current === null || current.id !== workflowId
+          ? current
+          : { ...current, name: nextName },
+      );
     } catch (cause) {
       setManagerError(localizeContractError(cause, t));
     }
@@ -668,11 +714,11 @@ function WorkflowSettingsContent({
   /** Soft-deletes a workflow and lets the library effect pick the next selection. */
   async function deleteWorkflow(workflowId: string): Promise<void> {
     setManagerError(null);
-    const deletedName = (
-      workflow?.id === workflowId
+    const deletedName =
+      (workflow?.id === workflowId
         ? workflow.name
-        : library.data?.find((item) => item.id === workflowId)?.name
-    ) ?? workflowId;
+        : library.data?.find((item) => item.id === workflowId)?.name) ??
+      workflowId;
     try {
       if (selectedWorkflowId === workflowId) {
         autosave.cancel();
@@ -683,7 +729,9 @@ function WorkflowSettingsContent({
         setHydratedWorkflowId(null);
         setWorkflow(null);
       }
-      toast.success(t("settings.workflow.deleteSuccess", { name: deletedName }));
+      toast.success(
+        t("settings.workflow.deleteSuccess", { name: deletedName }),
+      );
     } catch (cause) {
       setManagerError(localizeContractError(cause, t));
     }
@@ -717,9 +765,11 @@ function WorkflowSettingsContent({
         workflowId: workflow.id,
         version: version === "" ? null : version,
       });
-      toast.success(t("settings.workflow.publishSuccess", {
-        version: result.snapshot.version,
-      }));
+      toast.success(
+        t("settings.workflow.publishSuccess", {
+          version: result.snapshot.version,
+        }),
+      );
     } catch (cause) {
       setManagerError(localizeContractError(cause, t));
     }
@@ -742,8 +792,9 @@ function WorkflowSettingsContent({
     if (!saved) {
       return false;
     }
-    const hasPublished = draftQuery.data?.published != null
-      || draftQuery.data?.workflow.publishedSnapshotId != null;
+    const hasPublished =
+      draftQuery.data?.published != null ||
+      draftQuery.data?.workflow.publishedSnapshotId != null;
     if (hasPublished) {
       return true;
     }
@@ -752,9 +803,11 @@ function WorkflowSettingsContent({
         workflowId: workflow.id,
         version: null,
       });
-      toast.success(t("workflowRun.deployAutoPublished", {
-        version: published.snapshot.version,
-      }));
+      toast.success(
+        t("workflowRun.deployAutoPublished", {
+          version: published.snapshot.version,
+        }),
+      );
       return true;
     } catch (cause) {
       setManagerError(localizeContractError(cause, t));
@@ -808,10 +861,12 @@ function WorkflowSettingsContent({
         workflowId: result.workflow.id,
         version: importPublishVersion(file.name, name),
       });
-      toast.success(t("settings.workflow.importPublishSuccess", {
-        name,
-        version: published.snapshot.version,
-      }));
+      toast.success(
+        t("settings.workflow.importPublishSuccess", {
+          name,
+          version: published.snapshot.version,
+        }),
+      );
     } catch (cause) {
       setManagerError(localizeContractError(cause, t));
     }
@@ -835,7 +890,9 @@ function WorkflowSettingsContent({
   }
 
   /** Opens a published graph in a read-only preview without mutating the editable draft. */
-  async function previewWorkflowVersion(version: MockWorkflowVersion | null): Promise<void> {
+  async function previewWorkflowVersion(
+    version: MockWorkflowVersion | null,
+  ): Promise<void> {
     // Persist pending edits before leaving the editable draft; preview disables autosave.
     const saved = await autosave.flush({ force: true });
     if (!saved) {
@@ -856,7 +913,11 @@ function WorkflowSettingsContent({
         id: version.id,
         version: version.version,
         createdAt: version.createdAt,
-        graph: { nodes: envelope.nodes, edges: envelope.edges, viewport: envelope.viewport },
+        graph: {
+          nodes: envelope.nodes,
+          edges: envelope.edges,
+          viewport: envelope.viewport,
+        },
       });
     } catch (cause) {
       setManagerError(localizeContractError(cause, t));
@@ -864,7 +925,9 @@ function WorkflowSettingsContent({
   }
 
   /** Makes a published snapshot the active run target and loads its graph into the draft. */
-  async function activateWorkflowVersion(version: MockWorkflowVersion): Promise<void> {
+  async function activateWorkflowVersion(
+    version: MockWorkflowVersion,
+  ): Promise<void> {
     if (workflow === null) {
       return;
     }
@@ -887,9 +950,11 @@ function WorkflowSettingsContent({
       // Discard any pre-activate dirty flag; the synced draft remounts next.
       autosave.cancel();
       setHydratedWorkflowId(null);
-      toast.success(t("settings.workflow.activateVersionSuccess", {
-        version: version.version,
-      }));
+      toast.success(
+        t("settings.workflow.activateVersionSuccess", {
+          version: version.version,
+        }),
+      );
     } catch (cause) {
       setManagerError(localizeContractError(cause, t));
     }
@@ -898,7 +963,9 @@ function WorkflowSettingsContent({
   }
 
   /** Soft-deletes a non-active published version. */
-  async function deleteWorkflowVersion(version: MockWorkflowVersion): Promise<void> {
+  async function deleteWorkflowVersion(
+    version: MockWorkflowVersion,
+  ): Promise<void> {
     if (workflow === null) {
       return;
     }
@@ -915,9 +982,11 @@ function WorkflowSettingsContent({
       if (previewedVersion?.version === version.version) {
         setPreviewedVersion(null);
       }
-      toast.success(t("settings.workflow.deleteVersionSuccess", {
-        version: version.version,
-      }));
+      toast.success(
+        t("settings.workflow.deleteVersionSuccess", {
+          version: version.version,
+        }),
+      );
     } catch (cause) {
       setManagerError(localizeContractError(cause, t));
     }
@@ -926,8 +995,9 @@ function WorkflowSettingsContent({
   /** Adds a catalog node at a canvas-provided position and selects it for immediate editing. */
   function addNode(kind: WorkflowNodeKind, position: XYPosition): void {
     if (
-      workflow === null
-      || (kind === "start" && workflow.nodes.some((node) => node.data.kind === "start"))
+      workflow === null ||
+      (kind === "start" &&
+        workflow.nodes.some((node) => node.data.kind === "start"))
     ) {
       return;
     }
@@ -940,12 +1010,16 @@ function WorkflowSettingsContent({
       sequence,
       position,
       locale,
-      agentConfig: kind === "agent" ? capabilities.defaultAgentConfig : undefined,
+      agentConfig:
+        kind === "agent" ? capabilities.defaultAgentConfig : undefined,
     });
     updateWorkflow((current) => ({
       ...current,
       nodes: [
-        ...current.nodes.map((candidate) => ({ ...candidate, selected: false })),
+        ...current.nodes.map((candidate) => ({
+          ...candidate,
+          selected: false,
+        })),
         { ...node, selected: true },
       ],
     }));
@@ -978,14 +1052,19 @@ function WorkflowSettingsContent({
   }
 
   /** Applies React Flow node changes directly to the active graph. */
-  function changeNodes(changes: NodeChange<Node<WorkflowNodeData, "workflow">>[]): void {
+  function changeNodes(
+    changes: NodeChange<Node<WorkflowNodeData, "workflow">>[],
+  ): void {
     const persistable = changes.some(
       (change) => change.type !== "select" && change.type !== "dimensions",
     );
     updateWorkflow(
       (current) => ({
         ...current,
-        nodes: applyNodeChanges<Node<WorkflowNodeData, "workflow">>(changes, current.nodes),
+        nodes: applyNodeChanges<Node<WorkflowNodeData, "workflow">>(
+          changes,
+          current.nodes,
+        ),
       }),
       { persist: persistable },
     );
@@ -1008,9 +1087,9 @@ function WorkflowSettingsContent({
       className="flex h-full min-h-0 flex-col bg-background"
       onKeyDown={(event) => {
         if (
-          event.key === "Escape"
-          && !event.defaultPrevented
-          && selectedNode !== null
+          event.key === "Escape" &&
+          !event.defaultPrevented &&
+          selectedNode !== null
         ) {
           event.preventDefault();
           event.stopPropagation();
@@ -1024,7 +1103,9 @@ function WorkflowSettingsContent({
         </span>
         <div className="min-w-0 flex-1">
           {workflow === null ? (
-            <h2 className="text-sm font-semibold">{t("settings.workflow.library")}</h2>
+            <h2 className="text-sm font-semibold">
+              {t("settings.workflow.library")}
+            </h2>
           ) : (
             <>
               <div className="flex items-center gap-2">
@@ -1032,7 +1113,10 @@ function WorkflowSettingsContent({
                   value={workflow.name}
                   disabled={previewedVersion !== null}
                   onChange={(event) =>
-                    updateWorkflow((current) => ({ ...current, name: event.target.value }))
+                    updateWorkflow((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
                   }
                   aria-label={t("settings.workflow.workflowName")}
                   className="h-7 max-w-72 border-transparent bg-transparent px-1 text-sm font-semibold shadow-none hover:border-border focus-visible:border-border"
@@ -1113,8 +1197,9 @@ function WorkflowSettingsContent({
                   0,
                   Math.min(
                     1,
-                    (libraryVisualWidth - WORKFLOW_LIBRARY_FADE_START)
-                      / (MIN_WORKFLOW_LIBRARY_WIDTH - WORKFLOW_LIBRARY_FADE_START),
+                    (libraryVisualWidth - WORKFLOW_LIBRARY_FADE_START) /
+                      (MIN_WORKFLOW_LIBRARY_WIDTH -
+                        WORKFLOW_LIBRARY_FADE_START),
                   ),
                 ),
               }}
@@ -1125,7 +1210,9 @@ function WorkflowSettingsContent({
                 error={managerError}
                 onSelect={(workflowId) => void selectWorkflow(workflowId)}
                 onCreate={(name) => void createWorkflow(name)}
-                onRename={(workflowId, name) => void renameWorkflow(workflowId, name)}
+                onRename={(workflowId, name) =>
+                  void renameWorkflow(workflowId, name)
+                }
                 onDelete={(workflowId) => void deleteWorkflow(workflowId)}
                 onImport={(file) => void importWorkflow(file)}
                 onCollapse={collapseLibrary}
@@ -1137,18 +1224,25 @@ function WorkflowSettingsContent({
             aria-label={t("settings.workflow.resizeLibrary")}
             title={t("settings.workflow.resizeLibrary")}
             className="z-20 after:w-3 transition-colors hover:bg-ring focus-visible:bg-ring"
-            onPointerDown={() => cancelWorkflowPanelAnimation(libraryAnimationRef)}
+            onPointerDown={() =>
+              cancelWorkflowPanelAnimation(libraryAnimationRef)
+            }
             onDoubleClick={() => {
               libraryWidthRef.current = DEFAULT_WORKFLOW_LIBRARY_WIDTH;
               libraryPanelRef.current?.resize(DEFAULT_WORKFLOW_LIBRARY_WIDTH);
             }}
           />
-          <ResizablePanel id="workflow-canvas" minSize={MIN_WORKFLOW_CANVAS_WIDTH}>
+          <ResizablePanel
+            id="workflow-canvas"
+            minSize={MIN_WORKFLOW_CANVAS_WIDTH}
+          >
             {displayedWorkflow === null ? (
               <WorkflowEmpty
                 onCreate={() =>
                   void createWorkflow(
-                    t("settings.workflow.untitledWorkflow", { count: libraryWorkflows.length + 1 }),
+                    t("settings.workflow.untitledWorkflow", {
+                      count: libraryWorkflows.length + 1,
+                    }),
                   )
                 }
               />
@@ -1173,9 +1267,15 @@ function WorkflowSettingsContent({
                 previewedVersion={previewedVersion}
                 activeVersion={draftQuery.data?.published?.version ?? null}
                 draftUpdatedAt={draftUpdatedAt}
-                onPreviewVersion={(version) => void previewWorkflowVersion(version)}
-                onActivateVersion={(version) => void activateWorkflowVersion(version)}
-                onDeleteVersion={(version) => void deleteWorkflowVersion(version)}
+                onPreviewVersion={(version) =>
+                  void previewWorkflowVersion(version)
+                }
+                onActivateVersion={(version) =>
+                  void activateWorkflowVersion(version)
+                }
+                onDeleteVersion={(version) =>
+                  void deleteWorkflowVersion(version)
+                }
                 readOnly={previewedVersion !== null}
               />
             )}
@@ -1185,10 +1285,14 @@ function WorkflowSettingsContent({
             aria-label={t("settings.workflow.resizeConfiguration")}
             title={t("settings.workflow.resizeConfiguration")}
             className="z-20 after:w-3 transition-colors hover:bg-ring focus-visible:bg-ring"
-            onPointerDown={() => cancelWorkflowPanelAnimation(inspectorAnimationRef)}
+            onPointerDown={() =>
+              cancelWorkflowPanelAnimation(inspectorAnimationRef)
+            }
             onDoubleClick={() => {
               inspectorWidthRef.current = DEFAULT_WORKFLOW_INSPECTOR_WIDTH;
-              inspectorPanelRef.current?.resize(DEFAULT_WORKFLOW_INSPECTOR_WIDTH);
+              inspectorPanelRef.current?.resize(
+                DEFAULT_WORKFLOW_INSPECTOR_WIDTH,
+              );
             }}
           />
           <ResizablePanel
@@ -1218,8 +1322,9 @@ function WorkflowSettingsContent({
                   0,
                   Math.min(
                     1,
-                    (inspectorVisualWidth - WORKFLOW_INSPECTOR_FADE_START)
-                      / (MIN_WORKFLOW_INSPECTOR_WIDTH - WORKFLOW_INSPECTOR_FADE_START),
+                    (inspectorVisualWidth - WORKFLOW_INSPECTOR_FADE_START) /
+                      (MIN_WORKFLOW_INSPECTOR_WIDTH -
+                        WORKFLOW_INSPECTOR_FADE_START),
                   ),
                 ),
               }}
@@ -1258,7 +1363,9 @@ function WorkflowSettingsContent({
       <AlertDialog open={publishDialogOpen} onOpenChange={setPublishDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("settings.workflow.publishTitle")}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t("settings.workflow.publishTitle")}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {t("settings.workflow.publishDescription")}
             </AlertDialogDescription>
@@ -1298,7 +1405,9 @@ function WorkflowEmpty({ onCreate }: { onCreate: () => void }) {
         <span className="mx-auto flex size-10 items-center justify-center rounded-xl border border-border bg-background shadow-sm">
           <IconRoute className="size-4 text-muted-foreground" />
         </span>
-        <h3 className="mt-3 text-sm font-semibold">{t("settings.workflow.emptyTitle")}</h3>
+        <h3 className="mt-3 text-sm font-semibold">
+          {t("settings.workflow.emptyTitle")}
+        </h3>
         <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
           {t("settings.workflow.emptyDescription")}
         </p>

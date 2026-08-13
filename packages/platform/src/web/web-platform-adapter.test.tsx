@@ -1,11 +1,20 @@
 import type { ContractsClient, ListDirectoryResponse } from "@ora/contracts";
 import { PlatformHost, PlatformProvider } from "../index";
 import { PathSelectionInProgressError, type SelectPathOptions } from "../types";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { createWebPlatformAdapter, type WebPlatformAdapter } from "./web-platform-adapter";
+import {
+  createWebPlatformAdapter,
+  type WebPlatformAdapter,
+} from "./web-platform-adapter";
 
 const homeDirectory: ListDirectoryResponse = {
   currentPath: "/home/ora",
@@ -38,7 +47,9 @@ const homeDirectory: ListDirectoryResponse = {
 };
 
 /** Builds the narrow contracts client surface owned by the Web adapter. */
-function fileSystemClient(listDirectory = vi.fn().mockResolvedValue(homeDirectory)) {
+function fileSystemClient(
+  listDirectory = vi.fn().mockResolvedValue(homeDirectory),
+) {
   return {
     client: { fileSystem: { listDirectory } } as unknown as ContractsClient,
     listDirectory,
@@ -58,7 +69,11 @@ function PickerHarness({
     <PlatformProvider adapter={adapter}>
       <button
         type="button"
-        onClick={() => void adapter.selectPath(options).then((path) => setResult(path ?? "cancelled"))}
+        onClick={() =>
+          void adapter
+            .selectPath(options)
+            .then((path) => setResult(path ?? "cancelled"))
+        }
       >
         Browse
       </button>
@@ -135,7 +150,11 @@ describe("WebPlatformAdapter", () => {
       maxInlineSize: "calc(100vw - 2rem)",
       maxBlockSize: "calc(100dvh - 2rem)",
     });
-    expect(screen.getByRole("listbox")).toHaveClass("min-h-0", "flex-1", "overflow-auto");
+    expect(screen.getByRole("listbox")).toHaveClass(
+      "min-h-0",
+      "flex-1",
+      "overflow-auto",
+    );
   });
 
   it("uses the same single-column list for a small directory", async () => {
@@ -152,14 +171,18 @@ describe("WebPlatformAdapter", () => {
   });
 
   it("summarizes a deep path instead of rendering every breadcrumb", async () => {
-    const currentPath = "/home/ora/projects/very-long-organization-name/very-long-repository-name";
+    const currentPath =
+      "/home/ora/projects/very-long-organization-name/very-long-repository-name";
     const directory: ListDirectoryResponse = {
       ...homeDirectory,
       currentPath,
       breadcrumbs: [
         ...homeDirectory.breadcrumbs,
         { name: "projects", path: "/home/ora/projects" },
-        { name: "very-long-organization-name", path: "/home/ora/projects/very-long-organization-name" },
+        {
+          name: "very-long-organization-name",
+          path: "/home/ora/projects/very-long-organization-name",
+        },
         { name: "very-long-repository-name", path: currentPath },
       ],
     };
@@ -170,8 +193,12 @@ describe("WebPlatformAdapter", () => {
 
     await user.click(screen.getByRole("button", { name: "Browse" }));
 
-    expect(await screen.findByRole("textbox", { name: "Absolute path" })).toHaveValue(currentPath);
-    expect(screen.queryByRole("button", { name: "projects" })).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("textbox", { name: "Absolute path" }),
+    ).toHaveValue(currentPath);
+    expect(
+      screen.queryByRole("button", { name: "projects" }),
+    ).not.toBeInTheDocument();
   });
 
   it("returns files in file mode while keeping directories navigable", async () => {
@@ -206,7 +233,10 @@ describe("WebPlatformAdapter", () => {
     const projectsDirectory: ListDirectoryResponse = {
       currentPath: "/home/ora/projects",
       parentPath: "/home/ora",
-      breadcrumbs: [...homeDirectory.breadcrumbs, { name: "projects", path: "/home/ora/projects" }],
+      breadcrumbs: [
+        ...homeDirectory.breadcrumbs,
+        { name: "projects", path: "/home/ora/projects" },
+      ],
       entries: [],
     };
     const listDirectory = vi
@@ -227,8 +257,12 @@ describe("WebPlatformAdapter", () => {
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("This folder is empty")).toBeVisible();
-    expect(listDirectory).toHaveBeenNthCalledWith(2, { path: "/home/ora/projects" });
-    expect(listDirectory).toHaveBeenNthCalledWith(3, { path: "/home/ora/projects" });
+    expect(listDirectory).toHaveBeenNthCalledWith(2, {
+      path: "/home/ora/projects",
+    });
+    expect(listDirectory).toHaveBeenNthCalledWith(3, {
+      path: "/home/ora/projects",
+    });
   });
 
   it("renders a new virtual range after scrolling a large directory", async () => {
@@ -241,7 +275,9 @@ describe("WebPlatformAdapter", () => {
         isSymbolicLink: false,
       })),
     };
-    const { client } = fileSystemClient(vi.fn().mockResolvedValue(largeDirectory));
+    const { client } = fileSystemClient(
+      vi.fn().mockResolvedValue(largeDirectory),
+    );
     const adapter = createWebPlatformAdapter(client);
     const user = userEvent.setup();
     render(<PickerHarness adapter={adapter} options={{ kind: "file" }} />);
@@ -303,7 +339,10 @@ describe("WebPlatformAdapter", () => {
     const { client } = fileSystemClient(listDirectory);
     const adapter = createWebPlatformAdapter(client);
 
-    const selection = adapter.selectPath({ kind: "directory", initialPath: "/missing" });
+    const selection = adapter.selectPath({
+      kind: "directory",
+      initialPath: "/missing",
+    });
     render(
       <PlatformProvider adapter={adapter}>
         <PlatformHost locale="en-US" />

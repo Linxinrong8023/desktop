@@ -93,14 +93,18 @@ type ConnectionDraft =
     };
 
 /** Finds the workflow card under a pointer so the whole card remains a forgiving drop zone. */
-function workflowNodeAtClientPoint(clientX: number, clientY: number): string | null {
+function workflowNodeAtClientPoint(
+  clientX: number,
+  clientY: number,
+): string | null {
   const element = document.elementFromPoint(clientX, clientY);
   if (!(element instanceof Element)) {
     return null;
   }
-  return element
-    .closest<HTMLElement>("[data-workflow-node-id]")
-    ?.dataset.workflowNodeId ?? null;
+  return (
+    element.closest<HTMLElement>("[data-workflow-node-id]")?.dataset
+      .workflowNodeId ?? null
+  );
 }
 
 /** Normalizes mouse and touch releases for whole-card connection fallback. */
@@ -109,9 +113,7 @@ function connectionEndClientPoint(
 ): XYPosition | null {
   if ("changedTouches" in event) {
     const touch = event.changedTouches.item(0);
-    return touch === null
-      ? null
-      : { x: touch.clientX, y: touch.clientY };
+    return touch === null ? null : { x: touch.clientX, y: touch.clientY };
   }
   return { x: event.clientX, y: event.clientY };
 }
@@ -169,12 +171,14 @@ function WorkflowCanvasInner({
 }: WorkflowCanvasProps) {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLDivElement>(null);
-  const [connectionDraft, setConnectionDraft] = useState<ConnectionDraft | null>(null);
+  const [connectionDraft, setConnectionDraft] =
+    useState<ConnectionDraft | null>(null);
   const connectionCandidateFrameRef = useRef<number | null>(null);
   const connectionCandidatePointRef = useRef<XYPosition | null>(null);
   const connectionCandidateNodeIdRef = useRef<string | null>(null);
-  const [connectionCandidateNodeId, setConnectionCandidateNodeId] =
-    useState<string | null>(null);
+  const [connectionCandidateNodeId, setConnectionCandidateNodeId] = useState<
+    string | null
+  >(null);
   const { deleteElements, screenToFlowPosition, setViewport } = useReactFlow();
   const reconnectingEdgeIdRef = useRef<string | null>(null);
   const edgeIdByDirectedPair = useMemo(() => {
@@ -188,38 +192,41 @@ function WorkflowCanvasInner({
   /** Rejects self-loops and duplicate directed edges during connect and reconnect. */
   function isValidConnection(connection: Connection | Edge): boolean {
     if (
-      connection.source === null
-      || connection.target === null
-      || connection.source === connection.target
+      connection.source === null ||
+      connection.target === null ||
+      connection.source === connection.target
     ) {
       return false;
     }
     const existingEdgeId = edgeIdByDirectedPair.get(
       `${connection.source}\u0000${connection.target}`,
     );
-    return existingEdgeId === undefined
-      || existingEdgeId === reconnectingEdgeIdRef.current;
+    return (
+      existingEdgeId === undefined ||
+      existingEdgeId === reconnectingEdgeIdRef.current
+    );
   }
 
-  const connectionState = useMemo(
-    () => {
-      return {
-        connectionCandidateEndpoint: connectionCandidateNodeId === null
+  const connectionState = useMemo(() => {
+    return {
+      connectionCandidateEndpoint:
+        connectionCandidateNodeId === null
           ? null
           : connectionDraft?.kind === "new"
-            ? "target" as const
-            : connectionDraft?.endpoint ?? null,
-        connectionCandidateNodeId,
-      };
-    },
-    [connectionCandidateNodeId, connectionDraft],
-  );
+            ? ("target" as const)
+            : (connectionDraft?.endpoint ?? null),
+      connectionCandidateNodeId,
+    };
+  }, [connectionCandidateNodeId, connectionDraft]);
 
-  useEffect(() => () => {
-    if (connectionCandidateFrameRef.current !== null) {
-      cancelAnimationFrame(connectionCandidateFrameRef.current);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (connectionCandidateFrameRef.current !== null) {
+        cancelAnimationFrame(connectionCandidateFrameRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     // Version preview replaces the displayed graph without remounting the
@@ -273,10 +280,11 @@ function WorkflowCanvasInner({
         return;
       }
       const candidate = workflowNodeAtClientPoint(point.x, point.y);
-      const validCandidate = candidate !== null
-        && isValidConnection(connectionForCandidate(draft, candidate))
-        ? candidate
-        : null;
+      const validCandidate =
+        candidate !== null &&
+        isValidConnection(connectionForCandidate(draft, candidate))
+          ? candidate
+          : null;
       commitConnectionCandidate(validCandidate);
     });
   }
@@ -287,9 +295,9 @@ function WorkflowCanvasInner({
     // The reconnect draft must remain authoritative or a moved endpoint becomes
     // an accidental new edge.
     if (
-      reconnectingEdgeIdRef.current === null
-      && params.nodeId !== null
-      && params.handleType === "source"
+      reconnectingEdgeIdRef.current === null &&
+      params.nodeId !== null &&
+      params.handleType === "source"
     ) {
       setConnectionDraft({
         kind: "new",
@@ -310,10 +318,7 @@ function WorkflowCanvasInner({
       return;
     }
     const point = connectionEndClientPoint(event);
-    if (
-      connectionState.isValid !== true
-      && point !== null
-    ) {
+    if (connectionState.isValid !== true && point !== null) {
       const candidate = workflowNodeAtClientPoint(point.x, point.y);
       if (candidate !== null) {
         const connection = connectionForCandidate(draft, candidate);
@@ -335,9 +340,9 @@ function WorkflowCanvasInner({
     const draft = connectionDraft;
     const point = connectionEndClientPoint(event);
     if (
-      connectionState.isValid !== true
-      && draft?.kind === "reconnect"
-      && point !== null
+      connectionState.isValid !== true &&
+      draft?.kind === "reconnect" &&
+      point !== null
     ) {
       const candidate = workflowNodeAtClientPoint(point.x, point.y);
       if (candidate !== null) {
@@ -374,11 +379,11 @@ function WorkflowCanvasInner({
   ): void {
     const bounds = canvasRef.current?.getBoundingClientRect();
     if (
-      bounds === undefined
-      || position.x < bounds.left
-      || position.x > bounds.right
-      || position.y < bounds.top
-      || position.y > bounds.bottom
+      bounds === undefined ||
+      position.x < bounds.left ||
+      position.x > bounds.right ||
+      position.y < bounds.top ||
+      position.y > bounds.bottom
     ) {
       return;
     }
@@ -402,7 +407,9 @@ function WorkflowCanvasInner({
    * Blocks pan starts in the thin horizontal strip where resizable panel
    * handles overlap the canvas so a near-miss resize never becomes a pan.
    */
-  function guardPanelResizeEdge(event: ReactPointerEvent<HTMLDivElement>): void {
+  function guardPanelResizeEdge(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void {
     const bounds = event.currentTarget.getBoundingClientRect();
     const nearestHorizontalEdge = Math.min(
       event.clientX - bounds.left,

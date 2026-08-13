@@ -54,7 +54,6 @@ type InstalledEntry =
   | { source: "catalog"; plugin: PluginEntry }
   | { source: "discovered"; plugin: InstalledPlugin };
 
-
 /**
  * The plugin marketplace pane: an installed strip, a public/personal browse grid and a
  * per-plugin detail page. The catalog is hard-coded and most plugins' install state lives
@@ -65,11 +64,17 @@ type InstalledEntry =
 export function PluginsSettings() {
   const { t } = useTranslation();
   const installedIds = usePluginInstallStore((state) => state.installedIds);
-  const toggleInstalledId = usePluginInstallStore((state) => state.toggleInstalled);
+  const toggleInstalledId = usePluginInstallStore(
+    (state) => state.toggleInstalled,
+  );
   const disabledIds = usePluginInstallStore((state) => state.disabledIds);
   const toggleEnabledId = usePluginInstallStore((state) => state.toggleEnabled);
-  const pendingInstallIds = usePluginInstallStore((state) => state.pendingInstallIds);
-  const pendingEnableIds = usePluginInstallStore((state) => state.pendingEnableIds);
+  const pendingInstallIds = usePluginInstallStore(
+    (state) => state.pendingInstallIds,
+  );
+  const pendingEnableIds = usePluginInstallStore(
+    (state) => state.pendingEnableIds,
+  );
   const discoveredPlugins = useInstalledPlugins().data ?? [];
   const [query, setQuery] = useState("");
   const [collection, setCollection] = useState<PluginCollection>("public");
@@ -85,17 +90,21 @@ export function PluginsSettings() {
     const statuses = new Map<string, AgentCliStatus>();
     for (const plugin of PLUGIN_CATALOG) {
       if (!plugin.detectionAgentCli) continue;
-      const match = agentRuntimeStatuses?.find((status) => status.agentCli === plugin.detectionAgentCli);
+      const match = agentRuntimeStatuses?.find(
+        (status) => status.agentCli === plugin.detectionAgentCli,
+      );
       statuses.set(plugin.id, match?.status ?? "starting");
     }
     return statuses;
   }, [agentRuntimeStatuses]);
 
-  const isInstalled = useCallback((plugin: PluginEntry) => (
-    plugin.detectionAgentCli
-      ? detectionStatusByPluginId.get(plugin.id) === "ready"
-      : installedIds.includes(plugin.id)
-  ), [detectionStatusByPluginId, installedIds]);
+  const isInstalled = useCallback(
+    (plugin: PluginEntry) =>
+      plugin.detectionAgentCli
+        ? detectionStatusByPluginId.get(plugin.id) === "ready"
+        : installedIds.includes(plugin.id),
+    [detectionStatusByPluginId, installedIds],
+  );
 
   // Both mutations resolve behind a simulated delay owned by the store; nothing here
   // awaits them because every control re-renders off the store's pending id lists.
@@ -112,14 +121,24 @@ export function PluginsSettings() {
 
   const installedEntries: InstalledEntry[] = [
     ...installed.map((plugin) => ({ source: "catalog" as const, plugin })),
-    ...discoveredPlugins.map((plugin) => ({ source: "discovered" as const, plugin })),
+    ...discoveredPlugins.map((plugin) => ({
+      source: "discovered" as const,
+      plugin,
+    })),
   ];
   const needle = query.trim().toLowerCase();
-  const visible = useMemo(() => PLUGIN_CATALOG.filter((plugin) => plugin.collection === collection
-    && (!needle
-      || plugin.name.toLowerCase().includes(needle)
-      || plugin.publisher.toLowerCase().includes(needle)
-      || t(plugin.summaryKey).toLowerCase().includes(needle))), [collection, needle, t]);
+  const visible = useMemo(
+    () =>
+      PLUGIN_CATALOG.filter(
+        (plugin) =>
+          plugin.collection === collection &&
+          (!needle ||
+            plugin.name.toLowerCase().includes(needle) ||
+            plugin.publisher.toLowerCase().includes(needle) ||
+            t(plugin.summaryKey).toLowerCase().includes(needle)),
+      ),
+    [collection, needle, t],
+  );
 
   const openPlugin = openId === null ? undefined : findPlugin(openId);
   if (openPlugin) {
@@ -158,11 +177,20 @@ export function PluginsSettings() {
   const featured = visible.filter((plugin) => plugin.featured);
   const rest = visible.filter((plugin) => !plugin.featured);
   const collapsible = rest.length > NAMED_IN_SHOW_MORE;
-  const grid = { installedIds, pendingInstallIds, detectionStatusByPluginId, onOpen: setOpenId, onToggleInstall: toggleInstall };
+  const grid = {
+    installedIds,
+    pendingInstallIds,
+    detectionStatusByPluginId,
+    onOpen: setOpenId,
+    onToggleInstall: toggleInstall,
+  };
 
   return (
     <div className="space-y-6">
-      <SettingsHeading title={t("settings.plugins.title")} description={t("settings.plugins.description")} />
+      <SettingsHeading
+        title={t("settings.plugins.title")}
+        description={t("settings.plugins.description")}
+      />
 
       <div className="relative">
         <IconSearch className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -189,7 +217,9 @@ export function PluginsSettings() {
       {needle.length === 0 && (
         <section>
           <div className="flex h-8 items-center justify-between border-b border-border">
-            <h3 className="text-sm font-medium">{t("settings.plugins.installed")}</h3>
+            <h3 className="text-sm font-medium">
+              {t("settings.plugins.installed")}
+            </h3>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -202,12 +232,27 @@ export function PluginsSettings() {
           </div>
           {/* Never wraps: the overflow tile is the row's last cell, not a second line. */}
           <div className="flex flex-nowrap items-start gap-x-2 overflow-hidden pt-2">
-            {installedEntries.length === 0 && <p className="py-4 text-sm text-muted-foreground">{t("settings.plugins.noneInstalled")}</p>}
-            {installedEntries.slice(0, MAX_INSTALLED_TILES).map((entry) => (
-              entry.source === "catalog"
-                ? <InstalledTile key={`catalog:${entry.plugin.id}`} plugin={entry.plugin} onOpen={() => setOpenId(entry.plugin.id)} />
-                : <DiscoveredInstalledTile key={`discovered:${entry.plugin.id}`} plugin={entry.plugin} />
-            ))}
+            {installedEntries.length === 0 && (
+              <p className="py-4 text-sm text-muted-foreground">
+                {t("settings.plugins.noneInstalled")}
+              </p>
+            )}
+            {installedEntries
+              .slice(0, MAX_INSTALLED_TILES)
+              .map((entry) =>
+                entry.source === "catalog" ? (
+                  <InstalledTile
+                    key={`catalog:${entry.plugin.id}`}
+                    plugin={entry.plugin}
+                    onOpen={() => setOpenId(entry.plugin.id)}
+                  />
+                ) : (
+                  <DiscoveredInstalledTile
+                    key={`discovered:${entry.plugin.id}`}
+                    plugin={entry.plugin}
+                  />
+                ),
+              )}
             {installedEntries.length > MAX_INSTALLED_TILES && (
               <InstalledOverflowTile
                 hidden={installedEntries.length - MAX_INSTALLED_TILES}
@@ -228,23 +273,42 @@ export function PluginsSettings() {
           }}
         >
           <TabsList>
-            <TabsTrigger value="public">{t("settings.plugins.public")}</TabsTrigger>
-            <TabsTrigger value="personal">{t("settings.plugins.personal")}</TabsTrigger>
+            <TabsTrigger value="public">
+              {t("settings.plugins.public")}
+            </TabsTrigger>
+            <TabsTrigger value="personal">
+              {t("settings.plugins.personal")}
+            </TabsTrigger>
           </TabsList>
         </Tabs>
         {/* Placeholder: the filter affordance is drawn but carries no behaviour yet. */}
-        <Button variant="ghost" size="icon-sm" aria-label={t("settings.plugins.filter")} className="shrink-0 text-muted-foreground">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("settings.plugins.filter")}
+          className="shrink-0 text-muted-foreground"
+        >
           <IconFilter />
         </Button>
       </div>
 
-      {visible.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">{t("settings.plugins.empty")}</p>}
+      {visible.length === 0 && (
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          {t("settings.plugins.empty")}
+        </p>
+      )}
 
       {visible.length > 0 && searching && (
         <section className="space-y-2">
           <h3 className="flex items-baseline gap-2 text-sm font-medium">
-            {t(collection === "public" ? "settings.plugins.public" : "settings.plugins.personal")}
-            <span className="font-normal text-muted-foreground">{visible.length}</span>
+            {t(
+              collection === "public"
+                ? "settings.plugins.public"
+                : "settings.plugins.personal",
+            )}
+            <span className="font-normal text-muted-foreground">
+              {visible.length}
+            </span>
           </h3>
           <PluginGrid items={visible} {...grid} />
         </section>
@@ -254,23 +318,34 @@ export function PluginsSettings() {
         <>
           {featured.length > 0 && (
             <section className="space-y-2">
-              <h3 className="text-sm font-medium">{t("settings.plugins.featured")}</h3>
+              <h3 className="text-sm font-medium">
+                {t("settings.plugins.featured")}
+              </h3>
               <PluginGrid items={featured} {...grid} />
             </section>
           )}
           {rest.length > 0 && (!collapsible || expanded) && (
             <section className="space-y-2">
-              <h3 className="text-sm font-medium">{t("settings.plugins.more")}</h3>
+              <h3 className="text-sm font-medium">
+                {t("settings.plugins.more")}
+              </h3>
               <PluginGrid items={rest} {...grid} />
               {collapsible && (
-                <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setExpanded(false)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                  onClick={() => setExpanded(false)}
+                >
                   {t("settings.plugins.showLess")}
                   <IconChevronUp />
                 </Button>
               )}
             </section>
           )}
-          {collapsible && !expanded && <ShowMoreRow plugins={rest} onExpand={() => setExpanded(true)} />}
+          {collapsible && !expanded && (
+            <ShowMoreRow plugins={rest} onExpand={() => setExpanded(true)} />
+          )}
         </>
       )}
     </div>
@@ -278,7 +353,13 @@ export function PluginsSettings() {
 }
 
 /** An installed plugin in the icon strip. The name stays visible; hovering lifts the tile. */
-function InstalledTile({ plugin, onOpen }: { plugin: PluginEntry; onOpen: () => void }) {
+function InstalledTile({
+  plugin,
+  onOpen,
+}: {
+  plugin: PluginEntry;
+  onOpen: () => void;
+}) {
   return (
     <button
       type="button"
@@ -321,7 +402,15 @@ function DiscoveredInstalledTile({ plugin }: { plugin: InstalledPlugin }) {
  * instead of wrapping onto a second line.
  */
 
-function InstalledOverflowTile({ hidden, total, onOpen }: { hidden: number; total: number; onOpen: () => void }) {
+function InstalledOverflowTile({
+  hidden,
+  total,
+  onOpen,
+}: {
+  hidden: number;
+  total: number;
+  onOpen: () => void;
+}) {
   const { t } = useTranslation();
   return (
     <button
@@ -341,7 +430,14 @@ function InstalledOverflowTile({ hidden, total, onOpen }: { hidden: number; tota
 }
 
 /** Two-column browse grid shared by the featured, expanded and search result sections. */
-function PluginGrid({ items, installedIds, pendingInstallIds, detectionStatusByPluginId, onOpen, onToggleInstall }: {
+function PluginGrid({
+  items,
+  installedIds,
+  pendingInstallIds,
+  detectionStatusByPluginId,
+  onOpen,
+  onToggleInstall,
+}: {
   items: PluginEntry[];
   installedIds: string[];
   pendingInstallIds: string[];
@@ -357,7 +453,11 @@ function PluginGrid({ items, installedIds, pendingInstallIds, detectionStatusByP
           <PluginCard
             key={plugin.id}
             plugin={plugin}
-            installed={detectionStatus ? detectionStatus === "ready" : installedIds.includes(plugin.id)}
+            installed={
+              detectionStatus
+                ? detectionStatus === "ready"
+                : installedIds.includes(plugin.id)
+            }
             pending={pendingInstallIds.includes(plugin.id)}
             onOpen={() => onOpen(plugin.id)}
             onToggleInstall={() => onToggleInstall(plugin.id)}
@@ -369,7 +469,13 @@ function PluginGrid({ items, installedIds, pendingInstallIds, detectionStatusByP
 }
 
 /** One catalog row: the mark and copy open the detail page, the trailing control installs it. */
-function PluginCard({ plugin, installed, pending, onOpen, onToggleInstall }: {
+function PluginCard({
+  plugin,
+  installed,
+  pending,
+  onOpen,
+  onToggleInstall,
+}: {
   plugin: PluginEntry;
   installed: boolean;
   pending: boolean;
@@ -386,50 +492,101 @@ function PluginCard({ plugin, installed, pending, onOpen, onToggleInstall }: {
       >
         <PluginTile plugin={plugin} />
         <span className="min-w-0">
-          <span className="block truncate text-sm font-medium">{plugin.name}</span>
-          <span className="block truncate text-xs text-muted-foreground">{t(plugin.summaryKey)}</span>
-          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/80">{plugin.publisher}</span>
+          <span className="block truncate text-sm font-medium">
+            {plugin.name}
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">
+            {t(plugin.summaryKey)}
+          </span>
+          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/80">
+            {plugin.publisher}
+          </span>
         </span>
       </button>
       {/* In flight, the menu and the install button both give way to one inert progress
           button, so the row cannot start a second mutation or be uninstalled mid-install. */}
-      {pending
-        ? (
-          <Button variant="outline" size="sm" disabled className="shrink-0">
-            <IconLoader2 className="animate-spin" />
-            {t(installed ? "settings.plugins.uninstalling" : "settings.plugins.installing")}
-          </Button>
-        )
-        : installed
-          ? <PluginActionsMenu plugin={plugin} onOpen={onOpen} onUninstall={onToggleInstall} />
-          : <Button variant="outline" size="sm" className="shrink-0" onClick={onToggleInstall}>{t("settings.plugins.install")}</Button>}
+      {pending ? (
+        <Button variant="outline" size="sm" disabled className="shrink-0">
+          <IconLoader2 className="animate-spin" />
+          {t(
+            installed
+              ? "settings.plugins.uninstalling"
+              : "settings.plugins.installing",
+          )}
+        </Button>
+      ) : installed ? (
+        <PluginActionsMenu
+          plugin={plugin}
+          onOpen={onOpen}
+          onUninstall={onToggleInstall}
+        />
+      ) : (
+        <Button
+          variant="outline"
+          size="sm"
+          className="shrink-0"
+          onClick={onToggleInstall}
+        >
+          {t("settings.plugins.install")}
+        </Button>
+      )}
     </div>
   );
 }
 
 /** The overflow menu shown in place of the install button once a plugin is installed. */
-function PluginActionsMenu({ plugin, onOpen, onUninstall }: { plugin: PluginEntry; onOpen: () => void; onUninstall: () => void }) {
+function PluginActionsMenu({
+  plugin,
+  onOpen,
+  onUninstall,
+}: {
+  plugin: PluginEntry;
+  onOpen: () => void;
+  onUninstall: () => void;
+}) {
   const { t } = useTranslation();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<Button variant="ghost" size="icon-sm" aria-label={t("settings.plugins.openMenu", { name: plugin.name })} className="shrink-0 text-muted-foreground" />}
+        render={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t("settings.plugins.openMenu", { name: plugin.name })}
+            className="shrink-0 text-muted-foreground"
+          />
+        }
       >
         <IconDots />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuItem onClick={onOpen}><IconInfoCircle />{t("settings.plugins.viewDetails")}</DropdownMenuItem>
+        <DropdownMenuItem onClick={onOpen}>
+          <IconInfoCircle />
+          {t("settings.plugins.viewDetails")}
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={onUninstall}><IconTrash />{t("settings.plugins.uninstall")}</DropdownMenuItem>
+        <DropdownMenuItem variant="destructive" onClick={onUninstall}>
+          <IconTrash />
+          {t("settings.plugins.uninstall")}
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
 /** Collapsed tail of the catalog, previewing the remaining plugins as stacked marks. */
-function ShowMoreRow({ plugins, onExpand }: { plugins: PluginEntry[]; onExpand: () => void }) {
+function ShowMoreRow({
+  plugins,
+  onExpand,
+}: {
+  plugins: PluginEntry[];
+  onExpand: () => void;
+}) {
   const { t } = useTranslation();
-  const names = plugins.slice(0, NAMED_IN_SHOW_MORE).map((plugin) => plugin.name).join(", ");
+  const names = plugins
+    .slice(0, NAMED_IN_SHOW_MORE)
+    .map((plugin) => plugin.name)
+    .join(", ");
   return (
     <button
       type="button"
@@ -438,10 +595,15 @@ function ShowMoreRow({ plugins, onExpand }: { plugins: PluginEntry[]; onExpand: 
     >
       {/* Bare marks cannot overlap legibly, so the preview sits in a row rather than a stack. */}
       <span className="flex shrink-0 gap-1">
-        {plugins.slice(0, 3).map((plugin) => <PluginTile key={plugin.id} plugin={plugin} size="sm" />)}
+        {plugins.slice(0, 3).map((plugin) => (
+          <PluginTile key={plugin.id} plugin={plugin} size="sm" />
+        ))}
       </span>
       <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-        {t("settings.plugins.showMore", { names, count: plugins.length - NAMED_IN_SHOW_MORE })}
+        {t("settings.plugins.showMore", {
+          names,
+          count: plugins.length - NAMED_IN_SHOW_MORE,
+        })}
       </span>
       <IconChevronDown className="size-4 shrink-0 text-muted-foreground" />
     </button>

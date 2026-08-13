@@ -10,13 +10,20 @@ import {
   useUpdateSkill,
   useDeleteSkill,
 } from "./use-atom-mutations";
-import { createMockClient, createMockClientState } from "../../test/mock-client";
+import {
+  createMockClient,
+  createMockClientState,
+} from "../../test/mock-client";
 import { renderHookWithClient } from "../../test/hook-harness";
 import { queryKeys } from "./query-keys";
 import type { Agent, Skill } from "@ora/contracts";
 
 const AGENT_A: Agent = { id: "a1", name: "Codex", description: "Code agent" };
-const SKILL_X: Skill = { id: "sk1", name: "Refactor", description: "Refactoring skill" };
+const SKILL_X: Skill = {
+  id: "sk1",
+  name: "Refactor",
+  description: "Refactoring skill",
+};
 
 describe("useAgents", () => {
   it("returns the agent list from the client", async () => {
@@ -45,16 +52,26 @@ describe("useCreateAgent", () => {
     const state = createMockClientState();
     const client = createMockClient(state);
     const agents = renderHookWithClient(() => useAgents(), client);
-    const mutation = renderHookWithClient(() => useCreateAgent(), client, agents.queryClient);
+    const mutation = renderHookWithClient(
+      () => useCreateAgent(),
+      client,
+      agents.queryClient,
+    );
 
     await waitFor(() => expect(agents.result.current.isSuccess).toBe(true));
-    mutation.result.current.mutate({ name: "New Agent", description: "desc", content: "# Agent" });
+    mutation.result.current.mutate({
+      name: "New Agent",
+      description: "desc",
+      content: "# Agent",
+    });
     await waitFor(() => expect(mutation.result.current.isSuccess).toBe(true));
 
     expect(state.agents).toHaveLength(1);
     expect(state.agents[0]!.name).toBe("New Agent");
     await agents.queryClient.refetchQueries({ queryKey: queryKeys.agents });
-    expect(agents.queryClient.getQueryData<Agent[]>(queryKeys.agents)).toHaveLength(1);
+    expect(
+      agents.queryClient.getQueryData<Agent[]>(queryKeys.agents),
+    ).toHaveLength(1);
   });
 });
 
@@ -64,13 +81,26 @@ describe("useUpdateAgent", () => {
     state.agents = [AGENT_A];
     const client = createMockClient(state);
     const agents = renderHookWithClient(() => useAgents(), client);
-    const mutation = renderHookWithClient(() => useUpdateAgent(), client, agents.queryClient);
+    const mutation = renderHookWithClient(
+      () => useUpdateAgent(),
+      client,
+      agents.queryClient,
+    );
 
     await waitFor(() => expect(agents.result.current.isSuccess).toBe(true));
-    mutation.result.current.mutate({ agent: AGENT_A, name: "Renamed", description: "new desc", content: "# Updated agent" });
+    mutation.result.current.mutate({
+      agent: AGENT_A,
+      name: "Renamed",
+      description: "new desc",
+      content: "# Updated agent",
+    });
     await waitFor(() => expect(mutation.result.current.isSuccess).toBe(true));
 
-    expect(state.agents[0]).toEqual({ id: "a1", name: "Renamed", description: "new desc" });
+    expect(state.agents[0]).toEqual({
+      id: "a1",
+      name: "Renamed",
+      description: "new desc",
+    });
   });
 });
 
@@ -80,7 +110,11 @@ describe("useDeleteAgent", () => {
     state.agents = [AGENT_A];
     const client = createMockClient(state);
     const agents = renderHookWithClient(() => useAgents(), client);
-    const mutation = renderHookWithClient(() => useDeleteAgent(), client, agents.queryClient);
+    const mutation = renderHookWithClient(
+      () => useDeleteAgent(),
+      client,
+      agents.queryClient,
+    );
 
     await waitFor(() => expect(agents.result.current.isSuccess).toBe(true));
     mutation.result.current.mutate({ agentId: "a1" });
@@ -95,16 +129,26 @@ describe("useCreateSkill", () => {
     const state = createMockClientState();
     const client = createMockClient(state);
     const skills = renderHookWithClient(() => useSkills(), client);
-    const mutation = renderHookWithClient(() => useCreateSkill(), client, skills.queryClient);
+    const mutation = renderHookWithClient(
+      () => useCreateSkill(),
+      client,
+      skills.queryClient,
+    );
 
     await waitFor(() => expect(skills.result.current.isSuccess).toBe(true));
-    mutation.result.current.mutate({ name: "New Skill", description: "desc", content: "# Skill" });
+    mutation.result.current.mutate({
+      name: "New Skill",
+      description: "desc",
+      content: "# Skill",
+    });
     await waitFor(() => expect(mutation.result.current.isSuccess).toBe(true));
 
     expect(state.skills).toHaveLength(1);
     expect(state.skills[0]!.name).toBe("New Skill");
     await skills.queryClient.refetchQueries({ queryKey: queryKeys.skills });
-    expect(skills.queryClient.getQueryData<Skill[]>(queryKeys.skills)).toHaveLength(1);
+    expect(
+      skills.queryClient.getQueryData<Skill[]>(queryKeys.skills),
+    ).toHaveLength(1);
   });
 });
 
@@ -114,13 +158,26 @@ describe("useUpdateSkill", () => {
     state.skills = [SKILL_X];
     const client = createMockClient(state);
     const skills = renderHookWithClient(() => useSkills(), client);
-    const mutation = renderHookWithClient(() => useUpdateSkill(), client, skills.queryClient);
+    const mutation = renderHookWithClient(
+      () => useUpdateSkill(),
+      client,
+      skills.queryClient,
+    );
 
     await waitFor(() => expect(skills.result.current.isSuccess).toBe(true));
-    mutation.result.current.mutate({ skill: SKILL_X, name: "Renamed", description: "new desc", content: "# Updated skill" });
+    mutation.result.current.mutate({
+      skill: SKILL_X,
+      name: "Renamed",
+      description: "new desc",
+      content: "# Updated skill",
+    });
     await waitFor(() => expect(mutation.result.current.isSuccess).toBe(true));
 
-    expect(state.skills[0]).toEqual({ id: "sk1", name: "Renamed", description: "new desc" });
+    expect(state.skills[0]).toEqual({
+      id: "sk1",
+      name: "Renamed",
+      description: "new desc",
+    });
   });
 });
 
@@ -130,7 +187,11 @@ describe("useDeleteSkill", () => {
     state.skills = [SKILL_X];
     const client = createMockClient(state);
     const skills = renderHookWithClient(() => useSkills(), client);
-    const mutation = renderHookWithClient(() => useDeleteSkill(), client, skills.queryClient);
+    const mutation = renderHookWithClient(
+      () => useDeleteSkill(),
+      client,
+      skills.queryClient,
+    );
 
     await waitFor(() => expect(skills.result.current.isSuccess).toBe(true));
     mutation.result.current.mutate({ skillId: "sk1" });

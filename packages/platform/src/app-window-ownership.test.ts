@@ -4,12 +4,17 @@ import { createWebLockWindowOwnership } from "./app-window-ownership";
 describe("web lock app-window ownership", () => {
   it("transfers ownership to a waiting page after the active page releases", async () => {
     const lockManager = new TestLockManager();
-    const ownership = createWebLockWindowOwnership(() => lockManager as unknown as LockManager);
+    const ownership = createWebLockWindowOwnership(
+      () => lockManager as unknown as LockManager,
+    );
     const first = await ownership.acquire({
       signal: new AbortController().signal,
       onWaiting: vi.fn(),
     });
-    expect(lockManager.requests[0]).toEqual({ mode: "exclusive", ifAvailable: true });
+    expect(lockManager.requests[0]).toEqual({
+      mode: "exclusive",
+      ifAvailable: true,
+    });
     const onWaiting = vi.fn();
     const secondLease = ownership.acquire({
       signal: new AbortController().signal,

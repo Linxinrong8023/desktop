@@ -49,21 +49,41 @@ describe("WorkspaceReviewFilesPanel", () => {
     renderPanel({ taskId: "task-1" });
 
     expect(screen.getByTestId("files-explorer")).toHaveTextContent("explorer");
-    expect(screen.queryByRole("button", { name: /配置 Spec 来源|Configure Spec sources/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: /配置 Spec 来源|Configure Spec sources/,
+      }),
+    ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Specs" }));
     expect(screen.getByTestId("specs-content")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /配置 Spec 来源|Configure Spec sources/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /刷新 Specs|Refresh Specs/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: /配置 Spec 来源|Configure Spec sources/,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /刷新 Specs|Refresh Specs/ }),
+    ).toBeInTheDocument();
   });
 
   it("opens project files directly on specs and hides explorer/search toggles", () => {
     renderPanel({});
 
     expect(screen.getByTestId("specs-content")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /浏览|Explorer/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /搜索|Search/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /配置 Spec 来源|Configure Spec sources/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /刷新 Specs|Refresh Specs/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /浏览|Explorer/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /搜索|Search/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: /配置 Spec 来源|Configure Spec sources/,
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /刷新 Specs|Refresh Specs/ }),
+    ).toBeInTheDocument();
   });
 });

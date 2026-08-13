@@ -1,6 +1,14 @@
-import type { ChatPlan, ChatToolCall, ChatTurnItem, ChatTurnStatus } from "@ora/chat";
+import type {
+  ChatPlan,
+  ChatToolCall,
+  ChatTurnItem,
+  ChatTurnStatus,
+} from "@ora/chat";
 import type { ActivityItem } from "./activity-group";
-import { toolCallGroupKind, type ToolCallGroupKind } from "./tool-call-group-kind";
+import {
+  toolCallGroupKind,
+  type ToolCallGroupKind,
+} from "./tool-call-group-kind";
 
 /** One run of consecutive tool calls sharing a group kind, collapsed into a single disclosure. */
 export interface ToolGroup {
@@ -18,7 +26,8 @@ export interface ActivityGroupItem {
 }
 
 /** Non-text turn content: reasoning and tool activity, as opposed to the final answer. */
-export type NonTextDisplayItem = ActivityGroupItem | ChatPlan | ChatToolCall | ToolGroup;
+export type NonTextDisplayItem =
+  ActivityGroupItem | ChatPlan | ChatToolCall | ToolGroup;
 
 /** One contiguous run of non-text activity: rendered live while streaming, or as one collapsed summary once it ends. */
 export interface ActivityPhaseItem {
@@ -36,11 +45,18 @@ export type DisplayTurnItem = ActivityPhaseItem | TextDisplayItem;
 type ToolGroupedTurnItem = ChatTurnItem | ToolGroup;
 // Every thought is absorbed into an ActivityGroupItem by groupExplorationActivity, so it never
 // reaches this stage on its own.
-type ExplorationGroupedItem = ActivityGroupItem | Exclude<ToolGroupedTurnItem, { kind: "thought" }>;
+type ExplorationGroupedItem =
+  ActivityGroupItem | Exclude<ToolGroupedTurnItem, { kind: "thought" }>;
 
 /** Builds the display sequence for one turn: adjacent tools, exploration activity, then activity phases. */
-export function buildTurnDisplayItems(items: ChatTurnItem[], turnStatus: ChatTurnStatus): DisplayTurnItem[] {
-  return groupActivityPhases(groupExplorationActivity(groupAdjacentTools(items)), turnStatus);
+export function buildTurnDisplayItems(
+  items: ChatTurnItem[],
+  turnStatus: ChatTurnStatus,
+): DisplayTurnItem[] {
+  return groupActivityPhases(
+    groupExplorationActivity(groupAdjacentTools(items)),
+    turnStatus,
+  );
 }
 
 /** Groups adjacent tools by intent while preserving boundaries created by messages and plans. */
@@ -52,14 +68,20 @@ function groupAdjacentTools(items: ChatTurnItem[]): ToolGroupedTurnItem[] {
   const flushTools = () => {
     if (tools.length === 1) grouped.push(tools[0]);
     if (tools.length > 1 && groupKind !== null) {
-      grouped.push({ kind: "toolGroup", id: `${groupKind}-group-${tools[0].id}`, groupKind, tools });
+      grouped.push({
+        kind: "toolGroup",
+        id: `${groupKind}-group-${tools[0].id}`,
+        groupKind,
+        tools,
+      });
     }
     tools = [];
     groupKind = null;
   };
 
   for (const item of items) {
-    const nextGroupKind = item.kind === "toolCall" ? toolCallGroupKind(item) : null;
+    const nextGroupKind =
+      item.kind === "toolCall" ? toolCallGroupKind(item) : null;
     if (item.kind === "toolCall" && nextGroupKind !== null) {
       if (groupKind !== null && groupKind !== nextGroupKind) flushTools();
       groupKind = nextGroupKind;
@@ -74,13 +96,19 @@ function groupAdjacentTools(items: ChatTurnItem[]): ToolGroupedTurnItem[] {
 }
 
 /** Merges interleaved thoughts and exploratory calls into one compact progress group. */
-function groupExplorationActivity(items: ToolGroupedTurnItem[]): ExplorationGroupedItem[] {
+function groupExplorationActivity(
+  items: ToolGroupedTurnItem[],
+): ExplorationGroupedItem[] {
   const grouped: ExplorationGroupedItem[] = [];
   let activity: ActivityItem[] = [];
 
   const flushActivity = () => {
     if (activity.length > 0) {
-      grouped.push({ kind: "activityGroup", id: `activity-group-${activity[0].id}`, items: activity });
+      grouped.push({
+        kind: "activityGroup",
+        id: `activity-group-${activity[0].id}`,
+        items: activity,
+      });
     }
     activity = [];
   };
@@ -112,13 +140,21 @@ function groupExplorationActivity(items: ToolGroupedTurnItem[]): ExplorationGrou
  * turn stops (completed, cancelled, or failed), matching how the agent's "thinking" visually
  * wraps up once the answer starts or the round ends.
  */
-function groupActivityPhases(items: ExplorationGroupedItem[], turnStatus: ChatTurnStatus): DisplayTurnItem[] {
+function groupActivityPhases(
+  items: ExplorationGroupedItem[],
+  turnStatus: ChatTurnStatus,
+): DisplayTurnItem[] {
   const grouped: DisplayTurnItem[] = [];
   let phase: NonTextDisplayItem[] = [];
 
   const flushPhase = (live: boolean) => {
     if (phase.length > 0) {
-      grouped.push({ kind: "activityPhase", id: `activity-phase-${phase[0].id}`, items: phase, live });
+      grouped.push({
+        kind: "activityPhase",
+        id: `activity-phase-${phase[0].id}`,
+        items: phase,
+        live,
+      });
     }
     phase = [];
   };

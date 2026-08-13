@@ -195,7 +195,9 @@ export function useCreateSession() {
       queryClient.removeQueries({
         queryKey: queryKeys.warmSession({ type: "task", taskId }, agentCli),
       });
-      chatStore.getState().setConfigOptions(response.session.id, warmed.configOptions);
+      chatStore
+        .getState()
+        .setConfigOptions(response.session.id, warmed.configOptions);
       return response.session;
     },
     onSuccess: (session) => {
@@ -231,7 +233,9 @@ export function useResumeSessionHistory() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
-      client.session.resumeHistory({ sessionId }).then((response) => response.session),
+      client.session
+        .resumeHistory({ sessionId })
+        .then((response) => response.session),
     onSuccess: (session) => {
       queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
         (current ?? []).map((candidate) =>

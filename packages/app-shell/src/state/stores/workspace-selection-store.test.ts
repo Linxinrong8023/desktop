@@ -50,7 +50,9 @@ describe("useWorkspaceSelectionStore", () => {
   });
 
   it("selectSessionBeforeTask records a project-scoped session before a task exists", () => {
-    useWorkspaceSelectionStore.getState().selectSessionBeforeTask("draft-1", "p1");
+    useWorkspaceSelectionStore
+      .getState()
+      .selectSessionBeforeTask("draft-1", "p1");
     expect(useWorkspaceSelectionStore.getState().selection).toEqual({
       projectId: "p1",
       taskId: null,
@@ -73,7 +75,9 @@ describe("useWorkspaceSelectionStore", () => {
   it("selectSession clears an active workflow run", () => {
     useWorkspaceSelectionStore.getState().selectWorkflowRun("gwr-1", "p1");
     useWorkspaceSelectionStore.getState().selectSession("s1", "t1", "p1");
-    expect(useWorkspaceSelectionStore.getState().selection.workflowRunId).toBeNull();
+    expect(
+      useWorkspaceSelectionStore.getState().selection.workflowRunId,
+    ).toBeNull();
   });
 
   it("clearSelection empties all legs", () => {

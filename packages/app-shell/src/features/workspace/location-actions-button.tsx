@@ -29,9 +29,16 @@ import {
 } from "../../state/stores/location-actions-store";
 
 /** The openers offered in the menu, in display order. Copy Path is handled separately. */
-const OPENERS: readonly DefaultLocationTarget[] = ["explorer", "terminal", "vscode"] as const;
+const OPENERS: readonly DefaultLocationTarget[] = [
+  "explorer",
+  "terminal",
+  "vscode",
+] as const;
 
-const OPENER_ICONS: Record<DefaultLocationTarget, ComponentType<{ className?: string }>> = {
+const OPENER_ICONS: Record<
+  DefaultLocationTarget,
+  ComponentType<{ className?: string }>
+> = {
   explorer: IconFolder,
   terminal: IconTerminal2,
   vscode: IconBrandVscode,
@@ -63,11 +70,16 @@ interface LocationActionsButtonProps {
  *
  * Desktop-only: on the Web host `locationActions` is unsupported and this renders nothing.
  */
-export function LocationActionsButton({ taskId, projectPath }: LocationActionsButtonProps) {
+export function LocationActionsButton({
+  taskId,
+  projectPath,
+}: LocationActionsButtonProps) {
   const { t } = useTranslation();
   const { locationActions } = usePlatform();
   const defaultTarget = useLocationActionsStore((state) => state.defaultTarget);
-  const setDefaultTarget = useLocationActionsStore((state) => state.setDefaultTarget);
+  const setDefaultTarget = useLocationActionsStore(
+    (state) => state.setDefaultTarget,
+  );
 
   // The browser cannot launch native apps, so the whole entry point stays hidden there.
   if (locationActions.kind !== "supported") return null;
@@ -100,7 +112,11 @@ export function LocationActionsButton({ taskId, projectPath }: LocationActionsBu
     try {
       await locationActions.open(target, path);
     } catch {
-      toast.error(t("locationActions.openFailed", { app: t(OPENER_LABEL_KEYS[target as DefaultLocationTarget]) }));
+      toast.error(
+        t("locationActions.openFailed", {
+          app: t(OPENER_LABEL_KEYS[target as DefaultLocationTarget]),
+        }),
+      );
     }
   };
 
@@ -135,7 +151,9 @@ export function LocationActionsButton({ taskId, projectPath }: LocationActionsBu
             <button
               type="button"
               disabled={!hasTarget}
-              aria-label={t("locationActions.openWith", { app: t(OPENER_LABEL_KEYS[defaultTarget]) })}
+              aria-label={t("locationActions.openWith", {
+                app: t(OPENER_LABEL_KEYS[defaultTarget]),
+              })}
               onClick={() => void openWith(defaultTarget)}
               className={cn(
                 "flex size-8 items-center justify-center rounded-l-md text-muted-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
@@ -149,7 +167,9 @@ export function LocationActionsButton({ taskId, projectPath }: LocationActionsBu
         </TooltipTrigger>
         <TooltipContent>
           {hasTarget
-            ? t("locationActions.openWith", { app: t(OPENER_LABEL_KEYS[defaultTarget]) })
+            ? t("locationActions.openWith", {
+                app: t(OPENER_LABEL_KEYS[defaultTarget]),
+              })
             : t("locationActions.pathUnavailable")}
         </TooltipContent>
       </Tooltip>
@@ -187,7 +207,9 @@ export function LocationActionsButton({ taskId, projectPath }: LocationActionsBu
               >
                 <Icon className="size-3.5 shrink-0" />
                 {t(OPENER_LABEL_KEYS[target])}
-                {target === defaultTarget && <IconCheck className="ml-auto size-4" />}
+                {target === defaultTarget && (
+                  <IconCheck className="ml-auto size-4" />
+                )}
               </DropdownMenuItem>
             );
           })}

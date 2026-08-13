@@ -20,12 +20,15 @@ function isStatusShape(value: unknown): value is Record<string, unknown> {
 }
 
 function normalize(value: Record<string, unknown>): OpenSpecStatus {
-  const artifacts = (value.artifacts as Array<Record<string, unknown>>).map((entry) => ({
-    id: String(entry.id),
-    status: String(entry.status),
-  }));
+  const artifacts = (value.artifacts as Array<Record<string, unknown>>).map(
+    (entry) => ({
+      id: String(entry.id),
+      status: String(entry.status),
+    }),
+  );
   return {
-    changeName: typeof value.changeName === "string" ? value.changeName : undefined,
+    changeName:
+      typeof value.changeName === "string" ? value.changeName : undefined,
     artifacts,
     isComplete: value.isComplete === true,
   };
@@ -51,13 +54,15 @@ function extractFromText(text: string): OpenSpecStatus | null {
 
 function fromToolCall(toolCall: ChatToolCall): OpenSpecStatus | null {
   const { rawOutput, content } = toolCall;
-  if (isStatusShape(rawOutput)) return normalize(rawOutput as Record<string, unknown>);
+  if (isStatusShape(rawOutput))
+    return normalize(rawOutput as Record<string, unknown>);
   const texts: string[] = [];
   if (typeof rawOutput === "string") texts.push(rawOutput);
   for (const item of content) {
     if (item.type === "content") {
       const block = item.content as { text?: unknown } | undefined;
-      if (block !== undefined && typeof block.text === "string") texts.push(block.text);
+      if (block !== undefined && typeof block.text === "string")
+        texts.push(block.text);
     }
   }
   for (const text of texts) {
@@ -68,7 +73,9 @@ function fromToolCall(toolCall: ChatToolCall): OpenSpecStatus | null {
 }
 
 /** The most recent parseable OpenSpec status across the given tool calls, or null. */
-export function parseOpenSpecStatus(toolCalls: readonly ChatToolCall[]): OpenSpecStatus | null {
+export function parseOpenSpecStatus(
+  toolCalls: readonly ChatToolCall[],
+): OpenSpecStatus | null {
   for (let index = toolCalls.length - 1; index >= 0; index -= 1) {
     const status = fromToolCall(toolCalls[index]);
     if (status !== null) return status;

@@ -1,1 +1,4 @@
-export { createWebPlatformAdapter, WebPlatformAdapter } from "./web-platform-adapter";
+export {
+  createWebPlatformAdapter,
+  WebPlatformAdapter,
+} from "./web-platform-adapter";

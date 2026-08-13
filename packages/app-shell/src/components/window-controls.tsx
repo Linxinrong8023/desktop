@@ -28,7 +28,9 @@ export function WindowControls() {
     void overlay.isMaximized().then((value) => {
       if (active) setMaximized(value);
     });
-    const unsubscribe = overlay.subscribeMaximized((value) => setMaximized(value));
+    const unsubscribe = overlay.subscribeMaximized((value) =>
+      setMaximized(value),
+    );
     return () => {
       active = false;
       unsubscribe();
@@ -38,8 +40,15 @@ export function WindowControls() {
   if (overlay === null) return null;
 
   return (
-    <div className="flex items-center gap-0.5 pl-1" role="group" aria-label={t("window.controls")}>
-      <CaptionButton label={t("window.minimize")} onClick={() => void overlay.minimize()}>
+    <div
+      className="flex items-center gap-0.5 pl-1"
+      role="group"
+      aria-label={t("window.controls")}
+    >
+      <CaptionButton
+        label={t("window.minimize")}
+        onClick={() => void overlay.minimize()}
+      >
         <MinimizeGlyph />
       </CaptionButton>
       <CaptionButton
@@ -48,7 +57,11 @@ export function WindowControls() {
       >
         {maximized ? <RestoreGlyph /> : <MaximizeGlyph />}
       </CaptionButton>
-      <CaptionButton label={t("window.close")} tone="close" onClick={() => void overlay.close()}>
+      <CaptionButton
+        label={t("window.close")}
+        tone="close"
+        onClick={() => void overlay.close()}
+      >
         <CloseGlyph />
       </CaptionButton>
     </div>

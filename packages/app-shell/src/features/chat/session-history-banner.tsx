@@ -17,20 +17,30 @@ import { useResumeSessionHistory } from "../../state/hooks/use-workspace-mutatio
  * Rendering nothing for a writable session keeps every caller free to mount it
  * unconditionally next to the conversation it belongs to.
  */
-export function SessionHistoryBanner({ session }: { session: Session | undefined }) {
+export function SessionHistoryBanner({
+  session,
+}: {
+  session: Session | undefined;
+}) {
   const { t } = useTranslation();
   const resumeHistory = useResumeSessionHistory();
 
-  if (session === undefined || session.historyState.type !== "degraded") return null;
+  if (session === undefined || session.historyState.type !== "degraded")
+    return null;
 
   return (
     <div
       role="alert"
       className="mx-3 mb-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs sm:mx-4"
     >
-      <IconAlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
+      <IconAlertTriangle
+        className="mt-0.5 size-4 shrink-0 text-destructive"
+        aria-hidden="true"
+      />
       <div className="min-w-0 flex-1">
-        <p className="font-medium text-destructive">{t("chat.historyDegraded.title")}</p>
+        <p className="font-medium text-destructive">
+          {t("chat.historyDegraded.title")}
+        </p>
         {/* The backend's reason is the only description of what actually broke
             — a full disk reads very differently from a missing file — so it is
             shown verbatim rather than flattened into one generic sentence. */}

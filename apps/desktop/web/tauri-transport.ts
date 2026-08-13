@@ -25,7 +25,12 @@ const unsupportedOperations = {
 } as const satisfies Partial<Record<EndpointOperation, true>>;
 
 type UnsupportedTauriOperation = keyof typeof unsupportedOperations;
-type TauriStreamOperation = "loadSession" | "promptSession" | "watchAppEvents" | "watchSpecs" | "watchWorkspace";
+type TauriStreamOperation =
+  | "loadSession"
+  | "promptSession"
+  | "watchAppEvents"
+  | "watchSpecs"
+  | "watchWorkspace";
 type SupportedTauriOperation = Exclude<
   EndpointOperation,
   UnsupportedTauriOperation | TauriStreamOperation
@@ -165,9 +170,15 @@ export function createTauriTransport(
   createChannel: ChannelFactory = () => new Channel(),
 ): ContractTransport {
   return {
-    async send<TResponse>(request: ContractTransportRequest, options?: ContractCallOptions): Promise<TResponse> {
+    async send<TResponse>(
+      request: ContractTransportRequest,
+      options?: ContractCallOptions,
+    ): Promise<TResponse> {
       const operation = request.operationName as EndpointOperation;
-      if (operation in unsupportedOperations || isTauriStreamOperation(operation)) {
+      if (
+        operation in unsupportedOperations ||
+        isTauriStreamOperation(operation)
+      ) {
         throw unsupportedOperation(operation);
       }
       const command = tauriCommands[operation as SupportedTauriOperation];
@@ -179,18 +190,36 @@ export function createTauriTransport(
           options?.signal,
         );
       } catch (error) {
-        if (error instanceof RemoteContractError || error instanceof UnknownRemoteError || error instanceof LocalTransportError) throw error;
-        if (isAbortError(error)) throw transportError("cancelled", "Desktop command was cancelled");
+        if (
+          error instanceof RemoteContractError ||
+          error instanceof UnknownRemoteError ||
+          error instanceof LocalTransportError
+        )
+          throw error;
+        if (isAbortError(error))
+          throw transportError("cancelled", "Desktop command was cancelled");
         throw normalizeInvokeError(error);
       }
     },
-    stream<TEvent>(request: ContractTransportRequest, options?: ContractCallOptions): AsyncIterable<TEvent> {
+    stream<TEvent>(
+      request: ContractTransportRequest,
+      options?: ContractCallOptions,
+    ): AsyncIterable<TEvent> {
       let consumed = false;
       return {
         [Symbol.asyncIterator](): AsyncIterator<TEvent> {
-          if (consumed) throw transportError("stream_already_consumed", "contract streams can only be consumed once");
+          if (consumed)
+            throw transportError(
+              "stream_already_consumed",
+              "contract streams can only be consumed once",
+            );
           consumed = true;
-          return streamFromChannel<TEvent>(invokeCommand, createChannel, request, options);
+          return streamFromChannel<TEvent>(
+            invokeCommand,
+            createChannel,
+            request,
+            options,
+          );
         },
       };
     },
@@ -198,8 +227,16 @@ export function createTauriTransport(
 }
 
 /** Identifies operations that must use the shared Tauri channel stream command. */
-function isTauriStreamOperation(operation: EndpointOperation): operation is TauriStreamOperation {
-  return operation === "loadSession" || operation === "promptSession" || operation === "watchAppEvents" || operation === "watchSpecs" || operation === "watchWorkspace";
+function isTauriStreamOperation(
+  operation: EndpointOperation,
+): operation is TauriStreamOperation {
+  return (
+    operation === "loadSession" ||
+    operation === "promptSession" ||
+    operation === "watchAppEvents" ||
+    operation === "watchSpecs" ||
+    operation === "watchWorkspace"
+  );
 }
 
 /** Starts one private channel stream and cancels its backend registration on every early exit. */
@@ -209,7 +246,8 @@ async function* streamFromChannel<TEvent>(
   request: ContractTransportRequest,
   options?: ContractCallOptions,
 ): AsyncGenerator<TEvent> {
-  if (options?.signal?.aborted === true) throw abortError(options.signal.reason);
+  if (options?.signal?.aborted === true)
+    throw abortError(options.signal.reason);
   const streamCallId = crypto.randomUUID();
   const channel = createChannel<ContractStreamFrame<TEvent>>();
   const frames: ContractStreamFrame<TEvent>[] = [];
@@ -240,7 +278,8 @@ async function* streamFromChannel<TEvent>(
       onEvent: channel,
     });
     while (true) {
-      if (isSignalAborted(options?.signal)) throw abortError(options?.signal?.reason);
+      if (isSignalAborted(options?.signal))
+        throw abortError(options?.signal?.reason);
       if (overflowed) {
         throw transportError(
           "stream_queue_overflow",
@@ -249,7 +288,9 @@ async function* streamFromChannel<TEvent>(
       }
       const frame = frames.shift();
       if (frame === undefined) {
-        await new Promise<void>((resolve) => { wake = resolve; });
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
         continue;
       }
       if (frame.type === "data") yield frame.data;
@@ -259,12 +300,20 @@ async function* streamFromChannel<TEvent>(
       if (frame.type === "end") return;
     }
   } catch (error) {
-    if (error instanceof RemoteContractError || error instanceof UnknownRemoteError || error instanceof LocalTransportError) throw error;
-    if (isAbortError(error)) throw transportError("cancelled", "Desktop stream was cancelled");
+    if (
+      error instanceof RemoteContractError ||
+      error instanceof UnknownRemoteError ||
+      error instanceof LocalTransportError
+    )
+      throw error;
+    if (isAbortError(error))
+      throw transportError("cancelled", "Desktop stream was cancelled");
     throw normalizeInvokeError(error);
   } finally {
     options?.signal?.removeEventListener("abort", abort);
-    await invokeCommand<void>("cancel_contract_stream", { streamCallId }).catch(() => undefined);
+    await invokeCommand<void>("cancel_contract_stream", { streamCallId }).catch(
+      () => undefined,
+    );
   }
 }
 
@@ -275,12 +324,17 @@ function abortable<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(abortError(signal.reason));
     signal.addEventListener("abort", abort, { once: true });
-    operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    operation
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", abort));
   });
 }
 
 function abortError(reason: unknown): DOMException {
-  return new DOMException(typeof reason === "string" ? reason : "The operation was aborted", "AbortError");
+  return new DOMException(
+    typeof reason === "string" ? reason : "The operation was aborted",
+    "AbortError",
+  );
 }
 
 function isAbortError(error: unknown): boolean {
@@ -300,14 +354,24 @@ function transportError(
 
 /** Builds the stable failure used for intentionally excluded Desktop operations. */
 function unsupportedOperation(operationName: string): LocalTransportError {
-  return transportError("unsupported_operation", `Desktop does not support operation ${operationName}`);
+  return transportError(
+    "unsupported_operation",
+    `Desktop does not support operation ${operationName}`,
+  );
 }
 
 /** Normalizes serialized Rust command errors and opaque Tauri invocation failures. */
 function normalizeInvokeError(error: unknown): Error {
   const decoded = decodeRemoteError(error, null, error);
-  if (!(decoded instanceof LocalTransportError) || decoded.kind !== "malformed_response") {
+  if (
+    !(decoded instanceof LocalTransportError) ||
+    decoded.kind !== "malformed_response"
+  ) {
     return decoded;
   }
-  return new LocalTransportError("tauri_invoke_failure", "Desktop command invocation failed", error);
+  return new LocalTransportError(
+    "tauri_invoke_failure",
+    "Desktop command invocation failed",
+    error,
+  );
 }

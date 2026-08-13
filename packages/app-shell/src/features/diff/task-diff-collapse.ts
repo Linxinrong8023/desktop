@@ -32,11 +32,13 @@ export function buildCollapsedDiffSegments(
   return hunks.flatMap((hunk, hunkIndex) => {
     const collapsedRanges = findCollapsedRanges(hunk, hunkIndex);
     if (collapsedRanges.length === 0) {
-      return [{
-        kind: "hunk" as const,
-        key: `${hunkIndex}:complete`,
-        hunk,
-      }];
+      return [
+        {
+          kind: "hunk" as const,
+          key: `${hunkIndex}:complete`,
+          hunk,
+        },
+      ];
     }
 
     const segments: DiffRenderSegment[] = [];
@@ -46,7 +48,9 @@ export function buildCollapsedDiffSegments(
         segments.push(createHunkSegment(hunk, hunkIndex, cursor, range.start));
       }
       if (expandedBlocks.has(range.key)) {
-        segments.push(createHunkSegment(hunk, hunkIndex, range.start, range.end));
+        segments.push(
+          createHunkSegment(hunk, hunkIndex, range.start, range.end),
+        );
       } else {
         segments.push({
           kind: "collapsed",
@@ -58,14 +62,19 @@ export function buildCollapsedDiffSegments(
     });
 
     if (cursor < hunk.changes.length) {
-      segments.push(createHunkSegment(hunk, hunkIndex, cursor, hunk.changes.length));
+      segments.push(
+        createHunkSegment(hunk, hunkIndex, cursor, hunk.changes.length),
+      );
     }
     return segments;
   });
 }
 
 /** Finds the middle of long normal-line runs while retaining nearby review context. */
-function findCollapsedRanges(hunk: HunkData, hunkIndex: number): CollapsedRange[] {
+function findCollapsedRanges(
+  hunk: HunkData,
+  hunkIndex: number,
+): CollapsedRange[] {
   const ranges: CollapsedRange[] = [];
   let cursor = 0;
 
@@ -76,12 +85,16 @@ function findCollapsedRanges(hunk: HunkData, hunkIndex: number): CollapsedRange[
     }
 
     const runStart = cursor;
-    while (cursor < hunk.changes.length && hunk.changes[cursor]?.type === "normal") {
+    while (
+      cursor < hunk.changes.length &&
+      hunk.changes[cursor]?.type === "normal"
+    ) {
       cursor += 1;
     }
     const runEnd = cursor;
     const hiddenStart = runStart + (runStart > 0 ? CONTEXT_LINE_COUNT : 0);
-    const hiddenEnd = runEnd - (runEnd < hunk.changes.length ? CONTEXT_LINE_COUNT : 0);
+    const hiddenEnd =
+      runEnd - (runEnd < hunk.changes.length ? CONTEXT_LINE_COUNT : 0);
     if (hiddenEnd - hiddenStart < MIN_COLLAPSED_LINE_COUNT) continue;
 
     ranges.push({
@@ -126,6 +139,6 @@ function createHunkSegment(
 /** Counts the lines represented on one side of a change slice. */
 function countSideLines(changes: ChangeData[], side: "old" | "new"): number {
   return changes.filter((change) =>
-    side === "old" ? change.type !== "insert" : change.type !== "delete"
+    side === "old" ? change.type !== "insert" : change.type !== "delete",
   ).length;
 }

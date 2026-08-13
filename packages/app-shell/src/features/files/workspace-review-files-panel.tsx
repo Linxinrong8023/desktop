@@ -31,14 +31,18 @@ export function WorkspaceReviewFilesPanel({
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const specsOnly = taskId === undefined;
-  const [surface, setSurface] = useState<FilesSurface>(specsOnly ? "specs" : "explorer");
+  const [surface, setSurface] = useState<FilesSurface>(
+    specsOnly ? "specs" : "explorer",
+  );
   const specsRef = useRef<SpecsContentHandle>(null);
   const [specsRefreshing, setSpecsRefreshing] = useState(false);
 
   const refreshSpecs = () => void specsRef.current?.refresh();
   const refreshFiles = () => {
     if (taskId === undefined) return;
-    void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceFiles(taskId) });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.workspaceFiles(taskId),
+    });
   };
 
   return (
@@ -86,7 +90,9 @@ export function WorkspaceReviewFilesPanel({
             aria-label={t("specs.refresh")}
             onClick={refreshSpecs}
           >
-            <IconRefresh className={specsRefreshing ? "animate-spin" : undefined} />
+            <IconRefresh
+              className={specsRefreshing ? "animate-spin" : undefined}
+            />
           </Button>
         ) : (
           <Button
@@ -110,11 +116,7 @@ export function WorkspaceReviewFilesPanel({
             onRefreshingChange={setSpecsRefreshing}
           />
         ) : (
-          <WorkspaceFilesView
-            taskId={taskId!}
-            surface={surface}
-            hideHeader
-          />
+          <WorkspaceFilesView taskId={taskId!} surface={surface} hideHeader />
         )}
       </div>
     </section>

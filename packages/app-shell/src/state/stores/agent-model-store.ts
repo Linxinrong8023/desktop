@@ -6,7 +6,10 @@ interface AgentModelState {
   /** The configuration options each CLI reported most recently, keyed by that CLI. */
   known: Partial<Record<AgentCli, acp.SessionConfigOption[]>>;
   /** Records what one CLI last reported, so the next surface opening on it renders at once. */
-  remember: (agentCli: AgentCli, configOptions: acp.SessionConfigOption[]) => void;
+  remember: (
+    agentCli: AgentCli,
+    configOptions: acp.SessionConfigOption[],
+  ) => void;
 }
 
 /**

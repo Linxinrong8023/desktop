@@ -158,12 +158,7 @@ export type GraphWorkflowRunStatus =
 
 /** Per-node execution status overlaid on a frozen definition snapshot. */
 export type GraphWorkflowNodeStatus =
-  | "idle"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "cancelled"
-  | "awaiting_input";
+  "idle" | "running" | "succeeded" | "failed" | "cancelled" | "awaiting_input";
 
 /** HITL timeout policy; MVP mock always waits (`wait`) until submit. */
 export type HitlTimeoutPolicy = "fail" | "skip" | "wait";
@@ -222,8 +217,7 @@ interface WorkflowNodeConversationItemBase {
 }
 
 /** A user or Agent message approved for the compact node conversation. */
-export interface WorkflowNodeConversationMessage
-  extends WorkflowNodeConversationItemBase {
+export interface WorkflowNodeConversationMessage extends WorkflowNodeConversationItemBase {
   kind: "message";
   role: WorkflowNodeConversationMessageRole;
   markdown: string;
@@ -231,8 +225,7 @@ export interface WorkflowNodeConversationMessage
 }
 
 /** A raw-session item retained for an explicitly expanded activity disclosure. */
-export interface WorkflowNodeConversationActivity
-  extends WorkflowNodeConversationItemBase {
+export interface WorkflowNodeConversationActivity extends WorkflowNodeConversationItemBase {
   kind: "activity";
   activityKind: WorkflowNodeConversationActivityKind;
   summary: string;
@@ -248,8 +241,7 @@ export interface WorkflowNodeConversationActivity
  * the same layout as the full chat surface.
  */
 export type WorkflowNodeConversationItem =
-  | WorkflowNodeConversationMessage
-  | WorkflowNodeConversationActivity;
+  WorkflowNodeConversationMessage | WorkflowNodeConversationActivity;
 
 /**
  * A project-scoped execution of a mounted workflow definition.

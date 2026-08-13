@@ -6,12 +6,22 @@ export type DialogState =
   | { kind: "project"; entity?: Project }
   | { kind: "task"; projectId: string; entity?: Task }
   | { kind: "session"; taskId: string; entity?: Session }
-  | { kind: "workflowRun"; projectId: string; entity: { id: string; name: string } };
+  | {
+      kind: "workflowRun";
+      projectId: string;
+      entity: { id: string; name: string };
+    };
 
 /** Shape of the delete-confirmation dialog driven from the workspace tree. */
 export type DeleteTarget =
   | { kind: "project"; id: string; name: string; sessionIds: string[] }
-  | { kind: "task"; id: string; name: string; workspaceMode: Task["workspaceMode"]; sessionIds: string[] }
+  | {
+      kind: "task";
+      id: string;
+      name: string;
+      workspaceMode: Task["workspaceMode"];
+      sessionIds: string[];
+    }
   | { kind: "session"; id: string; name: string }
   | { kind: "workflowRun"; id: string; name: string; projectId: string };
 
@@ -57,7 +67,8 @@ export const useUiStore = create<UiState>((set) => ({
   setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setDashboardOpen: (dashboardOpen) => set({ dashboardOpen }),
-  openDashboardPanel: (dashboardMode) => set({ dashboardMode, dashboardOpen: true }),
+  openDashboardPanel: (dashboardMode) =>
+    set({ dashboardMode, dashboardOpen: true }),
   setDashboardWidth: (dashboardWidth) => set({ dashboardWidth }),
   toggleProjectExpand: (projectId) =>
     set((state) => {

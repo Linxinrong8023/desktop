@@ -42,13 +42,7 @@ describe("watchWorkspaceContinuously", () => {
 
   it("caps reconnect backoff at ten seconds", () => {
     expect([0, 1, 2, 3, 4, 5, 20].map(workspaceWatchReconnectDelay)).toEqual([
-      500,
-      1_000,
-      2_000,
-      4_000,
-      8_000,
-      10_000,
-      10_000,
+      500, 1_000, 2_000, 4_000, 8_000, 10_000, 10_000,
     ]);
   });
 });

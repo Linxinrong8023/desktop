@@ -62,8 +62,12 @@ export function normalizeWorkflowDefinition(
       position: { ...node.position },
       data: structuredClone(node.data),
       ...(node.deletable === undefined ? {} : { deletable: node.deletable }),
-      ...(node.initialWidth === undefined ? {} : { initialWidth: node.initialWidth }),
-      ...(node.initialHeight === undefined ? {} : { initialHeight: node.initialHeight }),
+      ...(node.initialWidth === undefined
+        ? {}
+        : { initialWidth: node.initialWidth }),
+      ...(node.initialHeight === undefined
+        ? {}
+        : { initialHeight: node.initialHeight }),
     })),
     edges: input.edges.map((edge) => ({
       id: edge.id,
@@ -83,7 +87,9 @@ export function normalizeWorkflowDefinition(
  * Keeping this validation transport-neutral lets memory, HTTP, and Tauri
  * adapters enforce the same client-side deployment contract.
  */
-export function validateWorkflowDefinition(definition: WorkflowDefinition): void {
+export function validateWorkflowDefinition(
+  definition: WorkflowDefinition,
+): void {
   const issues: string[] = [];
   if (definition.id.trim() === "") {
     issues.push("definition id must not be empty");
@@ -100,7 +106,10 @@ export function validateWorkflowDefinition(definition: WorkflowDefinition): void
       issues.push(`duplicate node id ${node.id}`);
     }
     nodeIds.add(node.id);
-    if (!Number.isFinite(node.position.x) || !Number.isFinite(node.position.y)) {
+    if (
+      !Number.isFinite(node.position.x) ||
+      !Number.isFinite(node.position.y)
+    ) {
       issues.push(`node ${node.id || "<empty>"} has a non-finite position`);
     }
   }
@@ -144,10 +153,10 @@ export function validateWorkflowDefinition(definition: WorkflowDefinition): void
   }
 
   if (
-    !Number.isFinite(definition.viewport.x)
-    || !Number.isFinite(definition.viewport.y)
-    || !Number.isFinite(definition.viewport.zoom)
-    || definition.viewport.zoom <= 0
+    !Number.isFinite(definition.viewport.x) ||
+    !Number.isFinite(definition.viewport.y) ||
+    !Number.isFinite(definition.viewport.zoom) ||
+    definition.viewport.zoom <= 0
   ) {
     issues.push("viewport must contain finite coordinates and a positive zoom");
   }

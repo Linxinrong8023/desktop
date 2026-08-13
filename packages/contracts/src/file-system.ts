@@ -104,11 +104,11 @@ export type WorkspaceEntryKind = "file" | "directory";
  * Describes cache-invalidating changes emitted by the native workspace watcher.
  */
 export type WorkspaceFileChange =
-  | { "kind": "created"; path: string }
-  | { "kind": "modified"; path: string }
-  | { "kind": "removed"; path: string }
-  | { "kind": "renamed"; from: string; path: string }
-  | { "kind": "rescanRequired" };
+  | { kind: "created"; path: string }
+  | { kind: "modified"; path: string }
+  | { kind: "removed"; path: string }
+  | { kind: "renamed"; from: string; path: string }
+  | { kind: "rescanRequired" };
 
 /**
  * Batches native filesystem changes so event storms do not trigger one refetch per callback.
@@ -123,14 +123,16 @@ export type WorkspaceSearchKind = "files" | "content";
 /**
  * Keeps filename results and line-oriented content matches structurally distinct.
  */
-export type WorkspaceSearchResult = { "kind": "file"; path: string } | {
-  "kind": "match";
-  path: string;
-  line: number;
-  /**
-   * Uses ripgrep's one-based UTF-8 byte offset so every transport preserves its location.
-   */
-  column: number;
-  matchedText: string;
-  preview: string;
-};
+export type WorkspaceSearchResult =
+  | { kind: "file"; path: string }
+  | {
+      kind: "match";
+      path: string;
+      line: number;
+      /**
+       * Uses ripgrep's one-based UTF-8 byte offset so every transport preserves its location.
+       */
+      column: number;
+      matchedText: string;
+      preview: string;
+    };

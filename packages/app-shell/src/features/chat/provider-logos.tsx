@@ -9,7 +9,13 @@ type LogoProps = SVGProps<SVGSVGElement>;
  * Renders an agent CLI's brand mark. CLIs without a custom logo fall back to a
  * generic icon so every row still reads as a distinct group.
  */
-export function ProviderLogo({ agentCli, className }: { agentCli: AgentCli; className?: string }) {
+export function ProviderLogo({
+  agentCli,
+  className,
+}: {
+  agentCli: AgentCli;
+  className?: string;
+}) {
   switch (agentCli) {
     case "open_code":
       return <OpenCodeMark className={className} />;

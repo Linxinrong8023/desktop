@@ -33,7 +33,10 @@ interface WorkflowStepperProps {
  * right. Node completion is user-driven (suggest-only) and the next pending node
  * is highlighted as the recommended step rather than auto-run.
  */
-export function WorkflowStepper({ onLaunch, disabled = false }: WorkflowStepperProps) {
+export function WorkflowStepper({
+  onLaunch,
+  disabled = false,
+}: WorkflowStepperProps) {
   const { t } = useTranslation();
   const key = useWorkflowKey();
   const run = useWorkflowStore((state) => getRun(state, key));
@@ -46,12 +49,16 @@ export function WorkflowStepper({ onLaunch, disabled = false }: WorkflowStepperP
   // While a node is running, no later node is offered: the next step only lights
   // up once the user marks the current one done or skips it.
   const runningNode = run.nodes.find((node) => node.status === "running");
-  const suggestedId = runningNode === undefined ? suggestedNextNode(run.nodes) : null;
+  const suggestedId =
+    runningNode === undefined ? suggestedNextNode(run.nodes) : null;
   // The node in focus is the running one, or the highlighted next one. Skipping an
   // optional stage (explore, sync) is offered here even before it runs.
-  const focusNode = runningNode ?? run.nodes.find((node) => node.id === suggestedId);
+  const focusNode =
+    runningNode ?? run.nodes.find((node) => node.id === suggestedId);
   const skipTargetId =
-    focusNode !== undefined && OPTIONAL_WORKFLOW_NODES.has(focusNode.id) && !disabled
+    focusNode !== undefined &&
+    OPTIONAL_WORKFLOW_NODES.has(focusNode.id) &&
+    !disabled
       ? focusNode.id
       : null;
 
@@ -61,7 +68,10 @@ export function WorkflowStepper({ onLaunch, disabled = false }: WorkflowStepperP
         {run.nodes.map((node, index) => (
           <div key={node.id} className="flex items-center gap-1">
             {index > 0 && (
-              <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground/40" aria-hidden="true" />
+              <IconChevronRight
+                className="size-3.5 shrink-0 text-muted-foreground/40"
+                aria-hidden="true"
+              />
             )}
             <StepperNode
               node={node}
@@ -122,7 +132,14 @@ interface StepperNodeProps {
   onLaunch: () => void;
 }
 
-function StepperNode({ node, label, isSuggested, canLaunch, disabled, onLaunch }: StepperNodeProps) {
+function StepperNode({
+  node,
+  label,
+  isSuggested,
+  canLaunch,
+  disabled,
+  onLaunch,
+}: StepperNodeProps) {
   // A pending node is launchable only when nothing is running; the suggested node
   // is emphasised so the user is nudged rather than funnelled.
   const isLaunchable = node.status === "pending" && !disabled && canLaunch;
@@ -174,7 +191,13 @@ function StepperNode({ node, label, isSuggested, canLaunch, disabled, onLaunch }
 }
 
 /** Status glyph, echoing plan-block's icon vocabulary so the two read as one system. */
-function StepperIcon({ status, suggested }: { status: WorkflowNodeStatus; suggested: boolean }) {
+function StepperIcon({
+  status,
+  suggested,
+}: {
+  status: WorkflowNodeStatus;
+  suggested: boolean;
+}) {
   switch (status) {
     case "pending":
       return suggested ? (
@@ -183,7 +206,9 @@ function StepperIcon({ status, suggested }: { status: WorkflowNodeStatus; sugges
         <IconCircleDashed className="size-3.5 shrink-0 text-muted-foreground/60" />
       );
     case "running":
-      return <IconLoader2 className="size-3.5 shrink-0 animate-spin text-sky-600 motion-reduce:animate-none" />;
+      return (
+        <IconLoader2 className="size-3.5 shrink-0 animate-spin text-sky-600 motion-reduce:animate-none" />
+      );
     case "done":
       return <IconCheck className="size-3.5 shrink-0 text-emerald-600" />;
     case "skipped":

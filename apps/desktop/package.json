@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "format": "prettier --write \"web/**/*.{ts,tsx,css}\" \"*.{html,json,ts}\" --ignore-path ../../.prettierignore",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

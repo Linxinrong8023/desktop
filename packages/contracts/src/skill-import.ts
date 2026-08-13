@@ -127,11 +127,7 @@ export type SkillImportResult = {
  * The final outcome of one committed candidate.
  */
 export type SkillImportResultStatus =
-  | "imported"
-  | "overwritten"
-  | "skipped"
-  | "failed"
-  | "staleconflict";
+  "imported" | "overwritten" | "skipped" | "failed" | "staleconflict";
 
 /**
  * One live import session projection shared by every transport.
@@ -148,10 +144,7 @@ export type SkillImportSession = {
  * Tracks the lifecycle phase of one import session.
  */
 export type SkillImportSessionStatus =
-  | "prepared"
-  | "committing"
-  | "completed"
-  | "cancelled";
+  "prepared" | "committing" | "completed" | "cancelled";
 
 /**
  * Names the physical source of one import session.
@@ -159,8 +152,10 @@ export type SkillImportSessionStatus =
  * Adapters materialize the raw source into OS temporary storage before handing paths here;
  * the paths are never treated as untrusted names for storage.
  */
-export type SkillImportSource = { "kind": "folder"; path: string } | {
-  "kind": "archive";
-  path: string;
-  fileName: string;
-};
+export type SkillImportSource =
+  | { kind: "folder"; path: string }
+  | {
+      kind: "archive";
+      path: string;
+      fileName: string;
+    };

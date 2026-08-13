@@ -67,17 +67,26 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
   const conversations = useStore(chatStore, (state) => state.conversations);
   const unread = useUnreadSessionsStore((s) => s.unread);
   // Stabilise the array references so useMemo dependencies don't change every render.
-  const projects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
+  const projects = useMemo(
+    () => projectsQuery.data ?? [],
+    [projectsQuery.data],
+  );
   const tasks = useMemo(() => tasksQuery.data ?? [], [tasksQuery.data]);
-  const sessions = useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data]);
-  const loading = projectsQuery.isPending || tasksQuery.isPending || sessionsQuery.isPending;
+  const sessions = useMemo(
+    () => sessionsQuery.data ?? [],
+    [sessionsQuery.data],
+  );
+  const loading =
+    projectsQuery.isPending || tasksQuery.isPending || sessionsQuery.isPending;
   const error = projectsQuery.error ?? tasksQuery.error ?? sessionsQuery.error;
 
   const selection = useWorkspaceSelectionStore((s) => s.selection);
   const selectProject = useWorkspaceSelectionStore((s) => s.selectProject);
   const selectTask = useWorkspaceSelectionStore((s) => s.selectTask);
   const selectSession = useWorkspaceSelectionStore((s) => s.selectSession);
-  const selectWorkflowRun = useWorkspaceSelectionStore((s) => s.selectWorkflowRun);
+  const selectWorkflowRun = useWorkspaceSelectionStore(
+    (s) => s.selectWorkflowRun,
+  );
   const clearSelection = useWorkspaceSelectionStore((s) => s.clearSelection);
 
   const expandedProjects = useUiStore((s) => s.expandedProjects);
@@ -91,24 +100,42 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
 
   const needle = query.trim().toLowerCase();
 
-  const visibleProjects = useMemo(() => projects.filter((project) => {
-    if (!needle) return true;
-    const projectTasks = tasks.filter(
-      (task) => task.projectId === project.id && task.type !== "workflow",
-    );
-    return project.name.toLowerCase().includes(needle)
-      || projectTasks.some((task) => task.title.toLowerCase().includes(needle)
-        || sessions.some((session) => session.taskId === task.id
-          && session.title?.toLowerCase().includes(needle)));
-  }), [needle, projects, sessions, tasks]);
+  const visibleProjects = useMemo(
+    () =>
+      projects.filter((project) => {
+        if (!needle) return true;
+        const projectTasks = tasks.filter(
+          (task) => task.projectId === project.id && task.type !== "workflow",
+        );
+        return (
+          project.name.toLowerCase().includes(needle) ||
+          projectTasks.some(
+            (task) =>
+              task.title.toLowerCase().includes(needle) ||
+              sessions.some(
+                (session) =>
+                  session.taskId === task.id &&
+                  session.title?.toLowerCase().includes(needle),
+              ),
+          )
+        );
+      }),
+    [needle, projects, sessions, tasks],
+  );
 
   // Expand the initial workspace tree once while preserving later manual collapse choices.
   useEffect(() => {
     if (loading || initializedTreeExpansion.current) return;
     initializedTreeExpansion.current = true;
     useUiStore.setState((state) => ({
-      expandedProjects: new Set([...state.expandedProjects, ...projects.map((project) => project.id)]),
-      expandedTasks: new Set([...state.expandedTasks, ...tasks.map((task) => task.id)]),
+      expandedProjects: new Set([
+        ...state.expandedProjects,
+        ...projects.map((project) => project.id),
+      ]),
+      expandedTasks: new Set([
+        ...state.expandedTasks,
+        ...tasks.map((task) => task.id),
+      ]),
     }));
   }, [loading, projects, tasks]);
 
@@ -157,10 +184,21 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
         <header className="flex h-14 items-center gap-2 px-3">
           <DragRegion>
             <OraMark size="default" />
-            <span className="text-[15px] font-semibold tracking-[-0.01em]">Ora</span>
+            <span className="text-[15px] font-semibold tracking-[-0.01em]">
+              Ora
+            </span>
           </DragRegion>
           <Tooltip>
-            <TooltipTrigger render={<Button variant="ghost" size="icon" onClick={() => setSidebarCollapsed(true)} aria-label={t("sidebar.collapse")} />}>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setSidebarCollapsed(true)}
+                  aria-label={t("sidebar.collapse")}
+                />
+              }
+            >
               <IconLayoutSidebarLeftCollapse />
             </TooltipTrigger>
             <TooltipContent>{t("sidebar.collapse")}</TooltipContent>
@@ -176,7 +214,9 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
           >
             <IconSquareRoundedPlus className="size-5" />
             {t("chat.newThread")}
-            <span className="ml-auto text-xs font-normal text-muted-foreground">⌘N</span>
+            <span className="ml-auto text-xs font-normal text-muted-foreground">
+              ⌘N
+            </span>
           </Button>
         </div>
 
@@ -204,59 +244,92 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
           </div>
         </div>
 
-        <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-3" aria-label={t("sidebar.navigation")}>
+        <nav
+          className="min-h-0 flex-1 overflow-y-auto px-2 pb-3"
+          aria-label={t("sidebar.navigation")}
+        >
           <div className="flex h-8 items-center px-2 text-xs font-medium text-muted-foreground">
             <span>{t("sidebar.projects")}</span>
             <Tooltip>
-              <TooltipTrigger render={<Button variant="ghost" size="icon-sm" className="ml-auto" onClick={() => setDialog({ kind: "project" })} aria-label={t("sidebar.newProject")} />}>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="ml-auto"
+                    onClick={() => setDialog({ kind: "project" })}
+                    aria-label={t("sidebar.newProject")}
+                  />
+                }
+              >
                 <IconPlus />
               </TooltipTrigger>
               <TooltipContent>{t("sidebar.newProject")}</TooltipContent>
             </Tooltip>
           </div>
-          {loading && <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t("sidebar.loading")}</p>}
+          {loading && (
+            <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">
+              {t("sidebar.loading")}
+            </p>
+          )}
           {!loading && visibleProjects.length === 0 && (
-            <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">{t("sidebar.empty")}</p>
+            <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">
+              {t("sidebar.empty")}
+            </p>
           )}
           {visibleProjects.map((project) => {
             const projectTasks = tasks.filter(
-              (task) => task.projectId === project.id && task.type !== "workflow",
+              (task) =>
+                task.projectId === project.id && task.type !== "workflow",
             );
             const projectTaskIds = new Set(projectTasks.map((task) => task.id));
             const projectSessionIds = sessions
               .filter((session) => projectTaskIds.has(session.taskId))
               .map((session) => session.id);
-            const projectOpen = expandedProjects.has(project.id) || Boolean(needle);
+            const projectOpen =
+              expandedProjects.has(project.id) || Boolean(needle);
             return (
               <div key={project.id}>
                 <TreeRow
                   depth={0}
                   active={
-                    selection.projectId === project.id
-                    && selection.taskId === null
-                    && selection.workflowRunId === null
+                    selection.projectId === project.id &&
+                    selection.taskId === null &&
+                    selection.workflowRunId === null
                   }
-                  icon={<IconFolder className="size-[18px] text-muted-foreground" />}
+                  icon={
+                    <IconFolder className="size-[18px] text-muted-foreground" />
+                  }
                   label={project.name}
                   expanded={projectOpen}
                   onClick={() => openProject(project.id)}
-                  action={(
+                  action={
                     <>
-                      <NewWorktreeButton onClick={() => setDialog({ kind: "task", projectId: project.id })} />
-                      <NewDirectChatButton onClick={() => selectProject(project.id)} />
+                      <NewWorktreeButton
+                        onClick={() =>
+                          setDialog({ kind: "task", projectId: project.id })
+                        }
+                      />
+                      <NewDirectChatButton
+                        onClick={() => selectProject(project.id)}
+                      />
                     </>
-                  )}
-                  menu={(
+                  }
+                  menu={
                     <EntityMenu
-                      onEdit={() => setDialog({ kind: "project", entity: project })}
-                      onDelete={() => setDeleteTarget({
-                        kind: "project",
-                        id: project.id,
-                        name: project.name,
-                        sessionIds: projectSessionIds,
-                      })}
+                      onEdit={() =>
+                        setDialog({ kind: "project", entity: project })
+                      }
+                      onDelete={() =>
+                        setDeleteTarget({
+                          kind: "project",
+                          id: project.id,
+                          name: project.name,
+                          sessionIds: projectSessionIds,
+                        })
+                      }
                     />
-                  )}
+                  }
                 />
                 <TreeBranch expanded={projectOpen}>
                   <ProjectWorkflowRunRows
@@ -266,52 +339,93 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
                         ? selection.workflowRunId
                         : null
                     }
-                    onSelectRun={(runId) => selectWorkflowRun(runId, project.id)}
-                    onEditRun={(run) => setDialog({
-                      kind: "workflowRun",
-                      projectId: project.id,
-                      entity: { id: run.id, name: run.name },
-                    })}
-                    onDeleteRun={(run) => setDeleteTarget({
-                      kind: "workflowRun",
-                      id: run.id,
-                      name: run.name,
-                      projectId: project.id,
-                    })}
+                    onSelectRun={(runId) =>
+                      selectWorkflowRun(runId, project.id)
+                    }
+                    onEditRun={(run) =>
+                      setDialog({
+                        kind: "workflowRun",
+                        projectId: project.id,
+                        entity: { id: run.id, name: run.name },
+                      })
+                    }
+                    onDeleteRun={(run) =>
+                      setDeleteTarget({
+                        kind: "workflowRun",
+                        id: run.id,
+                        name: run.name,
+                        projectId: project.id,
+                      })
+                    }
                   />
                   {projectTasks.map((task) => {
-                    const taskSessions = sessions.filter((session) => session.taskId === task.id);
-                    const taskOpen = expandedTasks.has(task.id) || Boolean(needle);
+                    const taskSessions = sessions.filter(
+                      (session) => session.taskId === task.id,
+                    );
+                    const taskOpen =
+                      expandedTasks.has(task.id) || Boolean(needle);
                     if (task.workspaceMode === "project_root") {
                       const directSession = taskSessions[0];
                       return (
                         <TreeRow
                           key={task.id}
                           depth={1}
-                          active={directSession
-                            ? selection.sessionId === directSession.id
-                            : selection.taskId === task.id}
-                          icon={directSession && conversations[directSession.id]?.pendingPermissions.length
-                            ? <IconAlertTriangle className="size-[18px] text-amber-500" aria-label={t("sidebar.permissionRequired")} />
-                            : <IconMessageCircle className="size-4 text-muted-foreground" aria-label={t("sidebar.directChatTask")} />}
-                          label={directSession
-                            ? directSession.title ?? t("sidebar.newSession")
-                            : task.title}
-                          onClick={() => directSession
-                            ? selectSession(directSession.id, task.id, project.id)
-                            : selectTask(task.id, task.projectId)}
-                          menu={(
+                          active={
+                            directSession
+                              ? selection.sessionId === directSession.id
+                              : selection.taskId === task.id
+                          }
+                          icon={
+                            directSession &&
+                            conversations[directSession.id]?.pendingPermissions
+                              .length ? (
+                              <IconAlertTriangle
+                                className="size-[18px] text-amber-500"
+                                aria-label={t("sidebar.permissionRequired")}
+                              />
+                            ) : (
+                              <IconMessageCircle
+                                className="size-4 text-muted-foreground"
+                                aria-label={t("sidebar.directChatTask")}
+                              />
+                            )
+                          }
+                          label={
+                            directSession
+                              ? (directSession.title ?? t("sidebar.newSession"))
+                              : task.title
+                          }
+                          onClick={() =>
+                            directSession
+                              ? selectSession(
+                                  directSession.id,
+                                  task.id,
+                                  project.id,
+                                )
+                              : selectTask(task.id, task.projectId)
+                          }
+                          menu={
                             <EntityMenu
-                              onEdit={() => setDialog({ kind: "task", projectId: project.id, entity: task })}
-                              onDelete={() => setDeleteTarget({
-                                kind: "task",
-                                id: task.id,
-                                name: task.title,
-                                workspaceMode: task.workspaceMode,
-                                sessionIds: taskSessions.map((session) => session.id),
-                              })}
+                              onEdit={() =>
+                                setDialog({
+                                  kind: "task",
+                                  projectId: project.id,
+                                  entity: task,
+                                })
+                              }
+                              onDelete={() =>
+                                setDeleteTarget({
+                                  kind: "task",
+                                  id: task.id,
+                                  name: task.title,
+                                  workspaceMode: task.workspaceMode,
+                                  sessionIds: taskSessions.map(
+                                    (session) => session.id,
+                                  ),
+                                })
+                              }
                             />
-                          )}
+                          }
                         />
                       );
                     }
@@ -319,24 +433,48 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
                       <div key={task.id}>
                         <TreeRow
                           depth={1}
-                          active={selection.taskId === task.id && selection.sessionId === null}
-                          icon={<IconGitBranch className="size-4 text-muted-foreground" aria-label={t("sidebar.worktreeTask")} />}
+                          active={
+                            selection.taskId === task.id &&
+                            selection.sessionId === null
+                          }
+                          icon={
+                            <IconGitBranch
+                              className="size-4 text-muted-foreground"
+                              aria-label={t("sidebar.worktreeTask")}
+                            />
+                          }
                           label={task.title}
                           expanded={taskOpen}
                           onClick={() => openTask(task.id)}
-                          action={<NewSessionButton onClick={() => selectTask(task.id, task.projectId)} />}
-                          menu={(
-                            <EntityMenu
-                              onEdit={() => setDialog({ kind: "task", projectId: project.id, entity: task })}
-                              onDelete={() => setDeleteTarget({
-                                kind: "task",
-                                id: task.id,
-                                name: task.title,
-                                workspaceMode: task.workspaceMode,
-                                sessionIds: taskSessions.map((session) => session.id),
-                              })}
+                          action={
+                            <NewSessionButton
+                              onClick={() =>
+                                selectTask(task.id, task.projectId)
+                              }
                             />
-                          )}
+                          }
+                          menu={
+                            <EntityMenu
+                              onEdit={() =>
+                                setDialog({
+                                  kind: "task",
+                                  projectId: project.id,
+                                  entity: task,
+                                })
+                              }
+                              onDelete={() =>
+                                setDeleteTarget({
+                                  kind: "task",
+                                  id: task.id,
+                                  name: task.title,
+                                  workspaceMode: task.workspaceMode,
+                                  sessionIds: taskSessions.map(
+                                    (session) => session.id,
+                                  ),
+                                })
+                              }
+                            />
+                          }
                         />
                         <TreeBranch expanded={taskOpen}>
                           {taskSessions.map((session) => (
@@ -349,24 +487,39 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
                               // which tracks whether the logical session is registered and stays
                               // "running" through every idle gap between turns. Once it stops,
                               // the same slot carries an unread mark until the session is opened.
-                              icon={conversations[session.id]?.pendingPermissions.length
-                                ? <IconAlertTriangle className="size-[18px] text-amber-500" aria-label={t("sidebar.permissionRequired")} />
-                                : conversations[session.id]?.isResponding
-                                  ? <AgentActivityDots label={t("common.running")} className="text-muted-foreground" />
-                                  : unread.has(session.id)
-                                    ? <UnreadDot label={t("sidebar.unread")} />
-                                    : null}
+                              icon={
+                                conversations[session.id]?.pendingPermissions
+                                  .length ? (
+                                  <IconAlertTriangle
+                                    className="size-[18px] text-amber-500"
+                                    aria-label={t("sidebar.permissionRequired")}
+                                  />
+                                ) : conversations[session.id]?.isResponding ? (
+                                  <AgentActivityDots
+                                    label={t("common.running")}
+                                    className="text-muted-foreground"
+                                  />
+                                ) : unread.has(session.id) ? (
+                                  <UnreadDot label={t("sidebar.unread")} />
+                                ) : null
+                              }
                               label={session.title ?? t("sidebar.newSession")}
-                              onClick={() => selectSession(session.id, task.id, project.id)}
-                              menu={(
+                              onClick={() =>
+                                selectSession(session.id, task.id, project.id)
+                              }
+                              menu={
                                 <EntityMenu
-                                  onDelete={() => setDeleteTarget({
-                                    kind: "session",
-                                    id: session.id,
-                                    name: session.title ?? t("sidebar.newSession"),
-                                  })}
+                                  onDelete={() =>
+                                    setDeleteTarget({
+                                      kind: "session",
+                                      id: session.id,
+                                      name:
+                                        session.title ??
+                                        t("sidebar.newSession"),
+                                    })
+                                  }
                                 />
-                              )}
+                              }
                             />
                           ))}
                         </TreeBranch>
@@ -379,9 +532,20 @@ export function WorkspaceSidebar({ user, onSignOut }: WorkspaceSidebarProps) {
           })}
         </nav>
 
-        {error && <p data-selectable className="border-t border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">{localizeContractError(error, t)}</p>}
+        {error && (
+          <p
+            data-selectable
+            className="border-t border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          >
+            {localizeContractError(error, t)}
+          </p>
+        )}
         <div className="p-2">
-          <UserProfile user={user} onOpenSettings={() => setSettingsOpen(true)} onSignOut={onSignOut} />
+          <UserProfile
+            user={user}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onSignOut={onSignOut}
+          />
         </div>
       </aside>
     </>
@@ -423,7 +587,13 @@ function UnreadDot({ label }: { label: string }) {
  * keyframes read Radix/Bits/Reka/Kobalte height variables, none of which Base UI
  * sets, so they would silently fall back to `height: auto` and never animate.
  */
-function TreeBranch({ expanded, children }: { expanded: boolean; children: React.ReactNode }) {
+function TreeBranch({
+  expanded,
+  children,
+}: {
+  expanded: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <Collapsible open={expanded}>
       <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height,opacity] duration-200 ease-out data-ending-style:h-0 data-ending-style:opacity-0 data-starting-style:h-0 data-starting-style:opacity-0">
@@ -448,9 +618,21 @@ interface TreeRowProps {
 }
 
 /** Keeps every tree level aligned while preserving a stable row width for actions. */
-function TreeRow({ depth, active, icon, label, meta, expanded, onClick, action, menu }: TreeRowProps) {
+function TreeRow({
+  depth,
+  active,
+  icon,
+  label,
+  meta,
+  expanded,
+  onClick,
+  action,
+  menu,
+}: TreeRowProps) {
   return (
-    <div className={`group/tree flex h-9 items-center rounded-md transition-colors ${active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/70"}`}>
+    <div
+      className={`group/tree flex h-9 items-center rounded-md transition-colors ${active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "hover:bg-sidebar-accent/70"}`}
+    >
       <button
         type="button"
         onClick={onClick}
@@ -459,10 +641,17 @@ function TreeRow({ depth, active, icon, label, meta, expanded, onClick, action, 
         style={{ paddingLeft: `${8 + depth * 18}px` }}
       >
         <span className="relative flex size-[18px] shrink-0 items-center justify-center">
-          <span className={`flex items-center justify-center transition-opacity duration-100 ${expanded === undefined ? "" : "group-hover/tree:opacity-0"}`}>{icon}</span>
-          {expanded !== undefined && (expanded
-            ? <IconChevronDown className="absolute size-4 opacity-0 transition-opacity duration-100 group-hover/tree:opacity-100" />
-            : <IconChevronRight className="absolute size-4 opacity-0 transition-opacity duration-100 group-hover/tree:opacity-100" />)}
+          <span
+            className={`flex items-center justify-center transition-opacity duration-100 ${expanded === undefined ? "" : "group-hover/tree:opacity-0"}`}
+          >
+            {icon}
+          </span>
+          {expanded !== undefined &&
+            (expanded ? (
+              <IconChevronDown className="absolute size-4 opacity-0 transition-opacity duration-100 group-hover/tree:opacity-100" />
+            ) : (
+              <IconChevronRight className="absolute size-4 opacity-0 transition-opacity duration-100 group-hover/tree:opacity-100" />
+            ))}
         </span>
         <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
         {meta && (
@@ -549,7 +738,7 @@ function ProjectWorkflowRunRows({
           key={run.id}
           depth={1}
           active={activeRunId === run.id}
-          icon={(
+          icon={
             <span className="relative flex size-[18px] items-center justify-center">
               <IconRoute className="size-4 text-muted-foreground" aria-hidden />
               <span
@@ -557,15 +746,15 @@ function ProjectWorkflowRunRows({
                 aria-label={t(`workflowRun.status.${run.status}`)}
               />
             </span>
-          )}
+          }
           label={run.name}
           onClick={() => onSelectRun(run.id)}
-          menu={(
+          menu={
             <EntityMenu
               onEdit={() => onEditRun({ id: run.id, name: run.name })}
               onDelete={() => onDeleteRun({ id: run.id, name: run.name })}
             />
-          )}
+          }
         />
       ))}
     </>
@@ -580,7 +769,7 @@ function NewWorktreeButton({ onClick }: { onClick: () => void }) {
   return (
     <Tooltip>
       <TooltipTrigger
-        render={(
+        render={
           <Button
             variant="ghost"
             size="icon-sm"
@@ -590,7 +779,7 @@ function NewWorktreeButton({ onClick }: { onClick: () => void }) {
               onClick();
             }}
           />
-        )}
+        }
       >
         <IconGitBranch />
       </TooltipTrigger>
@@ -605,7 +794,7 @@ function NewDirectChatButton({ onClick }: { onClick: () => void }) {
   return (
     <Tooltip>
       <TooltipTrigger
-        render={(
+        render={
           <Button
             variant="ghost"
             size="icon-sm"
@@ -615,7 +804,7 @@ function NewDirectChatButton({ onClick }: { onClick: () => void }) {
               onClick();
             }}
           />
-        )}
+        }
       >
         <IconEdit />
       </TooltipTrigger>
@@ -637,18 +826,35 @@ function EntityMenu({
   const { t } = useTranslation();
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={t("sidebar.openActions")} onClick={(event) => event.stopPropagation()} />}>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t("sidebar.openActions")}
+            onClick={(event) => event.stopPropagation()}
+          />
+        }
+      >
         <IconDots />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
-        {onEdit && <DropdownMenuItem onClick={onEdit}><IconPencil />{t("common.edit")}</DropdownMenuItem>}
+        {onEdit && (
+          <DropdownMenuItem onClick={onEdit}>
+            <IconPencil />
+            {t("common.edit")}
+          </DropdownMenuItem>
+        )}
         {onCancel && (
           <DropdownMenuItem onClick={onCancel}>
             <IconPlayerStop />
             {t("workflowRun.cancelAction")}
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem variant="destructive" onClick={onDelete}><IconTrash />{t("common.delete")}</DropdownMenuItem>
+        <DropdownMenuItem variant="destructive" onClick={onDelete}>
+          <IconTrash />
+          {t("common.delete")}
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

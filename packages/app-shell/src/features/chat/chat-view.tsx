@@ -33,7 +33,10 @@ interface ChatViewProps {
   /** Fired on Enter with an empty input; used in Spec mode to run the highlighted stage. */
   onEmptySubmit?: () => void;
   onStop?: () => void;
-  onRespondToPermission?: (permissionRequestId: string, optionId: string) => void;
+  onRespondToPermission?: (
+    permissionRequestId: string,
+    optionId: string,
+  ) => void;
   /**
    * Optional strip rendered directly above the composer. Passed in rather than
    * built here so the chat pane stays unaware of workspace entities.
@@ -64,7 +67,27 @@ const SLIDE_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
  * thread layouts so sending the first message slides it down to the bottom
  * instead of tearing it down and rebuilding it in the new position.
  */
-export function ChatView({ taskId, turns, modelChanges, userName, isResponding, isStreaming = false, isLoading = false, error, pendingPermissions = [], disabled = false, onSend, onEmptySubmit, onStop, onRespondToPermission, contextBar, workflowBar, disabledHint, skills = [], availableCommands = [] }: ChatViewProps) {
+export function ChatView({
+  taskId,
+  turns,
+  modelChanges,
+  userName,
+  isResponding,
+  isStreaming = false,
+  isLoading = false,
+  error,
+  pendingPermissions = [],
+  disabled = false,
+  onSend,
+  onEmptySubmit,
+  onStop,
+  onRespondToPermission,
+  contextBar,
+  workflowBar,
+  disabledHint,
+  skills = [],
+  availableCommands = [],
+}: ChatViewProps) {
   const { t } = useTranslation();
   // A loading session takes the thread layout even before its turns arrive, so the
   // landing (centered) layout is reserved for the genuinely-empty new-task compose
@@ -104,13 +127,18 @@ export function ChatView({ taskId, turns, modelChanges, userName, isResponding, 
     const deltaY = origin - slot.getBoundingClientRect().top;
     if (deltaY === 0) return;
     slot.animate(
-      [{ transform: `translateY(${deltaY}px)` }, { transform: "translateY(0)" }],
+      [
+        { transform: `translateY(${deltaY}px)` },
+        { transform: "translateY(0)" },
+      ],
       { duration: SLIDE_DURATION_MS, easing: SLIDE_EASING },
     );
   });
 
   return (
-    <main className={`flex min-h-0 flex-1 flex-col bg-background ${isEmpty ? "overflow-y-auto" : ""}`}>
+    <main
+      className={`flex min-h-0 flex-1 flex-col bg-background ${isEmpty ? "overflow-y-auto" : ""}`}
+    >
       {isEmpty ? (
         // `mt-auto` here and `mb-auto` on the composer slot split the free space
         // evenly, centring the pair. Auto margins collapse to 0 once the content
@@ -125,7 +153,12 @@ export function ChatView({ taskId, turns, modelChanges, userName, isResponding, 
         // has already slid down, so this fills the space above it until turns land.
         <HistoryLoading />
       ) : (
-        <MessageList turns={turns} modelChanges={modelChanges} userName={userName} isResponding={isResponding} />
+        <MessageList
+          turns={turns}
+          modelChanges={modelChanges}
+          userName={userName}
+          isResponding={isResponding}
+        />
       )}
 
       <div
@@ -133,17 +166,32 @@ export function ChatView({ taskId, turns, modelChanges, userName, isResponding, 
         className={
           isEmpty
             ? "mb-auto w-full px-3 pb-10 sm:px-6"
-            // Gradient fade so the thread dissolves under the composer instead of hard-clipping.
-            : "shrink-0 bg-gradient-to-t from-background via-background to-transparent px-3 pb-4 pt-6 sm:px-5"
+            : // Gradient fade so the thread dissolves under the composer instead of hard-clipping.
+              "shrink-0 bg-gradient-to-t from-background via-background to-transparent px-3 pb-4 pt-6 sm:px-5"
         }
       >
         <div className="mx-auto w-full max-w-[760px]">
-          {error && <p role="alert" data-selectable className="mb-2 px-1 text-xs text-destructive">{error}</p>}
+          {error && (
+            <p
+              role="alert"
+              data-selectable
+              className="mb-2 px-1 text-xs text-destructive"
+            >
+              {error}
+            </p>
+          )}
           {pendingPermissions.map((request) => (
-            <section key={request.permissionRequestId} className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-              <p className="text-xs font-medium">{t("chat.permissionRequired")}</p>
+            <section
+              key={request.permissionRequestId}
+              className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3"
+            >
+              <p className="text-xs font-medium">
+                {t("chat.permissionRequired")}
+              </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {request.toolCall.title ?? request.toolCall.kind ?? t("chat.permissionFallback")}
+                {request.toolCall.title ??
+                  request.toolCall.kind ??
+                  t("chat.permissionFallback")}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {request.options.map((option) => (
@@ -151,8 +199,15 @@ export function ChatView({ taskId, turns, modelChanges, userName, isResponding, 
                     key={option.optionId}
                     type="button"
                     size="sm"
-                    variant={option.kind.startsWith("reject") ? "outline" : "default"}
-                    onClick={() => onRespondToPermission?.(request.permissionRequestId, option.optionId)}
+                    variant={
+                      option.kind.startsWith("reject") ? "outline" : "default"
+                    }
+                    onClick={() =>
+                      onRespondToPermission?.(
+                        request.permissionRequestId,
+                        option.optionId,
+                      )
+                    }
                   >
                     {option.name}
                   </Button>
@@ -161,7 +216,10 @@ export function ChatView({ taskId, turns, modelChanges, userName, isResponding, 
             </section>
           ))}
           {contextBar && (
-            <div data-slot="composer-context" className="mb-1 flex h-6 items-center px-1">
+            <div
+              data-slot="composer-context"
+              className="mb-1 flex h-6 items-center px-1"
+            >
               {contextBar}
             </div>
           )}
@@ -178,12 +236,27 @@ export function ChatView({ taskId, turns, modelChanges, userName, isResponding, 
               open the moment a hint reappears. */}
           <Tooltip trackCursorAxis="both" disabled={disabledHint === undefined}>
             <TooltipTrigger render={<div />}>
-              <Composer taskId={taskId} autoFocus onSend={onSend} onEmptySubmit={onEmptySubmit} onStop={onStop} isResponding={isResponding} isStreaming={isStreaming} disabled={disabled} skills={skills} availableCommands={availableCommands} />
+              <Composer
+                taskId={taskId}
+                autoFocus
+                onSend={onSend}
+                onEmptySubmit={onEmptySubmit}
+                onStop={onStop}
+                isResponding={isResponding}
+                isStreaming={isStreaming}
+                disabled={disabled}
+                skills={skills}
+                availableCommands={availableCommands}
+              />
             </TooltipTrigger>
             <TooltipContent sideOffset={12}>{disabledHint}</TooltipContent>
           </Tooltip>
           {isEmpty && (
-            <LandingSuggestions onSend={onSend} isResponding={isResponding} disabled={disabled} />
+            <LandingSuggestions
+              onSend={onSend}
+              isResponding={isResponding}
+              disabled={disabled}
+            />
           )}
         </div>
       </div>

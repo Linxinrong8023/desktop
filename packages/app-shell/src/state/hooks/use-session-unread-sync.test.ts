@@ -1,13 +1,22 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createChatStore, type ChatStore, type SessionConversation } from "@ora/chat";
-import { createMockClient, createMockClientState } from "../../test/mock-client";
+import {
+  createChatStore,
+  type ChatStore,
+  type SessionConversation,
+} from "@ora/chat";
+import {
+  createMockClient,
+  createMockClientState,
+} from "../../test/mock-client";
 import { useSessionUnreadSync } from "./use-session-unread-sync";
 import { useUnreadSessionsStore } from "../stores/unread-sessions-store";
 import { useWorkspaceSelectionStore } from "../stores/workspace-selection-store";
 
 /** Builds an idle conversation, overriding only the fields a test drives. */
-function conversation(overrides: Partial<SessionConversation> = {}): SessionConversation {
+function conversation(
+  overrides: Partial<SessionConversation> = {},
+): SessionConversation {
   return {
     configOptions: [],
     modelChanges: [],
@@ -30,17 +39,27 @@ function makeChatStore(): ChatStore {
 }
 
 /** Sets one session's live responding flag, leaving the others untouched. */
-function setResponding(store: ChatStore, id: string, isResponding: boolean): void {
+function setResponding(
+  store: ChatStore,
+  id: string,
+  isResponding: boolean,
+): void {
   act(() =>
     store.setState((state) => ({
-      conversations: { ...state.conversations, [id]: conversation({ isResponding }) },
+      conversations: {
+        ...state.conversations,
+        [id]: conversation({ isResponding }),
+      },
     })),
   );
 }
 
-const isUnread = (id: string) => useUnreadSessionsStore.getState().unread.has(id);
+const isUnread = (id: string) =>
+  useUnreadSessionsStore.getState().unread.has(id);
 const select = (sessionId: string) =>
-  act(() => useWorkspaceSelectionStore.getState().selectSession(sessionId, "t1", "p1"));
+  act(() =>
+    useWorkspaceSelectionStore.getState().selectSession(sessionId, "t1", "p1"),
+  );
 
 beforeEach(() => {
   useUnreadSessionsStore.setState({ unread: new Set() });

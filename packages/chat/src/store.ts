@@ -1,8 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import type {
-  ContractsClient,
-  SessionPermissionRequest,
-} from "@ora/contracts";
+import type { ContractsClient, SessionPermissionRequest } from "@ora/contracts";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type {
   ChatModelChange,
@@ -70,7 +67,10 @@ export interface ChatState {
    * Used to seed a warm session's options before any turn exists, from a warm
    * or attach response the store did not issue itself.
    */
-  setConfigOptions(oraSessionId: string, configOptions: acp.SessionConfigOption[]): void;
+  setConfigOptions(
+    oraSessionId: string,
+    configOptions: acp.SessionConfigOption[],
+  ): void;
   /**
    * Adopts the options of an agent this session has just been rebound onto.
    *
@@ -79,7 +79,10 @@ export interface ChatState {
    * in the thread and is the first the incoming agent answers — the mark belongs
    * before it rather than after the whole exchange.
    */
-  adoptSwitchedAgent(oraSessionId: string, configOptions: acp.SessionConfigOption[]): void;
+  adoptSwitchedAgent(
+    oraSessionId: string,
+    configOptions: acp.SessionConfigOption[],
+  ): void;
   /**
    * Applies one configuration selection — in practice the model — to a session.
    *
@@ -88,11 +91,19 @@ export interface ChatState {
    * gets recorded. Works on a warm session as well as a persisted one, so a model
    * can be chosen before the first message is sent.
    */
-  setSessionConfig(oraSessionId: string, configId: string, value: string): Promise<void>;
+  setSessionConfig(
+    oraSessionId: string,
+    configId: string,
+    value: string,
+  ): Promise<void>;
   loadSession(oraSessionId: string): Promise<void>;
   sendMessage(request: SendMessageRequest): Promise<void>;
   stopGeneration(oraSessionId: string): void;
-  respondToPermission(oraSessionId: string, permissionRequestId: string, optionId: string): Promise<void>;
+  respondToPermission(
+    oraSessionId: string,
+    permissionRequestId: string,
+    optionId: string,
+  ): Promise<void>;
   clearAll(): void;
   dispose(): void;
 }
@@ -278,14 +289,22 @@ export function createChatStore(
       }
     },
 
-    sendMessage: async ({ oraSessionId, text, images = [], agentText, prepare }) => {
+    sendMessage: async ({
+      oraSessionId,
+      text,
+      images = [],
+      agentText,
+      prepare,
+    }) => {
       const content = text.trim();
       if (content === "" && images.length === 0) return;
       // What the agent receives can differ from what the user sees in their turn,
       // so a workflow reminder is sent without appearing in the transcript.
       const promptContent = (agentText ?? text).trim();
       const prompt: acp.ContentBlock[] = [
-        ...(promptContent === "" ? [] : [{ type: "text" as const, text: promptContent }]),
+        ...(promptContent === ""
+          ? []
+          : [{ type: "text" as const, text: promptContent }]),
         ...images.map((image) => ({ type: "image" as const, ...image })),
       ];
 
@@ -328,9 +347,16 @@ export function createChatStore(
       };
 
       /** Collects one text chunk so repeated provider frames collapse into larger UI updates. */
-      const queueTextChunk = (itemKind: "message" | "thought", chunk: acp.ContentChunk) => {
+      const queueTextChunk = (
+        itemKind: "message" | "thought",
+        chunk: acp.ContentChunk,
+      ) => {
         if (chunk.content.type !== "text") return;
-        if (pendingTextChunk !== null && (pendingTextChunk.itemKind !== itemKind || pendingTextChunk.messageId !== (chunk.messageId ?? undefined))) {
+        if (
+          pendingTextChunk !== null &&
+          (pendingTextChunk.itemKind !== itemKind ||
+            pendingTextChunk.messageId !== (chunk.messageId ?? undefined))
+        ) {
           flushPendingTextChunk();
         }
         if (pendingTextChunk === null) {
@@ -359,7 +385,14 @@ export function createChatStore(
           id: createId(),
           role: "user",
           content,
-          ...(images.length === 0 ? {} : { structuredContent: images.map((image) => ({ type: "image" as const, ...image })) }),
+          ...(images.length === 0
+            ? {}
+            : {
+                structuredContent: images.map((image) => ({
+                  type: "image" as const,
+                  ...image,
+                })),
+              }),
           createdAt,
         },
         items: [],
@@ -381,7 +414,11 @@ export function createChatStore(
         } catch (error) {
           // Nothing streamed yet; settle the optimistic turn and stop here.
           const message = errorMessage(error);
-          updateTurn(set, key, turnId, (current) => ({ ...current, status: "failed", error: message }));
+          updateTurn(set, key, turnId, (current) => ({
+            ...current,
+            status: "failed",
+            error: message,
+          }));
           updateConversation(set, key, (conversation) => ({
             ...conversation,
             isResponding: false,
@@ -393,9 +430,14 @@ export function createChatStore(
         if (controller.signal.aborted) {
           // Stopped mid-startup: the session exists but we never open its stream.
           updateTurn(set, key, turnId, (current) =>
-            current.status === "streaming" ? { ...current, status: "cancelled" } : current,
+            current.status === "streaming"
+              ? { ...current, status: "cancelled" }
+              : current,
           );
-          updateConversation(set, key, (conversation) => ({ ...conversation, isResponding: false }));
+          updateConversation(set, key, (conversation) => ({
+            ...conversation,
+            isResponding: false,
+          }));
           operations.delete(key);
           return;
         }
@@ -425,7 +467,10 @@ export function createChatStore(
             // the session, so it never reaches the turn accumulator.
             const configOptions = sessionScopedConfigOptions(update);
             if (configOptions) {
-              updateConversation(set, key, (conversation) => ({ ...conversation, configOptions }));
+              updateConversation(set, key, (conversation) => ({
+                ...conversation,
+                configOptions,
+              }));
               continue;
             }
             if (isConversationUpdate(update)) {
@@ -435,11 +480,17 @@ export function createChatStore(
               continue;
             }
             if (isDeferredConversationUpdate(update)) continue;
-            if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+            if (
+              update.sessionUpdate === "agent_message_chunk" &&
+              update.content.type === "text"
+            ) {
               queueTextChunk("message", update);
               continue;
             }
-            if (update.sessionUpdate === "agent_thought_chunk" && update.content.type === "text") {
+            if (
+              update.sessionUpdate === "agent_thought_chunk" &&
+              update.content.type === "text"
+            ) {
               queueTextChunk("thought", update);
               continue;
             }
@@ -456,7 +507,10 @@ export function createChatStore(
               settleActiveToolCalls(
                 {
                   ...current,
-                  status: event.stopReason === "cancelled" ? "cancelled" as const : "completed" as const,
+                  status:
+                    event.stopReason === "cancelled"
+                      ? ("cancelled" as const)
+                      : ("completed" as const),
                   stopReason: event.stopReason,
                 },
                 impliedToolStatus(event.stopReason),
@@ -470,7 +524,11 @@ export function createChatStore(
         if (isAbortError(error)) {
           updateTurn(set, key, turnId, (current) =>
             current.status === "streaming"
-              ? settleActiveToolCalls({ ...current, status: "cancelled" }, "cancelled", now())
+              ? settleActiveToolCalls(
+                  { ...current, status: "cancelled" },
+                  "cancelled",
+                  now(),
+                )
               : current,
           );
           clearPendingPermissions(set, key);
@@ -502,7 +560,11 @@ export function createChatStore(
         // Nothing reported them finishing, so they close as interrupted.
         updateTurn(set, key, turnId, (current) =>
           current.status === "streaming"
-            ? settleActiveToolCalls({ ...current, status: "completed" }, "cancelled", now())
+            ? settleActiveToolCalls(
+                { ...current, status: "completed" },
+                "cancelled",
+                now(),
+              )
             : current,
         );
         updateConversation(set, key, (conversation) => ({
@@ -514,7 +576,11 @@ export function createChatStore(
 
     stopGeneration: (oraSessionId) => operations.get(oraSessionId)?.abort(),
 
-    respondToPermission: async (oraSessionId, permissionRequestId, optionId) => {
+    respondToPermission: async (
+      oraSessionId,
+      permissionRequestId,
+      optionId,
+    ) => {
       try {
         await client.respondToPermission({
           sessionId: oraSessionId,
@@ -623,7 +689,11 @@ class HistoryBuilder {
       // still be running nor credits it with an outcome the record never held.
       turns: this.turns.map((turn) =>
         turn.status === "streaming"
-          ? settleActiveToolCalls({ ...turn, status: "completed" as const }, "cancelled", this.now())
+          ? settleActiveToolCalls(
+              { ...turn, status: "completed" as const },
+              "cancelled",
+              this.now(),
+            )
           : turn,
       ),
       pendingPermissions: this.permissions,
@@ -650,16 +720,24 @@ class HistoryBuilder {
       last !== undefined &&
       last.items.length === 0 &&
       last.userMessage.role === "user" &&
-      (protocolMessageId === undefined || last.userMessage.protocolMessageId === protocolMessageId);
+      (protocolMessageId === undefined ||
+        last.userMessage.protocolMessageId === protocolMessageId);
     if (continuesUser && last) {
       this.replaceLast({
         ...last,
-        userMessage: chunk.content.type === "text"
-          ? { ...last.userMessage, content: last.userMessage.content + chunk.content.text }
-          : {
-            ...last.userMessage,
-            structuredContent: [...(last.userMessage.structuredContent ?? []), chunk.content],
-          },
+        userMessage:
+          chunk.content.type === "text"
+            ? {
+                ...last.userMessage,
+                content: last.userMessage.content + chunk.content.text,
+              }
+            : {
+                ...last.userMessage,
+                structuredContent: [
+                  ...(last.userMessage.structuredContent ?? []),
+                  chunk.content,
+                ],
+              },
       });
       return;
     }
@@ -671,7 +749,9 @@ class HistoryBuilder {
         id: this.createId(),
         role: "user",
         content: chunk.content.type === "text" ? chunk.content.text : "",
-        ...(chunk.content.type === "text" ? {} : { structuredContent: [chunk.content] }),
+        ...(chunk.content.type === "text"
+          ? {}
+          : { structuredContent: [chunk.content] }),
         createdAt,
         ...(protocolMessageId === undefined ? {} : { protocolMessageId }),
       },
@@ -691,7 +771,13 @@ class HistoryBuilder {
     const createdAt = this.now();
     const turn: ChatTurn = {
       id: this.createId(),
-      userMessage: { kind: "message", id: this.createId(), role: "user", content: "", createdAt },
+      userMessage: {
+        kind: "message",
+        id: this.createId(),
+        role: "user",
+        content: "",
+        createdAt,
+      },
       items: [],
       status: "streaming",
       stopReason: null,
@@ -756,7 +842,13 @@ function appendContentChunk(
     };
   }
 
-  return appendTextContentChunk(turn, itemKind, chunk.messageId ?? undefined, content.text, timestamp);
+  return appendTextContentChunk(
+    turn,
+    itemKind,
+    chunk.messageId ?? undefined,
+    content.text,
+    timestamp,
+  );
 }
 
 /** Appends one live text batch while preserving the per-message identity rules. */
@@ -787,7 +879,8 @@ function textRunIndex(
   for (let index = turn.items.length - 1; index >= 0; index -= 1) {
     const item = turn.items[index]!;
     if (item.kind !== "message" && item.kind !== "thought") return -1;
-    if (item.kind === itemKind && item.protocolMessageId === undefined) return index;
+    if (item.kind === itemKind && item.protocolMessageId === undefined)
+      return index;
   }
   return -1;
 }
@@ -807,25 +900,31 @@ function appendTextContentChunk(
     if (text.trim() === "") return turn;
     // Implicit runs are numbered by where they begin, which keeps them distinct
     // now that one turn can hold several.
-    const itemId = messageId === undefined
-      ? `${itemKind}-implicit-${turn.id}-${turn.items.length}`
-      : `${itemKind}-${messageId}`;
-    const item = itemKind === "message"
-      ? {
-          kind: "message" as const,
-          id: itemId,
-          role: "assistant" as const,
-          content: text,
-          createdAt: timestamp,
-          ...(messageId === undefined ? {} : { protocolMessageId: messageId }),
-        }
-      : {
-          kind: "thought" as const,
-          id: itemId,
-          content: text,
-          createdAt: timestamp,
-          ...(messageId === undefined ? {} : { protocolMessageId: messageId }),
-        };
+    const itemId =
+      messageId === undefined
+        ? `${itemKind}-implicit-${turn.id}-${turn.items.length}`
+        : `${itemKind}-${messageId}`;
+    const item =
+      itemKind === "message"
+        ? {
+            kind: "message" as const,
+            id: itemId,
+            role: "assistant" as const,
+            content: text,
+            createdAt: timestamp,
+            ...(messageId === undefined
+              ? {}
+              : { protocolMessageId: messageId }),
+          }
+        : {
+            kind: "thought" as const,
+            id: itemId,
+            content: text,
+            createdAt: timestamp,
+            ...(messageId === undefined
+              ? {}
+              : { protocolMessageId: messageId }),
+          };
     return { ...turn, items: [...turn.items, item] };
   }
 
@@ -841,15 +940,19 @@ function appendTextContentChunk(
 function isConversationUpdate(
   update: acp.SessionUpdate,
 ): update is ConversationUpdate {
-  return update.sessionUpdate === "available_commands_update"
-    || update.sessionUpdate === "session_info_update";
+  return (
+    update.sessionUpdate === "available_commands_update" ||
+    update.sessionUpdate === "session_info_update"
+  );
 }
 
 /** Ignores deferred conversation chrome without materializing an empty replay turn. */
 function isDeferredConversationUpdate(update: acp.SessionUpdate): boolean {
-  return update.sessionUpdate === "config_option_update"
-    || update.sessionUpdate === "current_mode_update"
-    || update.sessionUpdate === "usage_update";
+  return (
+    update.sessionUpdate === "config_option_update" ||
+    update.sessionUpdate === "current_mode_update" ||
+    update.sessionUpdate === "usage_update"
+  );
 }
 
 /** Applies the complete command list or partial session metadata update. */
@@ -863,16 +966,22 @@ function applyConversationUpdate(
     case "session_info_update":
       return {
         ...conversation,
-        sessionTitle: update.title === undefined ? conversation.sessionTitle : update.title,
-        sessionUpdatedAt: update.updatedAt === undefined
-          ? conversation.sessionUpdatedAt
-          : update.updatedAt,
+        sessionTitle:
+          update.title === undefined ? conversation.sessionTitle : update.title,
+        sessionUpdatedAt:
+          update.updatedAt === undefined
+            ? conversation.sessionUpdatedAt
+            : update.updatedAt,
       };
   }
 }
 
 /** Replaces the current turn's complete plan snapshot without changing its timeline position. */
-function replacePlan(turn: ChatTurn, entries: acp.PlanEntry[], timestamp: number): ChatTurn {
+function replacePlan(
+  turn: ChatTurn,
+  entries: acp.PlanEntry[],
+  timestamp: number,
+): ChatTurn {
   const planIndex = turn.items.findIndex((item) => item.kind === "plan");
   if (planIndex === -1) {
     const plan: ChatPlan = {
@@ -892,7 +1001,11 @@ function replacePlan(turn: ChatTurn, entries: acp.PlanEntry[], timestamp: number
 }
 
 /** Inserts a new tool call or replaces its complete initial snapshot. */
-function upsertToolCall(turn: ChatTurn, toolCall: acp.ToolCall, timestamp: number): ChatTurn {
+function upsertToolCall(
+  turn: ChatTurn,
+  toolCall: acp.ToolCall,
+  timestamp: number,
+): ChatTurn {
   const toolIndex = turn.items.findIndex(
     (item) => item.kind === "toolCall" && item.id === toolCall.toolCallId,
   );
@@ -905,8 +1018,13 @@ function upsertToolCall(turn: ChatTurn, toolCall: acp.ToolCall, timestamp: numbe
     content: toolCall.content ?? [],
     locations: toolCall.locations ?? [],
     ...(toolCall.rawInput === undefined ? {} : { rawInput: toolCall.rawInput }),
-    ...(toolCall.rawOutput === undefined ? {} : { rawOutput: toolCall.rawOutput }),
-    createdAt: toolIndex === -1 ? timestamp : (turn.items[toolIndex] as ChatToolCall).createdAt,
+    ...(toolCall.rawOutput === undefined
+      ? {}
+      : { rawOutput: toolCall.rawOutput }),
+    createdAt:
+      toolIndex === -1
+        ? timestamp
+        : (turn.items[toolIndex] as ChatToolCall).createdAt,
     updatedAt: timestamp,
   };
   if (toolIndex === -1) return { ...turn, items: [...turn.items, next] };
@@ -917,7 +1035,11 @@ function upsertToolCall(turn: ChatTurn, toolCall: acp.ToolCall, timestamp: numbe
 }
 
 /** Applies the partial fields from one ACP tool update to its existing timeline item. */
-function updateToolCall(turn: ChatTurn, update: acp.ToolCallUpdate, timestamp: number): ChatTurn {
+function updateToolCall(
+  turn: ChatTurn,
+  update: acp.ToolCallUpdate,
+  timestamp: number,
+): ChatTurn {
   const toolIndex = turn.items.findIndex(
     (item) => item.kind === "toolCall" && item.id === update.toolCallId,
   );
@@ -926,12 +1048,18 @@ function updateToolCall(turn: ChatTurn, update: acp.ToolCallUpdate, timestamp: n
       kind: "toolCall",
       id: update.toolCallId,
       title: update.title ?? "Tool call",
-      ...(update.kind === undefined || update.kind === null ? {} : { toolKind: update.kind }),
-      ...(update.status === undefined || update.status === null ? {} : { status: update.status }),
+      ...(update.kind === undefined || update.kind === null
+        ? {}
+        : { toolKind: update.kind }),
+      ...(update.status === undefined || update.status === null
+        ? {}
+        : { status: update.status }),
       content: update.content ?? [],
       locations: update.locations ?? [],
       ...(update.rawInput === undefined ? {} : { rawInput: update.rawInput }),
-      ...(update.rawOutput === undefined ? {} : { rawOutput: update.rawOutput }),
+      ...(update.rawOutput === undefined
+        ? {}
+        : { rawOutput: update.rawOutput }),
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -942,11 +1070,19 @@ function updateToolCall(turn: ChatTurn, update: acp.ToolCallUpdate, timestamp: n
   const current = items[toolIndex] as ChatToolCall;
   items[toolIndex] = {
     ...current,
-    ...(update.title === undefined || update.title === null ? {} : { title: update.title }),
-    ...(update.kind === undefined ? {} : { toolKind: update.kind ?? undefined }),
-    ...(update.status === undefined ? {} : { status: update.status ?? undefined }),
+    ...(update.title === undefined || update.title === null
+      ? {}
+      : { title: update.title }),
+    ...(update.kind === undefined
+      ? {}
+      : { toolKind: update.kind ?? undefined }),
+    ...(update.status === undefined
+      ? {}
+      : { status: update.status ?? undefined }),
     ...(update.content === undefined ? {} : { content: update.content ?? [] }),
-    ...(update.locations === undefined ? {} : { locations: update.locations ?? [] }),
+    ...(update.locations === undefined
+      ? {}
+      : { locations: update.locations ?? [] }),
     ...(update.rawInput === undefined ? {} : { rawInput: update.rawInput }),
     ...(update.rawOutput === undefined ? {} : { rawOutput: update.rawOutput }),
     updatedAt: timestamp,
@@ -970,7 +1106,8 @@ function settleActiveToolCalls(
   return {
     ...turn,
     items: turn.items.map((item) =>
-      item.kind === "toolCall" && (item.status === "pending" || item.status === "in_progress")
+      item.kind === "toolCall" &&
+      (item.status === "pending" || item.status === "in_progress")
         ? { ...item, status, updatedAt: timestamp }
         : item,
     ),
@@ -1001,7 +1138,10 @@ function appendPermission(
 }
 
 /** Clears requests that the backend settles as cancelled with the aborted prompt. */
-function clearPendingPermissions(set: ChatStore["setState"], oraSessionId: string): void {
+function clearPendingPermissions(
+  set: ChatStore["setState"],
+  oraSessionId: string,
+): void {
   updateConversation(set, oraSessionId, (conversation) => ({
     ...conversation,
     pendingPermissions: [],
@@ -1055,10 +1195,10 @@ function recordModelChange(
   const previous = currentModel(conversation.configOptions);
   const next = currentModel(configOptions);
   if (
-    previous === null
-    || next === null
-    || previous.value === next.value
-    || afterTurnCount === 0
+    previous === null ||
+    next === null ||
+    previous.value === next.value ||
+    afterTurnCount === 0
   ) {
     return conversation.modelChanges;
   }
@@ -1084,7 +1224,9 @@ function recordModelChange(
 function sessionScopedConfigOptions(
   update: acp.SessionUpdate,
 ): acp.SessionConfigOption[] | null {
-  return update.sessionUpdate === "config_option_update" ? update.configOptions : null;
+  return update.sessionUpdate === "config_option_update"
+    ? update.configOptions
+    : null;
 }
 
 /**
@@ -1139,7 +1281,9 @@ function updateTurn(
 ): void {
   updateConversation(set, oraSessionId, (conversation) => ({
     ...conversation,
-    turns: conversation.turns.map((turn) => (turn.id === turnId ? update(turn) : turn)),
+    turns: conversation.turns.map((turn) =>
+      turn.id === turnId ? update(turn) : turn,
+    ),
   }));
 }
 
@@ -1151,7 +1295,9 @@ function updateConversation(
   set((state) => ({
     conversations: {
       ...state.conversations,
-      [oraSessionId]: update(state.conversations[oraSessionId] ?? EMPTY_CONVERSATION),
+      [oraSessionId]: update(
+        state.conversations[oraSessionId] ?? EMPTY_CONVERSATION,
+      ),
     },
   }));
 }

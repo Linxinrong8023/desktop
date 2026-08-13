@@ -34,5 +34,8 @@ export function formatRelativeTime(timestamp: number, now: number): string {
   if (elapsed < hour) return `${Math.floor(elapsed / minute)}m ago`;
   if (elapsed < day) return `${Math.floor(elapsed / hour)}h ago`;
   if (elapsed < 7 * day) return `${Math.floor(elapsed / day)}d ago`;
-  return new Date(timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }

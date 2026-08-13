@@ -37,7 +37,11 @@ interface RunNodeConversationProps {
 
 type DisplayItem =
   | WorkflowNodeConversationMessage
-  | { kind: "activity_group"; id: string; items: WorkflowNodeConversationActivity[] };
+  | {
+      kind: "activity_group";
+      id: string;
+      items: WorkflowNodeConversationActivity[];
+    };
 
 /**
  * Read-only node conversation that reuses the full chat bubble and Markdown
@@ -77,7 +81,10 @@ export function RunNodeConversation({
   });
 
   return (
-    <div aria-label={t("workflowRun.conversation.label")} data-node-conversation>
+    <div
+      aria-label={t("workflowRun.conversation.label")}
+      data-node-conversation
+    >
       <div className="relative">
         <div
           ref={scrollRef}
@@ -99,16 +106,19 @@ export function RunNodeConversation({
           className="scrollbar-hide max-h-[28rem] overflow-y-auto overscroll-contain"
         >
           <div ref={contentRef} className="space-y-1 px-1 py-1">
-            {displayItems.length > 0
-              ? displayItems.map((item) => item.kind === "activity_group"
-                ? <CollapsedActivityGroup key={item.id} items={item.items} />
-                : (
+            {displayItems.length > 0 ? (
+              displayItems.map((item) =>
+                item.kind === "activity_group" ? (
+                  <CollapsedActivityGroup key={item.id} items={item.items} />
+                ) : (
                   <div
                     key={item.id}
                     data-conversation-anchor={item.id}
-                    className={item.role === "assistant"
-                      ? "relative overflow-visible rounded-xl"
-                      : undefined}
+                    className={
+                      item.role === "assistant"
+                        ? "relative overflow-visible rounded-xl"
+                        : undefined
+                    }
                   >
                     {item.role === "assistant" ? <AnchorHighlight /> : null}
                     <MessageBubble
@@ -119,16 +129,17 @@ export function RunNodeConversation({
                       streaming={item.status === "streaming"}
                     />
                   </div>
-                ))
-              : (
-                <div className="rounded-xl border border-dashed border-border/80 px-3 py-5 text-center">
-                  <p className="text-xs font-medium text-foreground/80">
-                    {waitingForReply
-                      ? t("workflowRun.conversation.waiting")
-                      : t("workflowRun.conversation.empty")}
-                  </p>
-                </div>
-              )}
+                ),
+              )
+            ) : (
+              <div className="rounded-xl border border-dashed border-border/80 px-3 py-5 text-center">
+                <p className="text-xs font-medium text-foreground/80">
+                  {waitingForReply
+                    ? t("workflowRun.conversation.waiting")
+                    : t("workflowRun.conversation.empty")}
+                </p>
+              </div>
+            )}
           </div>
         </div>
         <ConversationNavigator
@@ -157,18 +168,20 @@ function buildNodeAnchors(
     const isUser = item.role === "user";
     const index = isUser ? ++userIndex : ++agentIndex;
     const preview = item.markdown.trim() || t("workflowRun.conversation.empty");
-    return [{
-      id: item.id,
-      label: t(
-        isUser
-          ? "workflowRun.conversation.userAnchorLabel"
-          : "workflowRun.conversation.agentAnchorLabel",
-        { index },
-      ),
-      preview,
-      summary: preview.replace(/\s+/g, " ").trim(),
-      role: item.role,
-    }];
+    return [
+      {
+        id: item.id,
+        label: t(
+          isUser
+            ? "workflowRun.conversation.userAnchorLabel"
+            : "workflowRun.conversation.agentAnchorLabel",
+          { index },
+        ),
+        preview,
+        summary: preview.replace(/\s+/g, " ").trim(),
+        role: item.role,
+      },
+    ];
   });
 }
 
@@ -177,9 +190,7 @@ function buildDisplayItems(
   conversation: WorkflowNodeConversationItem[],
   input?: GraphWorkflowNodeIo,
 ): DisplayItem[] {
-  const source = conversation.length > 0
-    ? conversation
-    : fallbackInput(input);
+  const source = conversation.length > 0 ? conversation : fallbackInput(input);
   const result: DisplayItem[] = [];
   let activities: WorkflowNodeConversationActivity[] = [];
 
@@ -207,24 +218,28 @@ function buildDisplayItems(
 }
 
 /** Shows node input during the short hand-off before the first stream item arrives. */
-function fallbackInput(input?: GraphWorkflowNodeIo): WorkflowNodeConversationMessage[] {
+function fallbackInput(
+  input?: GraphWorkflowNodeIo,
+): WorkflowNodeConversationMessage[] {
   const content = input?.detail?.trim() || input?.summary.trim();
   if (content === undefined || content === "") {
     return [];
   }
   const now = new Date().toISOString();
-  return [{
-    kind: "message",
-    id: "node-input-preview",
-    runId: "preview",
-    nodeId: "preview",
-    sessionId: "preview",
-    role: "user",
-    markdown: content,
-    status: "complete",
-    createdAt: now,
-    updatedAt: now,
-  }];
+  return [
+    {
+      kind: "message",
+      id: "node-input-preview",
+      runId: "preview",
+      nodeId: "preview",
+      sessionId: "preview",
+      role: "user",
+      markdown: content,
+      status: "complete",
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
 }
 
 /** Adapts the transport-neutral message to the exact shape used by the full chat bubble. */
@@ -259,7 +274,9 @@ function CollapsedActivityGroup({
         <IconTimeline className="size-3.5 shrink-0 text-sky-700 dark:text-sky-400" />
         <span className="min-w-0 flex-1 truncate">
           <span className="font-medium text-foreground/80">
-            {t("workflowRun.conversation.hiddenActivity", { count: items.length })}
+            {t("workflowRun.conversation.hiddenActivity", {
+              count: items.length,
+            })}
           </span>
           <span className="ml-1.5 opacity-70">{preview}</span>
         </span>
@@ -273,14 +290,22 @@ function CollapsedActivityGroup({
       <CollapsibleContent>
         <div className="space-y-1 border-t border-border/60 bg-muted/15 px-2.5 py-2">
           {items.map((item) => (
-            <div key={item.id} className="flex gap-2 rounded-md px-1 py-1.5 text-[11px] text-muted-foreground">
-              {item.activityKind === "thought"
-                ? <IconRoute className="mt-0.5 size-3.5 shrink-0 text-violet-600 dark:text-violet-400" />
-                : <IconTool className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />}
+            <div
+              key={item.id}
+              className="flex gap-2 rounded-md px-1 py-1.5 text-[11px] text-muted-foreground"
+            >
+              {item.activityKind === "thought" ? (
+                <IconRoute className="mt-0.5 size-3.5 shrink-0 text-violet-600 dark:text-violet-400" />
+              ) : (
+                <IconTool className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+              )}
               <div className="min-w-0">
                 <p className="font-medium text-foreground/75">{item.summary}</p>
                 {item.detail !== undefined && (
-                  <p data-selectable className="mt-0.5 whitespace-pre-wrap leading-5">
+                  <p
+                    data-selectable
+                    className="mt-0.5 whitespace-pre-wrap leading-5"
+                  >
                     {item.detail}
                   </p>
                 )}

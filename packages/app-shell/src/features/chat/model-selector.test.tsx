@@ -4,12 +4,21 @@ import { TooltipProvider } from "@ora/ui";
 import { PlatformProvider } from "@ora/platform";
 import { describe, expect, it, beforeEach } from "vitest";
 import { AppI18nProvider } from "../../i18n/i18n";
-import { createHookWrapper, createTestQueryClient } from "../../test/hook-harness";
+import {
+  createHookWrapper,
+  createTestQueryClient,
+} from "../../test/hook-harness";
 import { createStubPlatform } from "../../test/stub-platform";
 import { createChatStore } from "@ora/chat";
-import { createMockClient, createMockClientState } from "../../test/mock-client";
+import {
+  createMockClient,
+  createMockClientState,
+} from "../../test/mock-client";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
-import { useSettingsStore, DEFAULT_SETTINGS } from "../../state/stores/settings-store";
+import {
+  useSettingsStore,
+  DEFAULT_SETTINGS,
+} from "../../state/stores/settings-store";
 import { usePendingAgentStore } from "../../state/stores/pending-agent-store";
 import { ModelSelector } from "./model-selector";
 
@@ -49,7 +58,10 @@ function picker() {
  * screen twice until it is dismissed. Closing here keeps each assertion about
  * what the trigger settled on rather than what the open list still offers.
  */
-async function pickAgent(user: ReturnType<typeof userEvent.setup>, agentLabel: RegExp) {
+async function pickAgent(
+  user: ReturnType<typeof userEvent.setup>,
+  agentLabel: RegExp,
+) {
   await user.click(picker());
   const menu = await screen.findByRole("menu");
   await user.click(within(menu).getByText(agentLabel));

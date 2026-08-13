@@ -7,6 +7,7 @@ export function useProjects() {
   const client = useContractsClient();
   return useQuery({
     queryKey: queryKeys.projects,
-    queryFn: () => client.project.list({}).then((response) => response.projects),
+    queryFn: () =>
+      client.project.list({}).then((response) => response.projects),
   });
 }

@@ -18,8 +18,10 @@ export function SkillMarketplacePanel() {
   const { t } = useTranslation();
   const { locationActions, skillMarketplace } = usePlatform();
   const [status, setStatus] = useState<SkillMarketplaceStatus | null>(null);
-  const [openingProvider, setOpeningProvider] = useState<SkillMarketplaceProvider | null>(null);
-  const [failedProvider, setFailedProvider] = useState<SkillMarketplaceProvider | null>(null);
+  const [openingProvider, setOpeningProvider] =
+    useState<SkillMarketplaceProvider | null>(null);
+  const [failedProvider, setFailedProvider] =
+    useState<SkillMarketplaceProvider | null>(null);
 
   useEffect(() => {
     if (skillMarketplace.kind !== "supported") return undefined;
@@ -63,8 +65,12 @@ export function SkillMarketplacePanel() {
   /** Opens the directory containing a completed archive without launching the ZIP itself. */
   const openDownloadDirectory = async (archivePath: string) => {
     if (locationActions.kind !== "supported") return;
-    const lastSeparator = Math.max(archivePath.lastIndexOf("/"), archivePath.lastIndexOf("\\"));
-    const directoryPath = lastSeparator > 0 ? archivePath.slice(0, lastSeparator) : archivePath;
+    const lastSeparator = Math.max(
+      archivePath.lastIndexOf("/"),
+      archivePath.lastIndexOf("\\"),
+    );
+    const directoryPath =
+      lastSeparator > 0 ? archivePath.slice(0, lastSeparator) : archivePath;
     try {
       await locationActions.open("explorer", directoryPath);
     } catch {
@@ -75,7 +81,10 @@ export function SkillMarketplacePanel() {
   const unsupported = skillMarketplace.kind === "unsupported";
 
   return (
-    <section className="rounded-lg border border-border bg-muted/20 p-4" aria-labelledby="skill-marketplace-title">
+    <section
+      className="rounded-lg border border-border bg-muted/20 p-4"
+      aria-labelledby="skill-marketplace-title"
+    >
       <div className="flex min-w-0 items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground">
           <IconShoppingBag className="size-4" aria-hidden="true" />
@@ -181,7 +190,9 @@ function MarketplaceCard({
               <h4 className="text-sm font-medium">{title}</h4>
               <Badge variant="outline">{badge}</Badge>
             </div>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              {description}
+            </p>
           </div>
         </div>
       </div>
@@ -226,7 +237,9 @@ function MarketplaceStatus({
   if (status.status === "downloading") {
     return (
       <p className="mt-3 text-xs text-muted-foreground" role="status">
-        {t("settings.skills.marketplaceDownloading", { fileName: status.fileName })}
+        {t("settings.skills.marketplaceDownloading", {
+          fileName: status.fileName,
+        })}
       </p>
     );
   }

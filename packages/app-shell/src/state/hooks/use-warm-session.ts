@@ -58,7 +58,8 @@ function seedConfigOptions(
   ) => void,
   warmed: WarmSessionResponse,
 ): void {
-  if (chatStore.getState().conversations[warmed.sessionId] !== undefined) return;
+  if (chatStore.getState().conversations[warmed.sessionId] !== undefined)
+    return;
   setConfigOptions(warmed.sessionId, warmed.configOptions);
 }
 
@@ -74,13 +75,20 @@ function seedConfigOptions(
  * selected (its options arrive with `session/load`), or no project is chosen.
  */
 export function useWarmSession(
-  selection: { projectId: string | null; taskId: string | null; sessionId: string | null },
+  selection: {
+    projectId: string | null;
+    taskId: string | null;
+    sessionId: string | null;
+  },
   agentCli: AgentCli,
 ): WarmSession {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   const chatStore = useChatStore();
-  const setConfigOptions = useStore(chatStore, (state) => state.setConfigOptions);
+  const setConfigOptions = useStore(
+    chatStore,
+    (state) => state.setConfigOptions,
+  );
   const { data: sessions = [] } = useSessions();
   const pendingSwitch = usePendingSwitch(selection.sessionId);
   const rememberModels = useAgentModelStore((state) => state.remember);
@@ -88,14 +96,15 @@ export function useWarmSession(
   // whose attach failed, for one — and that surface still needs a warm session
   // to retry with. Only a session the backend actually stored ends warming.
   const isPersisted =
-    selection.sessionId !== null
-    && sessions.some((session) => session.id === selection.sessionId);
+    selection.sessionId !== null &&
+    sessions.some((session) => session.id === selection.sessionId);
   // A persisted session normally has nothing to warm: its options arrive with
   // `session/load`. A pending move is the exception — the CLI it is moving to
   // has not handshaken here yet, and warming is the only way to show its models
   // before the move is paid for. The backend claims this very session when the
   // move commits, so the model chosen on it survives into the rebind.
-  const target = isPersisted && pendingSwitch === undefined ? null : warmTarget(selection);
+  const target =
+    isPersisted && pendingSwitch === undefined ? null : warmTarget(selection);
 
   // The backend keys warm sessions by exactly these values, so the same surface
   // always resolves to the same session and repeated calls are cache hits rather
@@ -112,7 +121,10 @@ export function useWarmSession(
     gcTime: Infinity,
     retry: false,
   };
-  const { data, isLoading } = useQuery({ ...queryOptions, enabled: target !== null });
+  const { data, isLoading } = useQuery({
+    ...queryOptions,
+    enabled: target !== null,
+  });
 
   const ensureSessionId = async (): Promise<string | null> => {
     if (target === null) return null;
@@ -150,7 +162,11 @@ export function useWarmSession(
   // `isLoading` is `isPending && isFetching`, so a disabled query (nothing to
   // warm) and a failed handshake — which does not retry — both read as false.
   // Only a request actually in flight counts as still opening.
-  return { sessionId: data?.sessionId ?? null, isOpening: isLoading, ensureSessionId };
+  return {
+    sessionId: data?.sessionId ?? null,
+    isOpening: isLoading,
+    ensureSessionId,
+  };
 }
 
 /** Derives what a chat surface should warm against, or `null` when nothing should. */
@@ -158,7 +174,8 @@ function warmTarget(selection: {
   projectId: string | null;
   taskId: string | null;
 }): WarmSessionTarget | null {
-  if (selection.taskId !== null) return { type: "task", taskId: selection.taskId };
+  if (selection.taskId !== null)
+    return { type: "task", taskId: selection.taskId };
   if (selection.projectId !== null) {
     // A direct chat creates its Task in project-root mode when the first message
     // is sent, so the project root is already the directory it will resolve to.
@@ -180,5 +197,7 @@ export function warmTargetKey(selection: {
 }): string | null {
   const target = warmTarget(selection);
   if (target === null) return null;
-  return target.type === "task" ? `task:${target.taskId}` : `project:${target.projectId}`;
+  return target.type === "task"
+    ? `task:${target.taskId}`
+    : `project:${target.projectId}`;
 }

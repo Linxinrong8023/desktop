@@ -79,23 +79,42 @@ function EnvironmentTab() {
           />
         }
       >
-        {environment === "local" ? <IconDeviceLaptop className="size-3.5" /> : <IconCloud className="size-3.5" />}
+        {environment === "local" ? (
+          <IconDeviceLaptop className="size-3.5" />
+        ) : (
+          <IconCloud className="size-3.5" />
+        )}
         {environment === "local" ? t("chat.local") : t("chat.cloud")}
-        <IconChevronDown className="size-3 opacity-50 transition-transform group-data-popup-open/context-trigger:rotate-180" aria-hidden="true" />
+        <IconChevronDown
+          className="size-3 opacity-50 transition-transform group-data-popup-open/context-trigger:rotate-180"
+          aria-hidden="true"
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="top" className="w-28">
         {/* DropdownMenuLabel is a group label, so it throws unless a group owns it. */}
         <DropdownMenuGroup className={MENU_GROUP_CLASS}>
-          <DropdownMenuLabel className={MENU_LABEL_CLASS}>{t("chat.contextBar.launchMode")}</DropdownMenuLabel>
-          <DropdownMenuItem className={MENU_ITEM_CLASS} onClick={() => setEnvironment("local")}>
+          <DropdownMenuLabel className={MENU_LABEL_CLASS}>
+            {t("chat.contextBar.launchMode")}
+          </DropdownMenuLabel>
+          <DropdownMenuItem
+            className={MENU_ITEM_CLASS}
+            onClick={() => setEnvironment("local")}
+          >
             <IconDeviceLaptop className={MENU_ICON_CLASS} />
             {t("chat.contextBar.runLocally")}
-            {environment === "local" && <IconCheck className={MENU_CHECK_CLASS} />}
+            {environment === "local" && (
+              <IconCheck className={MENU_CHECK_CLASS} />
+            )}
           </DropdownMenuItem>
-          <DropdownMenuItem className={MENU_ITEM_CLASS} onClick={() => setEnvironment("cloud")}>
+          <DropdownMenuItem
+            className={MENU_ITEM_CLASS}
+            onClick={() => setEnvironment("cloud")}
+          >
             <IconCloud className={MENU_ICON_CLASS} />
             {t("chat.cloud")}
-            {environment === "cloud" && <IconCheck className={MENU_CHECK_CLASS} />}
+            {environment === "cloud" && (
+              <IconCheck className={MENU_CHECK_CLASS} />
+            )}
           </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>
@@ -104,7 +123,8 @@ function EnvironmentTab() {
 }
 
 /** Shared trigger styling so the live project tab and the inert tabs stay on one baseline. */
-const CONTEXT_TAB_CLASS = "group/context-trigger h-6 min-w-0 cursor-pointer gap-1 rounded-md px-1.5 text-xs font-normal text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground data-popup-open:bg-muted/60 data-popup-open:text-foreground focus-visible:ring-2 focus-visible:ring-ring";
+const CONTEXT_TAB_CLASS =
+  "group/context-trigger h-6 min-w-0 cursor-pointer gap-1 rounded-md px-1.5 text-xs font-normal text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground data-popup-open:bg-muted/60 data-popup-open:text-foreground focus-visible:ring-2 focus-visible:ring-ring";
 
 /**
  * Metrics shared by the searchable project and worktree menus.
@@ -123,8 +143,10 @@ const MENU_GROUP_CLASS = "p-1 **:[[cmdk-group-heading]]:font-normal";
  * which is a shade darker than the `--foreground` that CommandGroup sets, so
  * without it the two menus render their labels at different weights.
  */
-const MENU_ITEM_CLASS = "gap-1.5 rounded-sm px-2 py-1.5 text-xs text-foreground focus:bg-muted focus:text-foreground";
-const MENU_LABEL_CLASS = "px-2 py-1.5 text-xs font-normal text-muted-foreground";
+const MENU_ITEM_CLASS =
+  "gap-1.5 rounded-sm px-2 py-1.5 text-xs text-foreground focus:bg-muted focus:text-foreground";
+const MENU_LABEL_CLASS =
+  "px-2 py-1.5 text-xs font-normal text-muted-foreground";
 /** Leading icons stay muted so the label carries the row; only the trailing check is full strength. */
 const MENU_ICON_CLASS = "size-3.5 text-muted-foreground";
 /** Command's built-in trailing check renders at size-4; hand-rolled ones must match. */
@@ -135,11 +157,15 @@ function ProjectTab() {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const { data: projects = [] } = useProjects();
-  const selectedProjectId = useWorkspaceSelectionStore((s) => s.selection.projectId);
+  const selectedProjectId = useWorkspaceSelectionStore(
+    (s) => s.selection.projectId,
+  );
   const selectProject = useWorkspaceSelectionStore((s) => s.selectProject);
   const setDialog = useUiStore((s) => s.setDialog);
 
-  const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  const selectedProject = projects.find(
+    (project) => project.id === selectedProjectId,
+  );
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -155,14 +181,28 @@ function ProjectTab() {
         }
       >
         <IconFolder className="size-3.5" />
-        <span className="min-w-0 max-w-28 truncate sm:max-w-40">{selectedProject?.name ?? t("chat.contextBar.noProject")}</span>
-        <IconChevronDown className="size-3 opacity-50 transition-transform group-data-popup-open/context-trigger:rotate-180" aria-hidden="true" />
+        <span className="min-w-0 max-w-28 truncate sm:max-w-40">
+          {selectedProject?.name ?? t("chat.contextBar.noProject")}
+        </span>
+        <IconChevronDown
+          className="size-3 opacity-50 transition-transform group-data-popup-open/context-trigger:rotate-180"
+          aria-hidden="true"
+        />
       </PopoverTrigger>
-      <PopoverContent align="start" side="top" className={`${SEARCH_MENU_WIDTH_CLASS} p-0`}>
+      <PopoverContent
+        align="start"
+        side="top"
+        className={`${SEARCH_MENU_WIDTH_CLASS} p-0`}
+      >
         <Command>
-          <CommandInput placeholder={t("chat.contextBar.searchProjects")} className="text-xs" />
+          <CommandInput
+            placeholder={t("chat.contextBar.searchProjects")}
+            className="text-xs"
+          />
           <CommandList>
-            <CommandEmpty className="py-4 text-xs">{t("chat.contextBar.noProjectsFound")}</CommandEmpty>
+            <CommandEmpty className="py-4 text-xs">
+              {t("chat.contextBar.noProjectsFound")}
+            </CommandEmpty>
             <CommandGroup className={MENU_GROUP_CLASS}>
               {projects.map((project) => (
                 // `data-checked` drives CommandItem's own trailing check. Rendering a
@@ -228,7 +268,9 @@ function BranchTab() {
   const setDialog = useUiStore((s) => s.setDialog);
 
   const projectId = selection.projectId;
-  const projectTasks = tasks.filter((task) => task.projectId === projectId && task.workspaceMode === "worktree");
+  const projectTasks = tasks.filter(
+    (task) => task.projectId === projectId && task.workspaceMode === "worktree",
+  );
   const selectedTask = tasks.find((task) => task.id === selection.taskId);
 
   // Direct chat is the default project context, so repeating it between the
@@ -252,15 +294,32 @@ function BranchTab() {
         }
       >
         <IconGitBranch className="size-3.5" />
-        <span className="min-w-0 max-w-28 truncate sm:max-w-40">{selectedTask.title}</span>
-        <IconChevronDown className="size-3 opacity-50 transition-transform group-data-popup-open/context-trigger:rotate-180" aria-hidden="true" />
+        <span className="min-w-0 max-w-28 truncate sm:max-w-40">
+          {selectedTask.title}
+        </span>
+        <IconChevronDown
+          className="size-3 opacity-50 transition-transform group-data-popup-open/context-trigger:rotate-180"
+          aria-hidden="true"
+        />
       </PopoverTrigger>
-      <PopoverContent align="start" side="top" className={`${SEARCH_MENU_WIDTH_CLASS} p-0`}>
+      <PopoverContent
+        align="start"
+        side="top"
+        className={`${SEARCH_MENU_WIDTH_CLASS} p-0`}
+      >
         <Command>
-          <CommandInput placeholder={t("chat.contextBar.searchBranches")} className="text-xs" />
+          <CommandInput
+            placeholder={t("chat.contextBar.searchBranches")}
+            className="text-xs"
+          />
           <CommandList>
-            <CommandEmpty className="py-4 text-xs">{t("chat.contextBar.noBranchesFound")}</CommandEmpty>
-            <CommandGroup heading={t("chat.contextBar.branches")} className={MENU_GROUP_CLASS}>
+            <CommandEmpty className="py-4 text-xs">
+              {t("chat.contextBar.noBranchesFound")}
+            </CommandEmpty>
+            <CommandGroup
+              heading={t("chat.contextBar.branches")}
+              className={MENU_GROUP_CLASS}
+            >
               {projectTasks.map((task) => (
                 <CommandItem
                   key={task.id}
@@ -275,7 +334,9 @@ function BranchTab() {
                   <IconGitBranch className={MENU_ICON_CLASS} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{task.title}</span>
-                    <span className="block truncate text-[10px] text-muted-foreground">{t(`common.${task.status}`)}</span>
+                    <span className="block truncate text-[10px] text-muted-foreground">
+                      {t(`common.${task.status}`)}
+                    </span>
                   </span>
                 </CommandItem>
               ))}
@@ -304,4 +365,3 @@ function BranchTab() {
     </Popover>
   );
 }
-

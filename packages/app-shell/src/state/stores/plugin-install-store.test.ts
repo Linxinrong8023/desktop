@@ -42,7 +42,9 @@ describe("usePluginInstallStore", () => {
       pendingInstallIds: ["figma"],
     });
 
-    await vi.advanceTimersByTimeAsync(INSTALL_LATENCY.centerMs + INSTALL_LATENCY.jitterMs);
+    await vi.advanceTimersByTimeAsync(
+      INSTALL_LATENCY.centerMs + INSTALL_LATENCY.jitterMs,
+    );
     await settled;
 
     expect(usePluginInstallStore.getState()).toMatchObject({
@@ -55,9 +57,13 @@ describe("usePluginInstallStore", () => {
     const first = usePluginInstallStore.getState().toggleInstalled("figma");
     await usePluginInstallStore.getState().toggleInstalled("figma");
 
-    expect(usePluginInstallStore.getState().pendingInstallIds).toEqual(["figma"]);
+    expect(usePluginInstallStore.getState().pendingInstallIds).toEqual([
+      "figma",
+    ]);
 
-    await vi.advanceTimersByTimeAsync(INSTALL_LATENCY.centerMs + INSTALL_LATENCY.jitterMs);
+    await vi.advanceTimersByTimeAsync(
+      INSTALL_LATENCY.centerMs + INSTALL_LATENCY.jitterMs,
+    );
     await first;
 
     // The re-entrant call was dropped rather than queued, so the plugin installs once.
@@ -72,7 +78,9 @@ describe("usePluginInstallStore", () => {
       pendingEnableIds: ["figma"],
     });
 
-    await vi.advanceTimersByTimeAsync(ENABLE_LATENCY.centerMs + ENABLE_LATENCY.jitterMs);
+    await vi.advanceTimersByTimeAsync(
+      ENABLE_LATENCY.centerMs + ENABLE_LATENCY.jitterMs,
+    );
     await settled;
 
     expect(usePluginInstallStore.getState()).toMatchObject({

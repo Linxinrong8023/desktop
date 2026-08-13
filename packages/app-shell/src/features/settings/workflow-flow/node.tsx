@@ -30,17 +30,16 @@ export const WorkflowFlowNodeView = memo(function WorkflowFlowNodeView({
 }: NodeProps<Node<WorkflowNodeData, "workflow">>) {
   const { i18n, t } = useTranslation();
   const { deleteElements } = useReactFlow<Node<WorkflowNodeData, "workflow">>();
-  const {
-    connectionCandidateEndpoint,
-    connectionCandidateNodeId,
-  } = useWorkflowConnectionState();
-  const locale = i18n.resolvedLanguage === "en-US" ? "en-US" as const : "zh-CN" as const;
+  const { connectionCandidateEndpoint, connectionCandidateNodeId } =
+    useWorkflowConnectionState();
+  const locale =
+    i18n.resolvedLanguage === "en-US" ? ("en-US" as const) : ("zh-CN" as const);
   const nodeKindLabel = createMockWorkflowNodeType(data.kind, locale).label;
   const isConnectionCandidate = connectionCandidateNodeId === id;
-  const isInputCandidate = isConnectionCandidate
-    && connectionCandidateEndpoint === "target";
-  const isOutputCandidate = isConnectionCandidate
-    && connectionCandidateEndpoint === "source";
+  const isInputCandidate =
+    isConnectionCandidate && connectionCandidateEndpoint === "target";
+  const isOutputCandidate =
+    isConnectionCandidate && connectionCandidateEndpoint === "source";
 
   return (
     <WorkflowNodeCardShell
@@ -60,21 +59,23 @@ export const WorkflowFlowNodeView = memo(function WorkflowFlowNodeView({
         isConnectionCandidate && "border-ring/60 shadow-md ring-2 ring-ring/10",
       )}
       details={<WorkflowNodeParameterSummary data={data} />}
-      headerEnd={selected && deletable
-        ? (
+      headerEnd={
+        selected && deletable ? (
           <button
             type="button"
             className="nodrag nopan flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={t("settings.workflow.deleteNamed", { name: data.title })}
+            aria-label={t("settings.workflow.deleteNamed", {
+              name: data.title,
+            })}
             onClick={() => {
               void deleteElements({ nodes: [{ id }] });
             }}
           >
             <IconTrash className="size-3.5" />
           </button>
-        )
-        : undefined}
-      targetHandle={(
+        ) : undefined
+      }
+      targetHandle={
         <Handle
           type="target"
           position={Position.Left}
@@ -86,8 +87,8 @@ export const WorkflowFlowNodeView = memo(function WorkflowFlowNodeView({
           )}
           style={{ top: WORKFLOW_NODE_ANCHOR_Y }}
         />
-      )}
-      sourceHandle={(
+      }
+      sourceHandle={
         <Handle
           type="source"
           position={Position.Right}
@@ -99,7 +100,7 @@ export const WorkflowFlowNodeView = memo(function WorkflowFlowNodeView({
           )}
           style={{ top: WORKFLOW_NODE_ANCHOR_Y }}
         />
-      )}
+      }
     />
   );
 });

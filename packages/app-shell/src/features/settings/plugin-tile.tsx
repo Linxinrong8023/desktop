@@ -18,11 +18,26 @@ const TILE_SIZES = {
  * the same mark at a different size so a plugin stays recognisable as the user
  * moves between them.
  */
-export function PluginTile({ plugin, size = "md", className }: { plugin: PluginEntry; size?: keyof typeof TILE_SIZES; className?: string }) {
+export function PluginTile({
+  plugin,
+  size = "md",
+  className,
+}: {
+  plugin: PluginEntry;
+  size?: keyof typeof TILE_SIZES;
+  className?: string;
+}) {
   const Mark = plugin.mark;
   const tile = TILE_SIZES[size];
   return (
-    <span className={cn("flex shrink-0 items-center justify-center", tile.box, plugin.tone, className)}>
+    <span
+      className={cn(
+        "flex shrink-0 items-center justify-center",
+        tile.box,
+        plugin.tone,
+        className,
+      )}
+    >
       <Mark className={tile.mark} />
     </span>
   );

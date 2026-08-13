@@ -41,25 +41,30 @@ export function RunActSessionDock({
         "transition-[transform,background-color,border-color,box-shadow,color] duration-200 motion-reduce:transition-none",
         hitlTone
           ? cn(
-            "size-8 border border-amber-500/25 bg-background/70 text-amber-950/80",
-            "hover:border-amber-500/40 hover:bg-amber-500/10 hover:text-amber-950",
-            "dark:text-amber-100/85 dark:hover:text-amber-50",
-            open && "border-amber-500/45 bg-amber-500/15 text-amber-950 dark:text-amber-50",
-          )
+              "size-8 border border-amber-500/25 bg-background/70 text-amber-950/80",
+              "hover:border-amber-500/40 hover:bg-amber-500/10 hover:text-amber-950",
+              "dark:text-amber-100/85 dark:hover:text-amber-50",
+              open &&
+                "border-amber-500/45 bg-amber-500/15 text-amber-950 dark:text-amber-50",
+            )
           : cn(
-            "ml-auto size-9 border shadow-sm",
-            open
-              ? "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15"
-              : "border-border/80 bg-background hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md",
-          ),
+              "ml-auto size-9 border shadow-sm",
+              open
+                ? "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15"
+                : "border-border/80 bg-background hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md",
+            ),
       )}
       aria-expanded={open}
-      aria-label={open
-        ? t("workflowRun.conversation.backToAct")
-        : t("workflowRun.conversation.open")}
-      title={open
-        ? t("workflowRun.conversation.backToAct")
-        : t("workflowRun.conversation.open")}
+      aria-label={
+        open
+          ? t("workflowRun.conversation.backToAct")
+          : t("workflowRun.conversation.open")
+      }
+      title={
+        open
+          ? t("workflowRun.conversation.backToAct")
+          : t("workflowRun.conversation.open")
+      }
       onClick={(event) => {
         event.stopPropagation();
         onOpenChange(!open);
@@ -67,42 +72,44 @@ export function RunActSessionDock({
       onKeyDown={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      {open
-        ? <IconArrowBackUp className="size-3.5" />
-        : (
-          <span className="relative flex size-5 items-center justify-center">
-            <IconMessageCircle className={hitlTone ? "size-4" : "size-[18px]"} />
-            {showDockSpark && (
-              <span
+      {open ? (
+        <IconArrowBackUp className="size-3.5" />
+      ) : (
+        <span className="relative flex size-5 items-center justify-center">
+          <IconMessageCircle className={hitlTone ? "size-4" : "size-[18px]"} />
+          {showDockSpark && (
+            <span
+              className={cn(
+                "absolute rounded-full border bg-background p-0.5 shadow-sm",
+                hitlTone
+                  ? "-right-1.5 -top-1.5 border-amber-500/25"
+                  : "-right-2 -top-2 border-border/60",
+              )}
+            >
+              <IconSparkles
                 className={cn(
-                  "absolute rounded-full border bg-background p-0.5 shadow-sm",
+                  "size-2.5 transition-transform duration-200 group-hover/session-dock:rotate-12 motion-reduce:transition-none",
                   hitlTone
-                    ? "-right-1.5 -top-1.5 border-amber-500/25"
-                    : "-right-2 -top-2 border-border/60",
+                    ? "text-amber-700 dark:text-amber-300"
+                    : "text-primary/85",
                 )}
-              >
-                <IconSparkles
-                  className={cn(
-                    "size-2.5 transition-transform duration-200 group-hover/session-dock:rotate-12 motion-reduce:transition-none",
-                    hitlTone ? "text-amber-700 dark:text-amber-300" : "text-primary/85",
-                  )}
-                />
-              </span>
-            )}
-            {messageCount > 0 && (
-              <span
-                className={cn(
-                  "absolute flex min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-semibold leading-4",
-                  hitlTone
-                    ? "-right-1 -top-1 border border-amber-600/20 bg-amber-700 text-amber-50 dark:bg-amber-500 dark:text-amber-950"
-                    : "-right-1.5 -top-1 border border-background bg-primary text-primary-foreground",
-                )}
-              >
-                {messageCount}
-              </span>
-            )}
-          </span>
-        )}
+              />
+            </span>
+          )}
+          {messageCount > 0 && (
+            <span
+              className={cn(
+                "absolute flex min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-semibold leading-4",
+                hitlTone
+                  ? "-right-1 -top-1 border border-amber-600/20 bg-amber-700 text-amber-50 dark:bg-amber-500 dark:text-amber-950"
+                  : "-right-1.5 -top-1 border border-background bg-primary text-primary-foreground",
+              )}
+            >
+              {messageCount}
+            </span>
+          )}
+        </span>
+      )}
     </Button>
   );
 }

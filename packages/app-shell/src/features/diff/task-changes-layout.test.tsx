@@ -94,7 +94,9 @@ describe("WorkspaceReviewLayout", () => {
     );
 
     expect(
-      screen.getByRole("group", { name: /工作区审查面板|Workspace review panels/ }).parentElement,
+      screen.getByRole("group", {
+        name: /工作区审查面板|Workspace review panels/,
+      }).parentElement,
     ).toHaveClass("right-4", "top-2");
   });
 
@@ -117,7 +119,9 @@ describe("WorkspaceReviewLayout", () => {
       screen.getByRole("button", { name: "Commit" }),
     );
     expect(toolbar).toContainElement(
-      screen.getByRole("group", { name: /工作区审查面板|Workspace review panels/ }),
+      screen.getByRole("group", {
+        name: /工作区审查面板|Workspace review panels/,
+      }),
     );
     expect(
       screen.getByRole("button", {
@@ -140,8 +144,12 @@ describe("WorkspaceReviewLayout", () => {
 
     await user.click(screen.getByRole("button", { name: "Open changed file" }));
 
-    expect(screen.getByRole("region", { name: "Task diff" })).toBeInTheDocument();
-    expect(screen.getByTestId("requested-file")).toHaveTextContent("src/main.ts");
+    expect(
+      screen.getByRole("region", { name: "Task diff" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("requested-file")).toHaveTextContent(
+      "src/main.ts",
+    );
   });
 
   it("shows only Files for a project review context", async () => {
@@ -149,17 +157,29 @@ describe("WorkspaceReviewLayout", () => {
     render(
       <PlatformProvider adapter={createStubPlatform()}>
         <AppI18nProvider>
-          <WorkspaceReviewLayout context={{ kind: "project", projectId: "project-1", projectRootPath: "C:/project" }}>
+          <WorkspaceReviewLayout
+            context={{
+              kind: "project",
+              projectId: "project-1",
+              projectRootPath: "C:/project",
+            }}
+          >
             <main>Project</main>
           </WorkspaceReviewLayout>
         </AppI18nProvider>
       </PlatformProvider>,
     );
 
-    expect(screen.queryByRole("button", { name: /变更|Changes/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /文件|Files/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /变更|Changes/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /文件|Files/ }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /文件|Files/ }));
-    expect(screen.getByRole("region", { name: "Files panel" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Files panel" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps the files panel open and remounts it for a compatible target change", async () => {
@@ -167,7 +187,13 @@ describe("WorkspaceReviewLayout", () => {
     const { rerender } = render(
       <PlatformProvider adapter={createStubPlatform()}>
         <AppI18nProvider>
-          <WorkspaceReviewLayout context={{ kind: "project", projectId: "project-1", projectRootPath: "C:/project" }}>
+          <WorkspaceReviewLayout
+            context={{
+              kind: "project",
+              projectId: "project-1",
+              projectRootPath: "C:/project",
+            }}
+          >
             <main>Project</main>
           </WorkspaceReviewLayout>
         </AppI18nProvider>
@@ -200,18 +226,28 @@ describe("WorkspaceReviewLayout", () => {
       </PlatformProvider>,
     );
     await user.click(screen.getByRole("button", { name: /变更|Changes/ }));
-    expect(screen.getByRole("region", { name: "Task diff" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Task diff" }),
+    ).toBeInTheDocument();
 
     rerender(
       <PlatformProvider adapter={createStubPlatform()}>
         <AppI18nProvider>
-          <WorkspaceReviewLayout context={{ kind: "project", projectId: "project-1", projectRootPath: "C:/project" }}>
+          <WorkspaceReviewLayout
+            context={{
+              kind: "project",
+              projectId: "project-1",
+              projectRootPath: "C:/project",
+            }}
+          >
             <main>Project</main>
           </WorkspaceReviewLayout>
         </AppI18nProvider>
       </PlatformProvider>,
     );
-    expect(screen.queryByRole("region", { name: "Task diff" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Task diff" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Project")).toBeInTheDocument();
   });
 
@@ -221,7 +257,10 @@ describe("WorkspaceReviewLayout", () => {
     render(
       <PlatformProvider adapter={createStubPlatform()}>
         <AppI18nProvider>
-          <WorkspaceReviewLayout context={taskContext} onOpenChange={onOpenChange}>
+          <WorkspaceReviewLayout
+            context={taskContext}
+            onOpenChange={onOpenChange}
+          >
             <main>Workspace</main>
           </WorkspaceReviewLayout>
         </AppI18nProvider>
@@ -229,14 +268,20 @@ describe("WorkspaceReviewLayout", () => {
     );
 
     await user.click(
-      within(screen.getByRole("group", { name: /工作区审查面板|Workspace review panels/ }))
-        .getByRole("button", { name: /^变更$|^Changes$/ }),
+      within(
+        screen.getByRole("group", {
+          name: /工作区审查面板|Workspace review panels/,
+        }),
+      ).getByRole("button", { name: /^变更$|^Changes$/ }),
     );
     expect(onOpenChange).toHaveBeenCalledWith(true);
 
     await user.click(
-      within(screen.getByRole("group", { name: /工作区审查面板|Workspace review panels/ }))
-        .getByRole("button", { name: /^变更$|^Changes$/ }),
+      within(
+        screen.getByRole("group", {
+          name: /工作区审查面板|Workspace review panels/,
+        }),
+      ).getByRole("button", { name: /^变更$|^Changes$/ }),
     );
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });

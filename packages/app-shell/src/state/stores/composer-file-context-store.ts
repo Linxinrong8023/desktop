@@ -22,34 +22,37 @@ interface ComposerFileContextState {
 let nextRequestId = 0;
 
 /** Bridges file-explorer actions to the task composer without coupling the two views. */
-export const useComposerFileContextStore = create<ComposerFileContextState>((set) => ({
-  pendingByTask: {},
-  addSelection: (taskId, selection) => {
-    set((state) => {
-      const pending = state.pendingByTask[taskId];
-      const existingSelections = pending?.selections ?? [];
-      const alreadyQueued = existingSelections.some((candidate) =>
-        candidate.path === selection.path
-        && candidate.startLine === selection.startLine
-        && candidate.endLine === selection.endLine,
-      );
-      if (alreadyQueued) return state;
-      const selections = [...existingSelections, selection];
-      return {
-        pendingByTask: {
-          ...state.pendingByTask,
-          [taskId]: { id: ++nextRequestId, selections },
-        },
-      };
-    });
-  },
-  consumeSelections: (taskId, requestId) => {
-    set((state) => {
-      const pending = state.pendingByTask[taskId];
-      if (pending?.id !== requestId) return state;
-      const pendingByTask = { ...state.pendingByTask };
-      delete pendingByTask[taskId];
-      return { pendingByTask };
-    });
-  },
-}));
+export const useComposerFileContextStore = create<ComposerFileContextState>(
+  (set) => ({
+    pendingByTask: {},
+    addSelection: (taskId, selection) => {
+      set((state) => {
+        const pending = state.pendingByTask[taskId];
+        const existingSelections = pending?.selections ?? [];
+        const alreadyQueued = existingSelections.some(
+          (candidate) =>
+            candidate.path === selection.path &&
+            candidate.startLine === selection.startLine &&
+            candidate.endLine === selection.endLine,
+        );
+        if (alreadyQueued) return state;
+        const selections = [...existingSelections, selection];
+        return {
+          pendingByTask: {
+            ...state.pendingByTask,
+            [taskId]: { id: ++nextRequestId, selections },
+          },
+        };
+      });
+    },
+    consumeSelections: (taskId, requestId) => {
+      set((state) => {
+        const pending = state.pendingByTask[taskId];
+        if (pending?.id !== requestId) return state;
+        const pendingByTask = { ...state.pendingByTask };
+        delete pendingByTask[taskId];
+        return { pendingByTask };
+      });
+    },
+  }),
+);

@@ -9,6 +9,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "format": "prettier --write . --ignore-path ../../.prettierignore",
     "lint": "tsc -p tsconfig.json --noEmit && eslint src tests",
     "test": "node ../../scripts/run-with-clean-stderr.mjs \"tsc -p tsconfig.json --noEmit && node --import tsx --test tests/*.test.ts\""
   },

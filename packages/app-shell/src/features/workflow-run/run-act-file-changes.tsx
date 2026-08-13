@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconChevronDown, IconChevronRight, IconFileDiff } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconChevronRight,
+  IconFileDiff,
+} from "@tabler/icons-react";
 import { useTaskChangesNavigation } from "../diff/task-changes-navigation-context";
 import { displayPath } from "../chat/turn-diff-files";
 import type { WorkflowNodeFileChange } from "@ora/workflow-runtime";
@@ -75,7 +79,10 @@ export function RunActFileChanges({ files }: RunActFileChangesProps) {
                 className="flex min-h-9 w-full items-center gap-3 px-3 py-2 text-left outline-none transition-colors hover:bg-muted/35 focus-visible:bg-muted/35 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 onClick={() => changesNavigation?.openFile(path)}
               >
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px]" title={path}>
+                <span
+                  className="min-w-0 flex-1 truncate font-mono text-[11px]"
+                  title={path}
+                >
                   {path}
                 </span>
                 <span

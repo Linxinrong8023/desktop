@@ -4,11 +4,7 @@
  * Identifies the shared CLI runtime selected for a provider-backed session.
  */
 export type AgentCli =
-  | "open_code"
-  | "nga"
-  | "code_agent_cli"
-  | "claude"
-  | "codex";
+  "open_code" | "nga" | "code_agent_cli" | "claude" | "codex";
 
 /**
  * Pairs one CLI identity with its current runtime detection status.
@@ -88,15 +84,15 @@ export type ListSessionsResponse = { sessions: Array<Session> };
  */
 export type LoadSessionEvent =
   | {
-    "type": "session_update";
-    update: import("@agentclientprotocol/sdk").SessionUpdate;
-  }
-  | { "type": "permission_request" } & SessionPermissionRequest
+      type: "session_update";
+      update: import("@agentclientprotocol/sdk").SessionUpdate;
+    }
+  | ({ type: "permission_request" } & SessionPermissionRequest)
   | {
-    "type": "turn_ended";
-    stopReason: import("@agentclientprotocol/sdk").StopReason;
-  }
-  | { "type": "completed" };
+      type: "turn_ended";
+      stopReason: import("@agentclientprotocol/sdk").StopReason;
+    }
+  | { type: "completed" };
 
 /**
  * Identifies a stopped session whose provider history should be replayed.
@@ -108,14 +104,14 @@ export type LoadSessionRequest = { sessionId: string };
  */
 export type PromptSessionEvent =
   | {
-    "type": "session_update";
-    update: import("@agentclientprotocol/sdk").SessionUpdate;
-  }
-  | { "type": "permission_request" } & SessionPermissionRequest
+      type: "session_update";
+      update: import("@agentclientprotocol/sdk").SessionUpdate;
+    }
+  | ({ type: "permission_request" } & SessionPermissionRequest)
   | {
-    "type": "completed";
-    stopReason: import("@agentclientprotocol/sdk").StopReason;
-  };
+      type: "completed";
+      stopReason: import("@agentclientprotocol/sdk").StopReason;
+    };
 
 /**
  * Carries one or more ACP content blocks to the provider session.
@@ -178,10 +174,12 @@ export type Session = {
  * still grow. A running session whose disk filled is both at once, and the user
  * has to be told which one broke.
  */
-export type SessionHistoryState = { "type": "writable" } | {
-  "type": "degraded";
-  reason: string;
-};
+export type SessionHistoryState =
+  | { type: "writable" }
+  | {
+      type: "degraded";
+      reason: string;
+    };
 
 /**
  * Exposes an opaque permission request while preserving the agent's typed option payload.
@@ -304,7 +302,9 @@ export type WarmSessionResponse = {
  * yet can only target the project root. Modelling this as an enum keeps callers
  * from having to pass two optional identifiers and guess which one wins.
  */
-export type WarmSessionTarget = { "type": "task"; taskId: string } | {
-  "type": "projectRoot";
-  projectId: string;
-};
+export type WarmSessionTarget =
+  | { type: "task"; taskId: string }
+  | {
+      type: "projectRoot";
+      projectId: string;
+    };

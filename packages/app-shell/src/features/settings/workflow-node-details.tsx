@@ -127,7 +127,9 @@ export function WorkflowNodeDetailsLayout({
         />
       );
     default:
-      throw new Error(`Missing workflow detail layout for node kind "${node.data.kind}"`);
+      throw new Error(
+        `Missing workflow detail layout for node kind "${node.data.kind}"`,
+      );
   }
 }
 
@@ -146,7 +148,9 @@ function WorkflowNodeDetailsHeader({
   const Icon = metadata.icon;
   return (
     <header className="flex min-w-0 items-center gap-2.5 border-b border-border px-4 py-3">
-      <span className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${metadata.tone}`}>
+      <span
+        className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${metadata.tone}`}
+      >
         <Icon className="size-4" />
       </span>
       <h3 className="min-w-0 flex-1 truncate text-xs font-semibold">
@@ -185,31 +189,47 @@ function NodeIdentityFields({
   const { t } = useTranslation();
   return (
     <>
-      <InspectorField label={t("settings.workflow.field.name")} htmlFor="workflow-node-title">
+      <InspectorField
+        label={t("settings.workflow.field.name")}
+        htmlFor="workflow-node-title"
+      >
         <Input
           id="workflow-node-title"
           value={node.data.title}
-          onChange={(event) => onUpdate({
-            ...node,
-            data: { ...node.data, title: event.target.value },
-          })}
+          onChange={(event) =>
+            onUpdate({
+              ...node,
+              data: { ...node.data, title: event.target.value },
+            })
+          }
         />
       </InspectorField>
-      <InspectorField label={t("settings.workflow.field.description")} htmlFor="workflow-node-description">
+      <InspectorField
+        label={t("settings.workflow.field.description")}
+        htmlFor="workflow-node-description"
+      >
         <>
           <Input
             id="workflow-node-description"
             value={node.data.description}
             maxLength={NODE_DESCRIPTION_MAX_LENGTH}
-            onChange={(event) => onUpdate({
-              ...node,
-              data: {
-                ...node.data,
-                description: event.target.value.slice(0, NODE_DESCRIPTION_MAX_LENGTH),
-              },
-            })}
+            onChange={(event) =>
+              onUpdate({
+                ...node,
+                data: {
+                  ...node.data,
+                  description: event.target.value.slice(
+                    0,
+                    NODE_DESCRIPTION_MAX_LENGTH,
+                  ),
+                },
+              })
+            }
           />
-          <p className="text-right text-[10px] text-muted-foreground" aria-live="polite">
+          <p
+            className="text-right text-[10px] text-muted-foreground"
+            aria-live="polite"
+          >
             {t("settings.workflow.characterCount", {
               count: node.data.description.length,
               max: NODE_DESCRIPTION_MAX_LENGTH,
@@ -236,7 +256,9 @@ function AdvancedSettingsSection({ children }: { children: React.ReactNode }) {
           )}
         />
       </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-3 pt-2">{children}</CollapsibleContent>
+      <CollapsibleContent className="space-y-3 pt-2">
+        {children}
+      </CollapsibleContent>
     </Collapsible>
   );
 }
@@ -251,7 +273,10 @@ function MockStepMsField({
 }) {
   const { t } = useTranslation();
   return (
-    <InspectorField label={t("settings.workflow.field.mockStepMs")} htmlFor="workflow-node-mock-step">
+    <InspectorField
+      label={t("settings.workflow.field.mockStepMs")}
+      htmlFor="workflow-node-mock-step"
+    >
       <Input
         id="workflow-node-mock-step"
         type="number"
@@ -263,9 +288,10 @@ function MockStepMsField({
             ...node,
             data: {
               ...node.data,
-              mockStepMs: event.target.value !== "" && Number.isFinite(parsed)
-                ? parsed
-                : undefined,
+              mockStepMs:
+                event.target.value !== "" && Number.isFinite(parsed)
+                  ? parsed
+                  : undefined,
             },
           });
         }}
@@ -289,10 +315,17 @@ function StartNodeDetails({
   };
   return (
     <>
-      <WorkflowNodeDetailsHeader node={node} nodeType={nodeType} onClose={onClose} />
+      <WorkflowNodeDetailsHeader
+        node={node}
+        nodeType={nodeType}
+        onClose={onClose}
+      />
       <WorkflowNodeBody>
         <NodeIdentityFields node={node} onUpdate={onUpdate} />
-        <InspectorField label={t("settings.workflow.field.trigger")} htmlFor="workflow-node-trigger">
+        <InspectorField
+          label={t("settings.workflow.field.trigger")}
+          htmlFor="workflow-node-trigger"
+        >
           <Select
             value={node.data.trigger ?? capabilities.defaultTrigger}
             onValueChange={(trigger) => {
@@ -316,33 +349,51 @@ function StartNodeDetails({
             </SelectContent>
           </Select>
         </InspectorField>
-        <WorkflowNodeSection title={t("settings.workflow.section.inputVariables")}>
+        <WorkflowNodeSection
+          title={t("settings.workflow.section.inputVariables")}
+        >
           <div className="space-y-2">
             {inputVariables.map((variable, index) => (
-              <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
+              <div
+                key={index}
+                className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2"
+              >
                 <Input
                   value={variable.name}
-                  aria-label={t("settings.workflow.field.inputVariableName", { index: index + 1 })}
-                  placeholder={t("settings.workflow.field.inputVariableNamePlaceholder")}
-                  className="h-8"
-                  onChange={(event) => updateVariables(
-                    inputVariables.map((candidate, candidateIndex) =>
-                      candidateIndex === index
-                        ? { ...candidate, name: event.target.value }
-                        : candidate),
+                  aria-label={t("settings.workflow.field.inputVariableName", {
+                    index: index + 1,
+                  })}
+                  placeholder={t(
+                    "settings.workflow.field.inputVariableNamePlaceholder",
                   )}
+                  className="h-8"
+                  onChange={(event) =>
+                    updateVariables(
+                      inputVariables.map((candidate, candidateIndex) =>
+                        candidateIndex === index
+                          ? { ...candidate, name: event.target.value }
+                          : candidate,
+                      ),
+                    )
+                  }
                 />
                 <Input
                   value={variable.defaultValue ?? ""}
-                  aria-label={t("settings.workflow.field.inputVariableDefault", { index: index + 1 })}
+                  aria-label={t(
+                    "settings.workflow.field.inputVariableDefault",
+                    { index: index + 1 },
+                  )}
                   placeholder={t("settings.workflow.field.defaultPlaceholder")}
                   className="h-8"
-                  onChange={(event) => updateVariables(
-                    inputVariables.map((candidate, candidateIndex) =>
-                      candidateIndex === index
-                        ? { ...candidate, defaultValue: event.target.value }
-                        : candidate),
-                  )}
+                  onChange={(event) =>
+                    updateVariables(
+                      inputVariables.map((candidate, candidateIndex) =>
+                        candidateIndex === index
+                          ? { ...candidate, defaultValue: event.target.value }
+                          : candidate,
+                      ),
+                    )
+                  }
                 />
                 <Button
                   type="button"
@@ -350,9 +401,13 @@ function StartNodeDetails({
                   size="icon-sm"
                   className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   aria-label={t("settings.workflow.start.removeVariable")}
-                  onClick={() => updateVariables(
-                    inputVariables.filter((_, candidateIndex) => candidateIndex !== index),
-                  )}
+                  onClick={() =>
+                    updateVariables(
+                      inputVariables.filter(
+                        (_, candidateIndex) => candidateIndex !== index,
+                      ),
+                    )
+                  }
                 >
                   <IconTrash className="size-3.5" />
                 </Button>
@@ -363,14 +418,21 @@ function StartNodeDetails({
               variant="outline"
               size="sm"
               className="w-full justify-start"
-              onClick={() => updateVariables([...inputVariables, { name: "", defaultValue: "" }])}
+              onClick={() =>
+                updateVariables([
+                  ...inputVariables,
+                  { name: "", defaultValue: "" },
+                ])
+              }
             >
               <IconPlus />
               {t("settings.workflow.start.addVariable")}
             </Button>
           </div>
         </WorkflowNodeSection>
-        <WorkflowNodeSection title={t("settings.workflow.section.availableVariables")}>
+        <WorkflowNodeSection
+          title={t("settings.workflow.section.availableVariables")}
+        >
           <p className="text-[10px] leading-4 text-muted-foreground">
             {t("settings.workflow.start.availableHint")}
           </p>
@@ -386,7 +448,10 @@ function StartNodeDetails({
           </div>
         </WorkflowNodeSection>
         <AdvancedSettingsSection>
-          <InspectorField label={t("settings.workflow.field.instruction")} htmlFor="workflow-node-instruction">
+          <InspectorField
+            label={t("settings.workflow.field.instruction")}
+            htmlFor="workflow-node-instruction"
+          >
             <Textarea
               id="workflow-node-instruction"
               className="min-h-24 resize-none text-xs leading-5"
@@ -419,23 +484,33 @@ function ConditionNodeDetails({
   const updateBranches = (next: WorkflowConditionBranch[]): void => {
     onUpdate({ ...node, data: { ...node.data, conditionBranches: next } });
   };
-  const updateBranch = (branchIndex: number, patch: Partial<WorkflowConditionBranch>): void => {
-    updateBranches(branches.map((branch, candidateIndex) =>
-      candidateIndex === branchIndex ? { ...branch, ...patch } : branch));
+  const updateBranch = (
+    branchIndex: number,
+    patch: Partial<WorkflowConditionBranch>,
+  ): void => {
+    updateBranches(
+      branches.map((branch, candidateIndex) =>
+        candidateIndex === branchIndex ? { ...branch, ...patch } : branch,
+      ),
+    );
   };
   const updateRule = (
     branchIndex: number,
     ruleIndex: number,
     patch: Partial<WorkflowConditionRule>,
   ): void => {
-    updateBranches(branches.map((branch, candidateIndex) =>
-      candidateIndex === branchIndex
-        ? {
-            ...branch,
-            conditions: branch.conditions.map((rule, candidateRuleIndex) =>
-              candidateRuleIndex === ruleIndex ? { ...rule, ...patch } : rule),
-          }
-        : branch));
+    updateBranches(
+      branches.map((branch, candidateIndex) =>
+        candidateIndex === branchIndex
+          ? {
+              ...branch,
+              conditions: branch.conditions.map((rule, candidateRuleIndex) =>
+                candidateRuleIndex === ruleIndex ? { ...rule, ...patch } : rule,
+              ),
+            }
+          : branch,
+      ),
+    );
   };
   const logicOptions = [
     { value: "and" as const, label: t("settings.workflow.condition.logicAnd") },
@@ -443,7 +518,11 @@ function ConditionNodeDetails({
   ];
   return (
     <>
-      <WorkflowNodeDetailsHeader node={node} nodeType={nodeType} onClose={onClose} />
+      <WorkflowNodeDetailsHeader
+        node={node}
+        nodeType={nodeType}
+        onClose={onClose}
+      />
       <WorkflowNodeBody>
         <NodeIdentityFields node={node} onUpdate={onUpdate} />
         {branches.map((branch, branchIndex) => (
@@ -454,7 +533,9 @@ function ConditionNodeDetails({
             <div className="space-y-2 border-b border-border bg-muted/25 px-3 py-2">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-semibold">
-                  {t("settings.workflow.condition.branchTitle", { index: branchIndex + 1 })}
+                  {t("settings.workflow.condition.branchTitle", {
+                    index: branchIndex + 1,
+                  })}
                 </span>
                 {branchIndex > 0 && (
                   <Button
@@ -463,9 +544,13 @@ function ConditionNodeDetails({
                     size="icon-sm"
                     className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     aria-label={t("settings.workflow.condition.removeBranch")}
-                    onClick={() => updateBranches(
-                      branches.filter((_, candidateIndex) => candidateIndex !== branchIndex),
-                    )}
+                    onClick={() =>
+                      updateBranches(
+                        branches.filter(
+                          (_, candidateIndex) => candidateIndex !== branchIndex,
+                        ),
+                      )
+                    }
                   >
                     <IconTrash className="size-3.5" />
                   </Button>
@@ -485,7 +570,10 @@ function ConditionNodeDetails({
                   })}
                   className="h-7 w-full text-[11px]"
                 >
-                  <LocalizedSelectValue options={logicOptions} value={branch.logic ?? "and"} />
+                  <LocalizedSelectValue
+                    options={logicOptions}
+                    value={branch.logic ?? "and"}
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {logicOptions.map((logic) => (
@@ -505,11 +593,17 @@ function ConditionNodeDetails({
                   <RuleField label={t("settings.workflow.field.variable")}>
                     <Input
                       value={rule.variable}
-                      aria-label={t("settings.workflow.field.variable", { index: ruleIndex + 1 })}
-                      placeholder={t("settings.workflow.condition.variablePlaceholder")}
+                      aria-label={t("settings.workflow.field.variable", {
+                        index: ruleIndex + 1,
+                      })}
+                      placeholder={t(
+                        "settings.workflow.condition.variablePlaceholder",
+                      )}
                       className="h-8"
                       onChange={(event) =>
-                        updateRule(branchIndex, ruleIndex, { variable: event.target.value })
+                        updateRule(branchIndex, ruleIndex, {
+                          variable: event.target.value,
+                        })
                       }
                     />
                   </RuleField>
@@ -523,14 +617,22 @@ function ConditionNodeDetails({
                       }}
                     >
                       <SelectTrigger
-                        aria-label={t("settings.workflow.field.operator", { index: ruleIndex + 1 })}
+                        aria-label={t("settings.workflow.field.operator", {
+                          index: ruleIndex + 1,
+                        })}
                         className="h-8 w-full"
                       >
-                        <LocalizedSelectValue options={capabilities.conditionOperators} value={rule.operator} />
+                        <LocalizedSelectValue
+                          options={capabilities.conditionOperators}
+                          value={rule.operator}
+                        />
                       </SelectTrigger>
                       <SelectContent>
                         {capabilities.conditionOperators.map((operator) => (
-                          <SelectItem key={operator.value} value={operator.value}>
+                          <SelectItem
+                            key={operator.value}
+                            value={operator.value}
+                          >
                             {operator.label}
                           </SelectItem>
                         ))}
@@ -541,11 +643,17 @@ function ConditionNodeDetails({
                     <>
                       <Input
                         value={rule.value}
-                        aria-label={t("settings.workflow.field.value", { index: ruleIndex + 1 })}
-                        placeholder={t("settings.workflow.condition.valuePlaceholder")}
+                        aria-label={t("settings.workflow.field.value", {
+                          index: ruleIndex + 1,
+                        })}
+                        placeholder={t(
+                          "settings.workflow.condition.valuePlaceholder",
+                        )}
                         className="h-8"
                         onChange={(event) =>
-                          updateRule(branchIndex, ruleIndex, { value: event.target.value })
+                          updateRule(branchIndex, ruleIndex, {
+                            value: event.target.value,
+                          })
                         }
                       />
                       <Button
@@ -554,15 +662,18 @@ function ConditionNodeDetails({
                         size="sm"
                         className={cn(
                           "h-8 shrink-0 px-2 text-[10px] font-semibold",
-                          rule.negated === true && "text-amber-700 dark:text-amber-400",
+                          rule.negated === true &&
+                            "text-amber-700 dark:text-amber-400",
                         )}
                         aria-label={t("settings.workflow.condition.toggleNot", {
                           index: ruleIndex + 1,
                         })}
                         aria-pressed={rule.negated === true}
-                        onClick={() => updateRule(branchIndex, ruleIndex, {
-                          negated: rule.negated === true ? undefined : true,
-                        })}
+                        onClick={() =>
+                          updateRule(branchIndex, ruleIndex, {
+                            negated: rule.negated === true ? undefined : true,
+                          })
+                        }
                       >
                         {t("settings.workflow.condition.not")}
                       </Button>
@@ -572,18 +683,25 @@ function ConditionNodeDetails({
                           variant="ghost"
                           size="icon-sm"
                           className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                          aria-label={t("settings.workflow.condition.removeRule")}
-                          onClick={() => updateBranches(
-                            branches.map((candidateBranch, candidateIndex) =>
-                              candidateIndex === branchIndex
-                                ? {
-                                    ...candidateBranch,
-                                    conditions: candidateBranch.conditions.filter(
-                                      (_, candidateRuleIndex) => candidateRuleIndex !== ruleIndex,
-                                    ),
-                                  }
-                                : candidateBranch),
+                          aria-label={t(
+                            "settings.workflow.condition.removeRule",
                           )}
+                          onClick={() =>
+                            updateBranches(
+                              branches.map((candidateBranch, candidateIndex) =>
+                                candidateIndex === branchIndex
+                                  ? {
+                                      ...candidateBranch,
+                                      conditions:
+                                        candidateBranch.conditions.filter(
+                                          (_, candidateRuleIndex) =>
+                                            candidateRuleIndex !== ruleIndex,
+                                        ),
+                                    }
+                                  : candidateBranch,
+                              ),
+                            )
+                          }
                         >
                           <IconTrash className="size-3.5" />
                         </Button>
@@ -597,15 +715,21 @@ function ConditionNodeDetails({
                 variant="ghost"
                 size="sm"
                 className="w-full justify-start"
-                onClick={() => updateBranches(
-                  branches.map((candidateBranch, candidateIndex) =>
-                    candidateIndex === branchIndex
-                      ? {
-                          ...candidateBranch,
-                          conditions: [...candidateBranch.conditions, defaultConditionRule()],
-                        }
-                      : candidateBranch),
-                )}
+                onClick={() =>
+                  updateBranches(
+                    branches.map((candidateBranch, candidateIndex) =>
+                      candidateIndex === branchIndex
+                        ? {
+                            ...candidateBranch,
+                            conditions: [
+                              ...candidateBranch.conditions,
+                              defaultConditionRule(),
+                            ],
+                          }
+                        : candidateBranch,
+                    ),
+                  )
+                }
               >
                 <IconPlus />
                 {t("settings.workflow.condition.addRule")}
@@ -618,19 +742,29 @@ function ConditionNodeDetails({
           variant="outline"
           size="sm"
           className="w-full justify-start"
-          onClick={() => updateBranches([...branches, { conditions: [defaultConditionRule()] }])}
+          onClick={() =>
+            updateBranches([
+              ...branches,
+              { conditions: [defaultConditionRule()] },
+            ])
+          }
         >
           <IconPlus />
           {t("settings.workflow.condition.addBranch")}
         </Button>
         <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/25 px-3 py-2.5">
-          <span className="text-[11px] font-medium">{t("settings.workflow.condition.otherCases")}</span>
+          <span className="text-[11px] font-medium">
+            {t("settings.workflow.condition.otherCases")}
+          </span>
           <span className="ml-auto text-[11px] text-muted-foreground">
             {t("settings.workflow.condition.defaultBranch")}
           </span>
         </div>
         <AdvancedSettingsSection>
-          <InspectorField label={t("settings.workflow.field.instruction")} htmlFor="workflow-node-instruction">
+          <InspectorField
+            label={t("settings.workflow.field.instruction")}
+            htmlFor="workflow-node-instruction"
+          >
             <Textarea
               id="workflow-node-instruction"
               className="min-h-24 resize-none text-xs leading-5"
@@ -680,8 +814,10 @@ function LocalizedSelectValue({
 }) {
   return (
     <SelectValue>
-      {(selected) => options.find((option) => option.value === (selected ?? value))?.label
-        ?? String(selected ?? value)}
+      {(selected) =>
+        options.find((option) => option.value === (selected ?? value))?.label ??
+        String(selected ?? value)
+      }
     </SelectValue>
   );
 }
@@ -712,10 +848,17 @@ function ToolNodeDetails({
   };
   return (
     <>
-      <WorkflowNodeDetailsHeader node={node} nodeType={nodeType} onClose={onClose} />
+      <WorkflowNodeDetailsHeader
+        node={node}
+        nodeType={nodeType}
+        onClose={onClose}
+      />
       <WorkflowNodeBody>
         <NodeIdentityFields node={node} onUpdate={onUpdate} />
-        <InspectorField label={t("settings.workflow.field.tool")} htmlFor="workflow-node-tool">
+        <InspectorField
+          label={t("settings.workflow.field.tool")}
+          htmlFor="workflow-node-tool"
+        >
           <Select
             value={selectedTool}
             onValueChange={(tool) => {
@@ -726,7 +869,9 @@ function ToolNodeDetails({
                     ...node.data,
                     tool,
                     // Switch to the first operation of the newly selected tool.
-                    operation: (capabilities.toolOperations[tool] ?? [])[0]?.value ?? undefined,
+                    operation:
+                      (capabilities.toolOperations[tool] ?? [])[0]?.value ??
+                      undefined,
                   },
                 });
               }
@@ -745,7 +890,10 @@ function ToolNodeDetails({
           </Select>
         </InspectorField>
         {operations.length > 0 ? (
-          <InspectorField label={t("settings.workflow.field.operation")} htmlFor="workflow-node-operation">
+          <InspectorField
+            label={t("settings.workflow.field.operation")}
+            htmlFor="workflow-node-operation"
+          >
             <Select
               value={node.data.operation ?? operations[0]!.value}
               onValueChange={(operation) => {
@@ -770,35 +918,50 @@ function ToolNodeDetails({
             </Select>
           </InspectorField>
         ) : (
-          <p className="text-[11px] text-muted-foreground">{t("settings.workflow.tool.noOperations")}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {t("settings.workflow.tool.noOperations")}
+          </p>
         )}
         <WorkflowNodeSection title={t("settings.workflow.section.parameters")}>
           <div className="space-y-2">
             {toolParameters.map((parameter, index) => (
-              <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
+              <div
+                key={index}
+                className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2"
+              >
                 <Input
                   value={parameter.key}
-                  aria-label={t("settings.workflow.field.parameterName", { index: index + 1 })}
+                  aria-label={t("settings.workflow.field.parameterName", {
+                    index: index + 1,
+                  })}
                   placeholder={t("settings.workflow.field.parameterName")}
                   className="h-8"
-                  onChange={(event) => updateParameters(
-                    toolParameters.map((candidate, candidateIndex) =>
-                      candidateIndex === index
-                        ? { ...candidate, key: event.target.value }
-                        : candidate),
-                  )}
+                  onChange={(event) =>
+                    updateParameters(
+                      toolParameters.map((candidate, candidateIndex) =>
+                        candidateIndex === index
+                          ? { ...candidate, key: event.target.value }
+                          : candidate,
+                      ),
+                    )
+                  }
                 />
                 <Input
                   value={parameter.value}
-                  aria-label={t("settings.workflow.field.parameterValue", { index: index + 1 })}
+                  aria-label={t("settings.workflow.field.parameterValue", {
+                    index: index + 1,
+                  })}
                   placeholder={t("settings.workflow.field.parameterValue")}
                   className="h-8"
-                  onChange={(event) => updateParameters(
-                    toolParameters.map((candidate, candidateIndex) =>
-                      candidateIndex === index
-                        ? { ...candidate, value: event.target.value }
-                        : candidate),
-                  )}
+                  onChange={(event) =>
+                    updateParameters(
+                      toolParameters.map((candidate, candidateIndex) =>
+                        candidateIndex === index
+                          ? { ...candidate, value: event.target.value }
+                          : candidate,
+                      ),
+                    )
+                  }
                 />
                 <Button
                   type="button"
@@ -806,9 +969,13 @@ function ToolNodeDetails({
                   size="icon-sm"
                   className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   aria-label={t("settings.workflow.tool.removeParameter")}
-                  onClick={() => updateParameters(
-                    toolParameters.filter((_, candidateIndex) => candidateIndex !== index),
-                  )}
+                  onClick={() =>
+                    updateParameters(
+                      toolParameters.filter(
+                        (_, candidateIndex) => candidateIndex !== index,
+                      ),
+                    )
+                  }
                 >
                   <IconTrash className="size-3.5" />
                 </Button>
@@ -819,7 +986,9 @@ function ToolNodeDetails({
               variant="outline"
               size="sm"
               className="w-full justify-start"
-              onClick={() => updateParameters([...toolParameters, { key: "", value: "" }])}
+              onClick={() =>
+                updateParameters([...toolParameters, { key: "", value: "" }])
+              }
             >
               <IconPlus />
               {t("settings.workflow.tool.addParameter")}
@@ -827,7 +996,10 @@ function ToolNodeDetails({
           </div>
         </WorkflowNodeSection>
         <AdvancedSettingsSection>
-          <InspectorField label={t("settings.workflow.field.instruction")} htmlFor="workflow-node-instruction">
+          <InspectorField
+            label={t("settings.workflow.field.instruction")}
+            htmlFor="workflow-node-instruction"
+          >
             <Textarea
               id="workflow-node-instruction"
               className="min-h-24 resize-none text-xs leading-5"
@@ -859,28 +1031,51 @@ function JunctionNodeDetails({
   const waitOptions = [
     { value: "all" as const, label: t("settings.workflow.junction.waitAll") },
     { value: "any" as const, label: t("settings.workflow.junction.waitAny") },
-    { value: "count" as const, label: t("settings.workflow.junction.waitCount") },
+    {
+      value: "count" as const,
+      label: t("settings.workflow.junction.waitCount"),
+    },
   ];
   const failureOptions = [
     { value: "fail" as const, label: t("settings.workflow.junction.failFast") },
-    { value: "continue" as const, label: t("settings.workflow.junction.collectResults") },
+    {
+      value: "continue" as const,
+      label: t("settings.workflow.junction.collectResults"),
+    },
   ];
   return (
     <>
-      <WorkflowNodeDetailsHeader node={node} nodeType={nodeType} onClose={onClose} />
+      <WorkflowNodeDetailsHeader
+        node={node}
+        nodeType={nodeType}
+        onClose={onClose}
+      />
       <WorkflowNodeBody>
         <NodeIdentityFields node={node} onUpdate={onUpdate} />
-        <InspectorField label={t("settings.workflow.field.waitStrategy")} htmlFor="workflow-node-wait-strategy">
+        <InspectorField
+          label={t("settings.workflow.field.waitStrategy")}
+          htmlFor="workflow-node-wait-strategy"
+        >
           <Select
             value={waitStrategy}
             onValueChange={(strategy) => {
-              if (strategy === "all" || strategy === "any" || strategy === "count") {
-                onUpdate({ ...node, data: { ...node.data, waitStrategy: strategy } });
+              if (
+                strategy === "all" ||
+                strategy === "any" ||
+                strategy === "count"
+              ) {
+                onUpdate({
+                  ...node,
+                  data: { ...node.data, waitStrategy: strategy },
+                });
               }
             }}
           >
             <SelectTrigger id="workflow-node-wait-strategy" className="w-full">
-              <LocalizedSelectValue options={waitOptions} value={waitStrategy} />
+              <LocalizedSelectValue
+                options={waitOptions}
+                value={waitStrategy}
+              />
             </SelectTrigger>
             <SelectContent>
               {waitOptions.map((option) => (
@@ -892,7 +1087,10 @@ function JunctionNodeDetails({
           </Select>
         </InspectorField>
         {waitStrategy === "count" && (
-          <InspectorField label={t("settings.workflow.field.waitCount")} htmlFor="workflow-node-wait-count">
+          <InspectorField
+            label={t("settings.workflow.field.waitCount")}
+            htmlFor="workflow-node-wait-count"
+          >
             <Input
               id="workflow-node-wait-count"
               type="number"
@@ -904,25 +1102,35 @@ function JunctionNodeDetails({
                   ...node,
                   data: {
                     ...node.data,
-                    waitCount: event.target.value !== "" && Number.isFinite(parsed)
-                      ? parsed
-                      : undefined,
+                    waitCount:
+                      event.target.value !== "" && Number.isFinite(parsed)
+                        ? parsed
+                        : undefined,
                   },
                 });
               }}
             />
           </InspectorField>
         )}
-        <InspectorField label={t("settings.workflow.field.failureStrategy")} htmlFor="workflow-node-failure-strategy">
+        <InspectorField
+          label={t("settings.workflow.field.failureStrategy")}
+          htmlFor="workflow-node-failure-strategy"
+        >
           <Select
             value={node.data.failureStrategy ?? "fail"}
             onValueChange={(strategy) => {
               if (strategy === "fail" || strategy === "continue") {
-                onUpdate({ ...node, data: { ...node.data, failureStrategy: strategy } });
+                onUpdate({
+                  ...node,
+                  data: { ...node.data, failureStrategy: strategy },
+                });
               }
             }}
           >
-            <SelectTrigger id="workflow-node-failure-strategy" className="w-full">
+            <SelectTrigger
+              id="workflow-node-failure-strategy"
+              className="w-full"
+            >
               <LocalizedSelectValue
                 options={failureOptions}
                 value={node.data.failureStrategy ?? "fail"}
@@ -938,7 +1146,10 @@ function JunctionNodeDetails({
           </Select>
         </InspectorField>
         <AdvancedSettingsSection>
-          <InspectorField label={t("settings.workflow.field.instruction")} htmlFor="workflow-node-instruction">
+          <InspectorField
+            label={t("settings.workflow.field.instruction")}
+            htmlFor="workflow-node-instruction"
+          >
             <Textarea
               id="workflow-node-instruction"
               className="min-h-24 resize-none text-xs leading-5"
@@ -968,10 +1179,17 @@ function HumanNodeDetails({
   const { t } = useTranslation();
   return (
     <>
-      <WorkflowNodeDetailsHeader node={node} nodeType={nodeType} onClose={onClose} />
+      <WorkflowNodeDetailsHeader
+        node={node}
+        nodeType={nodeType}
+        onClose={onClose}
+      />
       <WorkflowNodeBody>
         <NodeIdentityFields node={node} onUpdate={onUpdate} />
-        <InspectorField label={t("settings.workflow.field.approvalPrompt")} htmlFor="workflow-node-instruction">
+        <InspectorField
+          label={t("settings.workflow.field.approvalPrompt")}
+          htmlFor="workflow-node-instruction"
+        >
           <Textarea
             id="workflow-node-instruction"
             className="min-h-32 resize-none text-xs leading-5"
@@ -1002,10 +1220,17 @@ function LoopNodeDetails({
   const { t } = useTranslation();
   return (
     <>
-      <WorkflowNodeDetailsHeader node={node} nodeType={nodeType} onClose={onClose} />
+      <WorkflowNodeDetailsHeader
+        node={node}
+        nodeType={nodeType}
+        onClose={onClose}
+      />
       <WorkflowNodeBody>
         <NodeIdentityFields node={node} onUpdate={onUpdate} />
-        <InspectorField label={t("settings.workflow.field.maxAttempts")} htmlFor="workflow-node-max-attempts">
+        <InspectorField
+          label={t("settings.workflow.field.maxAttempts")}
+          htmlFor="workflow-node-max-attempts"
+        >
           <Input
             id="workflow-node-max-attempts"
             type="number"
@@ -1017,15 +1242,19 @@ function LoopNodeDetails({
                 ...node,
                 data: {
                   ...node.data,
-                  maxAttempts: event.target.value !== "" && Number.isFinite(parsed)
-                    ? parsed
-                    : undefined,
+                  maxAttempts:
+                    event.target.value !== "" && Number.isFinite(parsed)
+                      ? parsed
+                      : undefined,
                 },
               });
             }}
           />
         </InspectorField>
-        <InspectorField label={t("settings.workflow.field.exitCondition")} htmlFor="workflow-node-exit-condition">
+        <InspectorField
+          label={t("settings.workflow.field.exitCondition")}
+          htmlFor="workflow-node-exit-condition"
+        >
           <Input
             id="workflow-node-exit-condition"
             value={node.data.exitCondition ?? ""}
@@ -1039,7 +1268,10 @@ function LoopNodeDetails({
           />
         </InspectorField>
         <AdvancedSettingsSection>
-          <InspectorField label={t("settings.workflow.field.instruction")} htmlFor="workflow-node-instruction">
+          <InspectorField
+            label={t("settings.workflow.field.instruction")}
+            htmlFor="workflow-node-instruction"
+          >
             <Textarea
               id="workflow-node-instruction"
               className="min-h-24 resize-none text-xs leading-5"
@@ -1069,14 +1301,21 @@ function SubflowNodeDetails({
   const { t } = useTranslation();
   return (
     <>
-      <WorkflowNodeDetailsHeader node={node} nodeType={nodeType} onClose={onClose} />
+      <WorkflowNodeDetailsHeader
+        node={node}
+        nodeType={nodeType}
+        onClose={onClose}
+      />
       <WorkflowNodeBody>
         <NodeIdentityFields node={node} onUpdate={onUpdate} />
         <p className="rounded-lg border border-border bg-muted/25 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
           {t("settings.workflow.subflow.hint")}
         </p>
         <AdvancedSettingsSection>
-          <InspectorField label={t("settings.workflow.field.instruction")} htmlFor="workflow-node-instruction">
+          <InspectorField
+            label={t("settings.workflow.field.instruction")}
+            htmlFor="workflow-node-instruction"
+          >
             <Textarea
               id="workflow-node-instruction"
               className="min-h-24 resize-none text-xs leading-5"
@@ -1126,7 +1365,9 @@ export function InspectorField({
 }) {
   return (
     <div className="min-w-0 space-y-1.5">
-      <Label htmlFor={htmlFor} className="text-[11px]">{label}</Label>
+      <Label htmlFor={htmlFor} className="text-[11px]">
+        {label}
+      </Label>
       {children}
     </div>
   );

@@ -14,7 +14,10 @@ import { queryKeys } from "./query-keys";
  * can hide its second line. Pass `enabled: false` to skip the read entirely
  * (for example when an explicit user is injected in tests).
  */
-export function useGitIdentityUser(client: ContractsClient, enabled: boolean): CurrentUser {
+export function useGitIdentityUser(
+  client: ContractsClient,
+  enabled: boolean,
+): CurrentUser {
   const { t } = useTranslation();
   const { data } = useQuery({
     queryKey: queryKeys.gitIdentity,

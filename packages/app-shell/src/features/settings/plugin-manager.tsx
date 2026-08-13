@@ -18,7 +18,14 @@ import {
   Input,
   Switch,
 } from "@ora/ui";
-import { IconDots, IconInfoCircle, IconLoader2, IconPlug, IconSearch, IconTrash } from "@tabler/icons-react";
+import {
+  IconDots,
+  IconInfoCircle,
+  IconLoader2,
+  IconPlug,
+  IconSearch,
+  IconTrash,
+} from "@tabler/icons-react";
 import type { PluginEntry } from "./plugin-catalog";
 import { PluginTile } from "./plugin-tile";
 import { filterDiscoveredPlugins } from "./filter-discovered-plugins";
@@ -27,7 +34,17 @@ import { filterDiscoveredPlugins } from "./filter-discovered-plugins";
  * The installed-plugin manager keeps catalog interactions unchanged and appends
  * discovered packages as read-only rows without detail, uninstall, or enable controls.
  */
-export function PluginManager({ plugins, discoveredPlugins, disabledIds, pendingInstallIds, pendingEnableIds, onBack, onOpen, onToggleEnabled, onUninstall }: {
+export function PluginManager({
+  plugins,
+  discoveredPlugins,
+  disabledIds,
+  pendingInstallIds,
+  pendingEnableIds,
+  onBack,
+  onOpen,
+  onToggleEnabled,
+  onUninstall,
+}: {
   plugins: PluginEntry[];
   discoveredPlugins: InstalledPlugin[];
   disabledIds: string[];
@@ -42,10 +59,17 @@ export function PluginManager({ plugins, discoveredPlugins, disabledIds, pending
   const [query, setQuery] = useState("");
 
   const needle = query.trim().toLowerCase();
-  const visible = useMemo(() => plugins.filter((plugin) => !needle
-    || plugin.name.toLowerCase().includes(needle)
-    || plugin.publisher.toLowerCase().includes(needle)
-    || t(plugin.summaryKey).toLowerCase().includes(needle)), [needle, plugins, t]);
+  const visible = useMemo(
+    () =>
+      plugins.filter(
+        (plugin) =>
+          !needle ||
+          plugin.name.toLowerCase().includes(needle) ||
+          plugin.publisher.toLowerCase().includes(needle) ||
+          t(plugin.summaryKey).toLowerCase().includes(needle),
+      ),
+    [needle, plugins, t],
+  );
   const visibleDiscovered = useMemo(
     () => filterDiscoveredPlugins(discoveredPlugins, needle),
     [discoveredPlugins, needle],
@@ -56,22 +80,35 @@ export function PluginManager({ plugins, discoveredPlugins, disabledIds, pending
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
-            <BreadcrumbLink render={<button type="button" onClick={onBack} />}>{t("settings.plugins.title")}</BreadcrumbLink>
+            <BreadcrumbLink render={<button type="button" onClick={onBack} />}>
+              {t("settings.plugins.title")}
+            </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
-          <BreadcrumbItem><BreadcrumbPage>{t("settings.plugins.manageInstalled")}</BreadcrumbPage></BreadcrumbItem>
+          <BreadcrumbItem>
+            <BreadcrumbPage>
+              {t("settings.plugins.manageInstalled")}
+            </BreadcrumbPage>
+          </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
       <header>
         <h2 className="text-lg font-semibold">{t("settings.plugins.title")}</h2>
-        <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">{t("settings.plugins.manageDescription")}</p>
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+          {t("settings.plugins.manageDescription")}
+        </p>
       </header>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <Badge variant="secondary" className="h-7 shrink-0 gap-1.5 rounded-lg px-2.5 text-sm font-medium">
+        <Badge
+          variant="secondary"
+          className="h-7 shrink-0 gap-1.5 rounded-lg px-2.5 text-sm font-medium"
+        >
           {t("settings.plugins.title")}
-          <span className="font-normal text-muted-foreground">{plugins.length + discoveredPlugins.length}</span>
+          <span className="font-normal text-muted-foreground">
+            {plugins.length + discoveredPlugins.length}
+          </span>
         </Badge>
         <div className="relative min-w-0 flex-1 sm:max-w-xs sm:ml-auto">
           <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -85,14 +122,18 @@ export function PluginManager({ plugins, discoveredPlugins, disabledIds, pending
         </div>
       </div>
 
-      {visible.length === 0 && visibleDiscovered.length === 0
-        ? <p className="py-10 text-center text-sm text-muted-foreground">{plugins.length + discoveredPlugins.length === 0 ? t("settings.plugins.noneInstalled") : t("settings.plugins.empty")}</p>
-        : (
-          <div className="divide-y divide-border border-y border-border">
-            {visible.map((plugin) => {
-              const uninstalling = pendingInstallIds.includes(plugin.id);
-              const togglingEnabled = pendingEnableIds.includes(plugin.id);
-              return (
+      {visible.length === 0 && visibleDiscovered.length === 0 ? (
+        <p className="py-10 text-center text-sm text-muted-foreground">
+          {plugins.length + discoveredPlugins.length === 0
+            ? t("settings.plugins.noneInstalled")
+            : t("settings.plugins.empty")}
+        </p>
+      ) : (
+        <div className="divide-y divide-border border-y border-border">
+          {visible.map((plugin) => {
+            const uninstalling = pendingInstallIds.includes(plugin.id);
+            const togglingEnabled = pendingEnableIds.includes(plugin.id);
+            return (
               <div key={plugin.id} className="flex items-center gap-3 py-3">
                 <button
                   type="button"
@@ -101,26 +142,56 @@ export function PluginManager({ plugins, discoveredPlugins, disabledIds, pending
                 >
                   <PluginTile plugin={plugin} />
                   <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium">{plugin.name}</span>
-                    <span className="block truncate text-xs text-muted-foreground">{t(plugin.summaryKey)}</span>
-                    <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/80">{plugin.publisher}</span>
+                    <span className="block truncate text-sm font-medium">
+                      {plugin.name}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {t(plugin.summaryKey)}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/80">
+                      {plugin.publisher}
+                    </span>
                   </span>
                 </button>
                 <DropdownMenu>
                   <DropdownMenuTrigger
-                    render={<Button variant="ghost" size="icon-sm" aria-label={t("settings.plugins.openMenu", { name: plugin.name })} className="shrink-0 text-muted-foreground" />}
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t("settings.plugins.openMenu", {
+                          name: plugin.name,
+                        })}
+                        className="shrink-0 text-muted-foreground"
+                      />
+                    }
                   >
                     <IconDots />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-44">
-                    <DropdownMenuItem onClick={() => onOpen(plugin.id)}><IconInfoCircle />{t("settings.plugins.viewDetails")}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onOpen(plugin.id)}>
+                      <IconInfoCircle />
+                      {t("settings.plugins.viewDetails")}
+                    </DropdownMenuItem>
                     {/* The CLI runtimes' install state is detected, not managed here, so they never offer uninstall. */}
                     {!plugin.detectionAgentCli && (
                       <>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem variant="destructive" disabled={uninstalling} onClick={() => onUninstall(plugin.id)}>
-                          {uninstalling ? <IconLoader2 className="animate-spin" /> : <IconTrash />}
-                          {t(uninstalling ? "settings.plugins.uninstalling" : "settings.plugins.uninstall")}
+                        <DropdownMenuItem
+                          variant="destructive"
+                          disabled={uninstalling}
+                          onClick={() => onUninstall(plugin.id)}
+                        >
+                          {uninstalling ? (
+                            <IconLoader2 className="animate-spin" />
+                          ) : (
+                            <IconTrash />
+                          )}
+                          {t(
+                            uninstalling
+                              ? "settings.plugins.uninstalling"
+                              : "settings.plugins.uninstall",
+                          )}
                         </DropdownMenuItem>
                       </>
                     )}
@@ -131,27 +202,36 @@ export function PluginManager({ plugins, discoveredPlugins, disabledIds, pending
                   checked={!disabledIds.includes(plugin.id)}
                   disabled={togglingEnabled || uninstalling}
                   onCheckedChange={() => onToggleEnabled(plugin.id)}
-                  aria-label={t("settings.plugins.toggleSkill", { name: plugin.name })}
+                  aria-label={t("settings.plugins.toggleSkill", {
+                    name: plugin.name,
+                  })}
                 />
               </div>
-              );
-            })}
-            {visibleDiscovered.map((plugin) => (
-              <div key={`discovered:${plugin.id}`} className="flex items-center gap-3 py-3">
-                <span className="flex size-10 shrink-0 items-center justify-center text-muted-foreground">
-                  <IconPlug className="size-6" />
+            );
+          })}
+          {visibleDiscovered.map((plugin) => (
+            <div
+              key={`discovered:${plugin.id}`}
+              className="flex items-center gap-3 py-3"
+            >
+              <span className="flex size-10 shrink-0 items-center justify-center text-muted-foreground">
+                <IconPlug className="size-6" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">
+                  {plugin.displayName}
                 </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{plugin.displayName}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{plugin.packageName}</span>
-                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/80">
-                    {plugin.version} · {plugin.kind}
-                  </span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {plugin.packageName}
                 </span>
-              </div>
-            ))}
-          </div>
-        )}
+                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/80">
+                  {plugin.version} · {plugin.kind}
+                </span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

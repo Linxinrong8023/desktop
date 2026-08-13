@@ -41,9 +41,11 @@ type EndpointNamespace = (typeof endpoints)[EndpointOperation]["namespace"];
  */
 export type ContractsClient = {
   [Namespace in EndpointNamespace]: {
-    [Operation in EndpointOperation as (typeof endpoints)[Operation]["namespace"] extends Namespace
-      ? (typeof endpoints)[Operation]["memberName"]
-      : never]: ClientOperation<Operation>;
+    [
+      Operation in EndpointOperation as (typeof endpoints)[Operation]["namespace"] extends Namespace
+        ? (typeof endpoints)[Operation]["memberName"]
+        : never
+    ]: ClientOperation<Operation>;
   };
 };
 
@@ -54,8 +56,10 @@ export function createContractsClient(
     project: {
       create: (request, options) =>
         executeOperation("createProject", request, transport, options),
-      get: (request, options) => executeOperation("getProject", request, transport, options),
-      list: (request, options) => executeOperation("listProjects", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getProject", request, transport, options),
+      list: (request, options) =>
+        executeOperation("listProjects", request, transport, options),
       listBranches: (request, options) =>
         executeOperation("listProjectBranches", request, transport, options),
       update: (request, options) =>
@@ -64,14 +68,20 @@ export function createContractsClient(
         executeOperation("deleteProject", request, transport, options),
     },
     task: {
-      create: (request, options) => executeOperation("createTask", request, transport, options),
-      get: (request, options) => executeOperation("getTask", request, transport, options),
+      create: (request, options) =>
+        executeOperation("createTask", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getTask", request, transport, options),
       getWorkspace: (request, options) =>
         executeOperation("getTaskWorkspace", request, transport, options),
-      list: (request, options) => executeOperation("listTasks", request, transport, options),
-      update: (request, options) => executeOperation("updateTask", request, transport, options),
-      delete: (request, options) => executeOperation("deleteTask", request, transport, options),
-      getDiff: (request, options) => executeOperation("getTaskDiff", request, transport, options),
+      list: (request, options) =>
+        executeOperation("listTasks", request, transport, options),
+      update: (request, options) =>
+        executeOperation("updateTask", request, transport, options),
+      delete: (request, options) =>
+        executeOperation("deleteTask", request, transport, options),
+      getDiff: (request, options) =>
+        executeOperation("getTaskDiff", request, transport, options),
       commitChanges: (request, options) =>
         executeOperation("commitTaskChanges", request, transport, options),
       pushBranch: (request, options) =>
@@ -83,20 +93,37 @@ export function createContractsClient(
       replyDiffComment: (request, options) =>
         executeOperation("replyTaskDiffComment", request, transport, options),
       setDiffCommentStatus: (request, options) =>
-        executeOperation("setTaskDiffCommentStatus", request, transport, options),
+        executeOperation(
+          "setTaskDiffCommentStatus",
+          request,
+          transport,
+          options,
+        ),
     },
     session: {
-      warm: (request, options) => executeOperation("warmSession", request, transport, options),
+      warm: (request, options) =>
+        executeOperation("warmSession", request, transport, options),
       setConfig: (request, options) =>
         executeOperation("setSessionConfig", request, transport, options),
       attach: (request, options) =>
         executeOperation("attachSession", request, transport, options),
-      get: (request, options) => executeOperation("getSession", request, transport, options),
-      list: (request, options) => executeOperation("listSessions", request, transport, options),
-      load: (request, options) => executeStreamOperation("loadSession", request, transport, options),
-      prompt: (request, options) => executeStreamOperation("promptSession", request, transport, options),
-      respondToPermission: (request, options) => executeOperation("respondToSessionPermission", request, transport, options),
-      stop: (request, options) => executeOperation("stopSession", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getSession", request, transport, options),
+      list: (request, options) =>
+        executeOperation("listSessions", request, transport, options),
+      load: (request, options) =>
+        executeStreamOperation("loadSession", request, transport, options),
+      prompt: (request, options) =>
+        executeStreamOperation("promptSession", request, transport, options),
+      respondToPermission: (request, options) =>
+        executeOperation(
+          "respondToSessionPermission",
+          request,
+          transport,
+          options,
+        ),
+      stop: (request, options) =>
+        executeOperation("stopSession", request, transport, options),
       switchAgent: (request, options) =>
         executeOperation("switchSessionAgent", request, transport, options),
       resumeHistory: (request, options) =>
@@ -113,27 +140,38 @@ export function createContractsClient(
         executeOperation("getAgentRuntimeStatus", request, transport, options),
     },
     skill: {
-      create: (request, options) => executeOperation("createSkill", request, transport, options),
-      get: (request, options) => executeOperation("getSkill", request, transport, options),
-      list: (request, options) => executeOperation("listSkills", request, transport, options),
-      update: (request, options) => executeOperation("updateSkill", request, transport, options),
-      delete: (request, options) => executeOperation("deleteSkill", request, transport, options),
+      create: (request, options) =>
+        executeOperation("createSkill", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getSkill", request, transport, options),
+      list: (request, options) =>
+        executeOperation("listSkills", request, transport, options),
+      update: (request, options) =>
+        executeOperation("updateSkill", request, transport, options),
+      delete: (request, options) =>
+        executeOperation("deleteSkill", request, transport, options),
     },
     skillImport: {
       prepare: (request, options) =>
         executeOperation("prepareSkillImport", request, transport, options),
-      get: (request, options) => executeOperation("getSkillImport", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getSkillImport", request, transport, options),
       commit: (request, options) =>
         executeOperation("commitSkillImport", request, transport, options),
       cancel: (request, options) =>
         executeOperation("cancelSkillImport", request, transport, options),
     },
     agent: {
-      create: (request, options) => executeOperation("createAgent", request, transport, options),
-      get: (request, options) => executeOperation("getAgent", request, transport, options),
-      list: (request, options) => executeOperation("listAgents", request, transport, options),
-      update: (request, options) => executeOperation("updateAgent", request, transport, options),
-      delete: (request, options) => executeOperation("deleteAgent", request, transport, options),
+      create: (request, options) =>
+        executeOperation("createAgent", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getAgent", request, transport, options),
+      list: (request, options) =>
+        executeOperation("listAgents", request, transport, options),
+      update: (request, options) =>
+        executeOperation("updateAgent", request, transport, options),
+      delete: (request, options) =>
+        executeOperation("deleteAgent", request, transport, options),
     },
     agentImport: {
       prepare: (request, options) =>
@@ -165,7 +203,12 @@ export function createContractsClient(
       resolveSource: (request, options) =>
         executeOperation("resolveSpecSource", request, transport, options),
       updateProjectSources: (request, options) =>
-        executeOperation("updateProjectSpecSources", request, transport, options),
+        executeOperation(
+          "updateProjectSpecSources",
+          request,
+          transport,
+          options,
+        ),
       watch: (request, options) =>
         executeStreamOperation("watchSpecs", request, transport, options),
     },
@@ -176,14 +219,16 @@ export function createContractsClient(
     workflow: {
       create: (request, options) =>
         executeOperation("createWorkflow", request, transport, options),
-      get: (request, options) => executeOperation("getWorkflow", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getWorkflow", request, transport, options),
       list: (request, options) =>
         executeOperation("listWorkflows", request, transport, options),
       update: (request, options) =>
         executeOperation("updateWorkflow", request, transport, options),
       delete: (request, options) =>
         executeOperation("deleteWorkflow", request, transport, options),
-      getDraft: (request, options) => executeOperation("getDraft", request, transport, options),
+      getDraft: (request, options) =>
+        executeOperation("getDraft", request, transport, options),
       updateDraft: (request, options) =>
         executeOperation("updateDraft", request, transport, options),
       publish: (request, options) =>
@@ -209,7 +254,12 @@ export function createContractsClient(
       list: (request, options) =>
         executeOperation("listWorkflowRuns", request, transport, options),
       listByWorkflow: (request, options) =>
-        executeOperation("listWorkflowRunsByWorkflow", request, transport, options),
+        executeOperation(
+          "listWorkflowRunsByWorkflow",
+          request,
+          transport,
+          options,
+        ),
       listNodeRuns: (request, options) =>
         executeOperation("listWorkflowNodeRuns", request, transport, options),
       delete: (request, options) =>
@@ -254,7 +304,10 @@ async function executeOperation<Operation extends EndpointOperation>(
     headers: buildHeaders(endpoint.hasJsonBody),
   };
 
-  return transport.send<ResponseByOperation[Operation]>(transportRequest, options);
+  return transport.send<ResponseByOperation[Operation]>(
+    transportRequest,
+    options,
+  );
 }
 
 /** Builds one typed request and delegates stream lifecycle to the selected transport. */
@@ -266,14 +319,27 @@ function executeStreamOperation<Operation extends EndpointOperation>(
 ): AsyncIterable<ResponseByOperation[Operation]> {
   const endpoint = endpoints[operation];
   const requestShape = request as ClientRequestShape;
-  return transport.stream<ResponseByOperation[Operation]>({
-    operationName: endpoint.operationName,
-    request,
-    method: endpoint.method,
-    path: buildPath(endpoint.pathTemplate, endpoint.pathParams, endpoint.queryParams, requestShape),
-    body: buildJsonBody(endpoint.pathParams, endpoint.queryParams, endpoint.hasJsonBody, requestShape),
-    headers: buildHeaders(endpoint.hasJsonBody),
-  }, options);
+  return transport.stream<ResponseByOperation[Operation]>(
+    {
+      operationName: endpoint.operationName,
+      request,
+      method: endpoint.method,
+      path: buildPath(
+        endpoint.pathTemplate,
+        endpoint.pathParams,
+        endpoint.queryParams,
+        requestShape,
+      ),
+      body: buildJsonBody(
+        endpoint.pathParams,
+        endpoint.queryParams,
+        endpoint.hasJsonBody,
+        requestShape,
+      ),
+      headers: buildHeaders(endpoint.hasJsonBody),
+    },
+    options,
+  );
 }
 
 function buildPath(

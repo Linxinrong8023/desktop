@@ -47,7 +47,16 @@ const RESOURCE_KEYS = [
  * the skills it contributes, a details section and a VS Code-style info table. Every
  * value is read from the hard-coded catalog; the skill switches are local-only.
  */
-export function PluginDetail({ plugin, installed, enabled, installPending, enablePending, onBack, onToggleEnabled, onToggleInstall }: {
+export function PluginDetail({
+  plugin,
+  installed,
+  enabled,
+  installPending,
+  enablePending,
+  onBack,
+  onToggleEnabled,
+  onToggleInstall,
+}: {
   plugin: PluginEntry;
   installed: boolean;
   enabled: boolean;
@@ -60,26 +69,36 @@ export function PluginDetail({ plugin, installed, enabled, installPending, enabl
   const { i18n, t } = useTranslation();
   const [disabledSkills, setDisabledSkills] = useState<string[]>([]);
 
-  const toggleSkill = (skill: string) => setDisabledSkills((skills) => (
-    skills.includes(skill) ? skills.filter((current) => current !== skill) : [...skills, skill]
-  ));
+  const toggleSkill = (skill: string) =>
+    setDisabledSkills((skills) =>
+      skills.includes(skill)
+        ? skills.filter((current) => current !== skill)
+        : [...skills, skill],
+    );
 
   const summary = t(plugin.summaryKey);
   // Detection-driven CLI plugins carry no real catalog metadata, so `updated` is the
   // literal placeholder "—" rather than a formattable date.
-  const updated = plugin.updated === "—"
-    ? plugin.updated
-    : new Intl.DateTimeFormat(i18n.resolvedLanguage, { dateStyle: "medium" }).format(new Date(plugin.updated));
+  const updated =
+    plugin.updated === "—"
+      ? plugin.updated
+      : new Intl.DateTimeFormat(i18n.resolvedLanguage, {
+          dateStyle: "medium",
+        }).format(new Date(plugin.updated));
 
   return (
     <div className="space-y-6">
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
-            <BreadcrumbLink render={<button type="button" onClick={onBack} />}>{t("settings.plugins.title")}</BreadcrumbLink>
+            <BreadcrumbLink render={<button type="button" onClick={onBack} />}>
+              {t("settings.plugins.title")}
+            </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
-          <BreadcrumbItem><BreadcrumbPage>{plugin.name}</BreadcrumbPage></BreadcrumbItem>
+          <BreadcrumbItem>
+            <BreadcrumbPage>{plugin.name}</BreadcrumbPage>
+          </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
@@ -92,71 +111,129 @@ export function PluginDetail({ plugin, installed, enabled, installPending, enabl
         <div className="flex shrink-0 items-center gap-2">
           {/* An uninstall in flight takes over the whole control group: the enable
               toggle would be acting on a plugin that is about to be gone. */}
-          {installPending
-            ? (
-              <Button variant="outline" disabled>
-                <IconLoader2 className="animate-spin" />
-                {t(installed ? "settings.plugins.uninstalling" : "settings.plugins.installing")}
+          {installPending ? (
+            <Button variant="outline" disabled>
+              <IconLoader2 className="animate-spin" />
+              {t(
+                installed
+                  ? "settings.plugins.uninstalling"
+                  : "settings.plugins.installing",
+              )}
+            </Button>
+          ) : installed ? (
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t("settings.plugins.openMenu", {
+                        name: plugin.name,
+                      })}
+                      className="text-muted-foreground"
+                    />
+                  }
+                >
+                  <IconDots />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-40">
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={onToggleInstall}
+                  >
+                    <IconTrash />
+                    {t("settings.plugins.uninstall")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                variant={enabled ? "outline" : "default"}
+                disabled={enablePending}
+                onClick={onToggleEnabled}
+              >
+                {enablePending ? (
+                  <IconLoader2 className="animate-spin" />
+                ) : enabled ? (
+                  <IconPlayerPause />
+                ) : (
+                  <IconPlayerPlay />
+                )}
+                {enablePending
+                  ? t(
+                      enabled
+                        ? "settings.plugins.disabling"
+                        : "settings.plugins.enabling",
+                    )
+                  : t(
+                      enabled
+                        ? "settings.plugins.disable"
+                        : "settings.plugins.enable",
+                    )}
               </Button>
-            )
-            : installed
-              ? (
-                <>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={<Button variant="ghost" size="icon-sm" aria-label={t("settings.plugins.openMenu", { name: plugin.name })} className="text-muted-foreground" />}
-                    >
-                      <IconDots />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-40">
-                      <DropdownMenuItem variant="destructive" onClick={onToggleInstall}><IconTrash />{t("settings.plugins.uninstall")}</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <Button variant={enabled ? "outline" : "default"} disabled={enablePending} onClick={onToggleEnabled}>
-                    {enablePending
-                      ? <IconLoader2 className="animate-spin" />
-                      : enabled ? <IconPlayerPause /> : <IconPlayerPlay />}
-                    {enablePending
-                      ? t(enabled ? "settings.plugins.disabling" : "settings.plugins.enabling")
-                      : t(enabled ? "settings.plugins.disable" : "settings.plugins.enable")}
-                  </Button>
-                </>
-              )
-              : <Button variant="outline" onClick={onToggleInstall}><IconDownload />{t("settings.plugins.install")}</Button>}
+            </>
+          ) : (
+            <Button variant="outline" onClick={onToggleInstall}>
+              <IconDownload />
+              {t("settings.plugins.install")}
+            </Button>
+          )}
         </div>
       </header>
 
       <div className="rounded-xl border border-border bg-gradient-to-br from-muted/70 via-muted/30 to-background p-6">
         <div className="mx-auto flex max-w-sm flex-col gap-2.5">
-          {[1, 2, 3].map((step) => `settings.plugins.prompt.${plugin.id}.${step}`).map((key) => (
-            <div key={key} className="flex items-center gap-2 rounded-lg border border-border bg-background/80 px-3 py-2 text-xs shadow-sm">
-              <PluginTile plugin={plugin} size="sm" className="size-4 [&_svg]:size-4" />
-              <span className="shrink-0 font-medium">{plugin.name}</span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">{t(key, { name: plugin.name })}</span>
-              <IconArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
-            </div>
-          ))}
+          {[1, 2, 3]
+            .map((step) => `settings.plugins.prompt.${plugin.id}.${step}`)
+            .map((key) => (
+              <div
+                key={key}
+                className="flex items-center gap-2 rounded-lg border border-border bg-background/80 px-3 py-2 text-xs shadow-sm"
+              >
+                <PluginTile
+                  plugin={plugin}
+                  size="sm"
+                  className="size-4 [&_svg]:size-4"
+                />
+                <span className="shrink-0 font-medium">{plugin.name}</span>
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                  {t(key, { name: plugin.name })}
+                </span>
+                <IconArrowRight className="size-3.5 shrink-0 text-muted-foreground" />
+              </div>
+            ))}
         </div>
       </div>
 
       <p data-selectable className="text-sm leading-6 text-muted-foreground">
-        {t("settings.plugins.overview", { name: plugin.name, publisher: plugin.publisher, summary })}
+        {t("settings.plugins.overview", {
+          name: plugin.name,
+          publisher: plugin.publisher,
+          summary,
+        })}
       </p>
 
       {plugin.skills.length > 0 && (
-        <PluginSection title={t("settings.plugins.skills")} count={plugin.skills.length}>
+        <PluginSection
+          title={t("settings.plugins.skills")}
+          count={plugin.skills.length}
+        >
           <div className="divide-y divide-border">
             {plugin.skills.map((skill) => (
               <div key={skill} className="flex items-center gap-3 py-3">
                 <PluginTile plugin={plugin} size="sm" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{skill}</p>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">{t("settings.plugins.skillSummary", { name: skill })}</p>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {t("settings.plugins.skillSummary", { name: skill })}
+                  </p>
                 </div>
                 <Switch
                   checked={!disabledSkills.includes(skill)}
                   onCheckedChange={() => toggleSkill(skill)}
-                  aria-label={t("settings.plugins.toggleSkill", { name: skill })}
+                  aria-label={t("settings.plugins.toggleSkill", {
+                    name: skill,
+                  })}
                 />
               </div>
             ))}
@@ -167,7 +244,10 @@ export function PluginDetail({ plugin, installed, enabled, installPending, enabl
       <PluginSection title={t("settings.plugins.details")}>
         <ul data-selectable className="space-y-2 pt-3">
           {FEATURE_KEYS.map((key) => (
-            <li key={key} className="flex gap-2 text-sm leading-6 text-muted-foreground">
+            <li
+              key={key}
+              className="flex gap-2 text-sm leading-6 text-muted-foreground"
+            >
               <IconCheck className="mt-1.5 size-3.5 shrink-0 text-foreground/60" />
               {t(key, { name: plugin.name })}
             </li>
@@ -178,14 +258,26 @@ export function PluginDetail({ plugin, installed, enabled, installPending, enabl
       <PluginSection title={t("settings.plugins.info")}>
         <dl className="divide-y divide-border text-sm">
           <InfoRow label={t("settings.plugins.identifier")}>
-            <code data-selectable className="break-all font-mono text-xs">{plugin.identifier}</code>
+            <code data-selectable className="break-all font-mono text-xs">
+              {plugin.identifier}
+            </code>
           </InfoRow>
-          <InfoRow label={t("settings.plugins.version")}>{plugin.version}</InfoRow>
+          <InfoRow label={t("settings.plugins.version")}>
+            {plugin.version}
+          </InfoRow>
           <InfoRow label={t("settings.plugins.lastUpdated")}>{updated}</InfoRow>
           <InfoRow label={t("settings.plugins.size")}>{plugin.size}</InfoRow>
-          <InfoRow label={t("settings.plugins.publisher")}>{plugin.publisher}</InfoRow>
-          <InfoRow label={t("settings.plugins.category")}>{t(plugin.categoryKey)}</InfoRow>
-          <InfoRow label={t("settings.plugins.capabilities")}>{plugin.capabilityKeys.map((key) => t(key)).join(t("settings.plugins.listSeparator"))}</InfoRow>
+          <InfoRow label={t("settings.plugins.publisher")}>
+            {plugin.publisher}
+          </InfoRow>
+          <InfoRow label={t("settings.plugins.category")}>
+            {t(plugin.categoryKey)}
+          </InfoRow>
+          <InfoRow label={t("settings.plugins.capabilities")}>
+            {plugin.capabilityKeys
+              .map((key) => t(key))
+              .join(t("settings.plugins.listSeparator"))}
+          </InfoRow>
         </dl>
         <div className="flex flex-wrap gap-1.5 pt-3">
           {RESOURCE_KEYS.map((key) => (
@@ -201,12 +293,22 @@ export function PluginDetail({ plugin, installed, enabled, installPending, enabl
 }
 
 /** Gives the detail page's sections one underlined heading style, optionally with a count. */
-function PluginSection({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
+function PluginSection({
+  title,
+  count,
+  children,
+}: {
+  title: string;
+  count?: number;
+  children: React.ReactNode;
+}) {
   return (
     <section>
       <h3 className="flex items-baseline gap-2 border-b border-border pb-2 text-sm font-medium">
         {title}
-        {count !== undefined && <span className="font-normal text-muted-foreground">{count}</span>}
+        {count !== undefined && (
+          <span className="font-normal text-muted-foreground">{count}</span>
+        )}
       </h3>
       {children}
     </section>
@@ -214,7 +316,13 @@ function PluginSection({ title, count, children }: { title: string; count?: numb
 }
 
 /** One label/value pair of the info table, laid out as a fixed label column like VS Code's. */
-function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
+function InfoRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex gap-4 py-2.5">
       <dt className="w-32 shrink-0 text-muted-foreground">{label}</dt>

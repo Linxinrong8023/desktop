@@ -11,6 +11,7 @@
     "./tauri": "./src/tauri/index.ts"
   },
   "scripts": {
+    "format": "prettier --write . --ignore-path ../../.prettierignore",
     "lint": "tsc -p tsconfig.json --noEmit && eslint src",
     "test": "node ../../scripts/run-with-clean-stderr.mjs \"vitest run\"",
     "test:watch": "vitest"

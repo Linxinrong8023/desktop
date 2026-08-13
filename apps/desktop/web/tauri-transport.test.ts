@@ -5,7 +5,9 @@ import { createTauriTransport } from "./tauri-transport";
 describe("createTauriTransport", () => {
   it("maps supported operations and forwards the complete request", async () => {
     const invoke = vi.fn().mockResolvedValue({ projects: [] });
-    const transport = createTauriTransport(invoke, () => ({ onmessage: () => undefined }));
+    const transport = createTauriTransport(invoke, () => ({
+      onmessage: () => undefined,
+    }));
     const request = {
       operationName: "listProjects",
       request: {},
@@ -19,35 +21,40 @@ describe("createTauriTransport", () => {
     expect(invoke).toHaveBeenCalledWith("list_projects", { request: {} });
   });
 
-
   it("maps installed plugin discovery to the Desktop snapshot command", async () => {
     const response = { plugins: [] };
     const invoke = vi.fn().mockResolvedValue(response);
     const transport = createTauriTransport(invoke);
 
-    await expect(transport.send({
-      operationName: "listInstalledPlugins",
+    await expect(
+      transport.send({
+        operationName: "listInstalledPlugins",
+        request: {},
+        method: "GET",
+        path: "/api/plugins/installed",
+        body: undefined,
+        headers: {},
+      }),
+    ).resolves.toEqual(response);
+    expect(invoke).toHaveBeenCalledWith("list_installed_plugins", {
       request: {},
-      method: "GET",
-      path: "/api/plugins/installed",
-      body: undefined,
-      headers: {},
-    })).resolves.toEqual(response);
-    expect(invoke).toHaveBeenCalledWith("list_installed_plugins", { request: {} });
+    });
   });
   it("maps workspace directory reads to the dedicated desktop command", async () => {
     const response = { path: "src", entries: [] };
     const invoke = vi.fn().mockResolvedValue(response);
     const transport = createTauriTransport(invoke);
 
-    await expect(transport.send({
-      operationName: "listWorkspaceDirectory",
-      request: { taskId: "task-1", path: "src" },
-      method: "POST",
-      path: "/api/tasks/task-1/files/list",
-      body: { taskId: "task-1", path: "src" },
-      headers: { "content-type": "application/json" },
-    })).resolves.toEqual(response);
+    await expect(
+      transport.send({
+        operationName: "listWorkspaceDirectory",
+        request: { taskId: "task-1", path: "src" },
+        method: "POST",
+        path: "/api/tasks/task-1/files/list",
+        body: { taskId: "task-1", path: "src" },
+        headers: { "content-type": "application/json" },
+      }),
+    ).resolves.toEqual(response);
     expect(invoke).toHaveBeenCalledWith("list_workspace_directory", {
       request: { taskId: "task-1", path: "src" },
     });
@@ -64,64 +71,96 @@ describe("createTauriTransport", () => {
     const transport = createTauriTransport(invoke);
     const request = { taskId: "task-1", scope: "branch" as const };
 
-    await expect(transport.send({
-      operationName: "getTaskDiff",
-      request,
-      method: "GET",
-      path: "/api/tasks/task-1/diff?scope=branch",
-      body: undefined,
-      headers: {},
-    })).resolves.toEqual(response);
+    await expect(
+      transport.send({
+        operationName: "getTaskDiff",
+        request,
+        method: "GET",
+        path: "/api/tasks/task-1/diff?scope=branch",
+        body: undefined,
+        headers: {},
+      }),
+    ).resolves.toEqual(response);
     expect(invoke).toHaveBeenCalledWith("get_task_diff", { request });
   });
 
   it.each([
-    ["switchSessionAgent", "switch_session_agent", { sessionId: "s1", agentCli: "claude" }],
+    [
+      "switchSessionAgent",
+      "switch_session_agent",
+      { sessionId: "s1", agentCli: "claude" },
+    ],
     ["resumeSessionHistory", "resume_session_history", { sessionId: "s1" }],
     ["prepareAgentImport", "prepare_agent_import", { content: "# Role" }],
-    ["commitAgentImport", "commit_agent_import", { content: "# Role", decision: null, expectedAgentId: null, expectedUpdatedAt: null }],
+    [
+      "commitAgentImport",
+      "commit_agent_import",
+      {
+        content: "# Role",
+        decision: null,
+        expectedAgentId: null,
+        expectedUpdatedAt: null,
+      },
+    ],
     ["listWorkflows", "list_workflows", {}],
     ["getDraft", "get_workflow_draft", { workflowId: "wf-1" }],
-    ["createWorkflowRun", "create_workflow_run", { workflowId: "wf-1", projectId: "project-1" }],
+    [
+      "createWorkflowRun",
+      "create_workflow_run",
+      { workflowId: "wf-1", projectId: "project-1" },
+    ],
     ["listWorkflowNodeRuns", "list_workflow_node_runs", { runId: "run-1" }],
-  ] as const)("routes %s to its desktop command", async (operationName, command, request) => {
-    const invoke = vi.fn().mockResolvedValue({});
-    const transport = createTauriTransport(invoke, () => ({ onmessage: () => undefined }));
+  ] as const)(
+    "routes %s to its desktop command",
+    async (operationName, command, request) => {
+      const invoke = vi.fn().mockResolvedValue({});
+      const transport = createTauriTransport(invoke, () => ({
+        onmessage: () => undefined,
+      }));
 
-    await transport.send({
-      operationName,
-      request,
-      method: "POST",
-      path: "/api/contract",
-      body: request,
-      headers: {},
-    });
+      await transport.send({
+        operationName,
+        request,
+        method: "POST",
+        path: "/api/contract",
+        body: request,
+        headers: {},
+      });
 
-    expect(invoke).toHaveBeenCalledWith(command, { request });
-  });
+      expect(invoke).toHaveBeenCalledWith(command, { request });
+    },
+  );
 
   it("maps task workspaces and spec operations to their Desktop commands", async () => {
-    const invoke = vi.fn()
-      .mockResolvedValueOnce({ rootPath: "C:/repo/.ora-worktrees/task-1", branchName: "ora/task-1" })
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce({
+        rootPath: "C:/repo/.ora-worktrees/task-1",
+        branchName: "ora/task-1",
+      })
       .mockResolvedValueOnce({ sources: [], documents: [], truncated: false });
     const transport = createTauriTransport(invoke);
 
-    await expect(transport.send({
-      operationName: "getTaskWorkspace",
-      request: { taskId: "task-1" },
-      method: "GET",
-      path: "/api/tasks/task-1/workspace",
-      body: undefined,
-      headers: {},
-    })).resolves.toMatchObject({ branchName: "ora/task-1" });
-    await expect(transport.send({
-      operationName: "getSpecCatalog",
-      request: { target: { kind: "task", taskId: "task-1" } },
-      method: "POST",
-      path: "/api/specs/catalog",
-      body: { target: { kind: "task", taskId: "task-1" } },
-      headers: { "content-type": "application/json" },
-    })).resolves.toEqual({ sources: [], documents: [], truncated: false });
+    await expect(
+      transport.send({
+        operationName: "getTaskWorkspace",
+        request: { taskId: "task-1" },
+        method: "GET",
+        path: "/api/tasks/task-1/workspace",
+        body: undefined,
+        headers: {},
+      }),
+    ).resolves.toMatchObject({ branchName: "ora/task-1" });
+    await expect(
+      transport.send({
+        operationName: "getSpecCatalog",
+        request: { target: { kind: "task", taskId: "task-1" } },
+        method: "POST",
+        path: "/api/specs/catalog",
+        body: { target: { kind: "task", taskId: "task-1" } },
+        headers: { "content-type": "application/json" },
+      }),
+    ).resolves.toEqual({ sources: [], documents: [], truncated: false });
     expect(invoke).toHaveBeenNthCalledWith(1, "get_task_workspace", {
       request: { taskId: "task-1" },
     });
@@ -132,7 +171,9 @@ describe("createTauriTransport", () => {
 
   it("rejects explicitly unsupported operations before invoking Rust", async () => {
     const invoke = vi.fn();
-    const transport = createTauriTransport(invoke, () => ({ onmessage: () => undefined }));
+    const transport = createTauriTransport(invoke, () => ({
+      onmessage: () => undefined,
+    }));
 
     await expect(
       transport.send({
@@ -148,20 +189,28 @@ describe("createTauriTransport", () => {
   });
 
   it("streams spec watcher events through the shared channel lifecycle", async () => {
-    const invoke = vi.fn().mockImplementation(async (command: string, args: Record<string, unknown>) => {
-      if (command === "stream_contract") {
-        expect(args.operationName).toBe("watchSpecs");
-        const channel = args.onEvent as { onmessage: (frame: unknown) => void };
-        queueMicrotask(() => {
-          channel.onmessage({ type: "data", data: { changes: [{ kind: "rescanRequired", path: "" }] } });
-          channel.onmessage({ type: "end" });
-        });
-      }
-    });
-    const stream = createTauriTransport(
-      invoke,
-      () => ({ onmessage: () => undefined }),
-    ).stream<{ changes: Array<{ kind: string; path: string }> }>({
+    const invoke = vi
+      .fn()
+      .mockImplementation(
+        async (command: string, args: Record<string, unknown>) => {
+          if (command === "stream_contract") {
+            expect(args.operationName).toBe("watchSpecs");
+            const channel = args.onEvent as {
+              onmessage: (frame: unknown) => void;
+            };
+            queueMicrotask(() => {
+              channel.onmessage({
+                type: "data",
+                data: { changes: [{ kind: "rescanRequired", path: "" }] },
+              });
+              channel.onmessage({ type: "end" });
+            });
+          }
+        },
+      );
+    const stream = createTauriTransport(invoke, () => ({
+      onmessage: () => undefined,
+    })).stream<{ changes: Array<{ kind: string; path: string }> }>({
       operationName: "watchSpecs",
       request: { target: { kind: "project", projectId: "project-1" } },
       method: "POST",
@@ -173,8 +222,13 @@ describe("createTauriTransport", () => {
     const events = [];
     for await (const event of stream) events.push(event);
 
-    expect(events).toEqual([{ changes: [{ kind: "rescanRequired", path: "" }] }]);
-    expect(invoke).toHaveBeenCalledWith("cancel_contract_stream", expect.any(Object));
+    expect(events).toEqual([
+      { changes: [{ kind: "rescanRequired", path: "" }] },
+    ]);
+    expect(invoke).toHaveBeenCalledWith(
+      "cancel_contract_stream",
+      expect.any(Object),
+    );
   });
 
   it("normalizes structured command errors", async () => {
@@ -210,19 +264,24 @@ describe("createTauriTransport", () => {
   });
 
   it("starts channel streams lazily and forwards ordered data until end", async () => {
-    const invoke = vi.fn().mockImplementation(async (command: string, args: Record<string, unknown>) => {
-      if (command === "stream_contract") {
-        const channel = args.onEvent as { onmessage: (frame: unknown) => void };
-        queueMicrotask(() => {
-          channel.onmessage({ type: "data", data: { value: 1 } });
-          channel.onmessage({ type: "end" });
-        });
-      }
-    });
-    const transport = createTauriTransport(
-      invoke,
-      () => ({ onmessage: () => undefined }),
-    );
+    const invoke = vi
+      .fn()
+      .mockImplementation(
+        async (command: string, args: Record<string, unknown>) => {
+          if (command === "stream_contract") {
+            const channel = args.onEvent as {
+              onmessage: (frame: unknown) => void;
+            };
+            queueMicrotask(() => {
+              channel.onmessage({ type: "data", data: { value: 1 } });
+              channel.onmessage({ type: "end" });
+            });
+          }
+        },
+      );
+    const transport = createTauriTransport(invoke, () => ({
+      onmessage: () => undefined,
+    }));
     const stream = transport.stream<{ value: number }>({
       operationName: "loadSession",
       request: { sessionId: "session-1" },
@@ -237,31 +296,45 @@ describe("createTauriTransport", () => {
     for await (const event of stream) events.push(event);
 
     expect(events).toEqual([{ value: 1 }]);
-    expect(invoke).toHaveBeenCalledWith("stream_contract", expect.objectContaining({
-      operationName: "loadSession",
-      request: { sessionId: "session-1" },
-    }));
-    expect(invoke).toHaveBeenCalledWith("cancel_contract_stream", expect.any(Object));
+    expect(invoke).toHaveBeenCalledWith(
+      "stream_contract",
+      expect.objectContaining({
+        operationName: "loadSession",
+        request: { sessionId: "session-1" },
+      }),
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      "cancel_contract_stream",
+      expect.any(Object),
+    );
     expect(() => stream[Symbol.asyncIterator]()).toThrowError(
       expect.objectContaining({ kind: "stream_already_consumed" }),
     );
   });
 
   it("fails a channel stream when its bounded consumer queue overflows", async () => {
-    const invoke = vi.fn().mockImplementation(async (command: string, args: Record<string, unknown>) => {
-      if (command === "stream_contract") {
-        const channel = args.onEvent as { onmessage: (frame: unknown) => void };
-        for (let index = 0; index < 257; index += 1) {
-          channel.onmessage({ type: "data", data: { index } });
-        }
-      }
-    });
-    const stream = createTauriTransport(
-      invoke,
-      () => ({ onmessage: () => undefined }),
-    ).stream({
+    const invoke = vi
+      .fn()
+      .mockImplementation(
+        async (command: string, args: Record<string, unknown>) => {
+          if (command === "stream_contract") {
+            const channel = args.onEvent as {
+              onmessage: (frame: unknown) => void;
+            };
+            for (let index = 0; index < 257; index += 1) {
+              channel.onmessage({ type: "data", data: { index } });
+            }
+          }
+        },
+      );
+    const stream = createTauriTransport(invoke, () => ({
+      onmessage: () => undefined,
+    })).stream({
       operationName: "promptSession",
-      request: { sessionId: "session-1", prompt: [{ type: "text", text: "hello" }] },
+      request: {
+        sessionId: "session-1",
+        prompt: [{ type: "text", text: "hello" }],
+      },
       method: "POST",
       path: "/api/sessions/session-1/prompt",
       body: { prompt: [{ type: "text", text: "hello" }] },

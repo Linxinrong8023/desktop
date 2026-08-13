@@ -28,11 +28,11 @@ Transport-neutral Host/Run ports and an in-memory adapter for **graph workflow r
 
 ## Boundaries
 
-| Package | Owns |
-| --- | --- |
-| `@ora/workflow-mock` | React Flow fixtures, editor validation, session demo |
-| `@ora/workflow-runtime` | Execution DTOs, mounts, runs, events, memory adapter |
-| `app-shell` workflow-run | Theater / Overview / hooks / React context |
+| Package                  | Owns                                                 |
+| ------------------------ | ---------------------------------------------------- |
+| `@ora/workflow-mock`     | React Flow fixtures, editor validation, session demo |
+| `@ora/workflow-runtime`  | Execution DTOs, mounts, runs, events, memory adapter |
+| `app-shell` workflow-run | Theater / Overview / hooks / React context           |
 
 ## Public API
 

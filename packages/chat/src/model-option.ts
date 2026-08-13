@@ -12,8 +12,8 @@ export function findModelOption(
 ): acp.SessionConfigOption | null {
   const selects = configOptions.filter((option) => option.type === "select");
   return (
-    selects.find((option) => option.category === "model")
-    ?? (selects.length === 1 ? selects[0]! : null)
+    selects.find((option) => option.category === "model") ??
+    (selects.length === 1 ? selects[0]! : null)
   );
 }
 
@@ -22,11 +22,15 @@ export function selectableValues(
   option: acp.SessionConfigOption,
 ): acp.SessionConfigSelectOption[] {
   if (option.type !== "select") return [];
-  return option.options.flatMap((entry) => ("group" in entry ? entry.options : [entry]));
+  return option.options.flatMap((entry) =>
+    "group" in entry ? entry.options : [entry],
+  );
 }
 
 /** Returns the human-readable name of the option value currently in effect. */
-export function currentValueName(option: acp.SessionConfigOption): string | null {
+export function currentValueName(
+  option: acp.SessionConfigOption,
+): string | null {
   if (option.type !== "select") return null;
   const current = selectableValues(option).find(
     (value) => value.value === option.currentValue,
@@ -40,5 +44,8 @@ export function currentModel(
 ): { value: string; name: string } | null {
   const option = findModelOption(configOptions);
   if (option === null || option.type !== "select") return null;
-  return { value: option.currentValue, name: currentValueName(option) ?? option.currentValue };
+  return {
+    value: option.currentValue,
+    name: currentValueName(option) ?? option.currentValue,
+  };
 }

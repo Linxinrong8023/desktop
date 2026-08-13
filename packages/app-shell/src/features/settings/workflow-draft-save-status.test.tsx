@@ -43,6 +43,8 @@ describe("WorkflowDraftSaveStatusLabel", () => {
   it("surfaces save failures distinctly from the live-saved label", () => {
     renderLabel({ status: "error", draftUpdatedAt: "8月7日 15:42:15" });
     expect(screen.getByText("保存工作流失败。")).toBeInTheDocument();
-    expect(screen.getByText("保存工作流失败。")).toHaveClass("text-destructive");
+    expect(screen.getByText("保存工作流失败。")).toHaveClass(
+      "text-destructive",
+    );
   });
 });

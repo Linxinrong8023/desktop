@@ -97,9 +97,9 @@ function createTauriLocationActions(): LocationActionsCapability {
   return {
     kind: "supported",
     resolveTaskCwd: (taskId) =>
-      invoke<{ path: string }>("resolve_task_cwd", { request: { taskId } }).then(
-        (response) => response.path,
-      ),
+      invoke<{ path: string }>("resolve_task_cwd", {
+        request: { taskId },
+      }).then((response) => response.path),
     open: (target: LocationTarget, path: string) =>
       invoke("open_location", { request: { target, path } }),
   };
@@ -110,26 +110,34 @@ export class TauriPlatformAdapter implements PlatformAdapter {
   readonly appWindowOwnership = createSingleWindowOwnership();
   private selectionInProgress = false;
 
-  readonly windowControls: WindowControlsCapability = createTauriWindowControls();
+  readonly windowControls: WindowControlsCapability =
+    createTauriWindowControls();
 
-  readonly locationActions: LocationActionsCapability = createTauriLocationActions();
+  readonly locationActions: LocationActionsCapability =
+    createTauriLocationActions();
 
   readonly skillMarketplace: SkillMarketplaceCapability = {
     kind: "supported",
     open: (provider: SkillMarketplaceProvider) =>
       invoke("open_skill_marketplace", { request: { provider } }),
     onStatus: (listener) =>
-      listen<SkillMarketplaceStatus>(SKILL_MARKETPLACE_STATUS_EVENT, (event) => {
-        listener(event.payload);
-      }),
+      listen<SkillMarketplaceStatus>(
+        SKILL_MARKETPLACE_STATUS_EVENT,
+        (event) => {
+          listener(event.payload);
+        },
+      ),
   };
 
   readonly worktreeStorage = {
     kind: "configurable" as const,
     getRoot: async (): Promise<string> => {
-      const config = await invoke<{ worktreeRoot: string }>("get_desktop_config", {
-        request: {},
-      });
+      const config = await invoke<{ worktreeRoot: string }>(
+        "get_desktop_config",
+        {
+          request: {},
+        },
+      );
       return config.worktreeRoot;
     },
     setRoot: async (path: string): Promise<void> => {
@@ -172,7 +180,9 @@ export class TauriPlatformAdapter implements PlatformAdapter {
       if (path === null) {
         return false;
       }
-      await invoke("write_workflow_export", { request: { path, content: options.content } });
+      await invoke("write_workflow_export", {
+        request: { path, content: options.content },
+      });
       return true;
     } finally {
       this.selectionInProgress = false;

@@ -1,10 +1,17 @@
 import { act, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
-import { createChatStore, type ChatStore, type SessionConversation } from "@ora/chat";
+import {
+  createChatStore,
+  type ChatStore,
+  type SessionConversation,
+} from "@ora/chat";
 import type { Session } from "@ora/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createMockClient, createMockClientState } from "../../test/mock-client";
+import {
+  createMockClient,
+  createMockClientState,
+} from "../../test/mock-client";
 import { queryKeys } from "./query-keys";
 import { useTaskDiffLiveSync } from "./use-task-diff-live-sync";
 
@@ -25,33 +32,38 @@ function conversation(
   return {
     configOptions: [],
     modelChanges: [],
-    turns: toolStatus === undefined
-      ? []
-      : [{
-          id: "turn-1",
-          userMessage: {
-            kind: "message",
-            id: "message-1",
-            role: "user",
-            content: "change it",
-            createdAt: 1,
-          },
-          items: [{
-            kind: "toolCall",
-            id: "tool-1",
-            title: "Edit file",
-            toolKind: "edit",
-            status: toolStatus,
-            content: [],
-            locations: [],
-            createdAt: 2,
-            updatedAt: 3,
-          }],
-          status: isResponding ? "streaming" : "completed",
-          stopReason: null,
-          error: null,
-          createdAt: 1,
-        }],
+    turns:
+      toolStatus === undefined
+        ? []
+        : [
+            {
+              id: "turn-1",
+              userMessage: {
+                kind: "message",
+                id: "message-1",
+                role: "user",
+                content: "change it",
+                createdAt: 1,
+              },
+              items: [
+                {
+                  kind: "toolCall",
+                  id: "tool-1",
+                  title: "Edit file",
+                  toolKind: "edit",
+                  status: toolStatus,
+                  content: [],
+                  locations: [],
+                  createdAt: 2,
+                  updatedAt: 3,
+                },
+              ],
+              status: isResponding ? "streaming" : "completed",
+              stopReason: null,
+              error: null,
+              createdAt: 1,
+            },
+          ],
     availableCommands: [],
     isLoaded: true,
     isLoading: false,
@@ -71,7 +83,11 @@ function makeChatStore(): ChatStore {
 /** Provides the query cache observed by the live-sync hook. */
 function wrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
-    return createElement(QueryClientProvider, { client: queryClient }, children);
+    return createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      children,
+    );
   };
 }
 
@@ -86,10 +102,9 @@ describe("useTaskDiffLiveSync", () => {
     });
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    renderHook(
-      () => useTaskDiffLiveSync(chatStore, [SESSION]),
-      { wrapper: wrapper(queryClient) },
-    );
+    renderHook(() => useTaskDiffLiveSync(chatStore, [SESSION]), {
+      wrapper: wrapper(queryClient),
+    });
 
     act(() => {
       chatStore.setState({
@@ -111,10 +126,9 @@ describe("useTaskDiffLiveSync", () => {
     });
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    renderHook(
-      () => useTaskDiffLiveSync(chatStore, [SESSION]),
-      { wrapper: wrapper(queryClient) },
-    );
+    renderHook(() => useTaskDiffLiveSync(chatStore, [SESSION]), {
+      wrapper: wrapper(queryClient),
+    });
 
     act(() => {
       chatStore.setState({
@@ -133,10 +147,9 @@ describe("useTaskDiffLiveSync", () => {
     const chatStore = makeChatStore();
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    renderHook(
-      () => useTaskDiffLiveSync(chatStore, [SESSION]),
-      { wrapper: wrapper(queryClient) },
-    );
+    renderHook(() => useTaskDiffLiveSync(chatStore, [SESSION]), {
+      wrapper: wrapper(queryClient),
+    });
 
     act(() => {
       chatStore.setState({

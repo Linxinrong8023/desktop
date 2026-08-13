@@ -9,6 +9,8 @@ export interface PlatformHostRenderer {
 }
 
 /** Detects the optional host renderer without adding UI methods to PlatformAdapter. */
-export function hasPlatformHostRenderer(value: object): value is PlatformHostRenderer {
+export function hasPlatformHostRenderer(
+  value: object,
+): value is PlatformHostRenderer {
   return renderPlatformHost in value;
 }

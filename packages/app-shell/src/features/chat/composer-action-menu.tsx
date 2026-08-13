@@ -1,9 +1,5 @@
 import type { MutableRefObject, ReactNode } from "react";
-import {
-  IconBolt,
-  IconPhoto,
-  IconSparkles,
-} from "@tabler/icons-react";
+import { IconBolt, IconPhoto, IconSparkles } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
   COLLAPSED_ACTION_GROUP_SIZE,
@@ -47,7 +43,9 @@ export function ComposerActionMenu({
     >
       <div className="max-h-[min(420px,55vh)] overflow-y-auto overscroll-contain scroll-py-6">
         {COMPOSER_ACTION_GROUPS.map((group) => {
-          const groupActions = actions.filter((action) => action.group === group);
+          const groupActions = actions.filter(
+            (action) => action.group === group,
+          );
           if (groupActions.length === 0) return null;
           const expanded = expandedGroups.has(group);
           const visibleGroupActions = expanded
@@ -56,19 +54,31 @@ export function ComposerActionMenu({
           const hiddenCount = groupActions.length - visibleGroupActions.length;
 
           return (
-            <section key={group} role="group" aria-labelledby={`${id}-${group}`} className="pb-1 last:pb-0">
-              <p id={`${id}-${group}`} className="flex h-7 items-center px-2 text-[11px] font-medium text-muted-foreground">
+            <section
+              key={group}
+              role="group"
+              aria-labelledby={`${id}-${group}`}
+              className="pb-1 last:pb-0"
+            >
+              <p
+                id={`${id}-${group}`}
+                className="flex h-7 items-center px-2 text-[11px] font-medium text-muted-foreground"
+              >
                 {t(`chat.actionMenu.${group}`)}
               </p>
               {visibleGroupActions.map((action) => {
-                const index = allVisibleActions.findIndex((candidate) => candidate.id === action.id);
+                const index = allVisibleActions.findIndex(
+                  (candidate) => candidate.id === action.id,
+                );
                 return (
                   <ActionOption
                     key={action.id}
                     id={`${id}-option-${index}`}
                     action={action}
                     active={index === activeIndex}
-                    buttonRef={(node) => { optionRefs.current[index] = node; }}
+                    buttonRef={(node) => {
+                      optionRefs.current[index] = node;
+                    }}
                     onPointerMove={() => onActiveIndexChange(index)}
                     onSelect={() => onSelect(action)}
                   />
@@ -126,7 +136,9 @@ function ActionOption({
       {actionIcon(action)}
       <span className="min-w-0 flex-1 truncate">{action.label}</span>
       {action.group === "commands" && action.hint && (
-        <span className="max-w-24 truncate font-mono text-[10px] text-muted-foreground">{action.hint}</span>
+        <span className="max-w-24 truncate font-mono text-[10px] text-muted-foreground">
+          {action.hint}
+        </span>
       )}
     </button>
   );
@@ -134,7 +146,8 @@ function ActionOption({
 
 /** Chooses a consistent line icon for each capability group; plugins show their own brand mark. */
 function actionIcon(action: ComposerAction): ReactNode {
-  const commonClassName = "size-4 shrink-0 text-muted-foreground group-aria-selected:text-foreground";
+  const commonClassName =
+    "size-4 shrink-0 text-muted-foreground group-aria-selected:text-foreground";
   switch (action.group) {
     case "skills":
       return <IconSparkles className={commonClassName} aria-hidden="true" />;
@@ -142,7 +155,12 @@ function actionIcon(action: ComposerAction): ReactNode {
       return <IconBolt className={commonClassName} aria-hidden="true" />;
     case "plugins": {
       const Mark = action.plugin.mark;
-      return <Mark className={`size-4 shrink-0 ${action.plugin.tone}`} aria-hidden="true" />;
+      return (
+        <Mark
+          className={`size-4 shrink-0 ${action.plugin.tone}`}
+          aria-hidden="true"
+        />
+      );
     }
     case "actions":
       return <IconPhoto className={commonClassName} aria-hidden="true" />;

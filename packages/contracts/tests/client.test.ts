@@ -173,7 +173,9 @@ test("posts a warm session request against the static warm path", async () => {
 
 test("puts the session id in the config path while the choice stays in the body", async () => {
   const requests: ContractTransportRequest[] = [];
-  const client = createContractsClient(recordingTransport(requests, { configOptions: [] }));
+  const client = createContractsClient(
+    recordingTransport(requests, { configOptions: [] }),
+  );
   const request = { sessionId: "session-1", configId: "model", value: "fast" };
 
   await client.session.setConfig(request);
@@ -304,28 +306,32 @@ test("splits task diff comment identifiers from the review body", async () => {
 test("lists installed plugins with a bodyless GET request", async () => {
   const requests: ContractTransportRequest[] = [];
   const response = {
-    plugins: [{
-      id: "ora.reviewer",
-      packageName: "@ora-plugins/reviewer",
-      displayName: "Reviewer",
-      version: "1.0.0",
-      kind: "agent",
-      main: "dist/index.js",
-      agents: [],
-    }],
+    plugins: [
+      {
+        id: "ora.reviewer",
+        packageName: "@ora-plugins/reviewer",
+        displayName: "Reviewer",
+        version: "1.0.0",
+        kind: "agent",
+        main: "dist/index.js",
+        agents: [],
+      },
+    ],
   };
   const client = createContractsClient(recordingTransport(requests, response));
 
   const actual = await client.plugin.listInstalled({});
 
-  assert.deepEqual(requests, [{
-    operationName: "listInstalledPlugins",
-    request: {},
-    method: "GET",
-    path: "/api/plugins/installed",
-    body: undefined,
-    headers: {},
-  }]);
+  assert.deepEqual(requests, [
+    {
+      operationName: "listInstalledPlugins",
+      request: {},
+      method: "GET",
+      path: "/api/plugins/installed",
+      body: undefined,
+      headers: {},
+    },
+  ]);
   assert.deepEqual(actual, response);
 });
 
@@ -356,10 +362,16 @@ test("omits standalone worktree operations from generated contracts", () => {
 
 test("exposes every generated endpoint in its declared namespace", () => {
   const client = createContractsClient(recordingTransport([], {}));
-  const clientRecord = client as unknown as Record<string, Record<string, unknown>>;
+  const clientRecord = client as unknown as Record<
+    string,
+    Record<string, unknown>
+  >;
 
   for (const endpoint of Object.values(endpoints)) {
-    assert.equal(typeof clientRecord[endpoint.namespace]?.[endpoint.memberName], "function");
+    assert.equal(
+      typeof clientRecord[endpoint.namespace]?.[endpoint.memberName],
+      "function",
+    );
   }
 });
 

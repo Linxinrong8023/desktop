@@ -1,1 +1,4 @@
-export { createTauriPlatformAdapter, TauriPlatformAdapter } from "./tauri-platform-adapter";
+export {
+  createTauriPlatformAdapter,
+  TauriPlatformAdapter,
+} from "./tauri-platform-adapter";

@@ -92,18 +92,20 @@ export type SpecSourceVisibility = "enabled" | "disabled";
 /**
  * Selects the project checkout or task workspace whose specification documents are managed.
  */
-export type SpecTarget = { "kind": "project"; projectId: string } | {
-  "kind": "task";
-  taskId: string;
-};
+export type SpecTarget =
+  | { kind: "project"; projectId: string }
+  | {
+      kind: "task";
+      taskId: string;
+    };
 
 /**
  * Identifies the workflow that owns a specification source.
  */
 export type SpecWorkflow =
-  | { "kind": "open_spec" }
-  | { "kind": "superpowers" }
-  | { "kind": "custom"; name: string };
+  | { kind: "open_spec" }
+  | { kind: "superpowers" }
+  | { kind: "custom"; name: string };
 
 /**
  * Atomically replaces all source overrides owned by one project.

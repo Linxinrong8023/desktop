@@ -10,7 +10,12 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { IconCheck, IconChevronsDown, IconChevronsUp, IconCopy } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconChevronsDown,
+  IconChevronsUp,
+  IconCopy,
+} from "@tabler/icons-react";
 import { Button } from "@ora/ui";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
@@ -32,7 +37,10 @@ interface MarkdownDocumentProps {
 
 const LANGUAGE_CLASS_PATTERN = /(?:^|\s)language-([^\s]+)/;
 const markdownRemarkPlugins = [remarkGfm];
-const highlightedCodeCache = new Map<string, Promise<ThemedTokenWithVariants[][] | null>>();
+const highlightedCodeCache = new Map<
+  string,
+  Promise<ThemedTokenWithVariants[][] | null>
+>();
 
 interface ShikiTokenStyle extends CSSProperties {
   "--shiki-dark"?: string;
@@ -76,49 +84,133 @@ const markdownComponents: Components = {
     </a>
   ),
   blockquote: ({ children, ...props }) => (
-    <blockquote className="my-3 border-l-2 border-border pl-3 text-muted-foreground" {...props}>
+    <blockquote
+      className="my-3 border-l-2 border-border pl-3 text-muted-foreground"
+      {...props}
+    >
       {children}
     </blockquote>
   ),
   code: ({ children, className, ...props }) => {
-    const inlineClassName = className === undefined
-      ? "rounded-sm border border-border/70 bg-muted/80 px-1.5 py-[0.15em] font-mono text-[0.85em] text-foreground"
-      : className;
-    return <code className={inlineClassName} {...props}>{children}</code>;
+    const inlineClassName =
+      className === undefined
+        ? "rounded-sm border border-border/70 bg-muted/80 px-1.5 py-[0.15em] font-mono text-[0.85em] text-foreground"
+        : className;
+    return (
+      <code className={inlineClassName} {...props}>
+        {children}
+      </code>
+    );
   },
-  h1: ({ children, ...props }) => <h1 className="mb-3 mt-6 text-2xl font-semibold leading-8 first:mt-0" {...props}>{children}</h1>,
-  h2: ({ children, ...props }) => <h2 className="mb-2 mt-5 text-xl font-semibold leading-8 first:mt-0" {...props}>{children}</h2>,
-  h3: ({ children, ...props }) => <h3 className="mb-2 mt-4 text-lg font-semibold leading-7 first:mt-0" {...props}>{children}</h3>,
+  h1: ({ children, ...props }) => (
+    <h1
+      className="mb-3 mt-6 text-2xl font-semibold leading-8 first:mt-0"
+      {...props}
+    >
+      {children}
+    </h1>
+  ),
+  h2: ({ children, ...props }) => (
+    <h2
+      className="mb-2 mt-5 text-xl font-semibold leading-8 first:mt-0"
+      {...props}
+    >
+      {children}
+    </h2>
+  ),
+  h3: ({ children, ...props }) => (
+    <h3
+      className="mb-2 mt-4 text-lg font-semibold leading-7 first:mt-0"
+      {...props}
+    >
+      {children}
+    </h3>
+  ),
   hr: (props) => <hr className="my-4 border-border" {...props} />,
-  li: ({ children, ...props }) => <li className="my-1 pl-1" {...props}>{children}</li>,
-  ol: ({ children, ...props }) => <ol className="my-3 list-decimal space-y-1 pl-6 marker:text-muted-foreground" {...props}>{children}</ol>,
-  p: ({ children, ...props }) => <p className="my-3 first:mt-0 last:mb-0" {...props}>{children}</p>,
+  li: ({ children, ...props }) => (
+    <li className="my-1 pl-1" {...props}>
+      {children}
+    </li>
+  ),
+  ol: ({ children, ...props }) => (
+    <ol
+      className="my-3 list-decimal space-y-1 pl-6 marker:text-muted-foreground"
+      {...props}
+    >
+      {children}
+    </ol>
+  ),
+  p: ({ children, ...props }) => (
+    <p className="my-3 first:mt-0 last:mb-0" {...props}>
+      {children}
+    </p>
+  ),
   pre: ({ children }) => {
-    if (isValidElement<{ children?: ReactNode; className?: string }>(children)) {
-      const language = children.props.className?.match(LANGUAGE_CLASS_PATTERN)?.[1] ?? "text";
-      return <CodeBlock code={String(children.props.children).replace(/\n$/, "")} language={language} />;
+    if (
+      isValidElement<{ children?: ReactNode; className?: string }>(children)
+    ) {
+      const language =
+        children.props.className?.match(LANGUAGE_CLASS_PATTERN)?.[1] ?? "text";
+      return (
+        <CodeBlock
+          code={String(children.props.children).replace(/\n$/, "")}
+          language={language}
+        />
+      );
     }
     return <pre>{children}</pre>;
   },
   table: ({ children, ...props }) => (
     <div className="my-3 max-w-full overflow-x-auto rounded-md border border-border/70">
-      <table className="w-max min-w-full border-collapse text-left text-[13px] leading-5" {...props}>{children}</table>
+      <table
+        className="w-max min-w-full border-collapse text-left text-[13px] leading-5"
+        {...props}
+      >
+        {children}
+      </table>
     </div>
   ),
-  td: ({ children, ...props }) => <td className="border-t border-border/70 px-3 py-2 align-top" {...props}>{children}</td>,
-  th: ({ children, ...props }) => <th className="bg-muted/55 px-3 py-2 font-medium" {...props}>{children}</th>,
-  ul: ({ children, ...props }) => <ul className="my-3 list-disc space-y-1 pl-6 marker:text-muted-foreground" {...props}>{children}</ul>,
+  td: ({ children, ...props }) => (
+    <td className="border-t border-border/70 px-3 py-2 align-top" {...props}>
+      {children}
+    </td>
+  ),
+  th: ({ children, ...props }) => (
+    <th className="bg-muted/55 px-3 py-2 font-medium" {...props}>
+      {children}
+    </th>
+  ),
+  ul: ({ children, ...props }) => (
+    <ul
+      className="my-3 list-disc space-y-1 pl-6 marker:text-muted-foreground"
+      {...props}
+    >
+      {children}
+    </ul>
+  ),
 };
 
 /** Renders raw, non-streaming Markdown on the same safe GFM and visual foundation as chat. */
-export function MarkdownDocument({ content, components }: MarkdownDocumentProps) {
+export function MarkdownDocument({
+  content,
+  components,
+}: MarkdownDocumentProps) {
   const mergedComponents = useMemo(
-    () => components === undefined ? markdownComponents : { ...markdownComponents, ...components },
+    () =>
+      components === undefined
+        ? markdownComponents
+        : { ...markdownComponents, ...components },
     [components],
   );
   return (
-    <div data-selectable className="min-w-0 break-words text-[15px] leading-[26px] text-foreground">
-      <ReactMarkdown remarkPlugins={markdownRemarkPlugins} components={mergedComponents}>
+    <div
+      data-selectable
+      className="min-w-0 break-words text-[15px] leading-[26px] text-foreground"
+    >
+      <ReactMarkdown
+        remarkPlugins={markdownRemarkPlugins}
+        components={mergedComponents}
+      >
         {content}
       </ReactMarkdown>
     </div>
@@ -126,27 +218,36 @@ export function MarkdownDocument({ content, components }: MarkdownDocumentProps)
 }
 
 /** Renders untrusted assistant Markdown without enabling raw HTML execution. */
-export function MarkdownMessage({ content, streaming = false }: MarkdownMessageProps) {
+export function MarkdownMessage({
+  content,
+  streaming = false,
+}: MarkdownMessageProps) {
   const markdown = unwrapMarkdownDocument(content);
   const renderedMarkdown = useFrameBatchedMarkdown(markdown, streaming);
   const parseableMarkdown = useMemo(
-    () => streaming ? prepareStreamingMarkdown(renderedMarkdown) : renderedMarkdown,
+    () =>
+      streaming ? prepareStreamingMarkdown(renderedMarkdown) : renderedMarkdown,
     [renderedMarkdown, streaming],
   );
-  const [storedRevealState, setStoredRevealState] = useState<StreamingRevealState>(() => ({
-    renderedLength: renderedMarkdown.length,
-    revealStart: streaming ? 0 : renderedMarkdown.length,
-    streaming,
-  }));
+  const [storedRevealState, setStoredRevealState] =
+    useState<StreamingRevealState>(() => ({
+      renderedLength: renderedMarkdown.length,
+      revealStart: streaming ? 0 : renderedMarkdown.length,
+      streaming,
+    }));
   let revealState = storedRevealState;
-  if (storedRevealState.renderedLength !== renderedMarkdown.length || storedRevealState.streaming !== streaming) {
+  if (
+    storedRevealState.renderedLength !== renderedMarkdown.length ||
+    storedRevealState.streaming !== streaming
+  ) {
     // Chat content is append-only while streaming. Length is therefore enough
     // to retain the prior boundary without rescanning an ever-growing string.
     revealState = {
       renderedLength: renderedMarkdown.length,
-      revealStart: streaming && renderedMarkdown.length >= storedRevealState.renderedLength
-        ? storedRevealState.renderedLength
-        : renderedMarkdown.length,
+      revealStart:
+        streaming && renderedMarkdown.length >= storedRevealState.renderedLength
+          ? storedRevealState.renderedLength
+          : renderedMarkdown.length,
       streaming,
     };
     setStoredRevealState(revealState);
@@ -156,12 +257,17 @@ export function MarkdownMessage({ content, streaming = false }: MarkdownMessageP
     [revealState.revealStart],
   );
   const revealNodesRef = useRef(new Set<HTMLElement>());
-  const streamingMarkdownComponents = useMemo<Components>(() => ({
-    ...markdownComponents,
-    span: (props) => <StreamingRevealSpan {...props} registryRef={revealNodesRef} />,
-  }), []);
+  const streamingMarkdownComponents = useMemo<Components>(
+    () => ({
+      ...markdownComponents,
+      span: (props) => (
+        <StreamingRevealSpan {...props} registryRef={revealNodesRef} />
+      ),
+    }),
+    [],
+  );
   const rehypePlugins = useMemo(
-    () => streaming ? [revealPlugin] : [],
+    () => (streaming ? [revealPlugin] : []),
     [revealPlugin, streaming],
   );
   const markdownBody = useMemo(
@@ -169,7 +275,9 @@ export function MarkdownMessage({ content, streaming = false }: MarkdownMessageP
       <ReactMarkdown
         remarkPlugins={markdownRemarkPlugins}
         rehypePlugins={rehypePlugins}
-        components={streaming ? streamingMarkdownComponents : markdownComponents}
+        components={
+          streaming ? streamingMarkdownComponents : markdownComponents
+        }
       >
         {parseableMarkdown}
       </ReactMarkdown>
@@ -182,7 +290,10 @@ export function MarkdownMessage({ content, streaming = false }: MarkdownMessageP
   }, [renderedMarkdown, streaming]);
 
   return (
-    <div data-selectable className="min-w-0 break-words text-[15px] leading-[26px] text-foreground">
+    <div
+      data-selectable
+      className="min-w-0 break-words text-[15px] leading-[26px] text-foreground"
+    >
       {markdownBody}
     </div>
   );
@@ -197,10 +308,13 @@ function useFrameBatchedMarkdown(markdown: string, streaming: boolean) {
 
   useLayoutEffect(() => {
     latestMarkdownRef.current = markdown;
-    if (committedMarkdownRef.current === markdown || frameRef.current !== null) return;
+    if (committedMarkdownRef.current === markdown || frameRef.current !== null)
+      return;
 
-    const scheduleFrame = window.requestAnimationFrame
-      ?? ((callback: FrameRequestCallback) => window.setTimeout(() => callback(performance.now()), 16));
+    const scheduleFrame =
+      window.requestAnimationFrame ??
+      ((callback: FrameRequestCallback) =>
+        window.setTimeout(() => callback(performance.now()), 16));
     frameRef.current = scheduleFrame(() => {
       frameRef.current = null;
       const latestMarkdown = latestMarkdownRef.current;
@@ -209,11 +323,15 @@ function useFrameBatchedMarkdown(markdown: string, streaming: boolean) {
     });
   }, [markdown]);
 
-  useEffect(() => () => {
-    if (frameRef.current === null) return;
-    if (window.cancelAnimationFrame) window.cancelAnimationFrame(frameRef.current);
-    else window.clearTimeout(frameRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (frameRef.current === null) return;
+      if (window.cancelAnimationFrame)
+        window.cancelAnimationFrame(frameRef.current);
+      else window.clearTimeout(frameRef.current);
+    },
+    [],
+  );
 
   return streaming ? renderedMarkdown : markdown;
 }
@@ -227,7 +345,12 @@ function createStreamingRevealPlugin(revealStart: number) {
 
 /** Wraps text after the previous stream boundary while leaving code structures untouched. */
 function wrapStreamingText(node: MarkdownAstNode, revealStart: number) {
-  if (node.tagName === "code" || node.tagName === "pre" || node.children === undefined) return;
+  if (
+    node.tagName === "code" ||
+    node.tagName === "pre" ||
+    node.children === undefined
+  )
+    return;
   for (let index = node.children.length - 1; index >= 0; index -= 1) {
     const child = node.children[index]!;
     const childEndOffset = child.position?.end.offset;
@@ -246,9 +369,10 @@ function wrapStreamingText(node: MarkdownAstNode, revealStart: number) {
     // Entities and escapes can make source offsets diverge from visible text.
     // Revealing the whole node is preferable to hiding freshly streamed text
     // behind an unsafe proportional offset.
-    const splitIndex = revealStart <= startOffset || sourceLength !== child.value.length
-      ? 0
-      : Math.min(child.value.length, revealStart - startOffset);
+    const splitIndex =
+      revealStart <= startOffset || sourceLength !== child.value.length
+        ? 0
+        : Math.min(child.value.length, revealStart - startOffset);
     const stableText = child.value.slice(0, splitIndex);
     const revealedText = child.value.slice(splitIndex);
     if (revealedText === "") continue;
@@ -261,7 +385,9 @@ function wrapStreamingText(node: MarkdownAstNode, revealStart: number) {
     node.children.splice(
       index,
       1,
-      ...(stableText === "" ? [revealNode] : [{ ...child, value: stableText }, revealNode]),
+      ...(stableText === ""
+        ? [revealNode]
+        : [{ ...child, value: stableText }, revealNode]),
     );
   }
 }
@@ -272,14 +398,13 @@ function animateStreamingReveal(nodes: ReadonlySet<HTMLElement>) {
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   nodes.forEach((node) => {
     node.getAnimations().forEach((animation) => animation.cancel());
-    const animation = node.animate(
-      [
-        { opacity: 0.2 },
-        { opacity: 1 },
-      ],
-      { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)" },
-    );
-    animation.addEventListener("finish", () => animation.cancel(), { once: true });
+    const animation = node.animate([{ opacity: 0.2 }, { opacity: 1 }], {
+      duration: 180,
+      easing: "cubic-bezier(0.2, 0, 0, 1)",
+    });
+    animation.addEventListener("finish", () => animation.cancel(), {
+      once: true,
+    });
   });
 }
 
@@ -291,7 +416,8 @@ function StreamingRevealSpan({
   ...props
 }: StreamingRevealSpanProps) {
   const spanRef = useRef<HTMLSpanElement>(null);
-  const shouldReveal = reveal === true || node?.properties?.dataStreamTextReveal === true;
+  const shouldReveal =
+    reveal === true || node?.properties?.dataStreamTextReveal === true;
 
   useLayoutEffect(() => {
     const span = spanRef.current;
@@ -303,7 +429,13 @@ function StreamingRevealSpan({
     };
   }, [registryRef, shouldReveal]);
 
-  return <span ref={spanRef} data-stream-text-reveal={shouldReveal || undefined} {...props} />;
+  return (
+    <span
+      ref={spanRef}
+      data-stream-text-reveal={shouldReveal || undefined}
+      {...props}
+    />
+  );
 }
 
 /** Wraps fenced code with persistent copy and disclosure controls. */
@@ -330,7 +462,9 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
       }`}
     >
       <div data-selection-control className="flex min-h-9 items-center px-3">
-        <span className="font-mono text-[11px] font-medium text-muted-foreground">{language}</span>
+        <span className="font-mono text-[11px] font-medium text-muted-foreground">
+          {language}
+        </span>
         <span className="mx-2 h-3 w-px bg-border" aria-hidden="true" />
         <span className="text-[11px] text-muted-foreground" aria-live="polite">
           {expanded
@@ -338,17 +472,32 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
             : t("chat.codeLinesCollapsed", { count: lineCount })}
         </span>
         <div className="ml-auto flex items-center gap-0.5">
-          <Button variant="ghost" size="icon-xs" onClick={copyCode} aria-label={copied ? t("chat.codeCopied") : t("chat.copyCode")}>
-            {copied ? <IconCheck className="size-3.5 text-emerald-600" /> : <IconCopy className="size-3.5" />}
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={copyCode}
+            aria-label={copied ? t("chat.codeCopied") : t("chat.copyCode")}
+          >
+            {copied ? (
+              <IconCheck className="size-3.5 text-emerald-600" />
+            ) : (
+              <IconCopy className="size-3.5" />
+            )}
           </Button>
           <Button
             variant="ghost"
             size="icon-xs"
             onClick={() => setExpanded((current) => !current)}
             aria-expanded={expanded}
-            aria-label={expanded ? t("chat.collapseCode") : t("chat.expandCode")}
+            aria-label={
+              expanded ? t("chat.collapseCode") : t("chat.expandCode")
+            }
           >
-            {expanded ? <IconChevronsUp className="size-3.5" /> : <IconChevronsDown className="size-3.5" />}
+            {expanded ? (
+              <IconChevronsUp className="size-3.5" />
+            ) : (
+              <IconChevronsDown className="size-3.5" />
+            )}
           </Button>
         </div>
       </div>
@@ -362,8 +511,16 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
 }
 
 /** Highlights fenced code with VS Code's TextMate grammars and paired default themes. */
-function HighlightedCode({ code, language }: { code: string; language: string }) {
-  const [tokens, setTokens] = useState<ThemedTokenWithVariants[][] | null>(null);
+function HighlightedCode({
+  code,
+  language,
+}: {
+  code: string;
+  language: string;
+}) {
+  const [tokens, setTokens] = useState<ThemedTokenWithVariants[][] | null>(
+    null,
+  );
 
   useEffect(() => {
     let active = true;
@@ -371,10 +528,12 @@ function HighlightedCode({ code, language }: { code: string; language: string })
     let pending = highlightedCodeCache.get(cacheKey);
     if (pending === undefined) {
       pending = import("shiki")
-        .then(({ codeToTokensWithThemes }) => codeToTokensWithThemes(code, {
-          lang: language as BundledLanguage,
-          themes: { light: "light-plus", dark: "dark-plus" },
-        }))
+        .then(({ codeToTokensWithThemes }) =>
+          codeToTokensWithThemes(code, {
+            lang: language as BundledLanguage,
+            themes: { light: "light-plus", dark: "dark-plus" },
+          }),
+        )
         .catch(() => null);
       highlightedCodeCache.set(cacheKey, pending);
     }
@@ -394,8 +553,19 @@ function HighlightedCode({ code, language }: { code: string; language: string })
           {line.map((token, tokenIndex) => {
             const light = token.variants.light;
             const dark = token.variants.dark;
-            const style: ShikiTokenStyle = { color: light?.color, "--shiki-dark": dark?.color };
-            return <span key={`${tokenIndex}-${token.offset}`} className="shiki-token" style={style}>{token.content}</span>;
+            const style: ShikiTokenStyle = {
+              color: light?.color,
+              "--shiki-dark": dark?.color,
+            };
+            return (
+              <span
+                key={`${tokenIndex}-${token.offset}`}
+                className="shiki-token"
+                style={style}
+              >
+                {token.content}
+              </span>
+            );
           })}
         </span>
       ))}

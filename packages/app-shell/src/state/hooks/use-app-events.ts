@@ -39,7 +39,10 @@ export function useAppEvents(client: ContractsClient) {
     const consume = async (): Promise<void> => {
       if (disposed) return;
       try {
-        const events = client.appEvents.watch({}, { signal: controller.signal });
+        const events = client.appEvents.watch(
+          {},
+          { signal: controller.signal },
+        );
         for await (const event of events) {
           if (disposed) return;
           if (event.type === "ready") {

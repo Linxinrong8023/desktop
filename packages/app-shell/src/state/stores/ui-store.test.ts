@@ -85,7 +85,10 @@ describe("useUiStore", () => {
       sessionIds: ["s1"],
     });
 
-    expect(useUiStore.getState().dialog).toEqual({ kind: "project", entity: project });
+    expect(useUiStore.getState().dialog).toEqual({
+      kind: "project",
+      entity: project,
+    });
     expect(useUiStore.getState().deleteTarget).toEqual({
       kind: "project",
       id: "p1",
@@ -94,10 +97,22 @@ describe("useUiStore", () => {
     });
 
     // Dialog state with task/session kinds preserves their lineage fields.
-    useUiStore.getState().setDialog({ kind: "task", projectId: "p1", entity: task });
-    expect(useUiStore.getState().dialog).toEqual({ kind: "task", projectId: "p1", entity: task });
-    useUiStore.getState().setDialog({ kind: "session", taskId: "t1", entity: session });
-    expect(useUiStore.getState().dialog).toEqual({ kind: "session", taskId: "t1", entity: session });
+    useUiStore
+      .getState()
+      .setDialog({ kind: "task", projectId: "p1", entity: task });
+    expect(useUiStore.getState().dialog).toEqual({
+      kind: "task",
+      projectId: "p1",
+      entity: task,
+    });
+    useUiStore
+      .getState()
+      .setDialog({ kind: "session", taskId: "t1", entity: session });
+    expect(useUiStore.getState().dialog).toEqual({
+      kind: "session",
+      taskId: "t1",
+      entity: session,
+    });
 
     useUiStore.getState().setDialog(null);
     useUiStore.getState().setDeleteTarget(null);

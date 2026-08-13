@@ -23,10 +23,28 @@ test("resolves paths against an absolute server base", () => {
 
 test("decodes known, unknown, and malformed remote payloads", () => {
   const requestId = "550e8400-e29b-41d4-a716-446655440000";
-  assert.ok(decodeRemoteError({ code: "project_not_found", params: {}, requestId }, 404) instanceof RemoteContractError);
-  assert.ok(decodeRemoteError({ code: "agent_name_conflict", params: {}, requestId }, 409) instanceof RemoteContractError);
-  assert.ok(decodeRemoteError({ code: "future_error", params: {}, requestId }, 500) instanceof UnknownRemoteError);
-  assert.ok(decodeRemoteError({ code: "project_not_found", params: {} }, 404) instanceof LocalTransportError);
+  assert.ok(
+    decodeRemoteError(
+      { code: "project_not_found", params: {}, requestId },
+      404,
+    ) instanceof RemoteContractError,
+  );
+  assert.ok(
+    decodeRemoteError(
+      { code: "agent_name_conflict", params: {}, requestId },
+      409,
+    ) instanceof RemoteContractError,
+  );
+  assert.ok(
+    decodeRemoteError(
+      { code: "future_error", params: {}, requestId },
+      500,
+    ) instanceof UnknownRemoteError,
+  );
+  assert.ok(
+    decodeRemoteError({ code: "project_not_found", params: {} }, 404) instanceof
+      LocalTransportError,
+  );
 });
 
 test("normalizes structured server errors from fetch responses", async () => {
@@ -66,19 +84,19 @@ test("normalizes structured server errors from fetch responses", async () => {
     headers: {},
   };
 
-  await assert.rejects(
-    transport.send(request),
-    (error: unknown) => {
-      assert.ok(error instanceof RemoteContractError);
-      const transportError = error as RemoteContractError;
+  await assert.rejects(transport.send(request), (error: unknown) => {
+    assert.ok(error instanceof RemoteContractError);
+    const transportError = error as RemoteContractError;
 
-      assert.equal(transportError.code, "project_not_found");
-      assert.equal(transportError.status, 404);
-      assert.equal(transportError.requestId, "550e8400-e29b-41d4-a716-446655440000");
+    assert.equal(transportError.code, "project_not_found");
+    assert.equal(transportError.status, 404);
+    assert.equal(
+      transportError.requestId,
+      "550e8400-e29b-41d4-a716-446655440000",
+    );
 
-      return true;
-    },
-  );
+    return true;
+  });
   assert.deepEqual(requests, [
     {
       url: "http://localhost:32578/api/projects/project-1",
@@ -97,13 +115,18 @@ test("starts NDJSON streams lazily, decodes split frames, and enforces single co
   const transport = createFetchTransport({
     fetch: async () => {
       fetchCalls += 1;
-      return new Response(new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(encoder.encode('{"type":"data","data":{"value":'));
-          controller.enqueue(encoder.encode('1}}\n{"type":"end"}\n'));
-          controller.close();
-        },
-      }), { status: 200 });
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode('{"type":"data","data":{"value":'),
+            );
+            controller.enqueue(encoder.encode('1}}\n{"type":"end"}\n'));
+            controller.close();
+          },
+        }),
+        { status: 200 },
+      );
     },
   });
   const request: ContractTransportRequest = {
@@ -123,7 +146,9 @@ test("starts NDJSON streams lazily, decodes split frames, and enforces single co
   assert.equal(fetchCalls, 1);
   assert.throws(
     () => stream[Symbol.asyncIterator](),
-    (error: unknown) => error instanceof LocalTransportError && error.kind === "stream_already_consumed",
+    (error: unknown) =>
+      error instanceof LocalTransportError &&
+      error.kind === "stream_already_consumed",
   );
 });
 
@@ -153,7 +178,8 @@ test("surfaces a typed stream error frame and aborts the underlying fetch lifecy
         assert.fail(`error-only stream yielded data: ${JSON.stringify(event)}`);
       }
     },
-    (error: unknown) => error instanceof RemoteContractError && error.code === "session_busy",
+    (error: unknown) =>
+      error instanceof RemoteContractError && error.code === "session_busy",
   );
   assert.equal(observedSignal?.aborted, true);
 });

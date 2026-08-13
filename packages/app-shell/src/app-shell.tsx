@@ -110,13 +110,17 @@ function AppShellContent({
 
   // Derive the sidebar user from the host's global Git identity unless a caller
   // (tests, storybook) injects an explicit user to render instead.
-  const gitIdentityUser = useGitIdentityUser(client, injectedUser === undefined);
+  const gitIdentityUser = useGitIdentityUser(
+    client,
+    injectedUser === undefined,
+  );
   const user = injectedUser ?? gitIdentityUser;
 
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const { i18n, t } = useTranslation();
   const sidebarPanelRef = useRef<ResizablePanelHandle | null>(null);
-  const locale: PlatformLocale = i18n.resolvedLanguage === "en-US" ? "en-US" : "zh-CN";
+  const locale: PlatformLocale =
+    i18n.resolvedLanguage === "en-US" ? "en-US" : "zh-CN";
 
   const handleSignOut = () => {
     chatStore.getState().clearAll();
@@ -154,9 +158,14 @@ function AppShellContent({
                     aria-label={t("sidebar.resize")}
                     title={t("sidebar.resize")}
                     className="z-20 bg-sidebar-border transition-colors hover:bg-ring focus-visible:bg-ring"
-                    onDoubleClick={() => sidebarPanelRef.current?.resize(DEFAULT_SIDEBAR_WIDTH)}
+                    onDoubleClick={() =>
+                      sidebarPanelRef.current?.resize(DEFAULT_SIDEBAR_WIDTH)
+                    }
                   />
-                  <ResizablePanel id="workspace-content" minSize={MIN_WORKSPACE_WIDTH}>
+                  <ResizablePanel
+                    id="workspace-content"
+                    minSize={MIN_WORKSPACE_WIDTH}
+                  >
                     <WorkspaceView userName={user.name} />
                   </ResizablePanel>
                 </ResizablePanelGroup>

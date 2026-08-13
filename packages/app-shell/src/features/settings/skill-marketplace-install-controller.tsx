@@ -9,7 +9,10 @@ import { localizeContractError } from "../../i18n/contract-error";
 import { queryKeys } from "../../state/hooks/query-keys";
 import { SkillImportDialog } from "./atoms-settings";
 
-type DownloadedMarketplaceArchive = Extract<SkillMarketplaceStatus, { status: "downloaded" }>;
+type DownloadedMarketplaceArchive = Extract<
+  SkillMarketplaceStatus,
+  { status: "downloaded" }
+>;
 
 interface PendingMarketplaceReview {
   archive: DownloadedMarketplaceArchive;
@@ -43,72 +46,107 @@ export function SkillMarketplaceInstallController() {
   );
 
   /** Prepares, commits, and observes one downloaded archive without bypassing import validation. */
-  const installArchive = useCallback(async (archive: DownloadedMarketplaceArchive) => {
-    toast(t("settings.skills.marketplaceInstalling", { fileName: archive.fileName }), {
-      description: archive.archivePath,
-    });
-
-    try {
-      const prepared = await client.skillImport.prepare({
-        source: {
-          kind: "archive",
-          path: archive.archivePath,
+  const installArchive = useCallback(
+    async (archive: DownloadedMarketplaceArchive) => {
+      toast(
+        t("settings.skills.marketplaceInstalling", {
           fileName: archive.fileName,
+        }),
+        {
+          description: archive.archivePath,
         },
-      });
-      const needsReview = prepared.session.candidates.some((candidate) => candidate.status !== "ready");
-      if (needsReview) {
-        toast(t("settings.skills.marketplaceInstallReview", { fileName: archive.fileName }));
-        await requestReview(archive, prepared.session);
-        return;
-      }
-
-      await client.skillImport.commit({
-        sessionId: prepared.session.sessionId,
-        decisions: [],
-      });
-
-      let completed = prepared.session;
-      do {
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 750));
-        completed = (await client.skillImport.get({ sessionId: prepared.session.sessionId })).session;
-      } while (completed.status !== "completed");
-
-      await refreshSkills();
-      const incomplete = completed.progress.results.some(
-        (result) => result.status !== "imported" && result.status !== "overwritten",
       );
-      if (incomplete) {
-        toast.error(t("settings.skills.marketplaceInstallIncomplete", { fileName: archive.fileName }));
-        await requestReview(archive, completed);
-        return;
-      }
 
-      toast.success(t("settings.skills.marketplaceInstalled", {
-        count: completed.progress.results.length,
-      }));
-    } catch (cause) {
-      toast.error(t("settings.skills.marketplaceInstallFailed", { fileName: archive.fileName }), {
-        description: localizeContractError(cause, t),
-      });
-    }
-  }, [client, refreshSkills, requestReview, t]);
+      try {
+        const prepared = await client.skillImport.prepare({
+          source: {
+            kind: "archive",
+            path: archive.archivePath,
+            fileName: archive.fileName,
+          },
+        });
+        const needsReview = prepared.session.candidates.some(
+          (candidate) => candidate.status !== "ready",
+        );
+        if (needsReview) {
+          toast(
+            t("settings.skills.marketplaceInstallReview", {
+              fileName: archive.fileName,
+            }),
+          );
+          await requestReview(archive, prepared.session);
+          return;
+        }
+
+        await client.skillImport.commit({
+          sessionId: prepared.session.sessionId,
+          decisions: [],
+        });
+
+        let completed = prepared.session;
+        do {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 750));
+          completed = (
+            await client.skillImport.get({
+              sessionId: prepared.session.sessionId,
+            })
+          ).session;
+        } while (completed.status !== "completed");
+
+        await refreshSkills();
+        const incomplete = completed.progress.results.some(
+          (result) =>
+            result.status !== "imported" && result.status !== "overwritten",
+        );
+        if (incomplete) {
+          toast.error(
+            t("settings.skills.marketplaceInstallIncomplete", {
+              fileName: archive.fileName,
+            }),
+          );
+          await requestReview(archive, completed);
+          return;
+        }
+
+        toast.success(
+          t("settings.skills.marketplaceInstalled", {
+            count: completed.progress.results.length,
+          }),
+        );
+      } catch (cause) {
+        toast.error(
+          t("settings.skills.marketplaceInstallFailed", {
+            fileName: archive.fileName,
+          }),
+          {
+            description: localizeContractError(cause, t),
+          },
+        );
+      }
+    },
+    [client, refreshSkills, requestReview, t],
+  );
 
   useEffect(() => {
     if (skillMarketplace.kind !== "supported") return undefined;
 
     let disposed = false;
     let unsubscribe: (() => void) | undefined;
-    void skillMarketplace.onStatus((status) => {
-      if (disposed || status.status !== "downloaded") return;
-      if (handledArchives.current.has(status.archivePath)) return;
-      handledArchives.current.add(status.archivePath);
-      // Serializing installation avoids presenting two conflict dialogs or racing same-name imports.
-      installQueue.current = installQueue.current.then(() => installArchive(status));
-    }).then((stop) => {
-      if (disposed) stop();
-      else unsubscribe = stop;
-    }).catch(() => undefined);
+    void skillMarketplace
+      .onStatus((status) => {
+        if (disposed || status.status !== "downloaded") return;
+        if (handledArchives.current.has(status.archivePath)) return;
+        handledArchives.current.add(status.archivePath);
+        // Serializing installation avoids presenting two conflict dialogs or racing same-name imports.
+        installQueue.current = installQueue.current.then(() =>
+          installArchive(status),
+        );
+      })
+      .then((stop) => {
+        if (disposed) stop();
+        else unsubscribe = stop;
+      })
+      .catch(() => undefined);
 
     return () => {
       disposed = true;

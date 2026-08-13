@@ -10,7 +10,9 @@ import type {
 test("sends Agent Markdown and conflict metadata in JSON bodies", async () => {
   const requests: ContractTransportRequest[] = [];
   const transport: ContractTransport = {
-    async send<TResponse>(request: ContractTransportRequest): Promise<TResponse> {
+    async send<TResponse>(
+      request: ContractTransportRequest,
+    ): Promise<TResponse> {
       requests.push(request);
       return {} as TResponse;
     },
@@ -19,7 +21,8 @@ test("sends Agent Markdown and conflict metadata in JSON bodies", async () => {
     },
   };
   const client = createContractsClient(transport);
-  const content = "---\nname: review-agent\ndescription: Reviews changes\n---\nReview changes.\n";
+  const content =
+    "---\nname: review-agent\ndescription: Reviews changes\n---\nReview changes.\n";
 
   await client.agentImport.prepare({ content });
   await client.agentImport.commit({

@@ -6,29 +6,29 @@
 @source "../../../packages/app-shell/src";
 
 @utility scrollbar-hide {
-    /* For Webkit-based browsers (Chrome, Safari and Opera) */
-    &::-webkit-scrollbar {
-        display: none;
-        -webkit-appearance: none;
-    }
+  /* For Webkit-based browsers (Chrome, Safari and Opera) */
+  &::-webkit-scrollbar {
+    display: none;
+    -webkit-appearance: none;
+  }
 
-    /* For IE, Edge and Firefox */
-    -ms-overflow-style: none; /* IE and Edge */
-    scrollbar-width: none; /* Firefox */
+  /* For IE, Edge and Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
 }
 
 @utility transition-inherit-all {
-    transition-property: inherit;
-    transition-duration: inherit;
-    transition-timing-function: inherit;
+  transition-property: inherit;
+  transition-duration: inherit;
+  transition-timing-function: inherit;
 }
 
 html,
 body {
-    margin: 0;
-    min-height: 100vh;
+  margin: 0;
+  min-height: 100vh;
 }
 
 #root {
-    min-height: 100vh;
+  min-height: 100vh;
 }

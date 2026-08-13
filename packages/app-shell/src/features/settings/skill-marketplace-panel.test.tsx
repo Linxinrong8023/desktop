@@ -16,7 +16,11 @@ function renderMarketplace(
   skillMarketplace: SkillMarketplaceCapability,
   locationActions: LocationActionsCapability = { kind: "unsupported" },
 ) {
-  const platform = { ...createStubPlatform(), skillMarketplace, locationActions };
+  const platform = {
+    ...createStubPlatform(),
+    skillMarketplace,
+    locationActions,
+  };
   return render(
     <AppI18nProvider>
       <PlatformProvider adapter={platform}>
@@ -32,10 +36,12 @@ describe("SkillMarketplacePanel", () => {
     const open = vi.fn().mockResolvedValue(undefined);
     const stop = vi.fn();
     let listener: ((status: SkillMarketplaceStatus) => void) | undefined;
-    const onStatus = vi.fn(async (nextListener: (status: SkillMarketplaceStatus) => void) => {
-      listener = nextListener;
-      return stop;
-    });
+    const onStatus = vi.fn(
+      async (nextListener: (status: SkillMarketplaceStatus) => void) => {
+        listener = nextListener;
+        return stop;
+      },
+    );
     const openLocation = vi.fn().mockResolvedValue(undefined);
     const view = renderMarketplace(
       { kind: "supported", open, onStatus },
@@ -46,29 +52,49 @@ describe("SkillMarketplacePanel", () => {
       },
     );
 
-    await user.click(screen.getByRole("button", { name: /打开技能市场|Open marketplace/ }));
+    await user.click(
+      screen.getByRole("button", { name: /打开技能市场|Open marketplace/ }),
+    );
     await waitFor(() => expect(onStatus).toHaveBeenCalledOnce());
     expect(open).toHaveBeenCalledWith("skillHub");
 
-    act(() => listener?.({
-      status: "downloading",
-      provider: "skillHub",
-      fileName: "skill.zip",
-    }));
-    expect(screen.getByRole("status")).toHaveTextContent(/正在下载 skill.zip|Downloading skill.zip/);
+    act(() =>
+      listener?.({
+        status: "downloading",
+        provider: "skillHub",
+        fileName: "skill.zip",
+      }),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /正在下载 skill.zip|Downloading skill.zip/,
+    );
 
-    act(() => listener?.({
-      status: "downloaded",
-      provider: "skillHub",
-      fileName: "skill.zip",
-      archivePath: "/app-data/skill-downloads/skill.zip",
-    }));
-    expect(screen.getByRole("status")).not.toHaveTextContent(/已下载 skill.zip|Downloaded skill.zip/);
-    expect(screen.queryByText("/app-data/skill-downloads/skill.zip")).not.toBeInTheDocument();
-    const savedLocation = screen.getByRole("button", { name: /保存位置|Saved to/ });
-    expect(savedLocation).toHaveAttribute("title", "/app-data/skill-downloads/skill.zip");
+    act(() =>
+      listener?.({
+        status: "downloaded",
+        provider: "skillHub",
+        fileName: "skill.zip",
+        archivePath: "/app-data/skill-downloads/skill.zip",
+      }),
+    );
+    expect(screen.getByRole("status")).not.toHaveTextContent(
+      /已下载 skill.zip|Downloaded skill.zip/,
+    );
+    expect(
+      screen.queryByText("/app-data/skill-downloads/skill.zip"),
+    ).not.toBeInTheDocument();
+    const savedLocation = screen.getByRole("button", {
+      name: /保存位置|Saved to/,
+    });
+    expect(savedLocation).toHaveAttribute(
+      "title",
+      "/app-data/skill-downloads/skill.zip",
+    );
     await user.click(savedLocation);
-    expect(openLocation).toHaveBeenCalledWith("explorer", "/app-data/skill-downloads");
+    expect(openLocation).toHaveBeenCalledWith(
+      "explorer",
+      "/app-data/skill-downloads",
+    );
 
     view.unmount();
     expect(stop).toHaveBeenCalledOnce();
@@ -86,15 +112,19 @@ describe("SkillMarketplacePanel", () => {
     });
     await waitFor(() => expect(listener).toBeDefined());
 
-    act(() => listener?.({
-      status: "failed",
-      provider: "skillHub",
-      stage: "download",
-      code: "skill_download_cancelled",
-      message: "cancelled",
-    }));
+    act(() =>
+      listener?.({
+        status: "failed",
+        provider: "skillHub",
+        stage: "download",
+        code: "skill_download_cancelled",
+        message: "cancelled",
+      }),
+    );
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/下载失败|Download failed/);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /下载失败|Download failed/,
+    );
     expect(screen.queryByText(/Saved to|保存位置/)).not.toBeInTheDocument();
   });
 
@@ -107,9 +137,11 @@ describe("SkillMarketplacePanel", () => {
       onStatus: async () => () => {},
     });
 
-    await user.click(screen.getByRole("button", {
-      name: /打开内网 Skill Market|Open internal Skill Market/,
-    }));
+    await user.click(
+      screen.getByRole("button", {
+        name: /打开内网 Skill Market|Open internal Skill Market/,
+      }),
+    );
 
     expect(open).toHaveBeenCalledWith("huaweiAgentCenter");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -118,11 +150,17 @@ describe("SkillMarketplacePanel", () => {
   it("keeps native launch actions disabled on unsupported hosts", () => {
     renderMarketplace({ kind: "unsupported" });
 
-    expect(screen.getByRole("button", { name: /打开技能市场|Open marketplace/ })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /打开技能市场|Open marketplace/ }),
+    ).toBeDisabled();
     expect(screen.getAllByRole("status")).toHaveLength(2);
-    expect(screen.getAllByRole("status")[0]).toHaveTextContent(/仅在 Ora 桌面端可用|Ora Desktop only/);
-    expect(screen.getByRole("button", {
-      name: /打开内网 Skill Market|Open internal Skill Market/,
-    })).toBeDisabled();
+    expect(screen.getAllByRole("status")[0]).toHaveTextContent(
+      /仅在 Ora 桌面端可用|Ora Desktop only/,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /打开内网 Skill Market|Open internal Skill Market/,
+      }),
+    ).toBeDisabled();
   });
 });

@@ -52,10 +52,10 @@ export function shouldReleaseFocusToFollow(
   currentStatus: GraphWorkflowNodeStatus | undefined,
 ): boolean {
   if (
-    prev === null
-    || focusNodeId === null
-    || currentStatus === undefined
-    || prev.nodeId !== focusNodeId
+    prev === null ||
+    focusNodeId === null ||
+    currentStatus === undefined ||
+    prev.nodeId !== focusNodeId
   ) {
     return false;
   }
@@ -104,8 +104,8 @@ function pickFallbackPrimary(run: GraphWorkflowRun): string | null {
     const state = run.nodeStates[node.id];
     if (state?.status === "succeeded" && state.finishedAt !== undefined) {
       if (
-        latestSucceeded === null
-        || state.finishedAt.localeCompare(latestSucceeded.finishedAt) > 0
+        latestSucceeded === null ||
+        state.finishedAt.localeCompare(latestSucceeded.finishedAt) > 0
       ) {
         latestSucceeded = { nodeId: node.id, finishedAt: state.finishedAt };
       }
@@ -133,16 +133,16 @@ export function resolveTheaterFocus(
   const activeIds = orderedActiveIds(run);
 
   if (
-    preferredNodeId !== null
-    && run.nodeStates[preferredNodeId] !== undefined
+    preferredNodeId !== null &&
+    run.nodeStates[preferredNodeId] !== undefined
   ) {
     // Keep user focus even after the act leaves "active", until they pick another
     // or the workspace releases a live pin that just finished.
     return { primaryId: preferredNodeId, activeIds };
   }
 
-  const primaryId = pickPrimaryAmongActive(run, activeIds)
-    ?? pickFallbackPrimary(run);
+  const primaryId =
+    pickPrimaryAmongActive(run, activeIds) ?? pickFallbackPrimary(run);
   return { primaryId, activeIds };
 }
 

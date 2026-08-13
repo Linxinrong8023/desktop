@@ -1,15 +1,48 @@
 .ora-task-diff {
   --diff-background-color: transparent;
   --diff-text-color: var(--foreground);
-  --diff-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  --diff-gutter-insert-background-color: color-mix(in oklab, #22c55e 17%, transparent);
-  --diff-gutter-delete-background-color: color-mix(in oklab, #ef4444 17%, transparent);
-  --diff-code-insert-background-color: color-mix(in oklab, #22c55e 11%, transparent);
-  --diff-code-delete-background-color: color-mix(in oklab, #ef4444 11%, transparent);
-  --diff-code-insert-edit-background-color: color-mix(in oklab, #22c55e 28%, transparent);
-  --diff-code-delete-edit-background-color: color-mix(in oklab, #ef4444 28%, transparent);
-  --diff-gutter-selected-background-color: color-mix(in oklab, var(--primary) 24%, transparent);
-  --diff-code-selected-background-color: color-mix(in oklab, var(--primary) 14%, transparent);
+  --diff-font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --diff-gutter-insert-background-color: color-mix(
+    in oklab,
+    #22c55e 17%,
+    transparent
+  );
+  --diff-gutter-delete-background-color: color-mix(
+    in oklab,
+    #ef4444 17%,
+    transparent
+  );
+  --diff-code-insert-background-color: color-mix(
+    in oklab,
+    #22c55e 11%,
+    transparent
+  );
+  --diff-code-delete-background-color: color-mix(
+    in oklab,
+    #ef4444 11%,
+    transparent
+  );
+  --diff-code-insert-edit-background-color: color-mix(
+    in oklab,
+    #22c55e 28%,
+    transparent
+  );
+  --diff-code-delete-edit-background-color: color-mix(
+    in oklab,
+    #ef4444 28%,
+    transparent
+  );
+  --diff-gutter-selected-background-color: color-mix(
+    in oklab,
+    var(--primary) 24%,
+    transparent
+  );
+  --diff-code-selected-background-color: color-mix(
+    in oklab,
+    var(--primary) 14%,
+    transparent
+  );
   font-size: 12.5px;
   line-height: 1.6;
   container-type: inline-size;
@@ -22,9 +55,21 @@
 }
 
 .ora-task-diff--split {
-  --diff-gutter-delete-background-color: color-mix(in oklab, #ef4444 12%, transparent);
-  --diff-code-delete-background-color: color-mix(in oklab, #ef4444 7%, transparent);
-  --diff-code-delete-edit-background-color: color-mix(in oklab, #ef4444 20%, transparent);
+  --diff-gutter-delete-background-color: color-mix(
+    in oklab,
+    #ef4444 12%,
+    transparent
+  );
+  --diff-code-delete-background-color: color-mix(
+    in oklab,
+    #ef4444 7%,
+    transparent
+  );
+  --diff-code-delete-edit-background-color: color-mix(
+    in oklab,
+    #ef4444 20%,
+    transparent
+  );
 }
 
 .ora-task-diff .diff {
@@ -163,7 +208,9 @@
   width: 100%;
 }
 
-.ora-task-diff--split.ora-task-diff--modify .diff-widget > :first-child:not(:only-child) {
+.ora-task-diff--split.ora-task-diff--modify
+  .diff-widget
+  > :first-child:not(:only-child) {
   grid-column: 2;
 }
 
@@ -204,7 +251,8 @@
 }
 
 .ora-task-diff .ora-diff-collapsed {
-  border-block: 1px dashed color-mix(in oklab, var(--violet-500, #8b5cf6) 24%, transparent);
+  border-block: 1px dashed
+    color-mix(in oklab, var(--violet-500, #8b5cf6) 24%, transparent);
   background: color-mix(in oklab, var(--muted) 36%, transparent);
 }
 
@@ -216,7 +264,8 @@
   overscroll-behavior: none;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 35%, transparent) transparent;
+  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 35%, transparent)
+    transparent;
 }
 
 .ora-scroll-region::-webkit-scrollbar {

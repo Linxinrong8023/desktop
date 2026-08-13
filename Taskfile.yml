@@ -73,6 +73,12 @@ tasks:
     desc: Run linters on all frontend packages
     silent: true
     cmds:
+      - pnpm --filter @ora/contracts format
+      - pnpm --filter @ora/web-client format
+      - pnpm --filter @ora/chat format
+      - pnpm --filter @ora/platform format
+      - pnpm --filter @ora/workflow-runtime format
+      - pnpm --filter @ora/app-shell format
       - pnpm --filter @ora/contracts lint
       - pnpm --filter @ora/web-client lint
       - pnpm --filter @ora/chat lint
@@ -84,6 +90,7 @@ tasks:
     desc: Run linters for the Desktop TypeScript package and Tauri Rust workspace
     silent: true
     cmds:
+      - pnpm --filter @ora/desktop format
       - pnpm --filter @ora/desktop lint
       - cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all
       - cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings

@@ -34,7 +34,9 @@ function renderPanel(
   resolve: DashboardResolver,
   resolveCompare?: DashboardCompareResolver | null,
 ) {
-  return render(<PanelShell resolve={resolve} resolveCompare={resolveCompare} />);
+  return render(
+    <PanelShell resolve={resolve} resolveCompare={resolveCompare} />,
+  );
 }
 
 describe("TraceDashboardPanel", () => {
@@ -68,7 +70,9 @@ describe("TraceDashboardPanel", () => {
 
     renderPanel(resolve);
 
-    const iframe = await screen.findByTitle("Dashboard", undefined, { timeout: 2000 });
+    const iframe = await screen.findByTitle("Dashboard", undefined, {
+      timeout: 2000,
+    });
     expect(iframe).toHaveAttribute(
       "src",
       "http://127.0.0.1:8601/?session_id=sess-1&agent_type=claude_code",
@@ -89,8 +93,13 @@ describe("TraceDashboardPanel", () => {
 
     renderPanel(resolve, resolveCompare);
 
-    const iframe = await screen.findByTitle(/Token/i, undefined, { timeout: 2000 });
-    expect(iframe).toHaveAttribute("src", "http://127.0.0.1:8601/?app_mode=compare");
+    const iframe = await screen.findByTitle(/Token/i, undefined, {
+      timeout: 2000,
+    });
+    expect(iframe).toHaveAttribute(
+      "src",
+      "http://127.0.0.1:8601/?app_mode=compare",
+    );
     expect(resolveCompare).toHaveBeenCalledOnce();
     expect(resolve).not.toHaveBeenCalled();
   });

@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-ssr
+target
+.data
+.tmp
+packages/contracts/.test-dist
+*.tsbuildinfo
+pnpm-lock.yaml

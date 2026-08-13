@@ -4,7 +4,10 @@ import type { AgentCli, WarmSessionTarget } from "@ora/contracts";
 import { findModelOption, selectableValues } from "@ora/chat";
 import type { WorkflowAgentModel } from "@ora/workflow-mock";
 import { useContractsClient } from "../../contracts-client-context";
-import { AGENT_CLI_LABELS, AGENT_CLI_ORDER } from "../../features/chat/model-catalog";
+import {
+  AGENT_CLI_LABELS,
+  AGENT_CLI_ORDER,
+} from "../../features/chat/model-catalog";
 import { useWorkspaceSelectionStore } from "../stores/workspace-selection-store";
 import { clientId } from "../client-id";
 import { queryKeys } from "./query-keys";
@@ -40,19 +43,25 @@ export function useWorkflowAgentModels(): WorkflowAgentModelsCatalog {
   const client = useContractsClient();
   const selection = useWorkspaceSelectionStore((state) => state.selection);
   const projectsQuery = useProjects();
-  const target = discoveryTarget(selection, projectsQuery.data?.[0]?.id ?? null);
-  const projectsPending = projectsQuery.isPending && selection.projectId === null
-    && selection.taskId === null;
+  const target = discoveryTarget(
+    selection,
+    projectsQuery.data?.[0]?.id ?? null,
+  );
+  const projectsPending =
+    projectsQuery.isPending &&
+    selection.projectId === null &&
+    selection.taskId === null;
 
   const warmQueries = useQueries({
     queries: AGENT_CLI_ORDER.map((agentCli) => ({
       queryKey: queryKeys.warmSession(target, agentCli),
       enabled: target !== null,
-      queryFn: () => client.session.warm({
-        target: target!,
-        agentCli,
-        clientId: clientId(),
-      }),
+      queryFn: () =>
+        client.session.warm({
+          target: target!,
+          agentCli,
+          clientId: clientId(),
+        }),
       staleTime: Infinity,
       gcTime: Infinity,
       retry: false,
@@ -98,27 +107,31 @@ export function useWorkflowAgentModels(): WorkflowAgentModelsCatalog {
   }, [agentModels]);
 
   const cliStatus = useMemo(
-    () => Object.fromEntries(
-      AGENT_CLI_ORDER.map((agentCli, index) => {
-        const query = warmQueries[index];
-        return [
-          agentCli,
-          {
-            isLoading: query?.isPending === true,
-            isError: query?.isError === true,
-          },
-        ];
-      }),
-    ) as Readonly<Record<AgentCli, WorkflowAgentCliStatus>>,
+    () =>
+      Object.fromEntries(
+        AGENT_CLI_ORDER.map((agentCli, index) => {
+          const query = warmQueries[index];
+          return [
+            agentCli,
+            {
+              isLoading: query?.isPending === true,
+              isError: query?.isError === true,
+            },
+          ];
+        }),
+      ) as Readonly<Record<AgentCli, WorkflowAgentCliStatus>>,
     [warmQueries],
   );
 
-  const isLoading = projectsPending
-    || (target !== null && warmQueries.some((query) => query.isPending || query.isFetching));
-  const isError = target !== null
-    && !isLoading
-    && warmQueries.every((query) => query.isError)
-    && agentModels.length === 0;
+  const isLoading =
+    projectsPending ||
+    (target !== null &&
+      warmQueries.some((query) => query.isPending || query.isFetching));
+  const isError =
+    target !== null &&
+    !isLoading &&
+    warmQueries.every((query) => query.isError) &&
+    agentModels.length === 0;
 
   return {
     agentModels,

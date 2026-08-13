@@ -55,7 +55,9 @@ export const useSettingsStore = create<SettingsState>()(
       storage: createJSONStorage(() => window.localStorage),
       // Tolerate partial/corrupt persisted state by merging over defaults.
       merge: (persisted, current) => {
-        const persistedSettings = (persisted as Partial<SettingsState> | undefined)?.settings;
+        const persistedSettings = (
+          persisted as Partial<SettingsState> | undefined
+        )?.settings;
         return {
           ...current,
           settings: { ...DEFAULT_SETTINGS, ...(persistedSettings ?? {}) },
@@ -72,7 +74,8 @@ let themeApplier: ThemeApplier = defaultThemeApplier;
 
 function defaultThemeApplier(settings: SettingsPreferences): void {
   const media = window.matchMedia("(prefers-color-scheme: dark)");
-  const dark = settings.theme === "dark" || (settings.theme === "system" && media.matches);
+  const dark =
+    settings.theme === "dark" || (settings.theme === "system" && media.matches);
   document.documentElement.classList.toggle("dark", dark);
   document.documentElement.dataset.theme = settings.theme;
   document.documentElement.dataset.density = settings.density;
@@ -90,7 +93,9 @@ export function startThemeSubscription(): () => void {
   const apply = () => themeApplier(useSettingsStore.getState().settings);
   apply();
 
-  const unsubscribeStore = useSettingsStore.subscribe((state) => themeApplier(state.settings));
+  const unsubscribeStore = useSettingsStore.subscribe((state) =>
+    themeApplier(state.settings),
+  );
   const media = window.matchMedia("(prefers-color-scheme: dark)");
   media.addEventListener("change", apply);
 

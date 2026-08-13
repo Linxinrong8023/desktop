@@ -18,8 +18,14 @@ export type ContractCallOptions = {
 };
 
 export interface ContractTransport {
-  send<TResponse>(request: ContractTransportRequest, options?: ContractCallOptions): Promise<TResponse>;
-  stream<TEvent>(request: ContractTransportRequest, options?: ContractCallOptions): AsyncIterable<TEvent>;
+  send<TResponse>(
+    request: ContractTransportRequest,
+    options?: ContractCallOptions,
+  ): Promise<TResponse>;
+  stream<TEvent>(
+    request: ContractTransportRequest,
+    options?: ContractCallOptions,
+  ): AsyncIterable<TEvent>;
 }
 
 export type ContractStreamFrame<TEvent> =
@@ -48,8 +54,14 @@ export class RemoteContractError extends Error {
   readonly status: number | null;
   readonly responseBody: unknown;
 
-  constructor(payload: ContractError, status: number | null, responseBody: unknown) {
-    super(`Remote Ora request failed with ${payload.code} (${payload.requestId})`);
+  constructor(
+    payload: ContractError,
+    status: number | null,
+    responseBody: unknown,
+  ) {
+    super(
+      `Remote Ora request failed with ${payload.code} (${payload.requestId})`,
+    );
     this.name = "RemoteContractError";
     this.payload = payload;
     this.status = status;
@@ -72,7 +84,12 @@ export class UnknownRemoteError extends Error {
   readonly status: number | null;
   readonly responseBody: unknown;
 
-  constructor(rawCode: string, requestId: string, status: number | null, responseBody: unknown) {
+  constructor(
+    rawCode: string,
+    requestId: string,
+    status: number | null,
+    responseBody: unknown,
+  ) {
     super(`Remote Ora request returned unknown code ${rawCode} (${requestId})`);
     this.name = "UnknownRemoteError";
     this.rawCode = rawCode;
@@ -87,7 +104,11 @@ export class LocalTransportError extends Error {
   readonly kind: LocalTransportErrorKind;
   readonly causeValue: unknown;
 
-  constructor(kind: LocalTransportErrorKind, technicalMessage: string, causeValue: unknown = null) {
+  constructor(
+    kind: LocalTransportErrorKind,
+    technicalMessage: string,
+    causeValue: unknown = null,
+  ) {
     super(technicalMessage);
     this.name = "LocalTransportError";
     this.kind = kind;
@@ -112,14 +133,27 @@ export function decodeRemoteError(
 ): RemoteContractError | UnknownRemoteError | LocalTransportError {
   const base = remoteBaseSchema.safeParse(value);
   if (!base.success) {
-    return new LocalTransportError("malformed_response", "Ora returned a malformed error response", responseBody);
+    return new LocalTransportError(
+      "malformed_response",
+      "Ora returned a malformed error response",
+      responseBody,
+    );
   }
   const known = contractErrorSchema.safeParse(value);
   if (known.success) {
     return new RemoteContractError(known.data, status, responseBody);
   }
   if (knownCodes.has(base.data.code)) {
-    return new LocalTransportError("malformed_response", "Ora returned invalid parameters for a known error", responseBody);
+    return new LocalTransportError(
+      "malformed_response",
+      "Ora returned invalid parameters for a known error",
+      responseBody,
+    );
   }
-  return new UnknownRemoteError(base.data.code, base.data.requestId, status, responseBody);
+  return new UnknownRemoteError(
+    base.data.code,
+    base.data.requestId,
+    status,
+    responseBody,
+  );
 }

@@ -52,7 +52,10 @@ describe("TauriPlatformAdapter", () => {
     expect(invokeMock).toHaveBeenCalledWith("open_skill_marketplace", {
       request: { provider: "huaweiAgentCenter" },
     });
-    expect(listenMock).toHaveBeenCalledWith("skill-marketplace://status", expect.any(Function));
+    expect(listenMock).toHaveBeenCalledWith(
+      "skill-marketplace://status",
+      expect.any(Function),
+    );
     expect(listener).toHaveBeenCalledWith({
       status: "downloaded",
       provider: "huaweiAgentCenter",
@@ -66,10 +69,14 @@ describe("TauriPlatformAdapter", () => {
     invokeMock.mockResolvedValueOnce({ worktreeRoot: "/home/ora/worktrees" });
     const adapter = createTauriPlatformAdapter();
 
-    await expect(adapter.worktreeStorage.getRoot()).resolves.toBe("/home/ora/worktrees");
+    await expect(adapter.worktreeStorage.getRoot()).resolves.toBe(
+      "/home/ora/worktrees",
+    );
     await adapter.worktreeStorage.setRoot("/mnt/worktrees");
 
-    expect(invokeMock).toHaveBeenNthCalledWith(1, "get_desktop_config", { request: {} });
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "get_desktop_config", {
+      request: {},
+    });
     expect(invokeMock).toHaveBeenNthCalledWith(2, "set_worktree_root", {
       request: { worktreeRoot: "/mnt/worktrees" },
     });
@@ -93,10 +100,12 @@ describe("TauriPlatformAdapter", () => {
     saveMock.mockResolvedValue("/home/ora/export.reactflow.json");
     const adapter = createTauriPlatformAdapter();
 
-    await expect(adapter.saveTextFile({
-      defaultFileName: "workflow.reactflow.json",
-      content: "{\"id\":\"workflow\"}\n",
-    })).resolves.toBe(true);
+    await expect(
+      adapter.saveTextFile({
+        defaultFileName: "workflow.reactflow.json",
+        content: '{"id":"workflow"}\n',
+      }),
+    ).resolves.toBe(true);
 
     expect(saveMock).toHaveBeenCalledWith({
       defaultPath: "workflow.reactflow.json",
@@ -105,7 +114,7 @@ describe("TauriPlatformAdapter", () => {
     expect(invokeMock).toHaveBeenCalledWith("write_workflow_export", {
       request: {
         path: "/home/ora/export.reactflow.json",
-        content: "{\"id\":\"workflow\"}\n",
+        content: '{"id":"workflow"}\n',
       },
     });
   });

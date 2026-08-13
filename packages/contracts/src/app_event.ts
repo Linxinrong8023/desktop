@@ -3,10 +3,12 @@
 /**
  * Describes an application-level invalidation or stream lifecycle event.
  */
-export type AppEvent = { "type": "ready" } | {
-  "type": "session_title_updated";
-  session_id: string;
-};
+export type AppEvent =
+  | { type: "ready" }
+  | {
+      type: "session_title_updated";
+      session_id: string;
+    };
 
 /**
  * Opens the application event stream without filtering or ownership metadata.

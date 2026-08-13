@@ -14,10 +14,10 @@ import {
   type GraphWorkflowRun,
 } from "@ora/workflow-runtime";
 
-function baseRun(
-  overrides: Partial<GraphWorkflowRun> = {},
-): GraphWorkflowRun {
-  const snapshot = normalizeWorkflowDefinition(createMockWorkflowFixture("zh-CN"));
+function baseRun(overrides: Partial<GraphWorkflowRun> = {}): GraphWorkflowRun {
+  const snapshot = normalizeWorkflowDefinition(
+    createMockWorkflowFixture("zh-CN"),
+  );
   return {
     id: "gwr-1",
     projectId: "p1",
@@ -95,9 +95,9 @@ describe("shouldReleaseFocusToFollow", () => {
   });
 
   it("does not release without a previous sample or focus", () => {
-    expect(
-      shouldReleaseFocusToFollow(null, "understand", "succeeded"),
-    ).toBe(false);
+    expect(shouldReleaseFocusToFollow(null, "understand", "succeeded")).toBe(
+      false,
+    );
     expect(
       shouldReleaseFocusToFollow(
         { nodeId: "understand", status: "running" },
@@ -128,7 +128,10 @@ describe("resolveTheaterFocus", () => {
     const run = baseRun({
       nodeStates: {
         start: { status: "succeeded", finishedAt: "2026-08-01T12:00:01+08:00" },
-        understand: { status: "running", startedAt: "2026-08-01T12:00:02+08:00" },
+        understand: {
+          status: "running",
+          startedAt: "2026-08-01T12:00:02+08:00",
+        },
         quality: { status: "idle" },
         tests: { status: "idle" },
         review: { status: "idle" },
@@ -159,7 +162,9 @@ describe("resolveTheaterFocus", () => {
   });
 
   it("orders parallel actives by path order even when the snapshot array is reversed", () => {
-    const snapshot = normalizeWorkflowDefinition(createMockWorkflowFixture("zh-CN"));
+    const snapshot = normalizeWorkflowDefinition(
+      createMockWorkflowFixture("zh-CN"),
+    );
     const reversed = {
       ...snapshot,
       nodes: [...snapshot.nodes].reverse(),
@@ -176,7 +181,10 @@ describe("resolveTheaterFocus", () => {
       },
     });
     expect(reversed.nodes.map((node) => node.id)[0]).toBe("output");
-    expect(resolveTheaterFocus(run, null).activeIds).toEqual(["tests", "review"]);
+    expect(resolveTheaterFocus(run, null).activeIds).toEqual([
+      "tests",
+      "review",
+    ]);
   });
 
   it("prefers awaiting_input over running when choosing primary", () => {
@@ -184,7 +192,10 @@ describe("resolveTheaterFocus", () => {
       status: "awaiting_input",
       nodeStates: {
         start: { status: "succeeded", finishedAt: "a" },
-        understand: { status: "running", startedAt: "2026-08-01T12:00:20+08:00" },
+        understand: {
+          status: "running",
+          startedAt: "2026-08-01T12:00:20+08:00",
+        },
         quality: {
           status: "awaiting_input",
           startedAt: "2026-08-01T12:00:11+08:00",
@@ -205,8 +216,14 @@ describe("resolveTheaterFocus", () => {
       status: "succeeded",
       nodeStates: {
         start: { status: "succeeded", finishedAt: "2026-08-01T12:00:01+08:00" },
-        understand: { status: "succeeded", finishedAt: "2026-08-01T12:00:05+08:00" },
-        quality: { status: "succeeded", finishedAt: "2026-08-01T12:00:03+08:00" },
+        understand: {
+          status: "succeeded",
+          finishedAt: "2026-08-01T12:00:05+08:00",
+        },
+        quality: {
+          status: "succeeded",
+          finishedAt: "2026-08-01T12:00:03+08:00",
+        },
         tests: { status: "idle" },
         review: { status: "idle" },
         output: { status: "idle" },
@@ -241,7 +258,10 @@ describe("resolveOverviewFocusedId", () => {
       status: "succeeded",
       nodeStates: {
         start: { status: "succeeded", finishedAt: "2026-08-01T12:00:01+08:00" },
-        understand: { status: "succeeded", finishedAt: "2026-08-01T12:00:05+08:00" },
+        understand: {
+          status: "succeeded",
+          finishedAt: "2026-08-01T12:00:05+08:00",
+        },
         quality: { status: "idle" },
         tests: { status: "idle" },
         review: { status: "idle" },
