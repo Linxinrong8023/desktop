@@ -81,12 +81,17 @@
 - **要点（实际）**：Spec 管理 = 索引并只读展示磁盘上已有的规格 md 文档（不创建/不修改，文档属于用户文件系统工具）；SpecTarget（project/task，task 用 agent 同 cwd）；默认候选目录（OpenSpec: openspec/specs+changes、Superpowers: docs/superpowers/specs+plans+docs/plans、Custom: specs+docs/specs）；有界发现（Git ignore + 最深度归属 + 大小写合并）；安全（catalog/read 不暴露绝对根、canonicalize、只读 .md/.mdx 且仍在 catalog 内、ripgrep 15s/8MiB/10000 限额）；前端（Specs 子视图、HTML 不执行/图片阻止/仅 catalog 链接可导航、项目根不可注册为源）；scheduler 特性（迭代不重叠、错过跳过、DelayHandle 取消语义）。
 - **观察项**：LESSON-PLAN 原规划滞后于代码（第三次分支差异）；lesson-13.md 已存档。
 
-### 第 14 课：task_diff 与文件系统层
+### 第 14 课：task_diff 与文件系统层 —— ✅ 已完成（本 session）
 - **核心问题**：diff 视图的数据哪来的？`ora-fs` 提供什么？工作区文件浏览怎么限制？
 - **代码地图**：
-  - `crates/application/src/task_diff/`、`crates/backend/src/task_diff.rs`
-  - `crates/fs/`、workspace explorer（web 端）
+  - `crates/application/src/task_diff/`（README：端口/不变量）、`crates/backend/src/task_diff.rs`
+  - `crates/fs/`（path/workspace/search/watch/error）、workspace explorer（web 端）
   - `docs/task-workspace-files.md`
+- **本 session 实际覆盖（以 lesson-14.md 为准）**：
+  - 两个功能：Task Diff（Git 变更审查 + 评论：diff_id 稳定计算、anchor 必须仍匹配当前 patch 防 stale、端口静态分发、超大 patch 截断）
+  - Workspace Files（只读浏览/搜索/查看/行选择/watcher）：四层分工（fs → 映射 → HTTP/Tauri → UI）、客户端从不提供 root
+  - ora-fs 5 能力详解：path 跨平台统一、workspace canonical containment（canonicalize 后检查防 symlink 逃逸、TOCTOU 诚实标注）、search 15s/8MiB/10000 + 固定文本 + 截断上报、watch 100ms 合并 + rename 双路径 + 歧义 rescan、error 类型化 + adapter 映射
+  - 安全边界汇总表 + 共享层动机（AGENTS.md 铁律）
 - **要点**：每轮 agent 的增量文件变化（additions/deletions）、turn diff 与工具调用关联、ripgrep 注入、15s / 8MiB / 10000 结果限制、截断上报。
 
 ---
