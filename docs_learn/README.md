@@ -17,9 +17,12 @@
 - [第 8 课：Session 生命周期与 Warm Session 深入（总结）](./lesson-08.md)
 - [第 9 课：⭐ 保存上下文信息——ora-history 会话历史与 transcript（总结）](./lesson-09.md)
 - [第 10 课：⭐ 模型选择与切换（Model Selector）（总结）](./lesson-10.md)
+- [第 11 课：⭐ 切换 Agent（会话换绑）（总结）](./lesson-11.md)
+- [第 12 课：Skill 体系与 AgentDefinition（简单总结）](./lesson-12.md)
+- [第 13 课：Spec 管理与租约（ProjectWorkContext）（总结）](./lesson-13.md)
 
 ## 学习路线图
 
 - [第 6 课起的章节规划（含四个关键专题）](./LESSON-PLAN.md)
 - [Agent 教学引导（如何给用户讲解）](./AGENT-TEACHING-GUIDE.md)
-- 已学完第 1~10 课；从第 11 课（⭐ 切换 Agent：会话换绑）继续。
+- 已学完第 1~13 课；从第 14 课（task_diff 与文件系统层）继续。

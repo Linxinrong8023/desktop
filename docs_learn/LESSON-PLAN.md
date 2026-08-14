@@ -74,13 +74,12 @@
   - desktop 的 skill_marketplace、`docs/application-contracts.md` 相关部分
 - **要点**：zip-slip 防护、扩展比预算、SKILL.md front matter 校验、最近 manifest 归属规则、导入会话生命周期（prepare / preview / commit / cancel）、200MiB 上限、技能落库与 reconciliation。
 
-### 第 13 课：Spec 管理与租约（ProjectWorkContext）
-- **核心问题**：Spec 目录怎么发现和索引？窗口租约机制怎么工作？scheduler 干什么？
-- **代码地图**：
-  - `crates/application/src/spec/`、`docs/spec-management.md`
-  - `crates/application/src/project_work_context/`、`docs/project-work-contexts.md`
-  - `crates/scheduler/`
-- **要点**：SpecTarget（project/task）、默认候选目录（OpenSpec/Superpowers/自定义）、只读预览、遍历/越权防护；租约 120s 自动过期、窗口独占、Web 合成占座 vs Desktop 不支持；scheduler 的清理待办。
+### 第 13 课：Spec 管理与租约（ProjectWorkContext）—— ✅ 已完成（project_learn 分支：租约已移除）
+- **核心问题**：Spec 目录怎么发现和索引？scheduler 干什么？
+- **⚠️ 分支差异（重要）**：PWC 租约**已从当前分支移除**——`schema_v0011`（tail migration）`DROP TABLE project_work_contexts`，无 application/domain 代码，无 lease 逻辑；LESSON-PLAN 原写的“租约 120s 过期、窗口独占、Web 占座 vs Desktop 不支持”是**旧设计**，已删除。scheduler 现在只被 title acquisition/polling 当延迟定时器用（60s/10s/3s），无 cron 任务。
+- **代码地图（实际）**：`crates/application/src/spec/`（handlers/ports）、`docs/spec-management.md`、`crates/scheduler/`、`crates/db/src/migration/schema_v0011.rs`（租约移除证据）
+- **要点（实际）**：Spec 管理 = 索引并只读展示磁盘上已有的规格 md 文档（不创建/不修改，文档属于用户文件系统工具）；SpecTarget（project/task，task 用 agent 同 cwd）；默认候选目录（OpenSpec: openspec/specs+changes、Superpowers: docs/superpowers/specs+plans+docs/plans、Custom: specs+docs/specs）；有界发现（Git ignore + 最深度归属 + 大小写合并）；安全（catalog/read 不暴露绝对根、canonicalize、只读 .md/.mdx 且仍在 catalog 内、ripgrep 15s/8MiB/10000 限额）；前端（Specs 子视图、HTML 不执行/图片阻止/仅 catalog 链接可导航、项目根不可注册为源）；scheduler 特性（迭代不重叠、错过跳过、DelayHandle 取消语义）。
+- **观察项**：LESSON-PLAN 原规划滞后于代码（第三次分支差异）；lesson-13.md 已存档。
 
 ### 第 14 课：task_diff 与文件系统层
 - **核心问题**：diff 视图的数据哪来的？`ora-fs` 提供什么？工作区文件浏览怎么限制？
