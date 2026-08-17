@@ -255,16 +255,39 @@ GitlancerError
 
 **总纲**：上层只会通过接口说"我要什么"；gitlancer 负责"怎么跑 git"；DB 负责"记什么账"。git 管现状、DB 管档案，两者靠"先 Git 后 DB + 补偿"对齐，靠"存身份问权威"保持同步。
 
-## 十二、检查题（自查）
+## 十二、检查题（详细答案版）
 
-1. gitlancer 四层各管什么？哪层最容易变、哪层最稳？→ parse 最易变（格式），domain 最稳（概念）。
-2. 为什么最后要转成 domain 类型？给谁用？→ 程序内部处理信息的代码用；不给 DB 用（DB 只收字符串）；"纸条 → 卡片"。
-3. 为什么先 Git 后 DB？→ 坏状态留在不可见侧；DB 失败可补偿，Git 失败难补偿。
-4. 创建流程各失败点的补偿分别是什么？→ 见第五节表格。
-5. 为什么删任务不删 Git、删 workflow run 却删 worktree？→ 谁的东西删谁的：用户资产 vs Ora 的一次性执行环境。
-6. 路径解析为什么存 branch_name 不存路径？→ 存身份、问权威；路径可变、身份稳定；git 账本不会过期。
-7. file_changes 记在哪个节点名下？给谁看？为什么不展示时现查 git diff？→ 各节点自己的 payload；给人/前端看；账要活得过 worktree + 归属靠时间窗口。
-8. 节点间怎么协作？→ 文本通道（结论）+ 实物通道（共享 worktree 现状）；功劳清单不进 prompt。
+**1. gitlancer 四层各管什么？哪层最容易变、哪层最稳？**
+
+domain（概念+规则，不 spawn 进程不解析文本）、exec（命令对象+执行器，怎么跑）、git（类型化用例，要什么操作）、parse（文本→类型，翻译官）。**最容易变的是 parse**（git 各版本的机器输出格式有差异，status 还有 v1/v2 之分，所以只解析稳定格式，格式变了只动这一层）；**最稳定的是 domain**（仓库根/工作树/分支这些概念 git 一百年不会变）。git 层随需求增用例，exec 层兜环境问题（git 没装、输出超限、平台差异）。
+
+**2. 为什么最后要转成 domain 类型？给谁用？**
+
+git 进程和程序之间只能传文字（纸条）；程序直接在纸条上做“找哪个分支对应哪个目录”的操作容易错。parse 把纸条翻译成“卡片”（类型化对象，如 WorktreeHandle）——卡片好查、不会错（能 find、能取字段、编译期防传错）。**给程序内部接下来要处理这些信息的代码用**（git 层查找、上层取路径），**不给 DB 用**（DB 只收从卡片里抽出的字符串：branch_name、commit id）。类比 serde：JSON → DTO，DTO 是给处理逻辑用的，不是给数据库用的。
+
+**3. 为什么先 Git 后 DB？**
+
+比较两种顺序的失败后果：先 DB 后 Git → DB 成功、Git 失败 → 用户看到一个“假任务”（记录在、目录不在），agent 一进去就崩（**坏状态可见**）；先 Git 后 DB → Git 成功、DB 失败 → 目录残留（用户不可见），补偿删除即可。原则：**DB 失败容易补偿（软删一行），Git 失败/残留难补偿；所以先做难补偿的 Git，DB 失败就删掉 Git 留下的东西——坏状态永远留在用户看不见的一侧**。
+
+**4. 创建流程各失败点的补偿分别是什么？**
+
+按失败点分四层：① `git worktree add` 本身失败 → 什么都不写（无残留）；② add 成功但 `find_worktree` 发现失败 → gitlancer 内部清理（`worktree remove --force` + `branch -D`，两个独立目标，一个失败也试另一个）；③ worktree 行落库失败 → Force 删 git worktree；④ task 行落库失败 → 先软删 worktree 行，再 Force 删 git worktree。所有情况**永远返回原始业务错误**，补偿失败不吞掉主错误。Force 模式保证脏检出不能阻止回滚。
+
+**5. 为什么删任务不删 Git、删 workflow run 却删 worktree？**
+
+判断标准是“**谁的东西**”：用户手动创建的任务 = 用户的资产（目录里有产出、commit、push 的历史），Ora 无权替用户抹掉 → 只删自己的数据库记录，一行 git 都不调（目录和 `ora/<前缀>` 分支留着，用户随时能捡回）；workflow run = **Ora 自己的一次性执行环境**（“车间”，用户没在上面做自己的事）→ 删 run 时连根删（Force）。印证规则：“用户没见过的东西才能删”——创建失败补偿是唯一删 Git 的场合。`delete_task_worktree` 能力已预留，产品将来做“删除时提醒并清理”直接复用；但破坏性操作必须显式（用户确认），不隐式连带。
+
+**6. 路径解析为什么存 branch_name 不存路径？**
+
+存身份、问权威：路径**可变**（用户能移动目录、root 配置能改、目录可能被重建），身份**稳定**（`ora/<8位>` 分支名不会变）。配置的 worktree root 只是“新东西往哪放”的创建目标；已存在目录永远问 git（`git worktree list --porcelain` 是权威，git 从创建时刻就在自己 .git 的账本里记着“分支 X 的 checkout 在哪”，Ora 改配置影响不到那本账）。代码链：task → worktree 行（branch_name）→ `resolve_worktree_by_branch` → 真实目录。若用“当前配置 root + task_id”拼路径：root 被改后旧任务路径就拼错了。
+
+**7. file_changes 记在哪个节点名下？给谁看？为什么不展示时现查 git diff？**
+
+记在**各节点自己那行**的 `workflow_node_runs.payload`（JSON：stop_reason + file_changes）。**给前端/用户看**（run 详情页展示“每个节点改了什么”）——执行链路不读它（agent 只看 worktree 现状 + 上游结论文本）。**为什么不展示时现查 git diff**：① 删 run 时 worktree 连根删，账要活得过 worktree——必须预先算好存库，脱离环境独立存在；② 归属靠**时间快照窗口**（节点启动前/后的两次快照），展示时现查 diff 分不出“哪个节点的增量”——窗口过去了就没了，必须当场算。类比：摄像头按时间段录像，文件无主，归属 = “在谁的时间段里它变了”。
+
+**8. 节点间怎么协作？**
+
+两条通道 + 一份账：① **文本通道**——上游节点的结论（output）拼进下游 prompt 的 upstream 块（transitive lineage + run input）；② **实物通道**——共享 worktree，上游改的文件真实留在目录里，下游直接看合并后的现状；③ **功劳清单**（file_changes）不进 prompt，只存 DB 给用户看。核心：下游 agent 不需要知道“谁改的”，只需要“现状 + 结论”；账本是给“人”看的（结果可解释性：output 会吹牛，git diff 不会——节点级 git blame）。
 
 ## 十三、术语表新增
 

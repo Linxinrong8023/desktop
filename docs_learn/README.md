@@ -21,9 +21,12 @@
 - [第 12 课：Skill 体系与 AgentDefinition（简单总结）](./lesson-12.md)
 - [第 13 课：Spec 管理与租约（ProjectWorkContext）（总结）](./lesson-13.md)
 - [第 14 课：task_diff 与文件系统层（总结）](./lesson-14.md)
+- [第 15 课：Workflow 定义与版本管理（总结）](./lesson-15.md)
+- [第 16 课：Workflow 运行引擎（总结）](./lesson-16.md)
+- [第 17 课：Workflow 前端设计模式 + 模块全貌（总结）](./lesson-17.md)
 
 ## 学习路线图
 
 - [第 6 课起的章节规划（含四个关键专题）](./LESSON-PLAN.md)
 - [Agent 教学引导（如何给用户讲解）](./AGENT-TEACHING-GUIDE.md)
-- 已学完第 1~14 课（第一段后端纵深完成）；从第 15 课（Workflow 定义与版本管理，第二段 Workflow 专线）继续。
+- 已学完第 1~17 课（第二段 Workflow 专线全部完成）；第 18~19 课偏前端（可不学/粗读），第 20 课 Web 服务器运行时、第 21 课桌面运行时（Tauri）值得细学。
