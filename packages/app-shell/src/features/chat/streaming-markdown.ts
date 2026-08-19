@@ -6,7 +6,8 @@ import remend, {
 } from "remend";
 
 const AMBIGUOUS_INLINE_DELIMITER_PATTERN = /(?:\*+|_+|~+|`+)$/;
-const AMBIGUOUS_BLOCK_MARKER_PATTERN = /^[ \t]{0,3}(?:#{1,6}|>|[-+*]|\d{1,9}[.)])[ \t]*$/;
+const AMBIGUOUS_BLOCK_MARKER_PATTERN =
+  /^[ \t]{0,3}(?:#{1,6}|>|[-+*]|\d{1,9}[.)])[ \t]*$/;
 
 const pendingBoundaryHandler: RemendHandler = {
   name: "pending-markdown-boundary",
@@ -30,9 +31,9 @@ function withholdPendingBoundary(markdown: string) {
   const lineStart = markdown.lastIndexOf("\n") + 1;
   const lastLine = markdown.slice(lineStart);
   if (
-    AMBIGUOUS_BLOCK_MARKER_PATTERN.test(lastLine)
-    && !isWithinCodeBlock(markdown, lineStart)
-    && !isWithinMathBlock(markdown, lineStart)
+    AMBIGUOUS_BLOCK_MARKER_PATTERN.test(lastLine) &&
+    !isWithinCodeBlock(markdown, lineStart) &&
+    !isWithinMathBlock(markdown, lineStart)
   ) {
     return markdown.slice(0, lineStart);
   }
@@ -41,14 +42,18 @@ function withholdPendingBoundary(markdown: string) {
   if (!delimiterMatch) return markdown;
   const delimiterStart = markdown.length - delimiterMatch[0].length;
   let escapeCount = 0;
-  for (let index = delimiterStart - 1; index >= 0 && markdown[index] === "\\"; index -= 1) {
+  for (
+    let index = delimiterStart - 1;
+    index >= 0 && markdown[index] === "\\";
+    index -= 1
+  ) {
     escapeCount += 1;
   }
   if (
-    escapeCount % 2 === 1
-    || isWithinCodeBlock(markdown, delimiterStart)
-    || isWithinMathBlock(markdown, delimiterStart)
-    || isWithinLinkOrImageUrl(markdown, delimiterStart)
+    escapeCount % 2 === 1 ||
+    isWithinCodeBlock(markdown, delimiterStart) ||
+    isWithinMathBlock(markdown, delimiterStart) ||
+    isWithinLinkOrImageUrl(markdown, delimiterStart)
   ) {
     return markdown;
   }

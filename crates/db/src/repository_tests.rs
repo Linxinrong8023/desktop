@@ -9,18 +9,17 @@ use ora_application::{
     ActivateVersionResult, AdvanceWorkflowRunResult, AgentDefinitionRepository,
     CancelWorkflowRunResult, Clock, DeleteSnapshotResult, DeleteWorkflowResult,
     DeleteWorkflowRunResult, EngineError, ExecutionContext, NodeExecutor, NodeRunToStart, NodeType,
-    ProjectRepository, ProjectSpecSourceOverrideRepository, PublishSnapshotResult, RepositoryError,
-    RestartWorkflowRunResult, RollbackDraftResult, SessionRepository, SkillRepository,
-    StartWorkflowRunResult, TaskRepository, UpdateWorkflowRunInputResult, WorkflowGraphNode,
-    WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunControlHandler,
-    WorkflowRunCreateOutcome, WorkflowRunEngine, WorkflowRunEngineRepository,
-    WorkflowRunRepository, WorkflowValidationError, WorktreeRepository,
+    ProjectRepository, PublishSnapshotResult, RepositoryError, RestartWorkflowRunResult,
+    RollbackDraftResult, SessionRepository, SkillRepository, StartWorkflowRunResult,
+    TaskRepository, UpdateWorkflowRunInputResult, WorkflowGraphNode, WorkflowNodeRunIdGenerator,
+    WorkflowRepository, WorkflowRunControlHandler, WorkflowRunCreateOutcome, WorkflowRunEngine,
+    WorkflowRunEngineRepository, WorkflowRunRepository, WorkflowValidationError,
+    WorktreeRepository,
 };
 use ora_contracts::{StartWorkflowRunRequest, WorkflowRunStatus as ContractRunStatus};
 use ora_domain::{
-    AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Project, ProjectId,
-    ProjectSpecSourceOverride, ProjectSpecSourceOverrideId, Session, SessionId, SessionStatus,
-    SessionTitle, Skill, SkillId, SpecSourceVisibility, SpecWorkflow, Task, TaskId, TaskStatus,
+    AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Namespace, Project,
+    ProjectId, Session, SessionId, SessionStatus, SessionTitle, Skill, SkillId, Task, TaskId,
     Workflow, WorkflowId, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRun, WorkflowRunDetail,
     WorkflowRunId, WorkflowRunStatus, WorkflowRunSummary, WorkflowSnapshot, WorkflowSnapshotId,
     Worktree, WorktreeActivity, WorktreeBaseline, WorktreeId, WorktreeProvisioningLeaseId,
@@ -32,114 +31,14 @@ use tempfile::TempDir;
 use crate::{
     CascadeDeleteOutcome, DatabaseBootstrapper, DatabaseError, DatabaseLocation, RepositoryPool,
     SqliteAgentDefinitionRepository, SqliteCascadeRepository, SqliteProjectRepository,
-    SqliteProjectSpecSourceOverrideRepository, SqliteSessionRepository, SqliteSkillRepository,
-    SqliteTaskRepository, SqliteWorkflowRepository, SqliteWorkflowRunEngineRepository,
-    SqliteWorkflowRunRepository, SqliteWorktreeRepository, TimestampSource,
-    default_migration_catalog,
+    SqliteSessionRepository, SqliteSkillRepository, SqliteTaskRepository, SqliteWorkflowRepository,
+    SqliteWorkflowRunEngineRepository, SqliteWorkflowRunRepository, SqliteWorktreeRepository,
+    TimestampSource, default_migration_catalog,
 };
 
-/// Verifies source replacement is atomic at the collection boundary and hides prior rows.
+/// Verifies catalog repositories scope duplicate names by namespace and hide soft-deleted rows.
 #[test]
-fn project_spec_source_repository_replaces_active_configuration() {
-    let (_temp_dir, pool) = bootstrapped_repository_pool();
-    let project_repository = SqliteProjectRepository::new(pool.clone());
-    let repository = SqliteProjectSpecSourceOverrideRepository::new(pool);
-    let project_id = ProjectId::new("project-specs");
-    project_repository
-        .create_project(Project::new(
-            project_id.clone(),
-            "Specs",
-            "C:/project",
-            AuditFields::new(1, 1, false),
-        ))
-        .unwrap();
-    let initial = ProjectSpecSourceOverride::new(
-        ProjectSpecSourceOverrideId::new("source-1"),
-        project_id.clone(),
-        "openspec/specs",
-        SpecWorkflow::OpenSpec,
-        SpecSourceVisibility::Enabled,
-        AuditFields::new(2, 2, false),
-    );
-    repository
-        .replace_spec_source_overrides(&project_id, vec![initial.clone()], 2)
-        .unwrap();
-    let conflicting_replacement = ProjectSpecSourceOverride::new(
-        ProjectSpecSourceOverrideId::new("source-1"),
-        project_id.clone(),
-        "docs/specs",
-        SpecWorkflow::Custom {
-            name: "Custom".to_string(),
-        },
-        SpecSourceVisibility::Enabled,
-        AuditFields::new(3, 3, false),
-    );
-    assert!(
-        repository
-            .replace_spec_source_overrides(&project_id, vec![conflicting_replacement], 3)
-            .is_err()
-    );
-    assert_eq!(
-        repository.list_spec_source_overrides(&project_id).unwrap(),
-        vec![initial]
-    );
-    let replacement = ProjectSpecSourceOverride::new(
-        ProjectSpecSourceOverrideId::new("source-2"),
-        project_id.clone(),
-        "docs/plans",
-        SpecWorkflow::Superpowers,
-        SpecSourceVisibility::Disabled,
-        AuditFields::new(3, 3, false),
-    );
-
-    assert_eq!(
-        repository
-            .replace_spec_source_overrides(&project_id, vec![replacement.clone()], 3)
-            .unwrap(),
-        vec![replacement.clone()]
-    );
-    assert_eq!(
-        repository.list_spec_source_overrides(&project_id).unwrap(),
-        vec![replacement]
-    );
-}
-
-/// Verifies migration constraints keep custom workflow names and built-in columns consistent.
-#[test]
-fn project_spec_source_schema_rejects_invalid_workflow_columns() {
-    let (_temp_dir, pool) = bootstrapped_repository_pool();
-    SqliteProjectRepository::new(pool.clone())
-        .create_project(Project::new(
-            ProjectId::new("project-spec-constraints"),
-            "Specs",
-            "C:/project",
-            AuditFields::new(1, 1, false),
-        ))
-        .unwrap();
-
-    for (id, workflow_kind, custom_name) in [
-        ("missing-custom-name", "custom", None),
-        ("unexpected-built-in-name", "open_spec", Some("OpenSpec")),
-    ] {
-        assert!(
-            pool.with_connection(|connection| {
-                connection.execute(
-                    "INSERT INTO project_spec_source_overrides (
-                        id, project_id, relative_path, workflow_kind, custom_name, visibility,
-                        created_at, updated_at, is_deleted
-                     ) VALUES (?1, 'project-spec-constraints', ?1, ?2, ?3, 'enabled', 1, 1, 0)",
-                    rusqlite::params![id, workflow_kind, custom_name],
-                )?;
-                Ok(())
-            })
-            .is_err()
-        );
-    }
-}
-
-/// Verifies catalog repositories use stable identifiers and hide soft-deleted rows.
-#[test]
-fn catalog_repositories_support_id_based_crud_and_allow_duplicate_names() {
+fn catalog_repositories_support_id_based_crud_and_namespaced_names() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let skill_repository = SqliteSkillRepository::new(pool.clone());
     let agent_repository = SqliteAgentDefinitionRepository::new(pool);
@@ -158,8 +57,10 @@ fn catalog_repositories_support_id_based_crud_and_allow_duplicate_names() {
             .unwrap(),
         created_agent.clone()
     );
-    let earlier_skill = skill("skill-0", "review", "Builds", 0, 0, false);
-    let earlier_agent = agent("agent-0", "opencode", "Assists", 0, 0, false);
+    let mut earlier_skill = skill("skill-0", "review", "Builds", 0, 0, false);
+    earlier_skill.namespace = Namespace::new("ora.plugin").unwrap();
+    let mut earlier_agent = agent("agent-0", "opencode", "Assists", 0, 0, false);
+    earlier_agent.namespace = Namespace::new("ora.plugin").unwrap();
     skill_repository
         .create_skill(earlier_skill.clone())
         .unwrap();
@@ -173,6 +74,18 @@ fn catalog_repositories_support_id_based_crud_and_allow_duplicate_names() {
     assert_eq!(
         agent_repository.list_agent_definitions().unwrap(),
         vec![earlier_agent.clone(), created_agent.clone()]
+    );
+    assert_eq!(
+        skill_repository
+            .find_skill_by_name(&Namespace::local(), "REVIEW")
+            .unwrap(),
+        Some(created_skill.clone())
+    );
+    assert_eq!(
+        skill_repository
+            .find_skill_by_name(&earlier_skill.namespace, "REVIEW")
+            .unwrap(),
+        Some(earlier_skill.clone())
     );
     let renamed_skill = skill("skill-1", "reviewer", "Reviews code", 1, 2, false);
     let renamed_agent = agent("agent-1", "reviewer-agent", "Reviews code", 1, 2, false);
@@ -226,6 +139,49 @@ fn catalog_repositories_support_id_based_crud_and_allow_duplicate_names() {
     );
 }
 
+/// Verifies workflow names are unique case-insensitively within each visible namespace.
+#[test]
+fn workflow_repository_scopes_visible_name_uniqueness_by_namespace() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool);
+    let (mut local, local_draft) = workflow_with_draft("local-workflow", "{}", 1);
+    local.name = "Review".to_string();
+    repository
+        .create_workflow(local.clone(), local_draft)
+        .unwrap();
+
+    let (mut duplicate, duplicate_draft) = workflow_with_draft("duplicate", "{}", 2);
+    duplicate.name = "REVIEW".to_string();
+    assert!(
+        repository
+            .create_workflow(duplicate, duplicate_draft)
+            .is_err()
+    );
+
+    let (mut plugin, plugin_draft) = workflow_with_draft("plugin-workflow", "{}", 3);
+    plugin.namespace = Namespace::new("ora.plugin").unwrap();
+    plugin.name = "review".to_string();
+    repository
+        .create_workflow(plugin.clone(), plugin_draft)
+        .unwrap();
+    assert_eq!(
+        repository
+            .find_workflow_by_name(&plugin.namespace, "REVIEW")
+            .unwrap(),
+        Some(plugin)
+    );
+
+    assert_eq!(
+        repository.soft_delete_workflow(&local.id, 4).unwrap(),
+        DeleteWorkflowResult::Deleted
+    );
+    let (mut replacement, replacement_draft) = workflow_with_draft("replacement", "{}", 5);
+    replacement.name = "review".to_string();
+    repository
+        .create_workflow(replacement, replacement_draft)
+        .unwrap();
+}
+
 /// Verifies lifecycle commands cannot use another workflow's snapshot as their source.
 #[test]
 fn workflow_repository_rejects_cross_workflow_lifecycle_targets() {
@@ -273,6 +229,7 @@ fn workflow_repository_rejects_cross_workflow_lifecycle_targets() {
             .expect("workflow B remains visible"),
         Workflow::new(
             workflow_b.id.clone(),
+            Namespace::local(),
             "Workflow workflow-b",
             Some(snapshot_b.id.clone()),
             AuditFields::new(20, 40, /*is_deleted*/ false),
@@ -737,7 +694,6 @@ fn workflow_run_repository_creates_and_reads_run() {
         task_id.clone(),
         ProjectId::new("project-1"),
         "Workflow workflow-a 30",
-        TaskStatus::Todo,
         run_id.clone(),
         worktree_id.clone(),
         AuditFields::new(30, 30, /*is_deleted*/ false),
@@ -815,8 +771,8 @@ fn workflow_run_repository_requires_run_row_before_task_row() {
 
     let result = pool.with_connection(|connection| {
         connection.execute(
-            "INSERT INTO tasks (id, project_id, title, status, type, workflow_run_id, created_at, updated_at, is_deleted)
-             VALUES ('task-orphan', 'project-1', 'orphan', 0, 1, 'run-missing', 1, 1, 0)",
+            "INSERT INTO tasks (id, project_id, title, type, workflow_run_id, created_at, updated_at, is_deleted)
+             VALUES ('task-orphan', 'project-1', 'orphan', 1, 'run-missing', 1, 1, 0)",
             [],
         )?;
         Ok(())
@@ -869,7 +825,6 @@ fn create_pending_run_fixture(pool: &RepositoryPool) -> (WorkflowRunId, TaskId, 
         task_id.clone(),
         ProjectId::new("project-1"),
         "Workflow workflow-a 30",
-        TaskStatus::Todo,
         run_id.clone(),
         worktree_id.clone(),
         AuditFields::new(30, 30, /*is_deleted*/ false),
@@ -1715,7 +1670,6 @@ fn create_pending_run_with_graph(
         task_id.clone(),
         ProjectId::new("project-1"),
         "Workflow workflow-engine 30",
-        TaskStatus::Todo,
         run_id.clone(),
         worktree_id.clone(),
         AuditFields::new(30, 30, /*is_deleted*/ false),
@@ -2231,6 +2185,7 @@ fn workflow_with_draft(id: &str, graph: &str, created_at: i64) -> (Workflow, Wor
     let workflow_id = WorkflowId::new(id);
     let workflow = Workflow::new(
         workflow_id.clone(),
+        Namespace::local(),
         format!("Workflow {id}"),
         /*published_snapshot_id*/ None,
         AuditFields::new(created_at, created_at, /*is_deleted*/ false),
@@ -2278,6 +2233,7 @@ fn skill(
 ) -> Skill {
     Skill::new(
         SkillId::new(id),
+        Namespace::local(),
         name,
         description,
         AuditFields::new(created_at, updated_at, is_deleted),
@@ -2295,6 +2251,7 @@ fn agent(
 ) -> AgentDefinition {
     AgentDefinition::new(
         AgentDefinitionId::new(id),
+        Namespace::local(),
         name,
         description,
         "",
@@ -2398,7 +2355,6 @@ fn task_repository_supports_crud_and_soft_delete() {
         TaskId::new("task-1"),
         ProjectId::new("project-1"),
         "Wire the pool",
-        TaskStatus::Todo,
         Some(WorktreeId::new("worktree-1")),
         AuditFields::new(11, 11, false),
     );
@@ -2417,7 +2373,6 @@ fn task_repository_supports_crud_and_soft_delete() {
         created_task.id.clone(),
         created_task.project_id.clone(),
         "Wire the repository pool",
-        TaskStatus::Doing,
         None,
         AuditFields::new(11, 21, false),
     );
@@ -2460,7 +2415,6 @@ fn session_repository_supports_crud_and_soft_delete() {
             TaskId::new("task-1"),
             ProjectId::new("project-1"),
             "Test sessions",
-            TaskStatus::Todo,
             None,
             AuditFields::new(11, 11, false),
         ))
@@ -2752,7 +2706,6 @@ fn repository_pool_composes_all_repository_adapters() {
         TaskId::new("task-1"),
         project.id.clone(),
         "Implement pool composition",
-        TaskStatus::Todo,
         Some(WorktreeId::new("worktree-1")),
         AuditFields::new(41, 41, false),
     );
@@ -2818,7 +2771,7 @@ fn task_cascade_delete_is_atomic_and_does_not_require_git() {
         repository.delete_task(&TaskId::new("task-1"), 20).unwrap(),
         CascadeDeleteOutcome::ActiveSession
     );
-    assert_eq!(cascade_flags(&pool), (0, 0, 0, 0, 0));
+    assert_eq!(cascade_flags(&pool), (0, 0, 0, 0));
     pool.with_connection(|connection| {
         connection.execute(
             "UPDATE sessions SET status = ?1 WHERE id = 'session-1'",
@@ -2832,7 +2785,7 @@ fn task_cascade_delete_is_atomic_and_does_not_require_git() {
         repository.delete_task(&TaskId::new("task-1"), 30).unwrap(),
         CascadeDeleteOutcome::Deleted
     );
-    assert_eq!(cascade_flags(&pool), (0, 1, 1, 1, 0));
+    assert_eq!(cascade_flags(&pool), (0, 1, 1, 1));
 }
 
 /// Verifies project deletion soft-deletes the full Ora aggregate without touching external state.
@@ -2848,7 +2801,7 @@ fn project_cascade_delete_soft_deletes_aggregate_without_touching_external_state
             .unwrap(),
         CascadeDeleteOutcome::Deleted
     );
-    assert_eq!(cascade_flags(&pool), (1, 1, 1, 1, 1));
+    assert_eq!(cascade_flags(&pool), (1, 1, 1, 1));
 }
 
 /// Inserts one complete aggregate using only Ora-owned rows, deliberately without Git fixtures.
@@ -2856,18 +2809,11 @@ fn insert_cascade_fixture(pool: &RepositoryPool, session_status: SessionStatus) 
     pool.with_connection(|connection| {
         connection.execute_batch(
             "INSERT INTO projects VALUES ('project-1', 'Ora', '/not/a/repository', 1, 1, 0);
-             INSERT INTO tasks (id, project_id, title, status, worktree_id, created_at, updated_at, is_deleted)
-             VALUES ('task-1', 'project-1', 'Task', 0, 'worktree-1', 1, 1, 0);
+             INSERT INTO tasks (id, project_id, title, worktree_id, created_at, updated_at, is_deleted)
+             VALUES ('task-1', 'project-1', 'Task', 'worktree-1', 1, 1, 0);
              INSERT INTO worktrees (
                  id, task_id, branch_name, is_active, created_at, updated_at, is_deleted, base_commit_id
              ) VALUES ('worktree-1', 'task-1', 'ora/task-1', 1, 1, 1, 0, 'base-commit');",
-        )?;
-        connection.execute(
-            "INSERT INTO project_spec_source_overrides (
-                id, project_id, relative_path, workflow_kind, custom_name, visibility,
-                created_at, updated_at, is_deleted
-             ) VALUES ('source-1', 'project-1', 'docs/specs', 'custom', 'Custom', 'enabled', 1, 1, 0)",
-            [],
         )?;
         // Columns are named rather than positional so a later schema addition
         // does not silently shift this fixture's values into the wrong ones.
@@ -2882,7 +2828,7 @@ fn insert_cascade_fixture(pool: &RepositoryPool, session_status: SessionStatus) 
 }
 
 /// Reads all aggregate deletion markers touched by a cascade.
-fn cascade_flags(pool: &RepositoryPool) -> (i64, i64, i64, i64, i64) {
+fn cascade_flags(pool: &RepositoryPool) -> (i64, i64, i64, i64) {
     pool.with_connection(|connection| {
         Ok((
             connection.query_row(
@@ -2902,11 +2848,6 @@ fn cascade_flags(pool: &RepositoryPool) -> (i64, i64, i64, i64, i64) {
             )?,
             connection.query_row(
                 "SELECT is_deleted FROM sessions WHERE id = 'session-1'",
-                [],
-                |row| row.get(0),
-            )?,
-            connection.query_row(
-                "SELECT is_deleted FROM project_spec_source_overrides WHERE id = 'source-1'",
                 [],
                 |row| row.get(0),
             )?,
@@ -2935,7 +2876,7 @@ fn project_repository_reports_sqlite_failures() {
     );
 }
 
-/// Verifies task repositories translate invalid persisted status values into application-owned errors.
+/// Verifies task repositories translate invalid persisted type values into application-owned errors.
 #[test]
 fn task_repository_reports_row_mapping_failures() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
@@ -2947,7 +2888,7 @@ fn task_repository_reports_row_mapping_failures() {
         repository
             .find_task(&TaskId::new("task-invalid"))
             .unwrap_err(),
-        "domain model error: invalid task status value: 99",
+        "domain model error: invalid task type value: 99",
     );
 }
 
@@ -3014,11 +2955,11 @@ fn database_path(temp_dir: &TempDir) -> PathBuf {
     temp_dir.path().join("repository.sqlite3")
 }
 
-/// Inserts one task row with an invalid status integer for row-mapping error coverage.
+/// Inserts one task row with an invalid type integer for row-mapping error coverage.
 fn insert_invalid_task_row(pool: &RepositoryPool) {
     pool.with_connection(|connection| {
         connection.execute(
-            "INSERT INTO tasks (id, project_id, title, status, worktree_id, created_at, updated_at, is_deleted)
+            "INSERT INTO tasks (id, project_id, title, type, worktree_id, created_at, updated_at, is_deleted)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 "task-invalid",

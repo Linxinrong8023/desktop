@@ -10,7 +10,9 @@ use ora_contracts::{
     RollbackWorkflowRequest, RollbackWorkflowResponse, UpdateDraftRequest, UpdateDraftResponse,
     UpdateWorkflowRequest, UpdateWorkflowResponse,
 };
-use ora_domain::{AuditFields, Workflow, WorkflowId, WorkflowSnapshot, WorkflowSnapshotId};
+use ora_domain::{
+    AuditFields, Namespace, Workflow, WorkflowId, WorkflowSnapshot, WorkflowSnapshotId,
+};
 
 use crate::workflow::mapper::{
     map_created_workflow, map_snapshot, map_workflow, map_workflow_detail, map_workflow_summary,
@@ -64,10 +66,14 @@ where
         let workflow_id = self.id_generator.generate_workflow_id();
         let snapshot_id = self.id_generator.generate_snapshot_id();
         let graph = request.graph.unwrap_or_else(|| DEFAULT_GRAPH.to_string());
+        let namespace = Namespace::local();
+        let name = request.name.trim().to_string();
+        reject_conflicting_workflow_name(&self.repository, &namespace, &name, None)?;
 
         let workflow = Workflow::new(
             workflow_id.clone(),
-            request.name,
+            namespace,
+            name,
             /*published_snapshot_id*/ None,
             AuditFields::new(now, now, /*is_deleted*/ false),
         )
@@ -189,6 +195,7 @@ where
 
         let workflow = Workflow::new(
             workflow_id.clone(),
+            existing.namespace.clone(),
             request.name,
             existing.published_snapshot_id,
             AuditFields::new(
@@ -198,6 +205,13 @@ where
             ),
         )
         .map_err(ApplicationError::from_workflow_domain_error)?;
+
+        reject_conflicting_workflow_name(
+            self.repository.as_ref(),
+            &workflow.namespace,
+            &workflow.name,
+            Some(&workflow_id),
+        )?;
 
         let updated = self
             .repository
@@ -217,6 +231,25 @@ where
         Ok(UpdateWorkflowResponse {
             workflow: map_workflow(updated),
         })
+    }
+}
+
+/// Rejects a workflow name already owned by another visible workflow in the same namespace.
+fn reject_conflicting_workflow_name<Repository: WorkflowRepository>(
+    repository: &Repository,
+    namespace: &Namespace,
+    name: &str,
+    own_id: Option<&WorkflowId>,
+) -> Result<(), ApplicationError> {
+    match repository
+        .find_workflow_by_name(namespace, name)
+        .map_err(ApplicationError::from_workflow_repository_error)?
+    {
+        Some(other) if Some(&other.id) != own_id => Err(ApplicationError::WorkflowNameConflict {
+            namespace: namespace.to_string(),
+            name: name.to_string(),
+        }),
+        _ => Ok(()),
     }
 }
 

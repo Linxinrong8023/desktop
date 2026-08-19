@@ -29,47 +29,7 @@ pub enum SpecWorkflow {
     Custom { name: String },
 }
 
-/// Records whether a source came from Ora defaults, discovery, or an explicit user choice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export_to = "spec.ts")]
-pub enum SpecSourceOrigin {
-    Default,
-    Discovered,
-    Manual,
-}
-
-/// Records whether a source participates in the effective catalog.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export_to = "spec.ts")]
-pub enum SpecSourceVisibility {
-    Enabled,
-    Disabled,
-}
-
-/// Records whether a configured source exists in the selected checkout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export_to = "spec.ts")]
-pub enum SpecSourceAvailability {
-    Available,
-    Missing,
-}
-
-/// Describes one effective or disabled specification source in the selected context.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "spec.ts")]
-pub struct SpecSource {
-    pub relative_path: String,
-    pub workflow: SpecWorkflow,
-    pub origin: SpecSourceOrigin,
-    pub visibility: SpecSourceVisibility,
-    pub availability: SpecSourceAvailability,
-}
-
-/// Describes one Markdown document assigned to an enabled source.
+/// Describes one Markdown document assigned to an automatically detected source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "spec.ts")]
@@ -88,12 +48,11 @@ pub struct GetSpecCatalogRequest {
     pub target: SpecTarget,
 }
 
-/// Returns source state plus the bounded Markdown document index.
+/// Returns the bounded Markdown document index.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "spec.ts")]
 pub struct SpecCatalogResponse {
-    pub sources: Vec<SpecSource>,
     pub documents: Vec<SpecDocument>,
     pub truncated: bool,
 }
@@ -117,51 +76,6 @@ pub struct ReadSpecResponse {
     pub byte_size: u32,
 }
 
-/// Validates an absolute directory selected by the existing platform picker.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "spec.ts")]
-pub struct ResolveSpecSourceRequest {
-    pub target: SpecTarget,
-    pub absolute_path: String,
-}
-
-/// Returns the normalized source path and workflow inferred from its segments.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "spec.ts")]
-pub struct ResolveSpecSourceResponse {
-    pub relative_path: String,
-    pub workflow: SpecWorkflow,
-}
-
-/// Carries one project-level source override in an atomic replacement request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "spec.ts")]
-pub struct ProjectSpecSourceOverride {
-    pub relative_path: String,
-    pub workflow: SpecWorkflow,
-    pub visibility: SpecSourceVisibility,
-}
-
-/// Atomically replaces all source overrides owned by one project.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "spec.ts")]
-pub struct UpdateProjectSpecSourcesRequest {
-    pub project_id: String,
-    pub sources: Vec<ProjectSpecSourceOverride>,
-}
-
-/// Returns the persisted replacement so adapters share one authoritative representation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "spec.ts")]
-pub struct UpdateProjectSpecSourcesResponse {
-    pub sources: Vec<ProjectSpecSourceOverride>,
-}
-
 /// Starts specification-aware workspace file monitoring for one target.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -177,20 +91,11 @@ pub type WatchSpecsEvent = WorkspaceFileEventBatch;
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     SpecTarget::export(config)?;
     SpecWorkflow::export(config)?;
-    SpecSourceOrigin::export(config)?;
-    SpecSourceVisibility::export(config)?;
-    SpecSourceAvailability::export(config)?;
-    SpecSource::export(config)?;
     SpecDocument::export(config)?;
     GetSpecCatalogRequest::export(config)?;
     SpecCatalogResponse::export(config)?;
     ReadSpecRequest::export(config)?;
     ReadSpecResponse::export(config)?;
-    ResolveSpecSourceRequest::export(config)?;
-    ResolveSpecSourceResponse::export(config)?;
-    ProjectSpecSourceOverride::export(config)?;
-    UpdateProjectSpecSourcesRequest::export(config)?;
-    UpdateProjectSpecSourcesResponse::export(config)?;
     WatchSpecsRequest::export(config)?;
     Ok(())
 }

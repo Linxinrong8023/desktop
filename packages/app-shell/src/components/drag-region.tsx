@@ -26,7 +26,9 @@ export function DragRegion({
       className={cn("flex min-w-0 flex-1 items-center self-stretch", className)}
     >
       {children !== undefined && (
-        <div className="pointer-events-none flex min-w-0 items-center gap-2">{children}</div>
+        <div className="pointer-events-none flex min-w-0 items-center gap-2">
+          {children}
+        </div>
       )}
     </div>
   );

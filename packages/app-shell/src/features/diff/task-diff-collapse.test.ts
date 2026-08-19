@@ -19,9 +19,13 @@ describe("collapsed task diff sections", () => {
     const file = parseDiff(COMPLETE_CONTEXT_PATCH)[0]!;
     const segments = buildCollapsedDiffSegments(file.hunks, new Set());
 
-    expect(segments.map((segment) =>
-      segment.kind === "collapsed" ? ["collapsed", segment.lineCount] : ["hunk", segment.hunk.changes.length]
-    )).toEqual([
+    expect(
+      segments.map((segment) =>
+        segment.kind === "collapsed"
+          ? ["collapsed", segment.lineCount]
+          : ["hunk", segment.hunk.changes.length],
+      ),
+    ).toEqual([
       ["collapsed", 6],
       ["hunk", 8],
       ["collapsed", 7],
@@ -31,7 +35,9 @@ describe("collapsed task diff sections", () => {
   it("restores an expanded block from the original complete-context hunk", () => {
     const file = parseDiff(COMPLETE_CONTEXT_PATCH)[0]!;
     const collapsed = buildCollapsedDiffSegments(file.hunks, new Set());
-    const firstBlock = collapsed.find((segment) => segment.kind === "collapsed");
+    const firstBlock = collapsed.find(
+      (segment) => segment.kind === "collapsed",
+    );
     expect(firstBlock?.kind).toBe("collapsed");
 
     const expanded = buildCollapsedDiffSegments(
@@ -39,7 +45,13 @@ describe("collapsed task diff sections", () => {
       new Set(firstBlock?.kind === "collapsed" ? [firstBlock.key] : []),
     );
 
-    expect(expanded.map((segment) => segment.kind)).toEqual(["hunk", "hunk", "collapsed"]);
-    expect(expanded[0]?.kind === "hunk" ? expanded[0].hunk.changes.length : 0).toBe(6);
+    expect(expanded.map((segment) => segment.kind)).toEqual([
+      "hunk",
+      "hunk",
+      "collapsed",
+    ]);
+    expect(
+      expanded[0]?.kind === "hunk" ? expanded[0].hunk.changes.length : 0,
+    ).toBe(6);
   });
 });

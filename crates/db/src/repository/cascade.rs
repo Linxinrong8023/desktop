@@ -30,11 +30,11 @@ impl SqliteCascadeRepository {
         task_id: &TaskId,
         deleted_at: i64,
     ) -> Result<CascadeDeleteOutcome, crate::DatabaseError> {
-        self.pool.with_connection(|connection| {
+        self.pool.with_connection_mut(|connection| {
             // Acquiring the writer reservation before checking status prevents a load from
             // making a descendant Running between validation and the cascade updates.
             let transaction =
-                Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                Transaction::new(connection, TransactionBehavior::Immediate)?;
             let exists = transaction
                 .query_row(
                     "SELECT 1 FROM tasks WHERE id = ?1 AND is_deleted = 0",
@@ -90,10 +90,10 @@ impl SqliteCascadeRepository {
         project_id: &ProjectId,
         deleted_at: i64,
     ) -> Result<CascadeDeleteOutcome, crate::DatabaseError> {
-        self.pool.with_connection(|connection| {
+        self.pool.with_connection_mut(|connection| {
             // Project deletion needs the same write reservation across every descendant check.
             let transaction =
-                Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                Transaction::new(connection, TransactionBehavior::Immediate)?;
             let exists = transaction
                 .query_row(
                     "SELECT 1 FROM projects WHERE id = ?1 AND is_deleted = 0",
@@ -141,12 +141,6 @@ impl SqliteCascadeRepository {
             )?;
             transaction.execute(
                 "UPDATE tasks SET updated_at = ?2, is_deleted = 1 WHERE project_id = ?1 AND is_deleted = 0",
-                params![project_id.as_ref(), deleted_at],
-            )?;
-            transaction.execute(
-                "UPDATE project_spec_source_overrides
-                 SET updated_at = ?2, is_deleted = 1
-                 WHERE project_id = ?1 AND is_deleted = 0",
                 params![project_id.as_ref(), deleted_at],
             )?;
             transaction.execute(

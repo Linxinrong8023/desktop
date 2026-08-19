@@ -122,13 +122,6 @@ pub enum WarmSessionTarget {
 pub struct WarmSessionRequest {
     pub target: WarmSessionTarget,
     pub agent_cli: AgentCli,
-    /// Identifies the client surface that will own the returned session.
-    ///
-    /// Warm entries are keyed by this value because one backend can serve
-    /// several clients (browser tabs against the Web server). Without it two
-    /// tabs showing the same selection would share one provider session, and
-    /// whichever attached first would take the other tab's conversation.
-    pub client_id: String,
 }
 
 /// Returns the warm session identifier together with the agent's current configuration.
@@ -245,6 +238,17 @@ pub struct SessionPermissionRequest {
     pub options: Vec<PermissionOption>,
 }
 
+/// Describes durable conversation content that Ora knows is missing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export_to = "session.ts")]
+pub enum SessionHistoryNotice {
+    /// Complete JSONL records could not be decoded, so their positions are unknown.
+    UnreadableRecords { count: u32 },
+    /// Recording stopped after content was already produced and later resumed.
+    UnrecordedContent { reason: String },
+}
+
 /// Replays Ora's recorded history while keeping JSON-RPC framing private to the backend.
 ///
 /// The stream carries assembled updates read back from Ora's own record, not the
@@ -264,6 +268,10 @@ pub enum LoadSessionEvent {
         #[serde(rename = "stopReason")]
         #[ts(type = "import(\"@agentclientprotocol/sdk\").StopReason")]
         stop_reason: StopReason,
+    },
+    /// Reports a known hole without pretending that the surviving transcript is continuous.
+    HistoryNotice {
+        notice: SessionHistoryNotice,
     },
     Completed,
 }
@@ -328,14 +336,6 @@ pub struct StopSessionResponse {
 pub struct SwitchSessionAgentRequest {
     pub session_id: String,
     pub agent_cli: AgentCli,
-    /// Identifies the client surface whose warm session this switch claims.
-    ///
-    /// The provider session the new CLI runs on is the one this client already
-    /// warmed while its picker was showing that CLI's models, and warm entries
-    /// are keyed by client. Carrying the same value here is what makes the
-    /// switch claim that entry — including any model chosen on it — rather than
-    /// build a second session the user never configured.
-    pub client_id: String,
 }
 
 /// Returns the session rebound to its new CLI.
@@ -390,6 +390,23 @@ pub struct DeleteSessionResponse {
     pub session_id: String,
 }
 
+/// Renames one persisted session with a user-supplied display title.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "session.ts")]
+pub struct RenameSessionRequest {
+    pub session_id: String,
+    pub title: String,
+}
+
+/// Returns the session after its display title was replaced.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "session.ts")]
+pub struct RenameSessionResponse {
+    pub session: Session,
+}
+
 /// Exports every TypeScript binding declared in this module into the target directory.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     AgentCli::export(config)?;
@@ -418,6 +435,7 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     LoadSessionRequest::export(config)?;
     PromptSessionRequest::export(config)?;
     SessionPermissionRequest::export(config)?;
+    SessionHistoryNotice::export(config)?;
     LoadSessionEvent::export(config)?;
     PromptSessionEvent::export(config)?;
     RespondToPermissionRequest::export(config)?;
@@ -426,6 +444,8 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     StopSessionResponse::export(config)?;
     DeleteSessionRequest::export(config)?;
     DeleteSessionResponse::export(config)?;
+    RenameSessionRequest::export(config)?;
+    RenameSessionResponse::export(config)?;
     Ok(())
 }
 

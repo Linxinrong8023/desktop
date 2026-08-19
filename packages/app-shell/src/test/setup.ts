@@ -32,16 +32,17 @@ Object.defineProperty(window, "localStorage", {
 
 // jsdom lacks matchMedia; settings theme subscription depends on it.
 if (!window.matchMedia) {
-  window.matchMedia = (query: string): MediaQueryList => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-    dispatchEvent: () => false,
-  }) as MediaQueryList;
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
 }
 
 // jsdom lacks ResizeObserver. Notify consumers with the fixture's declared
@@ -52,8 +53,12 @@ if (!globalThis.ResizeObserver) {
 
     observe(target: Element) {
       const bounds = target.getBoundingClientRect();
-      const width = bounds.width || (target instanceof HTMLElement ? target.clientWidth : 0);
-      const height = bounds.height || (target instanceof HTMLElement ? target.clientHeight : 0);
+      const width =
+        bounds.width ||
+        (target instanceof HTMLElement ? target.clientWidth : 0);
+      const height =
+        bounds.height ||
+        (target instanceof HTMLElement ? target.clientHeight : 0);
       const contentRect = {
         x: bounds.x,
         y: bounds.y,
@@ -65,13 +70,18 @@ if (!globalThis.ResizeObserver) {
         height,
         toJSON: () => ({}),
       };
-      this.callback([{
-        target,
-        contentRect,
-        borderBoxSize: [],
-        contentBoxSize: [],
-        devicePixelContentBoxSize: [],
-      }], this);
+      this.callback(
+        [
+          {
+            target,
+            contentRect,
+            borderBoxSize: [],
+            contentBoxSize: [],
+            devicePixelContentBoxSize: [],
+          },
+        ],
+        this,
+      );
     }
 
     unobserve() {}

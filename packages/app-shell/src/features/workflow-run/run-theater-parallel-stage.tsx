@@ -43,7 +43,8 @@ interface RunTheaterParallelStageProps {
    * Embedded HITL for the focused parallel act. Peers stay chrome-only so the
    * path chips / dots below remain the switcher.
    */
-  primaryInteraction?: ReactNode | ((slots: { accessory: ReactNode | null }) => ReactNode);
+  primaryInteraction?:
+    ReactNode | ((slots: { accessory: ReactNode | null }) => ReactNode);
 }
 
 /**
@@ -71,7 +72,10 @@ export function RunTheaterParallelStage({
   /** Visual index while a programmed slide is in flight (chevron / chip). */
   const [slideIndex, setSlideIndex] = useState<number | null>(null);
 
-  const committedIndex = Math.max(0, acts.findIndex((act) => act.nodeId === primaryId));
+  const committedIndex = Math.max(
+    0,
+    acts.findIndex((act) => act.nodeId === primaryId),
+  );
   const index = slideIndex ?? committedIndex;
   const primary = acts[committedIndex];
   const canGoPrev = committedIndex > 0 && slideIndex === null;
@@ -85,8 +89,8 @@ export function RunTheaterParallelStage({
     slideIndex,
   });
   if (
-    previousFocusState.committedIndex !== committedIndex
-    || previousFocusState.slideIndex !== slideIndex
+    previousFocusState.committedIndex !== committedIndex ||
+    previousFocusState.slideIndex !== slideIndex
   ) {
     setPreviousFocusState({ committedIndex, slideIndex });
     if (slideIndex !== null && committedIndex === slideIndex) {
@@ -95,11 +99,14 @@ export function RunTheaterParallelStage({
     }
   }
 
-  useEffect(() => () => {
-    if (slideTimerRef.current !== null) {
-      window.clearTimeout(slideTimerRef.current);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (slideTimerRef.current !== null) {
+        window.clearTimeout(slideTimerRef.current);
+      }
+    },
+    [],
+  );
 
   function focusAt(nextIndex: number): void {
     const next = acts[nextIndex];
@@ -114,10 +121,10 @@ export function RunTheaterParallelStage({
    */
   function slideTo(nextIndex: number): void {
     if (
-      nextIndex === committedIndex
-      || nextIndex < 0
-      || nextIndex >= acts.length
-      || slideIndex !== null
+      nextIndex === committedIndex ||
+      nextIndex < 0 ||
+      nextIndex >= acts.length ||
+      slideIndex !== null
     ) {
       return;
     }
@@ -353,19 +360,25 @@ export function RunTheaterParallelStage({
                       artifactCount={act.artifactCount}
                       conversation={act.conversation}
                       conversationEnabled={act.nodeId === primaryId}
-                      conversationOpen={sessionConversationNodeId === act.nodeId}
-                      onConversationOpenChange={act.nodeId === primaryId
-                        ? (open) => {
-                          onSessionConversationNodeIdChange?.(
-                            open ? act.nodeId : null,
-                          );
-                        }
-                        : undefined}
+                      conversationOpen={
+                        sessionConversationNodeId === act.nodeId
+                      }
+                      onConversationOpenChange={
+                        act.nodeId === primaryId
+                          ? (open) => {
+                              onSessionConversationNodeIdChange?.(
+                                open ? act.nodeId : null,
+                              );
+                            }
+                          : undefined
+                      }
                       variant="stage"
                       emphasized={act.nodeId === primaryId}
-                      interaction={act.nodeId === primaryId
-                        ? primaryInteraction
-                        : undefined}
+                      interaction={
+                        act.nodeId === primaryId
+                          ? primaryInteraction
+                          : undefined
+                      }
                     />
                   </div>
                 </div>
@@ -383,10 +396,7 @@ export function RunTheaterParallelStage({
           })}
         </p>
 
-        <div
-          className="flex items-center gap-1.5"
-          aria-hidden
-        >
+        <div className="flex items-center gap-1.5" aria-hidden>
           {acts.map((act, actIndex) => (
             <span
               key={act.nodeId}
@@ -414,10 +424,10 @@ export function RunTheaterParallelStage({
                   selected && waiting
                     ? "border-amber-500/55 bg-amber-500/15 text-amber-950 shadow-sm dark:text-amber-50"
                     : selected
-                    ? "border-foreground/35 bg-background shadow-sm"
-                    : waiting
-                    ? "border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
-                    : "border-border/70 bg-muted/40 text-muted-foreground hover:border-border hover:bg-background hover:text-foreground",
+                      ? "border-foreground/35 bg-background shadow-sm"
+                      : waiting
+                        ? "border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+                        : "border-border/70 bg-muted/40 text-muted-foreground hover:border-border hover:bg-background hover:text-foreground",
                 )}
                 aria-pressed={selected}
                 aria-label={t("workflowRun.theater.focusAct", {

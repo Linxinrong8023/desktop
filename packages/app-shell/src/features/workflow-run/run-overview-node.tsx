@@ -1,10 +1,5 @@
 import { createContext, memo, useContext, type ReactNode } from "react";
-import {
-  Handle,
-  Position,
-  type Node,
-  type NodeProps,
-} from "@xyflow/react";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { useTranslation } from "react-i18next";
 import { IconSparkles } from "@tabler/icons-react";
 import { cn } from "@ora/ui";
@@ -68,22 +63,24 @@ export const RunOverviewNode = memo(function RunOverviewNode({
   selected,
 }: NodeProps<Node<RunOverviewNodeData, "workflow">>) {
   const { i18n, t } = useTranslation();
-  const { states, focusedNodeId, activeNodeIds, artifactCountByNode } = useContext(
-    RunOverviewStatusContext,
-  );
-  const locale = i18n.resolvedLanguage === "en-US" ? "en-US" as const : "zh-CN" as const;
+  const { states, focusedNodeId, activeNodeIds, artifactCountByNode } =
+    useContext(RunOverviewStatusContext);
+  const locale =
+    i18n.resolvedLanguage === "en-US" ? ("en-US" as const) : ("zh-CN" as const);
   const state = states[id] ?? { status: "idle" as const };
   const tone = runStatusTone(state.status);
   const kindLabel = createMockWorkflowNodeType(data.kind, locale).label;
   const focused = focusedNodeId === id || selected;
   const peerActive = !focused && activeNodeIds.includes(id);
   const artifactCount = artifactCountByNode[id] ?? 0;
-  const startedLabel = state.startedAt !== undefined
-    ? formatRunClock(state.startedAt, locale)
-    : null;
-  const finishedLabel = state.finishedAt !== undefined
-    ? formatRunClock(state.finishedAt, locale)
-    : null;
+  const startedLabel =
+    state.startedAt !== undefined
+      ? formatRunClock(state.startedAt, locale)
+      : null;
+  const finishedLabel =
+    state.finishedAt !== undefined
+      ? formatRunClock(state.finishedAt, locale)
+      : null;
   const hasTiming = startedLabel !== null || finishedLabel !== null;
 
   return (
@@ -101,12 +98,14 @@ export const RunOverviewNode = memo(function RunOverviewNode({
         tone.ring,
         "ring-1 transition-[box-shadow,ring-color] duration-300",
         state.status === "running" && "ring-sky-500/35 theater-live-breathe",
-        state.status === "awaiting_input"
-          && "ring-amber-500/35 theater-live-breathe-amber",
-        peerActive && state.status !== "running" && state.status !== "awaiting_input"
-          && "ring-sky-500/20",
+        state.status === "awaiting_input" &&
+          "ring-amber-500/35 theater-live-breathe-amber",
+        peerActive &&
+          state.status !== "running" &&
+          state.status !== "awaiting_input" &&
+          "ring-sky-500/20",
       )}
-      headerAccessory={(
+      headerAccessory={
         <div className="flex shrink-0 items-center gap-1">
           {artifactCount > 0 && (
             <span
@@ -125,17 +124,17 @@ export const RunOverviewNode = memo(function RunOverviewNode({
             className="px-1.5 py-0 text-[9px]"
           />
         </div>
-      )}
-      footer={hasTiming
-        ? (
+      }
+      footer={
+        hasTiming ? (
           <p className="font-mono text-[9px] tabular-nums text-muted-foreground">
             {startedLabel ?? "—"}
             {" — "}
             {finishedLabel ?? "—"}
           </p>
-        )
-        : undefined}
-      targetHandle={(
+        ) : undefined
+      }
+      targetHandle={
         <Handle
           type="target"
           position={Position.Left}
@@ -143,8 +142,8 @@ export const RunOverviewNode = memo(function RunOverviewNode({
           style={{ top: WORKFLOW_NODE_ANCHOR_Y * 0.92 }}
           isConnectable={false}
         />
-      )}
-      sourceHandle={(
+      }
+      sourceHandle={
         <Handle
           type="source"
           position={Position.Right}
@@ -152,7 +151,7 @@ export const RunOverviewNode = memo(function RunOverviewNode({
           style={{ top: WORKFLOW_NODE_ANCHOR_Y * 0.92 }}
           isConnectable={false}
         />
-      )}
+      }
     />
   );
 });

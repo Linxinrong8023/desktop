@@ -4,9 +4,9 @@
 
 ## Entities and tables
 
-| Domain type | Backing table |
-| --- | --- |
-| `Workflow` | `workflows` |
+| Domain type        | Backing table        |
+| ------------------ | -------------------- |
+| `Workflow`         | `workflows`          |
 | `WorkflowSnapshot` | `workflow_snapshots` |
 
 `Workflow` holds the stable identity (name, published snapshot pointer, audit fields) while `WorkflowSnapshot` owns the versioned React Flow graph. Read models (`WorkflowDetail`, `WorkflowSummary`, `WorkflowVersion`) keep graph data out of list responses.
@@ -31,41 +31,41 @@ Snapshot versions are strings. The draft is identified by the reserved string `"
 
 ## Graph storage
 
-The `graph` column stores the complete React Flow JSON document. The backend treats it as an opaque string — no structural validation is performed at this layer. Validation and compilation belong to the future Workflow Runtime.
+The `graph` column stores the complete React Flow JSON document. Workflow definition CRUD treats it as an opaque string. The [workflow run engine](../crates/application/src/workflow_run/engine/README.md) parses and validates the frozen snapshot when a run starts.
 
 ## Handlers
 
 The `workflow` module exposes the full set of CRUD and lifecycle handlers, all following the existing port-adapter pattern with `WorkflowRepository`, `WorkflowIdGenerator`, and `Clock`:
 
-| Handler | Purpose |
-| --- | --- |
-| `CreateWorkflowHandler` | Create workflow with initial draft |
-| `GetWorkflowHandler` | Fetch workflow + draft + published snapshot |
-| `ListWorkflowsHandler` | List visible workflows without graph data |
-| `UpdateWorkflowHandler` | Rename workflow |
-| `DeleteWorkflowHandler` | Soft-delete workflow with cascade |
-| `GetDraftHandler` | Fetch draft snapshot with graph |
-| `UpdateDraftHandler` | Mutate draft graph in-place |
-| `PublishWorkflowHandler` | Freeze draft as immutable snapshot and activate |
-| `RollbackWorkflowHandler` | Copy historical graph into draft |
-| `ActivateWorkflowHandler` | Switch published pointer and sync draft |
-| `ListVersionsHandler` | List published version summaries |
-| `GetVersionHandler` | Fetch a specific snapshot by version string |
-| `DeleteSnapshotHandler` | Soft-delete a published snapshot (constrained) |
+| Handler                   | Purpose                                         |
+| ------------------------- | ----------------------------------------------- |
+| `CreateWorkflowHandler`   | Create workflow with initial draft              |
+| `GetWorkflowHandler`      | Fetch workflow + draft + published snapshot     |
+| `ListWorkflowsHandler`    | List visible workflows without graph data       |
+| `UpdateWorkflowHandler`   | Rename workflow                                 |
+| `DeleteWorkflowHandler`   | Soft-delete workflow with cascade               |
+| `GetDraftHandler`         | Fetch draft snapshot with graph                 |
+| `UpdateDraftHandler`      | Mutate draft graph in-place                     |
+| `PublishWorkflowHandler`  | Freeze draft as immutable snapshot and activate |
+| `RollbackWorkflowHandler` | Copy historical graph into draft                |
+| `ActivateWorkflowHandler` | Switch published pointer and sync draft         |
+| `ListVersionsHandler`     | List published version summaries                |
+| `GetVersionHandler`       | Fetch a specific snapshot by version string     |
+| `DeleteSnapshotHandler`   | Soft-delete a published snapshot (constrained)  |
 
 Unlike project and task, workflow deletion follows the standard CRUD handler pattern rather than a separate cascade repository, because the deletion constraints are simpler (no running-session check).
 
 ## Workflow runs
 
-A workflow run freezes one published snapshot and executes it against a dedicated run-task and Git worktree. The run CRUD layer is graph-agnostic; the execution engine (start/restart/HITL) builds on top of the same repository later.
+A workflow run freezes one published snapshot and executes it against a dedicated run-task and Git worktree. The run CRUD layer is graph-agnostic. The execution engine owns start/restart/HITL on top of the same repository; `ora-backend` implements `NodeExecutor` as `WorkflowRunNodeExecutor` and composes it at `Backend::open`.
 
 ### Entities and tables
 
-| Domain type | Backing table |
-| --- | --- |
-| `WorkflowRun` | `workflow_runs` |
+| Domain type       | Backing table        |
+| ----------------- | -------------------- |
+| `WorkflowRun`     | `workflow_runs`      |
 | `WorkflowNodeRun` | `workflow_node_runs` |
-| `TaskType` | `tasks.type` |
+| `TaskType`        | `tasks.type`         |
 
 `WorkflowRun` pins `snapshot_id` to the user-released version it was created against; the display name lives on the associated run-task (`tasks.title`). `WorkflowNodeRun` records one executed node; nodes that never started have no row, and the frontend derives "not started" by comparing graph nodes against recorded node runs. Run and node status share the same five-value enums (`Pending | Running | Succeeded | Failed | Cancelled`). `tasks.type` marks a run-task as `Workflow` (1) versus an ordinary `Default` (0) task, and `tasks.workflow_run_id` keeps the run↔task association unique.
 
@@ -85,8 +85,8 @@ A published snapshot referenced by a live run cannot be soft-deleted (`SnapshotI
 
 ## Boundaries (non-goals)
 
-- Workflow execution, runtime variables, and checkpoints belong to the future Workflow Runtime layer. The run CRUD layer persists runs and node-run records but does not execute them; node-run writes and the state machine (start/restart/HITL) are engine-owned.
-- Graph validation and React Flow node-type compilation are not part of this layer.
+- Workflow-run CRUD persists runs and node-run records but does not execute them. Graph execution, node-run writes, and the state machine (start/restart/HITL) are engine-owned in `ora-application`, with agent-node sessions driven by `ora-backend`'s `WorkflowRunNodeExecutor`. Runtime variables and checkpoints are out of scope for this layer.
+- Graph validation at run start belongs to the workflow run engine, not the definition CRUD handlers.
 - Tauri command registration and web-server route wiring are transport concerns owned by the respective adapters.
 
-See [Domain Models](domain-models.md), [Application and Contracts Boundary](application-contracts.md), [Database Repositories](database-repositories.md).
+See [Domain Models](domain-models.md), [Application and Contracts Boundary](application-contracts-boundary.md), [Database Repositories](database-repositories.md), [Workflow Run Engine](../crates/application/src/workflow_run/engine/README.md), [ora-backend](../crates/backend/README.md).

@@ -43,9 +43,9 @@ export function useTheaterHitl({
   const { t } = useTranslation();
   const [hitlExpanded, setHitlExpanded] = useState(false);
   const [selectedHitlId, setSelectedHitlId] = useState<string | null>(null);
-  const [hitlDrafts, setHitlDrafts] = useState<Record<string, Record<string, string>>>(
-    {},
-  );
+  const [hitlDrafts, setHitlDrafts] = useState<
+    Record<string, Record<string, string>>
+  >({});
   const hitlEngageTimerRef = useRef<number | null>(null);
 
   // Theater runs swap underneath this hook, so HITL-local state (selection,
@@ -61,9 +61,10 @@ export function useTheaterHitl({
 
   const openHitls = useMemo(() => listOpenHitls(run), [run]);
   const nodeTitleById = useMemo(
-    () => new Map(
-      run.definitionSnapshot.nodes.map((node) => [node.id, node.data.title]),
-    ),
+    () =>
+      new Map(
+        run.definitionSnapshot.nodes.map((node) => [node.id, node.data.title]),
+      ),
     [run.definitionSnapshot.nodes],
   );
   const hitlGates = useMemo(
@@ -84,9 +85,8 @@ export function useTheaterHitl({
         return primaryGate;
       }
     }
-    const focused = focusNodeId !== null
-      ? findOpenHitlForNode(run, focusNodeId)
-      : undefined;
+    const focused =
+      focusNodeId !== null ? findOpenHitlForNode(run, focusNodeId) : undefined;
     if (focused !== undefined) {
       return focused;
     }
@@ -100,7 +100,11 @@ export function useTheaterHitl({
   }, [openHitls, focusNodeId, run, selectedHitlId, primaryId]);
 
   const hitlSignature = useMemo(
-    () => openHitls.map((item) => item.id).sort().join("|"),
+    () =>
+      openHitls
+        .map((item) => item.id)
+        .sort()
+        .join("|"),
     [openHitls],
   );
   // Reconcile selection with the open gate set. A run swap counts as a fresh
@@ -118,11 +122,14 @@ export function useTheaterHitl({
       setSelectedHitlId(openHitls[0]?.id ?? null);
       // Only auto-expand when the stage is already on a waiting act. If the
       // reader is on another card, keep the under-stage prompt collapsed.
-      const stageOnWaitingGate = primaryId !== null
-        && openHitls.some((item) => item.nodeId === primaryId);
+      const stageOnWaitingGate =
+        primaryId !== null &&
+        openHitls.some((item) => item.nodeId === primaryId);
       setHitlExpanded(stageOnWaitingGate);
-    } else if (selectedHitlId === null
-      || !openHitls.some((item) => item.id === selectedHitlId)) {
+    } else if (
+      selectedHitlId === null ||
+      !openHitls.some((item) => item.id === selectedHitlId)
+    ) {
       setSelectedHitlId(openHitls[0]?.id ?? null);
     }
   }
@@ -136,16 +143,21 @@ export function useTheaterHitl({
     }
   }, [run.id, hitlSignature]);
 
-  useEffect(() => () => {
-    if (hitlEngageTimerRef.current !== null) {
-      window.clearTimeout(hitlEngageTimerRef.current);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (hitlEngageTimerRef.current !== null) {
+        window.clearTimeout(hitlEngageTimerRef.current);
+      }
+    },
+    [],
+  );
 
   // Move selection to the gate under the focused act and expand the composer
   // there; browsing a non-waiting act collapses it. Keyed on focus changes via
   // the render-adjust pattern.
-  const [previousFocusNodeId, setPreviousFocusNodeId] = useState<string | null>(null);
+  const [previousFocusNodeId, setPreviousFocusNodeId] = useState<string | null>(
+    null,
+  );
   if (previousFocusNodeId !== focusNodeId) {
     setPreviousFocusNodeId(focusNodeId);
     if (focusNodeId !== null) {
@@ -196,9 +208,8 @@ export function useTheaterHitl({
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [hitlExpanded]);
 
-  const primaryHitl = primaryId !== null
-    ? findOpenHitlForNode(run, primaryId)
-    : undefined;
+  const primaryHitl =
+    primaryId !== null ? findOpenHitlForNode(run, primaryId) : undefined;
   const primaryHasHitl = primaryHitl !== undefined;
 
   function renderHitlComposer(accessory?: ReactNode): ReactNode {
@@ -208,18 +219,22 @@ export function useTheaterHitl({
     // Embedded = this act's card owns only its gate(s). Overlay (under-stage
     // while browsing elsewhere) may list every open gate so the user can jump.
     const embedded = primaryHasHitl;
-    const gates = embedded && primaryId !== null
-      ? hitlGates.filter((gate) => gate.request.nodeId === primaryId)
-      : hitlGates;
+    const gates =
+      embedded && primaryId !== null
+        ? hitlGates.filter((gate) => gate.request.nodeId === primaryId)
+        : hitlGates;
     if (gates.length === 0) {
       return null;
     }
-    const selectedRequest = gates.some((gate) => gate.request.id === selectedHitl.id)
+    const selectedRequest = gates.some(
+      (gate) => gate.request.id === selectedHitl.id,
+    )
       ? selectedHitl
       : gates[0]!.request;
-    const submitError = submitHitl.error !== null
-      ? localizeContractError(submitHitl.error, t)
-      : null;
+    const submitError =
+      submitHitl.error !== null
+        ? localizeContractError(submitHitl.error, t)
+        : null;
     return (
       <RunHitlComposer
         layout={embedded ? "embedded" : "overlay"}
@@ -247,9 +262,11 @@ export function useTheaterHitl({
         drafts={hitlDrafts}
         onDraftsChange={setHitlDrafts}
         submitting={submitHitl.isPending}
-        submittingRequestId={submitHitl.isPending
-          ? (submitHitl.variables?.requestId ?? selectedRequest.id)
-          : null}
+        submittingRequestId={
+          submitHitl.isPending
+            ? (submitHitl.variables?.requestId ?? selectedRequest.id)
+            : null
+        }
         submitError={submitError}
         accessory={accessory}
         onSubmit={async (payload) => {

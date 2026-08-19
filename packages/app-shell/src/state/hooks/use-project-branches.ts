@@ -14,9 +14,10 @@ export function useProjectBranches(projectId: string | null) {
   const client = useContractsClient();
   return useQuery({
     queryKey: queryKeys.projectBranches(projectId ?? ""),
-    queryFn: () => client.project
-      .listBranches({ projectId: projectId! })
-      .then((response) => response.branches),
+    queryFn: () =>
+      client.project
+        .listBranches({ projectId: projectId! })
+        .then((response) => response.branches),
     enabled: projectId !== null,
     staleTime: PROJECT_BRANCHES_STALE_MS,
     gcTime: PROJECT_BRANCHES_STALE_MS * 10,

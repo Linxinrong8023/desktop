@@ -1,5 +1,5 @@
 use crate::RepositoryError;
-use ora_domain::{AgentDefinition, AgentDefinitionId};
+use ora_domain::{AgentDefinition, AgentDefinitionId, Namespace};
 
 /// Defines persistence operations required by configurable-agent CRUD use cases.
 pub trait AgentDefinitionRepository {
@@ -15,9 +15,10 @@ pub trait AgentDefinitionRepository {
         agent_id: &AgentDefinitionId,
     ) -> Result<Option<AgentDefinition>, RepositoryError>;
 
-    /// Loads the first visible configurable agent whose name matches case-insensitively.
+    /// Loads the visible configurable agent in a namespace whose name matches case-insensitively.
     fn find_agent_definition_by_name(
         &self,
+        namespace: &Namespace,
         name: &str,
     ) -> Result<Option<AgentDefinition>, RepositoryError>;
 

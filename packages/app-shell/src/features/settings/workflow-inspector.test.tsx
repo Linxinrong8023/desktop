@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import type { Node } from "@xyflow/react";
-import { createMockWorkflowCapabilities, type WorkflowNodeData } from "@ora/workflow-mock";
+import {
+  createMockWorkflowCapabilities,
+  type WorkflowNodeData,
+} from "@ora/workflow-mock";
 import { appI18n } from "../../i18n/i18n-instance";
 import { AppI18nProvider } from "../../i18n/i18n";
 import { WorkflowInspector } from "./workflow-inspector";
@@ -25,12 +28,14 @@ function createAgentNode(): Node<WorkflowNodeData, "workflow"> {
         schemaVersion: 3,
         executor: {
           agentCli: "open_code",
-          modelId: "deepseek/deepseek-v4-pro-with-an-extremely-long-model-identifier",
+          modelId:
+            "deepseek/deepseek-v4-pro-with-an-extremely-long-model-identifier",
         },
         roleId: "Researcher",
         skills: [{ skillId: "openspec-explore", enabled: true }],
         mcps: [],
-        prompt: "阅读相关代码、文档和现有规范，输出现状、约束、风险与可选路径。",
+        prompt:
+          "阅读相关代码、文档和现有规范，输出现状、约束、风险与可选路径。",
       },
     },
   };
@@ -129,7 +134,8 @@ function renderNarrowInspector(): HTMLElement {
   const capabilities = createMockWorkflowCapabilities("zh-CN", [
     {
       agentCli: "open_code",
-      modelId: "deepseek/deepseek-v4-pro-with-an-extremely-long-model-identifier",
+      modelId:
+        "deepseek/deepseek-v4-pro-with-an-extremely-long-model-identifier",
       label: LONG_MODEL_LABEL,
     },
   ]);
@@ -164,24 +170,44 @@ describe("WorkflowInspector layout", () => {
     expect(inspector).toHaveClass("min-w-0", "w-full", "overflow-hidden");
 
     const modelTrigger = screen.getByLabelText("Agent 模型");
-    expect(modelTrigger).toHaveClass("min-w-0", "shrink", "overflow-hidden", "w-full");
-    expect(within(modelTrigger).getByTestId("workflow-agent-model-chevron")).toBeInTheDocument();
+    expect(modelTrigger).toHaveClass(
+      "min-w-0",
+      "shrink",
+      "overflow-hidden",
+      "w-full",
+    );
+    expect(
+      within(modelTrigger).getByTestId("workflow-agent-model-chevron"),
+    ).toBeInTheDocument();
 
     const roleTrigger = screen.getByLabelText("角色");
-    expect(roleTrigger).toHaveClass("min-w-0", "shrink", "overflow-hidden", "w-full");
-    expect(within(roleTrigger).getByTestId("workflow-agent-role-chevron")).toBeInTheDocument();
+    expect(roleTrigger).toHaveClass(
+      "min-w-0",
+      "shrink",
+      "overflow-hidden",
+      "w-full",
+    );
+    expect(
+      within(roleTrigger).getByTestId("workflow-agent-role-chevron"),
+    ).toBeInTheDocument();
 
     const addSkill = screen.getByRole("button", { name: "添加 Skill" });
     expect(addSkill).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "添加 MCP" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "添加 MCP" }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/1\/1/)).toBeInTheDocument();
     expect(screen.getByText("暂未配置 MCP（可选）")).toBeInTheDocument();
-    expect(screen.getByRole("switch", {
-      name: "启用或禁用 openspec-explore",
-    })).toBeInTheDocument();
-    expect(screen.getByRole("button", {
-      name: "移除 openspec-explore",
-    })).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", {
+        name: "启用或禁用 openspec-explore",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "移除 openspec-explore",
+      }),
+    ).toBeInTheDocument();
 
     host.remove();
   });
@@ -220,9 +246,13 @@ describe("WorkflowInspector kind-specific layouts", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "汇合节点" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "汇合节点" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("等待策略")).toHaveTextContent("全部分支完成");
-    expect(screen.getByLabelText("失败策略")).toHaveTextContent("任一失败则失败");
+    expect(screen.getByLabelText("失败策略")).toHaveTextContent(
+      "任一失败则失败",
+    );
 
     await user.click(screen.getByRole("button", { name: "高级设置" }));
     expect(screen.getByLabelText("执行指令")).toHaveValue("合并审核结果。");
@@ -238,12 +268,18 @@ describe("WorkflowInspector kind-specific layouts", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "循环节点" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "循环节点" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("最大次数")).toHaveValue(3);
-    expect(screen.getByLabelText("退出条件")).toHaveValue("verification.status == passed");
+    expect(screen.getByLabelText("退出条件")).toHaveValue(
+      "verification.status == passed",
+    );
 
     await user.click(screen.getByRole("button", { name: "高级设置" }));
-    expect(screen.getByLabelText("执行指令")).toHaveValue("修复失败后回到验证。");
+    expect(screen.getByLabelText("执行指令")).toHaveValue(
+      "修复失败后回到验证。",
+    );
   });
 
   it("renders an IF/ELSE branch panel for condition nodes", async () => {
@@ -256,9 +292,13 @@ describe("WorkflowInspector kind-specific layouts", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "条件分支节点" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "条件分支节点" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("分支 1")).toBeInTheDocument();
-    expect(screen.getByLabelText("分支 1 逻辑")).toHaveTextContent("满足以下所有条件");
+    expect(screen.getByLabelText("分支 1 逻辑")).toHaveTextContent(
+      "满足以下所有条件",
+    );
     expect(screen.getByLabelText("变量 1")).toHaveValue("工具1.exit_code");
     expect(screen.getByLabelText("条件 1")).toHaveTextContent("等于");
     expect(screen.getByLabelText("值 1")).toHaveValue("0");
@@ -266,13 +306,19 @@ describe("WorkflowInspector kind-specific layouts", () => {
     expect(notToggle).toHaveAttribute("aria-pressed", "false");
     await user.click(notToggle);
     expect(notToggle).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "添加条件" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "添加分支" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "添加条件" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "添加分支" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("其他情况")).toBeInTheDocument();
     expect(screen.getByText("默认分支")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "高级设置" }));
-    expect(screen.getByLabelText("执行指令")).toHaveValue("根据改动类型选择后续路径。");
+    expect(screen.getByLabelText("执行指令")).toHaveValue(
+      "根据改动类型选择后续路径。",
+    );
   });
 
   it("renders a tool panel with operation and parameters for tool nodes", async () => {
@@ -285,7 +331,9 @@ describe("WorkflowInspector kind-specific layouts", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "工具节点" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "工具节点" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("工具")).toHaveTextContent("Terminal");
     expect(screen.getByLabelText("操作")).toHaveTextContent("执行命令");
     expect(screen.getByRole("heading", { name: "参数" })).toBeInTheDocument();
@@ -295,7 +343,9 @@ describe("WorkflowInspector kind-specific layouts", () => {
     expect(screen.getByLabelText("参数值 1")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "高级设置" }));
-    expect(screen.getByLabelText("执行指令")).toHaveValue("运行与改动范围匹配的最小验证集。");
+    expect(screen.getByLabelText("执行指令")).toHaveValue(
+      "运行与改动范围匹配的最小验证集。",
+    );
   });
 
   it("renders a start panel with trigger, input variables, and available variables", async () => {
@@ -308,20 +358,30 @@ describe("WorkflowInspector kind-specific layouts", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "开始节点" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "开始节点" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("名称")).toHaveValue("开始");
-    expect(screen.getByLabelText("触发方式")).toHaveTextContent("Merge Request");
-    expect(screen.getByRole("heading", { name: "输入变量" })).toBeInTheDocument();
+    expect(screen.getByLabelText("触发方式")).toHaveTextContent(
+      "Merge Request",
+    );
+    expect(
+      screen.getByRole("heading", { name: "输入变量" }),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "添加变量" }));
     expect(screen.getByLabelText("变量名 1")).toBeInTheDocument();
     expect(screen.getByLabelText("默认值 1")).toBeInTheDocument();
 
-    expect(screen.getByRole("heading", { name: "可用变量" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "可用变量" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("repository")).toBeInTheDocument();
     expect(screen.getByText("changed_files")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "高级设置" }));
-    expect(screen.getByLabelText("执行指令")).toHaveValue("检查当前工作区的未提交改动");
+    expect(screen.getByLabelText("执行指令")).toHaveValue(
+      "检查当前工作区的未提交改动",
+    );
   });
 });

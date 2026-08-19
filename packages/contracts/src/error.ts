@@ -18,6 +18,8 @@ export type ContractError =
     | { "code": "agent_name_blank"; "params": EmptyErrorParams }
     | { "code": "agent_name_conflict"; "params": EmptyErrorParams }
     | { "code": "agent_not_found"; "params": EmptyErrorParams }
+    | { "code": "plugin_not_found"; "params": EmptyErrorParams }
+    | { "code": "plugin_disabled"; "params": EmptyErrorParams }
     | { "code": "project_not_found"; "params": EmptyErrorParams }
     | { "code": "task_not_found"; "params": EmptyErrorParams }
     | { "code": "resource_in_use"; "params": EmptyErrorParams }
@@ -49,28 +51,11 @@ export type ContractError =
     | { "code": "prompt_too_large"; "params": EmptyErrorParams }
     | { "code": "task_worktree_unavailable"; "params": EmptyErrorParams }
     | { "code": "task_project_root_unavailable"; "params": EmptyErrorParams }
-    | { "code": "file_system_path_not_absolute"; "params": EmptyErrorParams }
-    | { "code": "file_system_path_not_directory"; "params": EmptyErrorParams }
     | { "code": "file_system_path_not_found"; "params": EmptyErrorParams }
-    | {
-      "code": "file_system_path_permission_denied";
-      "params": EmptyErrorParams;
-    }
-    | { "code": "spec_source_invalid"; "params": EmptyErrorParams }
-    | { "code": "spec_source_outside_workspace"; "params": EmptyErrorParams }
-    | { "code": "spec_source_workspace_root"; "params": EmptyErrorParams }
     | { "code": "spec_document_not_found"; "params": EmptyErrorParams }
     | { "code": "worktree_root_not_absolute"; "params": EmptyErrorParams }
     | { "code": "worktree_root_not_directory"; "params": EmptyErrorParams }
     | { "code": "open_location_failed"; "params": OpenLocationFailedParams }
-    | { "code": "skill_upload_empty"; "params": EmptyErrorParams }
-    | { "code": "skill_upload_too_large"; "params": SkillUploadTooLargeParams }
-    | {
-      "code": "skill_upload_too_many_files";
-      "params": SkillUploadTooManyFilesParams;
-    }
-    | { "code": "skill_upload_path_invalid"; "params": EmptyErrorParams }
-    | { "code": "skill_upload_path_duplicate"; "params": EmptyErrorParams }
     | { "code": "skill_manifest_missing"; "params": EmptyErrorParams }
     | { "code": "skill_manifest_invalid"; "params": EmptyErrorParams }
     | { "code": "skill_manifest_name_blank"; "params": EmptyErrorParams }
@@ -104,6 +89,7 @@ export type ContractError =
     | { "code": "import_session_already_committed"; "params": EmptyErrorParams }
     | { "code": "skill_storage_inconsistent"; "params": EmptyErrorParams }
     | { "code": "workflow_name_blank"; "params": EmptyErrorParams }
+    | { "code": "workflow_name_conflict"; "params": EmptyErrorParams }
     | { "code": "workflow_not_found"; "params": EmptyErrorParams }
     | { "code": "workflow_snapshot_not_found"; "params": EmptyErrorParams }
     | { "code": "workflow_version_already_exists"; "params": EmptyErrorParams }
@@ -168,6 +154,8 @@ export type PublicError =
   | { "code": "agent_name_blank"; "params": EmptyErrorParams }
   | { "code": "agent_name_conflict"; "params": EmptyErrorParams }
   | { "code": "agent_not_found"; "params": EmptyErrorParams }
+  | { "code": "plugin_not_found"; "params": EmptyErrorParams }
+  | { "code": "plugin_disabled"; "params": EmptyErrorParams }
   | { "code": "project_not_found"; "params": EmptyErrorParams }
   | { "code": "task_not_found"; "params": EmptyErrorParams }
   | { "code": "resource_in_use"; "params": EmptyErrorParams }
@@ -199,25 +187,11 @@ export type PublicError =
   | { "code": "prompt_too_large"; "params": EmptyErrorParams }
   | { "code": "task_worktree_unavailable"; "params": EmptyErrorParams }
   | { "code": "task_project_root_unavailable"; "params": EmptyErrorParams }
-  | { "code": "file_system_path_not_absolute"; "params": EmptyErrorParams }
-  | { "code": "file_system_path_not_directory"; "params": EmptyErrorParams }
   | { "code": "file_system_path_not_found"; "params": EmptyErrorParams }
-  | { "code": "file_system_path_permission_denied"; "params": EmptyErrorParams }
-  | { "code": "spec_source_invalid"; "params": EmptyErrorParams }
-  | { "code": "spec_source_outside_workspace"; "params": EmptyErrorParams }
-  | { "code": "spec_source_workspace_root"; "params": EmptyErrorParams }
   | { "code": "spec_document_not_found"; "params": EmptyErrorParams }
   | { "code": "worktree_root_not_absolute"; "params": EmptyErrorParams }
   | { "code": "worktree_root_not_directory"; "params": EmptyErrorParams }
   | { "code": "open_location_failed"; "params": OpenLocationFailedParams }
-  | { "code": "skill_upload_empty"; "params": EmptyErrorParams }
-  | { "code": "skill_upload_too_large"; "params": SkillUploadTooLargeParams }
-  | {
-    "code": "skill_upload_too_many_files";
-    "params": SkillUploadTooManyFilesParams;
-  }
-  | { "code": "skill_upload_path_invalid"; "params": EmptyErrorParams }
-  | { "code": "skill_upload_path_duplicate"; "params": EmptyErrorParams }
   | { "code": "skill_manifest_missing"; "params": EmptyErrorParams }
   | { "code": "skill_manifest_invalid"; "params": EmptyErrorParams }
   | { "code": "skill_manifest_name_blank"; "params": EmptyErrorParams }
@@ -245,6 +219,7 @@ export type PublicError =
   | { "code": "import_session_already_committed"; "params": EmptyErrorParams }
   | { "code": "skill_storage_inconsistent"; "params": EmptyErrorParams }
   | { "code": "workflow_name_blank"; "params": EmptyErrorParams }
+  | { "code": "workflow_name_conflict"; "params": EmptyErrorParams }
   | { "code": "workflow_not_found"; "params": EmptyErrorParams }
   | { "code": "workflow_snapshot_not_found"; "params": EmptyErrorParams }
   | { "code": "workflow_version_already_exists"; "params": EmptyErrorParams }
@@ -283,16 +258,6 @@ export type RequestId = string;
  * Carries a validated skill name when its destination folder already exists.
  */
 export type SkillFolderConflictParams = { name: string };
-
-/**
- * Carries the configured request-body limit without exposing uploaded file contents.
- */
-export type SkillUploadTooLargeParams = { maxBytes: number };
-
-/**
- * Carries the configured upload limit without exposing uploaded file names.
- */
-export type SkillUploadTooManyFilesParams = { maxFiles: number };
 
 /**
  * Carries the user-selected base branch name when Git cannot resolve it.

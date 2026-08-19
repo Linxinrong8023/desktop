@@ -9,7 +9,8 @@ function ConnectionConsumer() {
     useWorkflowConnectionState();
   return (
     <span>
-      {connectionCandidateNodeId ?? "none"}:{connectionCandidateEndpoint ?? "none"}
+      {connectionCandidateNodeId ?? "none"}:
+      {connectionCandidateEndpoint ?? "none"}
     </span>
   );
 }

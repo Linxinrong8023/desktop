@@ -24,11 +24,21 @@ interface UserProfileProps {
  * and email; collapsed it shows just the avatar. Both open a small account
  * menu for application settings and sign-out.
  */
-export function UserProfile({ user, compact = false, onOpenSettings, onSignOut }: UserProfileProps) {
+export function UserProfile({
+  user,
+  compact = false,
+  onOpenSettings,
+  onSignOut,
+}: UserProfileProps) {
   const { t } = useTranslation();
   const accountLabel = t("account.label", { name: user.name });
   const trigger = compact ? (
-    <Button variant="ghost" size="icon" aria-label={accountLabel} className="rounded-full">
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label={accountLabel}
+      className="rounded-full"
+    >
       <InitialsAvatar name={user.name} size="sm" />
     </Button>
   ) : (
@@ -40,7 +50,9 @@ export function UserProfile({ user, compact = false, onOpenSettings, onSignOut }
     >
       <InitialsAvatar name={user.name} size="default" />
       <span className="flex min-w-0 flex-1 flex-col text-left">
-        <span className="truncate text-[15px] font-semibold text-foreground">{user.name}</span>
+        <span className="truncate text-[15px] font-semibold text-foreground">
+          {user.name}
+        </span>
         {/* Always render the second row so the profile keeps its two-line layout even
             when no email is configured; a non-breaking space preserves the line box. */}
         <span className="truncate text-[13px] text-muted-foreground">

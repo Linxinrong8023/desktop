@@ -5,6 +5,7 @@
 ## Module map
 
 - [agent_definition](src/agent_definition/README.md) manages configurable agent definitions.
+- [plugin](src/plugin/README.md) defines persistence for durable plugin eligibility.
 - [project](src/project/README.md) manages project creation, reads, and rename operations.
 - [session](src/session/README.md) provides persisted session reads and soft deletion.
 - [skill](src/skill/README.md) manages reusable skill records, their atomic on-disk packages, and journaled filesystem transactions.
@@ -12,6 +13,8 @@
 - [task](src/task/README.md) coordinates task persistence and optional Git worktree creation.
 - [task_diff](src/task_diff/README.md) coordinates task-scoped diff review, Git writes, and anchored discussions.
 - [worktree](src/worktree/README.md) defines persistence and identity ports for task-owned worktrees.
+- [workflow](src/workflow/README.md) manages workflow definitions and versioned snapshots.
+- [workflow_run](src/workflow_run/README.md) manages run CRUD; execution lives in [workflow_run/engine](src/workflow_run/engine/README.md).
 
 ## Boundaries
 
@@ -21,4 +24,4 @@ Handlers accept `ora-contracts` requests, operate on `ora-domain` models, and ma
 
 Aggregate deletion, SQLite composition, ACP process supervision, and transport-neutral public error normalization belong to `ora-backend` and `ora-db`. Contract serialization and endpoint metadata belong to `ora-contracts`.
 
-See [Application and Contracts Boundary](../../docs/application-contracts.md) for the cross-crate ownership model.
+See [Application and Contracts Boundary](../../docs/application-contracts-boundary.md) for the cross-crate ownership model.

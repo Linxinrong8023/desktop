@@ -7,7 +7,7 @@ import type {
   WarmSessionResponse,
 } from "@ora/contracts";
 import { TooltipProvider } from "@ora/ui";
-import { PlatformProvider } from "@ora/platform";
+import { PlatformProvider } from "../../platform";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppI18nProvider } from "../../i18n/i18n";
 import {
@@ -45,7 +45,6 @@ describe("WorkspaceView", () => {
         id: "t1",
         projectId: "p1",
         title: "Refresh history",
-        status: "todo",
         workspaceMode: "worktree",
         type: "default",
         workflowRunId: null,
@@ -92,6 +91,65 @@ describe("WorkspaceView", () => {
     );
   });
 
+  it("warns when loaded history contains records whose positions are unknown", async () => {
+    const state = createMockClientState();
+    state.projects = [{ id: "p1", name: "Ora", rootPath: "/ora" }];
+    state.tasks = [
+      {
+        id: "t1",
+        projectId: "p1",
+        title: "Damaged history",
+        workspaceMode: "worktree",
+        type: "default",
+        workflowRunId: null,
+      },
+    ];
+    state.sessions = [
+      {
+        id: "s1",
+        taskId: "t1",
+        agentCli: "open_code",
+        status: "running",
+        title: null,
+        historyState: { type: "writable" },
+      },
+    ];
+    const client = createMockClient(state);
+    client.session.load = async function* () {
+      yield {
+        type: "history_notice" as const,
+        notice: { type: "unreadable_records" as const, count: 2 },
+      };
+      yield { type: "completed" as const };
+    };
+    const chatStore = createChatStore(client.session);
+    const Wrapper = createHookWrapper(
+      client,
+      createTestQueryClient(),
+      chatStore,
+    );
+    useWorkspaceSelectionStore.getState().selectSession("s1", "t1", "p1");
+
+    render(
+      <Wrapper>
+        <AppI18nProvider>
+          <PlatformProvider adapter={createStubPlatform()}>
+            <TooltipProvider>
+              <WorkspaceView userName="Eric" />
+            </TooltipProvider>
+          </PlatformProvider>
+        </AppI18nProvider>
+      </Wrapper>,
+    );
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(
+      /有 2 条历史记录无法读取|2 history records could not be read/,
+    );
+    expect(within(banner).queryByRole("button")).toBeNull();
+    expect(await screen.findByRole("textbox")).toBeEnabled();
+  });
+
   it("does not load history for a newly initialized session", async () => {
     const state = createMockClientState();
     state.projects = [{ id: "p1", name: "Ora", rootPath: "/ora" }];
@@ -100,7 +158,6 @@ describe("WorkspaceView", () => {
         id: "t1",
         projectId: "p1",
         title: "Direct chat",
-        status: "todo",
         workspaceMode: "project_root",
         type: "default",
         workflowRunId: null,
@@ -217,7 +274,6 @@ describe("WorkspaceView", () => {
         id: "t1",
         projectId: "p1",
         title: "Current worktree",
-        status: "todo",
         workspaceMode: "worktree",
         type: "default",
         workflowRunId: null,
@@ -226,7 +282,6 @@ describe("WorkspaceView", () => {
         id: "t2",
         projectId: "p1",
         title: "Other worktree",
-        status: "todo",
         workspaceMode: "worktree",
         type: "default",
         workflowRunId: null,
@@ -235,7 +290,6 @@ describe("WorkspaceView", () => {
         id: "t3",
         projectId: "p1",
         title: "Hidden direct session",
-        status: "todo",
         workspaceMode: "project_root",
         type: "default",
         workflowRunId: null,
@@ -355,7 +409,6 @@ describe("WorkspaceView", () => {
           id: "t1",
           projectId: "p1",
           title: "你好 workspa",
-          status: "todo",
           workspaceMode: "project_root",
           type: "default",
           workflowRunId: null,
@@ -464,7 +517,6 @@ describe("WorkspaceView", () => {
         id: "t1",
         projectId: "p1",
         title: "Existing task",
-        status: "todo",
         workspaceMode: "project_root",
         type: "default",
         workflowRunId: null,
@@ -580,7 +632,9 @@ describe("WorkspaceView", () => {
     expect(state.tasks).toEqual([]);
     expect(state.sessions).toEqual([]);
     expect(useWorkspaceSelectionStore.getState().selection.taskId).toBeNull();
-    expect(useWorkspaceSelectionStore.getState().selection.sessionId).toBe("s1");
+    expect(useWorkspaceSelectionStore.getState().selection.sessionId).toBe(
+      "s1",
+    );
   });
 
   it("shows a model switch that never reached the agent", async () => {
@@ -648,7 +702,9 @@ describe("WorkspaceView", () => {
         // a switch it accepted �?the mock's default ignores the request.
         setConfig: async (req) => ({
           configOptions: state.configOptions.map((option) =>
-            option.type === "select" ? { ...option, currentValue: req.value } : option,
+            option.type === "select"
+              ? { ...option, currentValue: req.value }
+              : option,
           ),
         }),
       },
@@ -689,7 +745,9 @@ describe("WorkspaceView", () => {
     first.unmount();
     renderView();
 
-    picker = await screen.findByRole("button", { name: /选择模型|Select model/ });
+    picker = await screen.findByRole("button", {
+      name: /选择模型|Select model/,
+    });
     // The warm session is reused rather than re-opened, so its pinned handshake
     // response �?which still names the opening model �?is what a remount sees.
     // Replaying it would silently undo a switch the agent already accepted.
@@ -886,7 +944,6 @@ describe("WorkspaceView", () => {
         id: "t1",
         projectId: "p1",
         title: "Replaying",
-        status: "todo",
         workspaceMode: "worktree",
         type: "default",
         workflowRunId: null,
@@ -1001,7 +1058,9 @@ describe("WorkspaceView", () => {
    * Builds a client whose `warm` reports Claude's own models, so a switch can be
    * observed offering the incoming CLI's list rather than the outgoing one's.
    */
-  function createSwitchTargetClient(state: ReturnType<typeof createMockClientState>) {
+  function createSwitchTargetClient(
+    state: ReturnType<typeof createMockClientState>,
+  ) {
     const baseClient = createMockClient(state);
     const switched: SwitchSessionAgentRequest[] = [];
     const prompted: string[] = [];
@@ -1043,14 +1102,15 @@ describe("WorkspaceView", () => {
   }
 
   /** Seeds one running session on OpenCode under a worktree task. */
-  function seedSwitchableSession(state: ReturnType<typeof createMockClientState>) {
+  function seedSwitchableSession(
+    state: ReturnType<typeof createMockClientState>,
+  ) {
     state.projects = [{ id: "p1", name: "Ora", rootPath: "/ora" }];
     state.tasks = [
       {
         id: "t1",
         projectId: "p1",
         title: "Switch agent",
-        status: "todo",
         workspaceMode: "worktree",
         type: "default",
         workflowRunId: null,
@@ -1095,7 +1155,9 @@ describe("WorkspaceView", () => {
     await user.click(
       await screen.findByRole("button", { name: /选择模型|Select model/ }),
     );
-    await user.click(await screen.findByRole("menuitem", { name: "Claude Code" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Claude Code" }),
+    );
 
     // Picking a CLI is only half the decision, so the menu is still open on the
     // models that CLI actually offers rather than the ones it replaced. Those
@@ -1104,7 +1166,9 @@ describe("WorkspaceView", () => {
     expect(
       await within(menu).findByRole("menuitem", { name: "Haiku" }),
     ).toBeInTheDocument();
-    expect(within(menu).queryByRole("menuitem", { name: "Small Pickle" })).toBeNull();
+    expect(
+      within(menu).queryByRole("menuitem", { name: "Small Pickle" }),
+    ).toBeNull();
     // Rebinding here would tear down an agent that may be mid-reply, so nothing
     // is asked of the backend until the next message carries the move.
     expect(switched).toEqual([]);
@@ -1137,16 +1201,16 @@ describe("WorkspaceView", () => {
     await user.click(
       await screen.findByRole("button", { name: /选择模型|Select model/ }),
     );
-    await user.click(await screen.findByRole("menuitem", { name: "Claude Code" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Claude Code" }),
+    );
     await user.keyboard("{Escape}");
 
     await user.type(await screen.findByRole("textbox"), "hello");
     await user.keyboard("{Enter}");
 
     await waitFor(() => expect(state.sessions[0]?.agentCli).toBe("claude"));
-    expect(switched).toEqual([
-      { sessionId: "s1", agentCli: "claude", clientId: expect.any(String) },
-    ]);
+    expect(switched).toEqual([{ sessionId: "s1", agentCli: "claude" }]);
   });
 
   it("sends without rebinding when the picker returns to the session's own agent", async () => {
@@ -1175,7 +1239,9 @@ describe("WorkspaceView", () => {
     await user.click(
       await screen.findByRole("button", { name: /选择模型|Select model/ }),
     );
-    await user.click(await screen.findByRole("menuitem", { name: "Claude Code" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Claude Code" }),
+    );
     // Back to the CLI the conversation was already running on. Nothing was
     // rebound in between, so this is a withdrawn move rather than a second one.
     await user.click(await screen.findByRole("menuitem", { name: "OpenCode" }));
@@ -1200,7 +1266,6 @@ describe("WorkspaceView", () => {
         id: "t1",
         projectId: "p1",
         title: "Broken history",
-        status: "todo",
         workspaceMode: "worktree",
         type: "default",
         workflowRunId: null,

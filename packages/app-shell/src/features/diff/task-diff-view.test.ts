@@ -21,13 +21,18 @@ describe("task diff view mapping", () => {
   });
 
   it("counts additions and deletions from parsed backend patches", () => {
-    expect(countChanges(parseTaskDiffPatch(PATCH))).toEqual({ additions: 1, deletions: 1 });
+    expect(countChanges(parseTaskDiffPatch(PATCH))).toEqual({
+      additions: 1,
+      deletions: 1,
+    });
   });
 
   it("maps a parsed insertion to the backend comment anchor contract", () => {
     const [file] = parseDiff(PATCH);
     const [hunk] = file!.hunks;
-    const change = hunk!.changes.find((candidate) => candidate.type === "insert")!;
+    const change = hunk!.changes.find(
+      (candidate) => candidate.type === "insert",
+    )!;
 
     expect(createCommentAnchor(file!, hunk!, change, "new", "diff-1")).toEqual({
       diffId: "diff-1",
@@ -43,9 +48,12 @@ describe("task diff view mapping", () => {
   it("removes the retained carriage return before sending a CRLF anchor", () => {
     const [file] = parseDiff(PATCH.replaceAll("\n", "\r\n"));
     const [hunk] = file!.hunks;
-    const change = hunk!.changes.find((candidate) => candidate.type === "insert")!;
+    const change = hunk!.changes.find(
+      (candidate) => candidate.type === "insert",
+    )!;
 
-    expect(createCommentAnchor(file!, hunk!, change, "new", "diff-2").lineContent)
-      .toBe("const value = 2;");
+    expect(
+      createCommentAnchor(file!, hunk!, change, "new", "diff-2").lineContent,
+    ).toBe("const value = 2;");
   });
 });

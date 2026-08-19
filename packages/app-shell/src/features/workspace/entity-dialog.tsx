@@ -1,6 +1,6 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { IconFolderOpen } from "@tabler/icons-react";
-import { usePlatform, type PathSelectionKind } from "@ora/platform";
+import { usePlatform, type PathSelectionKind } from "../../platform";
 import {
   Button,
   Dialog,
@@ -16,6 +16,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Spinner,
 } from "@ora/ui";
 import { useTranslation } from "react-i18next";
 import { localizeContractError } from "../../i18n/contract-error";
@@ -34,6 +35,8 @@ interface TextEntityField extends EntityFieldBase {
 interface SelectEntityField extends EntityFieldBase {
   kind: "select";
   options: Array<{ label: string; value: string }>;
+  /** True while options are still loading, so submit cannot race an empty value. */
+  loading?: boolean;
 }
 
 interface PathEntityField extends EntityFieldBase {
@@ -49,6 +52,8 @@ interface EntityDialogProps {
   title: string;
   description?: string;
   submitLabel: string;
+  /** In-flight label; create flows pass a creating verb instead of "Saving…". */
+  pendingLabel?: string;
   fields: EntityField[];
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: Record<string, string>) => Promise<void>;
@@ -60,6 +65,7 @@ export function EntityDialog({
   title,
   description,
   submitLabel,
+  pendingLabel,
   fields,
   onOpenChange,
   onSubmit,
@@ -71,10 +77,16 @@ export function EntityDialog({
     Object.fromEntries(fields.map((field) => [field.name, field.value])),
   );
   const [submitting, setSubmitting] = useState(false);
+  // Ref closes the window between the first submit and the disabled re-render.
+  const submittingRef = useRef(false);
   const [validationError, setValidationError] = useState(false);
+  const [optionsLoadingError, setOptionsLoadingError] = useState(false);
   const [selectingField, setSelectingField] = useState<string | null>(null);
-  const [pathSelectionError, setPathSelectionError] = useState<string | null>(null);
+  const [pathSelectionError, setPathSelectionError] = useState<string | null>(
+    null,
+  );
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const inFlightLabel = pendingLabel ?? t("common.saving");
 
   const resolvedValues = useMemo(() => {
     // Select options arrive asynchronously for repository-backed forms. Fill only
@@ -87,6 +99,18 @@ export function EntityDialog({
     }
     return next;
   }, [fields, values]);
+
+  const optionsLoading = fields.some(
+    (field) => field.kind === "select" && field.loading === true,
+  );
+  // A loading select is empty because options have not arrived, not because the
+  // user skipped it. Treat that as a wait state so Enter does not look like a
+  // required-field miss that then lingers after the default branch fills in.
+  const hasEmptyNonLoadingField = fields.some(
+    (field) =>
+      !(field.kind === "select" && field.loading === true) &&
+      !resolvedValues[field.name]?.trim(),
+  );
 
   const handlePathSelection = async (field: PathEntityField) => {
     setSelectingField(field.name);
@@ -110,29 +134,48 @@ export function EntityDialog({
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (fields.some((field) => !resolvedValues[field.name]?.trim())) {
+    if (submittingRef.current) return;
+    // Native Enter still submits a form whose submit button is disabled, so
+    // keep the same validation/feedback path the click path would have shown.
+    if (hasEmptyNonLoadingField) {
       setValidationError(true);
+      setOptionsLoadingError(false);
       return;
     }
+    if (optionsLoading) {
+      setOptionsLoadingError(true);
+      setValidationError(false);
+      return;
+    }
+    submittingRef.current = true;
     setSubmitting(true);
     setSubmissionError(null);
+    setOptionsLoadingError(false);
     try {
       await onSubmit(resolvedValues);
       onOpenChange(false);
     } catch (error) {
       setSubmissionError(localizeContractError(error, t));
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => (!submitting || nextOpen) && onOpenChange(nextOpen)}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) =>
+        (!submitting || nextOpen) && onOpenChange(nextOpen)
+      }
+    >
       <DialogContent>
         <form onSubmit={handleSubmit} className="contents">
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
-            {description && <DialogDescription>{description}</DialogDescription>}
+            {description && (
+              <DialogDescription>{description}</DialogDescription>
+            )}
           </DialogHeader>
           <div className="grid gap-3">
             {fields.map((field) => (
@@ -141,14 +184,33 @@ export function EntityDialog({
                 {field.kind === "select" ? (
                   <Select
                     value={resolvedValues[field.name] ?? ""}
-                    onValueChange={(value) => setValues((current) => ({ ...current, [field.name]: value ?? "" }))}
+                    disabled={submitting || field.loading === true}
+                    onValueChange={(value) =>
+                      setValues((current) => ({
+                        ...current,
+                        [field.name]: value ?? "",
+                      }))
+                    }
                   >
-                    <SelectTrigger id={`entity-${field.name}`} className="w-full">
-                      <SelectValue />
+                    <SelectTrigger
+                      id={`entity-${field.name}`}
+                      className="w-full"
+                      aria-busy={field.loading === true}
+                    >
+                      {field.loading === true ? (
+                        <Spinner
+                          className="size-3.5 text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <SelectValue />
+                      )}
                     </SelectTrigger>
                     <SelectContent>
                       {field.options.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -159,9 +221,15 @@ export function EntityDialog({
                       className="min-w-0 flex-1"
                       value={values[field.name] ?? ""}
                       placeholder={field.placeholder}
-                      aria-invalid={validationError && !resolvedValues[field.name]?.trim()}
+                      disabled={submitting}
+                      aria-invalid={
+                        validationError && !resolvedValues[field.name]?.trim()
+                      }
                       onChange={(event) => {
-                        setValues((current) => ({ ...current, [field.name]: event.target.value }));
+                        setValues((current) => ({
+                          ...current,
+                          [field.name]: event.target.value,
+                        }));
                         setValidationError(false);
                         setPathSelectionError(null);
                       }}
@@ -182,27 +250,70 @@ export function EntityDialog({
                     id={`entity-${field.name}`}
                     value={resolvedValues[field.name] ?? ""}
                     placeholder={field.placeholder}
-                    aria-invalid={validationError && !resolvedValues[field.name]?.trim()}
+                    disabled={submitting}
+                    aria-invalid={
+                      validationError && !resolvedValues[field.name]?.trim()
+                    }
                     onChange={(event) => {
-                      setValues((current) => ({ ...current, [field.name]: event.target.value }));
+                      setValues((current) => ({
+                        ...current,
+                        [field.name]: event.target.value,
+                      }));
                       setValidationError(false);
                     }}
                     autoFocus={field === fields[0]}
                   />
                 )}
                 {pathSelectionError === field.name && (
-                  <p role="alert" data-selectable className="text-xs text-destructive">
+                  <p
+                    role="alert"
+                    data-selectable
+                    className="text-xs text-destructive"
+                  >
                     {t("dialog.pathSelectionError")}
                   </p>
                 )}
               </div>
             ))}
           </div>
-          {validationError && <p role="alert" className="text-xs text-destructive">{t("dialog.required")}</p>}
-          {submissionError && <p role="alert" data-selectable className="text-xs text-destructive">{submissionError}</p>}
+          {validationError && hasEmptyNonLoadingField && (
+            <p role="alert" className="text-xs text-destructive">
+              {t("dialog.required")}
+            </p>
+          )}
+          {optionsLoadingError && optionsLoading && (
+            <p role="alert" className="text-xs text-destructive">
+              {t("dialog.optionsLoading")}
+            </p>
+          )}
+          {submissionError && (
+            <p
+              role="alert"
+              data-selectable
+              className="text-xs text-destructive"
+            >
+              {submissionError}
+            </p>
+          )}
           <DialogFooter>
-            <Button type="button" variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? t("common.saving") : submitLabel}</Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={submitting}
+              onClick={() => onOpenChange(false)}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="submit"
+              disabled={submitting || optionsLoading}
+              aria-busy={submitting || optionsLoading}
+            >
+              {submitting || optionsLoading ? (
+                <Spinner className="size-3.5" aria-hidden="true" />
+              ) : null}
+              {submitting ? inFlightLabel : submitLabel}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

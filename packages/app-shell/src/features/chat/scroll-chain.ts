@@ -1,14 +1,14 @@
 /**
  * Finds the nearest ancestor that can scroll vertically past its client box.
  */
-export function findVerticalScrollParent(from: HTMLElement): HTMLElement | null {
+export function findVerticalScrollParent(
+  from: HTMLElement,
+): HTMLElement | null {
   let node: HTMLElement | null = from.parentElement;
   while (node !== null) {
     const { overflowY } = getComputedStyle(node);
     const scrollableOverflow =
-      overflowY === "auto"
-      || overflowY === "scroll"
-      || overflowY === "overlay";
+      overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay";
     if (scrollableOverflow && node.scrollHeight > node.clientHeight + 1) {
       return node;
     }
@@ -36,9 +36,7 @@ export function chainWheelToScrollParent(
   const atTop = element.scrollTop <= 0;
   const atBottom = maxScroll <= 0 || element.scrollTop >= maxScroll - 1;
   const shouldChain =
-    maxScroll <= 0
-    || (scrollingDown && atBottom)
-    || (!scrollingDown && atTop);
+    maxScroll <= 0 || (scrollingDown && atBottom) || (!scrollingDown && atTop);
   if (!shouldChain) {
     return;
   }

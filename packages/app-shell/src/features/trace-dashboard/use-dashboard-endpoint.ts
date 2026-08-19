@@ -73,7 +73,9 @@ export function useDashboardEndpoint(
       .catch((error) => {
         if (!superseded && activeResolve.current === promise) {
           const message =
-            error instanceof Error ? error.message : "Failed to resolve dashboard endpoint";
+            error instanceof Error
+              ? error.message
+              : "Failed to resolve dashboard endpoint";
           setResolved({ sessionId, endpoint: null, error: message });
         }
       });
@@ -93,7 +95,8 @@ export function useDashboardEndpoint(
   const isStale = resolved.sessionId !== sessionId;
   return {
     endpoint: isStale ? null : resolved.endpoint,
-    isLoading: isStale || (resolved.endpoint === null && resolved.error === null),
+    isLoading:
+      isStale || (resolved.endpoint === null && resolved.error === null),
     error: isStale ? null : resolved.error,
   };
 }

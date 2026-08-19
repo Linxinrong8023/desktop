@@ -11,21 +11,16 @@ Ora keeps SQLite migration definitions in Rust code inside `ora-db` rather than 
 
 ## Shipped catalog
 
-| Version | Adds |
-| --- | --- |
-| `0001` | `projects`, `tasks`, `worktrees`, `virtual_folders`, `virtual_entries`, `sessions`, `artifacts`, `migrations` |
-| `0002` | `project_work_contexts` plus its unique `(surface, window_id)` index and lease/expiry indexes |
-| `0003` | `skills`, `agents` |
-| `0004` | `worktrees.base_commit_id`, `task_diff_comments`, comment indexes, and the root-parent trigger |
-| `0005` | `sessions.history_degraded_reason` |
-| `0006` | `workflows`, `workflow_snapshots` with a partial unique index for visible `(workflow_id, version)` pairs and foreign key from snapshots to workflows; later extended with `workflow_runs`, `workflow_node_runs`, and `tasks.type`/`workflow_run_id` (unique partial index for the run-task association) |
-| `0007` | `project_spec_source_overrides` and its active project/path unique index |
-| `0008` | `agents.content` for persisted agent definitions |
-| `0009` | nullable `sessions.title` for the persisted display name |
-| `0010` | nullable `worktrees.checkout_root`, `git_cleanup_jobs`, `worktree_provisioning_leases` |
-| `0011` | drops `project_work_contexts` and its indexes after the single-tab restriction removed multi-client window leases |
+| Version | Adds                                                                                                                                                                                       |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `0001`  | Core `projects`, `tasks`, `worktrees`, and `sessions` tables plus migration bookkeeping. Worktree baseline/checkout identity and session title/history state are part of this base schema. |
+| `0002`  | `skills` and configurable `agents`, including persisted agent content.                                                                                                                     |
+| `0003`  | Constrained `task_diff_comments`, its lookup indexes, and the root-parent trigger.                                                                                                         |
+| `0004`  | Workflow definitions, snapshots, runs, node runs, and the task type/workflow-run association.                                                                                              |
+| `0005`  | Durable Git cleanup jobs, their dispatch index, and worktree provisioning leases.                                                                                                          |
+| `0006`  | Drops unused `tasks.status`.                                                                                                                                                               |
 
-`default_migration_catalog()` returns all eleven with every version as the active target.
+`default_migration_catalog()` returns all migrations with every version as the active target.
 
 ## Reconciliation model
 
@@ -39,14 +34,13 @@ A catalog carries the full migration list plus an **active target prefix**, whic
 
 Each migration's statements and its bookkeeping update run inside **one SQLite transaction**, so a failing statement can never leave the schema and the `migrations` table out of sync, and a failed version is never recorded as applied. Statements execute one at a time so the failing version and direction can be reported precisely.
 
-Because rollback needs `down` statements, retired tail migrations must stay defined in Rust until every managed database has been reconciled to the shorter target prefix.
+The catalog is a clean replacement for the earlier development history. Databases created from that retired history are not supported and must be recreated; the runner compares version identifiers and does not attempt to reinterpret rewritten versions.
 
-Migration `0004` is additive for existing databases: it adds the nullable worktree baseline and the new comment table. Its rollback removes only the task-diff indexes, trigger, table, and baseline column; it does not rewrite existing tasks or worktrees. A production rollback must still be treated as destructive for task-diff comments because the down migration drops that table.
+Migration `0003` rollback drops all task-diff comments together with their indexes and trigger. Migration `0004` rollback removes workflow execution state before definitions and removes the task association columns in dependency order.
 
-Migration `0005` is additive as well: it adds the nullable `sessions.history_degraded_reason` column, and its rollback only drops that column. On-disk conversation history lives outside SQLite, so neither direction touches recorded transcripts.
+Migration `0005` rollback drops all pending cleanup and provisioning bookkeeping, deliberately re-accepting the pre-migration behavior of leaking physical Git resources on aggregate deletion. The nullable `worktrees.checkout_root` remains part of the base schema because it is worktree identity used by cleanup rather than cleanup-job bookkeeping.
 
-Migration `0006` adds workflow definitions/snapshots, workflow runs/node runs, and the task `type`/`workflow_run_id` association columns. Migration `0007` stores audited project-level Spec source decisions. Database checks make custom workflow names mandatory and forbid custom names on built-in workflows; the partial unique index applies only to active rows so replacements can retain soft-deleted history.
-Migration `0008` stores the optional agent definition content. Migration `0009` adds the nullable `sessions.title` column; the acquisition window and its locked state are intentionally not persisted, so rollback only removes the title column. Migration `0010` records the exact checkout path on new worktrees and introduces the durable Git cleanup bookkeeping (`git_cleanup_jobs` with CHECK-constrained states and a dispatch index, plus `worktree_provisioning_leases`); rolling it back drops all pending cleanup and provisioning bookkeeping, deliberately re-accepting the pre-migration behavior of leaking physical Git resources on aggregate deletion.
+Migration `0006` rollback restores `tasks.status` as an unused integer defaulting to 0.
 
 ## Operational logging
 

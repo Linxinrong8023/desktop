@@ -50,91 +50,93 @@ const EMPTY_SELECTION: WorkspaceSelection = {
  * the owning project/task ids they already have from react-query results, which
  * keeps this store a pure state machine that is trivial to unit-test.
  */
-export const useWorkspaceSelectionStore = create<WorkspaceSelectionState>((set) => ({
-  selection: EMPTY_SELECTION,
-  selectProject: (projectId) =>
-    set({
-      selection: {
-        projectId,
-        taskId: null,
-        sessionId: null,
-        workflowRunId: null,
-      },
-    }),
-  selectTask: (taskId, projectId) =>
-    set({
-      selection: {
-        projectId,
-        taskId,
-        sessionId: null,
-        workflowRunId: null,
-      },
-    }),
-  selectSessionBeforeTask: (sessionId, projectId) =>
-    set({
-      selection: {
-        projectId,
-        taskId: null,
-        sessionId,
-        workflowRunId: null,
-      },
-    }),
-  selectSession: (sessionId, taskId, projectId) =>
-    set({
-      selection: {
-        projectId,
-        taskId,
-        sessionId,
-        workflowRunId: null,
-      },
-    }),
-  selectWorkflowRun: (workflowRunId, projectId) =>
-    set({
-      selection: {
-        projectId,
-        taskId: null,
-        sessionId: null,
-        workflowRunId,
-      },
-    }),
-  clearSelection: () => set({ selection: EMPTY_SELECTION }),
-  clearSessionSelection: () =>
-    set((state) => ({
-      selection: {
-        projectId: state.selection.projectId,
-        taskId: state.selection.taskId,
-        sessionId: null,
-        workflowRunId: state.selection.workflowRunId,
-      },
-    })),
-  clearTaskSelection: (projectId) =>
-    set({
-      selection: {
-        projectId,
-        taskId: null,
-        sessionId: null,
-        workflowRunId: null,
-      },
-    }),
-  clearWorkflowRunSelection: (projectId) =>
-    set({
-      selection: {
-        projectId,
-        taskId: null,
-        sessionId: null,
-        workflowRunId: null,
-      },
-    }),
-  setProject: (projectId) =>
-    set({
-      selection:
-        projectId === null
-          ? EMPTY_SELECTION
-          : {
-              projectId,
-              taskId: null,
-              sessionId: null,
-              workflowRunId: null,
-            },
-    }),
-}));
+export const useWorkspaceSelectionStore = create<WorkspaceSelectionState>(
+  (set) => ({
+    selection: EMPTY_SELECTION,
+    selectProject: (projectId) =>
+      set({
+        selection: {
+          projectId,
+          taskId: null,
+          sessionId: null,
+          workflowRunId: null,
+        },
+      }),
+    selectTask: (taskId, projectId) =>
+      set({
+        selection: {
+          projectId,
+          taskId,
+          sessionId: null,
+          workflowRunId: null,
+        },
+      }),
+    selectSessionBeforeTask: (sessionId, projectId) =>
+      set({
+        selection: {
+          projectId,
+          taskId: null,
+          sessionId,
+          workflowRunId: null,
+        },
+      }),
+    selectSession: (sessionId, taskId, projectId) =>
+      set({
+        selection: {
+          projectId,
+          taskId,
+          sessionId,
+          workflowRunId: null,
+        },
+      }),
+    selectWorkflowRun: (workflowRunId, projectId) =>
+      set({
+        selection: {
+          projectId,
+          taskId: null,
+          sessionId: null,
+          workflowRunId,
+        },
+      }),
+    clearSelection: () => set({ selection: EMPTY_SELECTION }),
+    clearSessionSelection: () =>
+      set((state) => ({
+        selection: {
+          projectId: state.selection.projectId,
+          taskId: state.selection.taskId,
+          sessionId: null,
+          workflowRunId: state.selection.workflowRunId,
+        },
+      })),
+    clearTaskSelection: (projectId) =>
+      set({
+        selection: {
+          projectId,
+          taskId: null,
+          sessionId: null,
+          workflowRunId: null,
+        },
+      }),
+    clearWorkflowRunSelection: (projectId) =>
+      set({
+        selection: {
+          projectId,
+          taskId: null,
+          sessionId: null,
+          workflowRunId: null,
+        },
+      }),
+    setProject: (projectId) =>
+      set({
+        selection:
+          projectId === null
+            ? EMPTY_SELECTION
+            : {
+                projectId,
+                taskId: null,
+                sessionId: null,
+                workflowRunId: null,
+              },
+      }),
+  }),
+);

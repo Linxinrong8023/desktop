@@ -7,6 +7,7 @@ use ts_rs::TS;
 #[ts(export_to = "agent.ts")]
 pub struct Agent {
     pub id: String,
+    pub namespace: String,
     pub name: String,
     pub description: String,
 }
@@ -17,6 +18,7 @@ pub struct Agent {
 #[ts(export_to = "agent.ts")]
 pub struct AgentDetails {
     pub id: String,
+    pub namespace: String,
     pub name: String,
     pub description: String,
     pub content: String,
@@ -141,6 +143,7 @@ mod tests {
     fn serializes_agent_contract_without_audit_fields() {
         let agent = Agent {
             id: "agent-1".to_string(),
+            namespace: "local".to_string(),
             name: "opencode".to_string(),
             description: "OpenCode agent configuration".to_string(),
         };
@@ -149,6 +152,7 @@ mod tests {
             serde_json::to_value(agent).unwrap(),
             json!({
                 "id": "agent-1",
+                "namespace": "local",
                 "name": "opencode",
                 "description": "OpenCode agent configuration",
             })
@@ -160,6 +164,7 @@ mod tests {
     fn serializes_agent_crud_contracts() {
         let agent = Agent {
             id: "agent-1".to_string(),
+            namespace: "local".to_string(),
             name: "opencode".to_string(),
             description: "OpenCode agent configuration".to_string(),
         };
@@ -176,7 +181,7 @@ mod tests {
             &CreateAgentResponse {
                 agent: agent.clone(),
             },
-            json!({ "agent": { "id": "agent-1", "name": "opencode", "description": "OpenCode agent configuration" } }),
+            json!({ "agent": { "id": "agent-1", "namespace": "local", "name": "opencode", "description": "OpenCode agent configuration" } }),
         );
         assert_serialized_json(
             &GetAgentRequest {
@@ -188,19 +193,20 @@ mod tests {
             &GetAgentResponse {
                 agent: super::AgentDetails {
                     id: agent.id.clone(),
+                    namespace: agent.namespace.clone(),
                     name: agent.name.clone(),
                     description: agent.description.clone(),
                     content: "# Instructions".to_string(),
                 },
             },
-            json!({ "agent": { "id": "agent-1", "name": "opencode", "description": "OpenCode agent configuration", "content": "# Instructions" } }),
+            json!({ "agent": { "id": "agent-1", "namespace": "local", "name": "opencode", "description": "OpenCode agent configuration", "content": "# Instructions" } }),
         );
         assert_serialized_json(&ListAgentsRequest {}, json!({}));
         assert_serialized_json(
             &ListAgentsResponse {
                 agents: vec![agent.clone()],
             },
-            json!({ "agents": [{ "id": "agent-1", "name": "opencode", "description": "OpenCode agent configuration" }] }),
+            json!({ "agents": [{ "id": "agent-1", "namespace": "local", "name": "opencode", "description": "OpenCode agent configuration" }] }),
         );
         assert_serialized_json(
             &UpdateAgentRequest {
@@ -228,11 +234,12 @@ mod tests {
             &UpdateAgentResponse {
                 agent: Agent {
                     id: "agent-1".to_string(),
+                    namespace: "local".to_string(),
                     name: "reviewer".to_string(),
                     description: "Reviews changes".to_string(),
                 },
             },
-            json!({ "agent": { "id": "agent-1", "name": "reviewer", "description": "Reviews changes" } }),
+            json!({ "agent": { "id": "agent-1", "namespace": "local", "name": "reviewer", "description": "Reviews changes" } }),
         );
         assert_serialized_json(
             &DeleteAgentRequest {

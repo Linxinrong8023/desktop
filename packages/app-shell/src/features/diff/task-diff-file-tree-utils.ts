@@ -37,7 +37,8 @@ export function buildDiffFileTree(files: FileData[]): DiffFileTreeNode[] {
     let directory = root;
 
     for (const part of parts) {
-      const childPath = directory.path === "" ? part : `${directory.path}/${part}`;
+      const childPath =
+        directory.path === "" ? part : `${directory.path}/${part}`;
       let child = directory.directories.get(part);
       if (child === undefined) {
         child = {
@@ -81,6 +82,8 @@ function finalizeDirectory(directory: MutableDirectory): DiffFileTreeNode[] {
       path: child.path,
       children: finalizeDirectory(child),
     }));
-  const files = [...directory.files].sort((left, right) => left.name.localeCompare(right.name));
+  const files = [...directory.files].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
   return [...directories, ...files];
 }

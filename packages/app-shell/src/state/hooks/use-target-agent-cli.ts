@@ -38,7 +38,9 @@ export function useTargetAgentCli(selection: AgentSelection): AgentCli {
   const { data: sessions = [] } = useSessions();
   const targetKey = warmTargetKey(selection);
   const pendingSwitch = usePendingAgentStore((state) =>
-    selection.sessionId === null ? undefined : state.switches[selection.sessionId],
+    selection.sessionId === null
+      ? undefined
+      : state.switches[selection.sessionId],
   );
   const pickedForTarget = usePendingAgentStore((state) =>
     targetKey === null ? undefined : state.selections[targetKey],
@@ -48,4 +50,3 @@ export function useTargetAgentCli(selection: AgentSelection): AgentCli {
   )?.agentCli;
   return pendingSwitch ?? boundAgentCli ?? pickedForTarget ?? defaultAgentCli;
 }
-

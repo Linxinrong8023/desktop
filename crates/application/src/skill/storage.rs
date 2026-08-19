@@ -1,22 +1,28 @@
-use ora_skill_package::path::RelativePath;
+use ora_domain::SkillId;
+use ora_utils::path::StrictRelativePath;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-/// Name of the reserved directory holding in-flight transaction staging.
-pub const STAGING_DIR_NAME: &str = ".ora-staging";
-/// Name of the reserved directory holding transaction compensation backups.
-pub const BACKUP_DIR_NAME: &str = ".ora-backup";
-/// Name of the reserved directory holding transaction journal markers.
-pub const JOURNAL_DIR_NAME: &str = ".ora-journal";
+/// Names of the directories this layer reserves under the skills root.
+///
+/// They are owned by `ora-domain` because [`ora_domain::validate_skill_name`] rejects every
+/// dot-prefixed skill name, which keeps these dot-prefixed directories unclaimable without
+/// needing to enumerate them individually. Re-exporting instead of redeclaring keeps one literal
+/// per directory, so the two layers cannot drift apart.
+pub use ora_domain::{BACKUP_DIR_NAME, JOURNAL_DIR_NAME, STAGING_DIR_NAME};
 
 /// Captures one durable intent record written before a formal skill mutation.
 ///
 /// The journal lets startup recovery restore or clean a transaction that was interrupted
-/// between the filesystem swap and the database write.
+/// between the filesystem swap and the database write. Ownership is recorded by immutable
+/// `skill_id` so recovery cannot attribute a directory to an unrelated row that happens to
+/// share the same user-facing name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransactionJournal {
     pub op: JournalOp,
+    /// Immutable skill identity this transaction mutates.
+    pub skill_id: String,
     /// Target (new) skill name the transaction writes.
     pub name: String,
     /// Previous skill name before the transaction (equal to `name` for create/delete).
@@ -35,7 +41,12 @@ pub struct TransactionJournal {
 #[serde(rename_all = "lowercase")]
 pub enum JournalOp {
     Create,
-    Swap,
+    /// Replaces an existing package whose database row must advance beyond this version.
+    Swap {
+        /// Previous database version for an owned package update. `None` means a new skill is
+        /// atomically claiming an untracked package and therefore has no prior database row.
+        previous_updated_at: Option<i64>,
+    },
     Delete,
 }
 
@@ -89,8 +100,16 @@ pub enum SkillStorageError {
 /// Implementations must keep formal directories at `<skills_root>/<name>/` with a root
 /// `SKILL.md`, reserve transaction staging under `<skills_root>/<STAGING_DIR_NAME>`, keep
 /// compensation backups under `<skills_root>/<BACKUP_DIR_NAME>`, and record intent in
-/// `<skills_root>/<JOURNAL_DIR_NAME>`. All staging, backup, and journal paths live on the
-/// same filesystem as the formal tree so promotion uses rename instead of cross-device copies.
+/// `<skills_root>/<JOURNAL_DIR_NAME>`. Journals store the skill id so startup recovery can
+/// decide directory ownership without treating a same-named unrelated row as the owner.
+/// All staging, backup, and journal paths live on the same filesystem as the formal tree so
+/// promotion uses rename instead of cross-device copies.
+///
+/// Reserved directory names and committed skill names occupy disjoint namespaces:
+/// [`ora_domain::validate_skill_name`] refuses every dot-prefixed name, which keeps any
+/// dot-prefixed reserved directory unclaimable. Without that split a skill would be promoted
+/// onto a transaction root and startup reconciliation would delete its package as a leftover, so
+/// a new reserved directory must keep the leading dot rather than needing a validation change.
 pub trait SkillStorage {
     /// Reserves a unique staging directory for one transaction.
     fn create_staging(&self) -> Result<PathBuf, SkillStorageError>;
@@ -105,7 +124,7 @@ pub trait SkillStorage {
     fn write_file(
         &self,
         staging: &Path,
-        relative: &RelativePath,
+        relative: &StrictRelativePath,
         bytes: &[u8],
     ) -> Result<(), SkillStorageError>;
 
@@ -116,7 +135,7 @@ pub trait SkillStorage {
     fn copy_file(
         &self,
         staging: &Path,
-        relative: &RelativePath,
+        relative: &StrictRelativePath,
         source: &Path,
     ) -> Result<(), SkillStorageError>;
 
@@ -124,7 +143,12 @@ pub trait SkillStorage {
     fn write_manifest(&self, staging: &Path, content: &[u8]) -> Result<(), SkillStorageError>;
 
     /// Promotes a staging directory to the formal `<name>` directory for a new skill.
-    fn commit_create(&self, name: &str, staging: &Path) -> Result<CreateHandle, SkillStorageError>;
+    fn commit_create(
+        &self,
+        name: &str,
+        skill_id: &SkillId,
+        staging: &Path,
+    ) -> Result<CreateHandle, SkillStorageError>;
 
     /// Removes a partially created formal directory and cleans the staging and journal.
     fn rollback_create(&self, handle: &CreateHandle) -> Result<(), SkillStorageError>;
@@ -137,6 +161,8 @@ pub trait SkillStorage {
         &self,
         name: &str,
         from_name: &str,
+        skill_id: &SkillId,
+        previous_updated_at: Option<i64>,
         staging: &Path,
     ) -> Result<SwapHandle, SkillStorageError>;
 
@@ -147,7 +173,11 @@ pub trait SkillStorage {
     fn finish_swap(&self, handle: &SwapHandle) -> Result<(), SkillStorageError>;
 
     /// Moves the formal `<name>` directory into a compensation backup for deletion.
-    fn commit_delete(&self, name: &str) -> Result<DeleteHandle, SkillStorageError>;
+    fn commit_delete(
+        &self,
+        name: &str,
+        skill_id: &SkillId,
+    ) -> Result<DeleteHandle, SkillStorageError>;
 
     /// Restores the formal directory after an interrupted delete.
     fn rollback_delete(&self, handle: &DeleteHandle) -> Result<(), SkillStorageError>;
@@ -172,6 +202,14 @@ pub trait SkillStorage {
 
     /// Removes one directory (best effort by the caller's recovery policy).
     fn remove_dir(&self, path: &Path) -> Result<(), SkillStorageError>;
+
+    /// Removes the formal `<name>` directory when it still exists.
+    ///
+    /// Callers must only use this for incomplete leftovers (no root `SKILL.md`) or for
+    /// post-delete cleanup when `commit_delete` already reported the directory missing.
+    /// Create and import of an unclaimed name replace leftovers through a journaled swap
+    /// instead of calling this, so a failed persist can restore the original package.
+    fn remove_formal(&self, name: &str) -> Result<(), SkillStorageError>;
 
     /// Lists every unresolved transaction journal for startup recovery.
     fn list_journals(&self) -> Result<Vec<TransactionJournal>, SkillStorageError>;

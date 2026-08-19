@@ -96,6 +96,7 @@ export type LoadSessionEvent =
     "type": "turn_ended";
     stopReason: import("@agentclientprotocol/sdk").StopReason;
   }
+  | { "type": "history_notice"; notice: SessionHistoryNotice }
   | { "type": "completed" };
 
 /**
@@ -124,6 +125,16 @@ export type PromptSessionRequest = {
   sessionId: string;
   prompt: Array<import("@agentclientprotocol/sdk").ContentBlock>;
 };
+
+/**
+ * Renames one persisted session with a user-supplied display title.
+ */
+export type RenameSessionRequest = { sessionId: string; title: string };
+
+/**
+ * Returns the session after its display title was replaced.
+ */
+export type RenameSessionResponse = { session: Session };
 
 /**
  * Selects one option for a still-pending permission request.
@@ -169,6 +180,14 @@ export type Session = {
   status: SessionStatus;
   historyState: SessionHistoryState;
 };
+
+/**
+ * Describes durable conversation content that Ora knows is missing.
+ */
+export type SessionHistoryNotice = {
+  "type": "unreadable_records";
+  count: number;
+} | { "type": "unrecorded_content"; reason: string };
 
 /**
  * Reports whether Ora can still extend this session's recorded history.
@@ -237,16 +256,6 @@ export type StopSessionResponse = { session: Session };
 export type SwitchSessionAgentRequest = {
   sessionId: string;
   agentCli: AgentCli;
-  /**
-   * Identifies the client surface whose warm session this switch claims.
-   *
-   * The provider session the new CLI runs on is the one this client already
-   * warmed while its picker was showing that CLI's models, and warm entries
-   * are keyed by client. Carrying the same value here is what makes the
-   * switch claim that entry — including any model chosen on it — rather than
-   * build a second session the user never configured.
-   */
-  clientId: string;
 };
 
 /**
@@ -273,15 +282,6 @@ export type SwitchSessionAgentResponse = {
 export type WarmSessionRequest = {
   target: WarmSessionTarget;
   agentCli: AgentCli;
-  /**
-   * Identifies the client surface that will own the returned session.
-   *
-   * Warm entries are keyed by this value because one backend can serve
-   * several clients (browser tabs against the Web server). Without it two
-   * tabs showing the same selection would share one provider session, and
-   * whichever attached first would take the other tab's conversation.
-   */
-  clientId: string;
 };
 
 /**

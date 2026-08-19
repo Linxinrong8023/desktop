@@ -8,6 +8,7 @@ use thiserror::Error;
 
 const CONFIG_VERSION: u32 = 1;
 const CONFIG_FILE_NAME: &str = "config.json";
+const ORA_DIRECTORY_NAME: &str = ".ora";
 const DEFAULT_WORKTREE_DIRECTORY_NAME: &str = "worktrees";
 const DEFAULT_DASHBOARD_HOST: &str = "127.0.0.1";
 const DEFAULT_DASHBOARD_PORT: u16 = 8601;
@@ -61,7 +62,10 @@ pub struct DesktopConfigStore {
 
 impl DesktopConfigStore {
     /// Loads an existing configuration or atomically creates the first-run default.
-    pub fn load_or_create(app_data_directory: &Path) -> Result<Self, DesktopConfigError> {
+    pub fn load_or_create(
+        app_data_directory: &Path,
+        home_directory: &Path,
+    ) -> Result<Self, DesktopConfigError> {
         fs::create_dir_all(app_data_directory).map_err(|source| {
             DesktopConfigError::DirectoryCreate {
                 path: app_data_directory.to_path_buf(),
@@ -72,7 +76,9 @@ impl DesktopConfigStore {
         let config = if config_path.exists() {
             read_config(&config_path)?
         } else {
-            let worktree_root = app_data_directory.join(DEFAULT_WORKTREE_DIRECTORY_NAME);
+            let worktree_root = home_directory
+                .join(ORA_DIRECTORY_NAME)
+                .join(DEFAULT_WORKTREE_DIRECTORY_NAME);
             fs::create_dir_all(&worktree_root).map_err(|source| {
                 DesktopConfigError::DirectoryCreate {
                     path: worktree_root.clone(),
@@ -320,13 +326,16 @@ mod tests {
         let temporary = TempDir::new().expect("create temporary app data directory");
         let app_data = temporary.path().join("app-data");
 
-        let store = DesktopConfigStore::load_or_create(&app_data)
+        let store = DesktopConfigStore::load_or_create(&app_data, temporary.path())
             .expect("create first-run Desktop configuration");
         let snapshot = store.snapshot().expect("read Desktop configuration");
         let persisted = fs::read_to_string(app_data.join("config.json"))
             .expect("read persisted Desktop configuration");
 
-        assert_eq!(snapshot.worktree_root(), app_data.join("worktrees"));
+        assert_eq!(
+            snapshot.worktree_root(),
+            temporary.path().join(".ora").join("worktrees")
+        );
         assert!(snapshot.worktree_root().is_dir());
         assert_eq!(snapshot.dashboard_host(), "127.0.0.1");
         assert_eq!(snapshot.dashboard_port(), 8601);
@@ -343,14 +352,14 @@ mod tests {
         let app_data = temporary.path().join("app-data");
         let selected = temporary.path().join("selected-worktrees");
         fs::create_dir_all(&selected).expect("create selected worktree root");
-        let store = DesktopConfigStore::load_or_create(&app_data)
+        let store = DesktopConfigStore::load_or_create(&app_data, temporary.path())
             .expect("create first-run Desktop configuration");
 
         store
             .set_worktree_root(selected.clone())
             .expect("persist selected worktree root");
-        let reloaded =
-            DesktopConfigStore::load_or_create(&app_data).expect("reload Desktop configuration");
+        let reloaded = DesktopConfigStore::load_or_create(&app_data, temporary.path())
+            .expect("reload Desktop configuration");
 
         assert_eq!(
             reloaded
@@ -365,7 +374,7 @@ mod tests {
     #[test]
     fn rejects_invalid_worktree_roots() {
         let temporary = TempDir::new().expect("create temporary app data directory");
-        let store = DesktopConfigStore::load_or_create(temporary.path())
+        let store = DesktopConfigStore::load_or_create(temporary.path(), temporary.path())
             .expect("create first-run Desktop configuration");
         let original = store.snapshot().expect("read original configuration");
 
@@ -391,7 +400,7 @@ mod tests {
             .expect("write corrupt configuration");
 
         assert!(matches!(
-            DesktopConfigStore::load_or_create(temporary.path()),
+            DesktopConfigStore::load_or_create(temporary.path(), temporary.path()),
             Err(DesktopConfigError::Decode { .. })
         ));
     }
@@ -410,7 +419,7 @@ mod tests {
         fs::write(temporary.path().join("config.json"), legacy)
             .expect("write legacy configuration");
 
-        let snapshot = DesktopConfigStore::load_or_create(temporary.path())
+        let snapshot = DesktopConfigStore::load_or_create(temporary.path(), temporary.path())
             .expect("load legacy Desktop configuration")
             .snapshot()
             .expect("read Desktop configuration");
@@ -423,14 +432,14 @@ mod tests {
     #[test]
     fn persists_selected_dashboard_endpoint() {
         let temporary = TempDir::new().expect("create temporary app data directory");
-        let store = DesktopConfigStore::load_or_create(temporary.path())
+        let store = DesktopConfigStore::load_or_create(temporary.path(), temporary.path())
             .expect("create first-run Desktop configuration");
 
         store
             .set_dashboard_endpoint("127.0.0.1".to_string(), 8602)
             .expect("persist selected dashboard endpoint");
-        let snapshot =
-            DesktopConfigStore::load_or_create(temporary.path()).expect("reload configuration");
+        let snapshot = DesktopConfigStore::load_or_create(temporary.path(), temporary.path())
+            .expect("reload configuration");
         let snapshot = snapshot
             .snapshot()
             .expect("read reloaded Desktop configuration");
@@ -443,7 +452,7 @@ mod tests {
     #[test]
     fn rejects_invalid_dashboard_endpoints() {
         let temporary = TempDir::new().expect("create temporary app data directory");
-        let store = DesktopConfigStore::load_or_create(temporary.path())
+        let store = DesktopConfigStore::load_or_create(temporary.path(), temporary.path())
             .expect("create first-run Desktop configuration");
         let original = store.snapshot().expect("read original configuration");
 

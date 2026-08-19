@@ -1,6 +1,7 @@
 use crate::config::validate_worktree_root;
 use crate::error::{CommandError, desktop_config_backend_error};
 use crate::state::DesktopState;
+use crate::stream_forwarding::{forward_contract_stream, forward_workspace_watch};
 use crate::workspace_files::{WorkspaceFileApi, workspace_file_backend_error};
 use ora_backend::{Backend, BackendError, RequestLifecycle, UuidRequestIdGenerator};
 use ora_contracts::*;
@@ -8,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 use tauri::State;
 use tauri::ipc::Channel;
 use tokio_util::sync::CancellationToken;
@@ -133,6 +133,19 @@ macro_rules! backend_command {
                 Backend::$operation,
             )
             .await
+        }
+    };
+}
+
+macro_rules! async_backend_command {
+    ($name:ident, $request:ty, $response:ty, $operation:ident, $doc:literal) => {
+        #[doc = $doc]
+        #[tauri::command]
+        pub async fn $name(
+            state: State<'_, DesktopState>,
+            request: $request,
+        ) -> Result<$response, CommandError> {
+            run_async_backend(stringify!($name), state.backend.$operation(request)).await
         }
     };
 }
@@ -501,6 +514,15 @@ pub async fn delete_session(
     run_async_backend("delete_session", state.backend.delete_session(request)).await
 }
 
+/// Renames one session through the shared Backend.
+#[tauri::command]
+pub async fn rename_session(
+    state: State<'_, DesktopState>,
+    request: RenameSessionRequest,
+) -> Result<RenameSessionResponse, CommandError> {
+    run_async_backend("rename_session", state.backend.rename_session(request)).await
+}
+
 /// Starts one typed Session stream and forwards private transport frames over a Tauri Channel.
 #[tauri::command]
 pub async fn stream_contract(
@@ -690,144 +712,36 @@ pub async fn cancel_contract_stream(
     state: State<'_, DesktopState>,
     stream_call_id: String,
 ) -> Result<(), CommandError> {
-    if let Some(cancellation) = state
-        .stream_cancellations
-        .lock()
-        .map_err(|_poisoned| CommandError::execution())?
-        .remove(&stream_call_id)
-    {
-        cancellation.cancel();
-    }
-    Ok(())
-}
+    let lifecycle = RequestLifecycle::start("cancel_contract_stream", &UuidRequestIdGenerator);
+    let request_span =
+        ora_logging::span_with_request_id("tauri_command", &lifecycle.request_id().to_string());
 
-/// Forwards ordered data/error/end frames and drops the backend stream on channel failure.
-async fn forward_contract_stream<Event>(
-    mut stream: ora_backend::SessionEventStream<Event>,
-    cancellation: CancellationToken,
-    stream_call_id: String,
-    registry: std::sync::Arc<
-        std::sync::Mutex<std::collections::HashMap<String, CancellationToken>>,
-    >,
-    on_event: Channel<serde_json::Value>,
-    lifecycle: RequestLifecycle,
-) where
-    Event: Serialize + Send + 'static,
-{
-    loop {
-        tokio::select! {
-            () = cancellation.cancelled() => {
-                lifecycle.complete_cancellation();
-                break;
-            },
-            event = stream.recv() => {
-                let is_terminal = matches!(&event, Some(Err(_)) | None);
-                let frame = match event {
-                    Some(Ok(data)) => serde_json::json!({ "type": "data", "data": data }),
-                    Some(Err(error)) => {
-                        lifecycle.complete_failure(&error);
-                        serde_json::json!({
-                            "type": "error",
-                            "error": error.contract_error(lifecycle.request_id()),
-                        })
-                    },
-                    None => {
-                        lifecycle.complete_success();
-                        serde_json::json!({ "type": "end" })
-                    },
-                };
-                if on_event.send(frame).is_err() || is_terminal {
-                    break;
-                }
-            }
-        }
-    }
-    if let Ok(mut registrations) = registry.lock() {
-        registrations.remove(&stream_call_id);
-    }
-}
+    // The body holds a registry lock and never awaits, so the span is entered with `in_scope`
+    // instead of `Instrument`, which would keep a guard alive across the async fn boundary.
+    request_span.in_scope(|| {
+        let registration = state
+            .stream_cancellations
+            .lock()
+            .map(|mut registrations| registrations.remove(&stream_call_id))
+            .map_err(|_poisoned| {
+                CommandError::from_backend_with_lifecycle(
+                    BackendError::internal(
+                        "stream registration state is unavailable",
+                        std::io::Error::other("stream registration lock poisoned"),
+                    ),
+                    &lifecycle,
+                )
+            })?;
 
-/// Forwards debounced native workspace changes until the Desktop stream is cancelled.
-pub(crate) async fn forward_workspace_watch(
-    watcher: ora_fs::WorkspaceWatcher,
-    cancellation: CancellationToken,
-    stream_call_id: String,
-    registry: std::sync::Arc<
-        std::sync::Mutex<std::collections::HashMap<String, CancellationToken>>,
-    >,
-    on_event: Channel<serde_json::Value>,
-    lifecycle: RequestLifecycle,
-) {
-    let watch_cancellation = cancellation.clone();
-    let terminal_channel = on_event.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        while !watch_cancellation.is_cancelled() {
-            match watcher.receive_batch(Duration::from_millis(100)) {
-                Ok(Some(changes)) if !changes.is_empty() => {
-                    let data = WorkspaceFileEventBatch {
-                        changes: changes.into_iter().map(to_contract_change).collect(),
-                    };
-                    if on_event
-                        .send(serde_json::json!({ "type": "data", "data": data }))
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-                Ok(Some(_)) | Ok(None) => {}
-                Err(error) => return Err(error),
-            }
+        // Cancelling an already-finished stream is not an error: the forwarding task removes its
+        // own registration on completion, so a missing entry only means the race resolved first.
+        if let Some(cancellation) = registration {
+            cancellation.cancel();
         }
-        Ok::<(), ora_fs::WorkspaceFileSystemError>(())
+
+        lifecycle.complete_success();
+        Ok(())
     })
-    .await;
-
-    if cancellation.is_cancelled() {
-        lifecycle.complete_cancellation();
-    } else {
-        match result {
-            Ok(Ok(())) => {
-                lifecycle.complete_success();
-                let _ = terminal_channel.send(serde_json::json!({ "type": "end" }));
-            }
-            Ok(Err(error)) => {
-                let backend_error = workspace_file_backend_error(error);
-                lifecycle.complete_failure(&backend_error);
-                let _ = terminal_channel.send(serde_json::json!({
-                    "type": "error",
-                    "error": backend_error.contract_error(lifecycle.request_id()),
-                }));
-            }
-            Err(error) => {
-                let backend_error =
-                    BackendError::internal("Desktop workspace watcher failed", error);
-                lifecycle.complete_failure(&backend_error);
-                let _ = terminal_channel.send(serde_json::json!({
-                    "type": "error",
-                    "error": backend_error.contract_error(lifecycle.request_id()),
-                }));
-            }
-        }
-    }
-    if let Ok(mut registrations) = registry.lock() {
-        registrations.remove(&stream_call_id);
-    }
-}
-
-/// Converts native watcher events to the shared file-change contract.
-fn to_contract_change(change: ora_fs::WorkspaceChange) -> WorkspaceFileChange {
-    match change.kind {
-        ora_fs::WorkspaceChangeKind::Created => WorkspaceFileChange::Created { path: change.path },
-        ora_fs::WorkspaceChangeKind::Modified => {
-            WorkspaceFileChange::Modified { path: change.path }
-        }
-        ora_fs::WorkspaceChangeKind::Removed => WorkspaceFileChange::Removed { path: change.path },
-        ora_fs::WorkspaceChangeKind::Renamed { from } => WorkspaceFileChange::Renamed {
-            from,
-            path: change.path,
-        },
-        ora_fs::WorkspaceChangeKind::RescanRequired => WorkspaceFileChange::RescanRequired,
-    }
 }
 
 // =============================================================================
@@ -968,37 +882,55 @@ backend_command!(
 // plugin
 // =============================================================================
 
-/// Lists the immutable installed-plugin snapshot captured during Desktop bootstrap.
-#[tauri::command]
-pub async fn list_installed_plugins(
-    state: State<'_, DesktopState>,
-    _request: ListInstalledPluginsRequest,
-) -> Result<ListInstalledPluginsResponse, CommandError> {
-    let plugins = state
-        .plugin_manager
-        .installed_plugins()
-        .iter()
-        .map(|plugin| InstalledPlugin {
-            id: plugin.id.clone(),
-            package_name: plugin.package_name.clone(),
-            display_name: plugin.display_name.clone(),
-            version: plugin.version.to_string(),
-            kind: plugin.kind.as_str().to_string(),
-            main: plugin.main.to_string_lossy().to_string(),
-            agents: plugin
-                .agents
-                .iter()
-                .map(|agent| InstalledPluginAgent {
-                    id: agent.id.clone(),
-                    display_name: agent.display_name.clone(),
-                    contract_version: agent.contract_version,
-                })
-                .collect(),
-        })
-        .collect();
-
-    Ok(ListInstalledPluginsResponse { plugins })
-}
+backend_command!(
+    list_installed_plugins,
+    ListInstalledPluginsRequest,
+    ListInstalledPluginsResponse,
+    list_installed_plugins,
+    "Lists the cached installed-plugin lifecycle snapshot."
+);
+async_backend_command!(
+    scan_plugins,
+    ScanPluginsRequest,
+    ScanPluginsResponse,
+    scan_plugins,
+    "Explicitly scans and reconciles installed plugins."
+);
+async_backend_command!(
+    enable_plugin,
+    EnablePluginRequest,
+    EnablePluginResponse,
+    enable_plugin,
+    "Persists plugin eligibility without activating it."
+);
+async_backend_command!(
+    disable_plugin,
+    DisablePluginRequest,
+    DisablePluginResponse,
+    disable_plugin,
+    "Stops and disables one installed plugin."
+);
+async_backend_command!(
+    activate_plugin,
+    ActivatePluginRequest,
+    ActivatePluginResponse,
+    activate_plugin,
+    "Activates one enabled plugin."
+);
+async_backend_command!(
+    stop_plugin,
+    StopPluginRequest,
+    StopPluginResponse,
+    stop_plugin,
+    "Stops one plugin without changing eligibility."
+);
+async_backend_command!(
+    uninstall_plugin,
+    UninstallPluginRequest,
+    UninstallPluginResponse,
+    uninstall_plugin,
+    "Stops and removes one installed plugin."
+);
 
 // =============================================================================
 // gitIdentity

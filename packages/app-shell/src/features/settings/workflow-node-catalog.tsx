@@ -56,7 +56,8 @@ export function WorkflowNodeCatalog({
   const suppressClickRef = useRef(false);
   const [elasticOffset, setElasticOffset] = useState(0);
   const [returning, setReturning] = useState(false);
-  const [nodeDragPreview, setNodeDragPreview] = useState<NodeDragPreview | null>(null);
+  const [nodeDragPreview, setNodeDragPreview] =
+    useState<NodeDragPreview | null>(null);
 
   useEffect(
     () => () => {
@@ -75,18 +76,27 @@ export function WorkflowNodeCatalog({
       return;
     }
 
-    const maxScrollLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+    const maxScrollLeft = Math.max(
+      0,
+      viewport.scrollWidth - viewport.clientWidth,
+    );
     event.preventDefault();
-    const dominantDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY)
-      ? event.deltaX
-      : event.deltaY;
-    const deltaMultiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-      ? 16
-      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-        ? viewport.clientWidth
-        : 1;
-    const requestedScrollLeft = viewport.scrollLeft + dominantDelta * deltaMultiplier;
-    const nextScrollLeft = Math.min(maxScrollLeft, Math.max(0, requestedScrollLeft));
+    const dominantDelta =
+      Math.abs(event.deltaX) > Math.abs(event.deltaY)
+        ? event.deltaX
+        : event.deltaY;
+    const deltaMultiplier =
+      event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? viewport.clientWidth
+          : 1;
+    const requestedScrollLeft =
+      viewport.scrollLeft + dominantDelta * deltaMultiplier;
+    const nextScrollLeft = Math.min(
+      maxScrollLeft,
+      Math.max(0, requestedScrollLeft),
+    );
     const overflow = requestedScrollLeft - nextScrollLeft;
     viewport.scrollLeft = nextScrollLeft;
 
@@ -94,7 +104,8 @@ export function WorkflowNodeCatalog({
       clearTimeout(returnTimerRef.current);
     }
 
-    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const reduceMotion =
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     const nextElasticOffset = reduceMotion
       ? 0
       : Math.min(
@@ -141,8 +152,8 @@ export function WorkflowNodeCatalog({
       return;
     }
     if (
-      !draft.moved
-      && Math.hypot(
+      !draft.moved &&
+      Math.hypot(
         event.clientX - draft.origin.x,
         event.clientY - draft.origin.y,
       ) < NODE_DRAG_THRESHOLD
@@ -164,10 +175,12 @@ export function WorkflowNodeCatalog({
     }
     nodeDragRef.current = null;
     setNodeDragPreview(null);
-    const moved = draft.moved || Math.hypot(
-      event.clientX - draft.origin.x,
-      event.clientY - draft.origin.y,
-    ) >= NODE_DRAG_THRESHOLD;
+    const moved =
+      draft.moved ||
+      Math.hypot(
+        event.clientX - draft.origin.x,
+        event.clientY - draft.origin.y,
+      ) >= NODE_DRAG_THRESHOLD;
     if (!moved) {
       return;
     }
@@ -207,7 +220,9 @@ export function WorkflowNodeCatalog({
     >
       <div className="hidden shrink-0 items-center gap-1.5 border-r border-border px-2 xl:flex">
         <IconAdjustmentsAlt className="size-3.5 text-muted-foreground" />
-        <span className="text-[10px] font-semibold">{t("settings.workflow.nodes")}</span>
+        <span className="text-[10px] font-semibold">
+          {t("settings.workflow.nodes")}
+        </span>
       </div>
       <div
         ref={scrollViewportRef}
@@ -218,7 +233,8 @@ export function WorkflowNodeCatalog({
           data-workflow-node-track
           className={cn(
             "flex w-max items-center gap-0.5 px-0.5",
-            returning && "transition-transform duration-200 ease-out motion-reduce:transition-none",
+            returning &&
+              "transition-transform duration-200 ease-out motion-reduce:transition-none",
           )}
           style={{ transform: `translate3d(${elasticOffset}px, 0, 0)` }}
         >
@@ -237,33 +253,41 @@ export function WorkflowNodeCatalog({
                 onPointerUp={finishNodeDrag}
                 onPointerCancel={cancelNodeDrag}
                 onLostPointerCapture={cancelNodeDrag}
-                title={startTaken
-                  ? t("settings.workflow.startAlreadyPresent")
-                  : `${nodeType.description} · ${t("settings.workflow.dragNodeHint")}`}
+                title={
+                  startTaken
+                    ? t("settings.workflow.startAlreadyPresent")
+                    : `${nodeType.description} · ${t("settings.workflow.dragNodeHint")}`
+                }
                 className="group flex h-9 shrink-0 touch-none cursor-grab items-center gap-1 rounded-lg border border-transparent px-1.5 text-left outline-none transition-colors hover:border-border hover:bg-muted/65 focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-transparent disabled:hover:bg-transparent"
               >
-                <span className={cn(
-                  "flex size-6 shrink-0 items-center justify-center rounded-md",
-                  metadata.tone,
-                )}>
+                <span
+                  className={cn(
+                    "flex size-6 shrink-0 items-center justify-center rounded-md",
+                    metadata.tone,
+                  )}
+                >
                   <Icon className="size-3.5" stroke={1.8} />
                 </span>
-                <span className="text-[10px] font-medium">{nodeType.label}</span>
+                <span className="text-[10px] font-medium">
+                  {nodeType.label}
+                </span>
               </button>
             );
           })}
         </div>
       </div>
-      {nodeDragPreview !== null && createPortal(
-        <WorkflowNodeDragPreview
-          {...nodeDragPreview}
-          label={
-            nodeTypes.find((nodeType) => nodeType.kind === nodeDragPreview.kind)?.label
-              ?? nodeDragPreview.kind
-          }
-        />,
-        document.body,
-      )}
+      {nodeDragPreview !== null &&
+        createPortal(
+          <WorkflowNodeDragPreview
+            {...nodeDragPreview}
+            label={
+              nodeTypes.find(
+                (nodeType) => nodeType.kind === nodeDragPreview.kind,
+              )?.label ?? nodeDragPreview.kind
+            }
+          />,
+          document.body,
+        )}
     </div>
   );
 }
@@ -288,10 +312,12 @@ function WorkflowNodeDragPreview({
         transform: "translate(-50%, -50%)",
       }}
     >
-      <span className={cn(
-        "flex size-7 shrink-0 items-center justify-center rounded-full",
-        metadata.tone,
-      )}>
+      <span
+        className={cn(
+          "flex size-7 shrink-0 items-center justify-center rounded-full",
+          metadata.tone,
+        )}
+      >
         <Icon className="size-3.5" stroke={1.8} />
       </span>
       <span className="pr-1 text-[10px] font-medium">{label}</span>

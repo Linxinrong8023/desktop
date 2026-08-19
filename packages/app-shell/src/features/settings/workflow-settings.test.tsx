@@ -1,15 +1,37 @@
-import { act, fireEvent, render, screen, waitFor, within, type RenderResult } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+  type RenderResult,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import { createChatStore } from "@ora/chat";
-import { PlatformProvider } from "@ora/platform";
-import { createMockWorkflowVersions, createMockWorkflows } from "@ora/workflow-mock";
-import { serializeWorkflowGraph, type WorkflowDefinitionEdge, type WorkflowDefinitionNode } from "@ora/workflow-runtime";
+import { PlatformProvider } from "../../platform";
+import {
+  createMockWorkflowVersions,
+  createMockWorkflows,
+} from "@ora/workflow-mock";
+import {
+  serializeWorkflowGraph,
+  type WorkflowDefinitionEdge,
+  type WorkflowDefinitionNode,
+} from "@ora/workflow-runtime";
 import { appI18n } from "../../i18n/i18n-instance";
 import { AppI18nProvider } from "../../i18n/i18n";
-import { createHookWrapper, createTestQueryClient } from "../../test/hook-harness";
-import { createMockClient, createMockClientState, type MockClientState } from "../../test/mock-client";
+import {
+  createHookWrapper,
+  createTestQueryClient,
+} from "../../test/hook-harness";
+import {
+  createMockClient,
+  createMockClientState,
+  type MockClientState,
+} from "../../test/mock-client";
 import { renderHookWithClient } from "../../test/hook-harness";
 import { createStubPlatform } from "../../test/stub-platform";
 import { useDeleteWorkflow } from "./workflow-definitions";
@@ -17,16 +39,22 @@ import { WorkflowSettings } from "./workflow-settings";
 
 /** Seeds the mock client with the demo workflows and their published versions. */
 function seedDemoWorkflows(state: MockClientState): void {
-  const locale = appI18n.resolvedLanguage === "en-US" ? "en-US" as const : "zh-CN" as const;
+  const locale =
+    appI18n.resolvedLanguage === "en-US"
+      ? ("en-US" as const)
+      : ("zh-CN" as const);
   const demo = createMockWorkflows(locale);
   const versionsByWorkflow = createMockWorkflowVersions(demo);
   // Match the mock editor's default selection: open the code-review showcase first.
-  demo.sort((a, b) => (a.id === "code-review" ? -1 : b.id === "code-review" ? 1 : 0));
+  demo.sort((a, b) =>
+    a.id === "code-review" ? -1 : b.id === "code-review" ? 1 : 0,
+  );
   state.workflows = demo.map((workflow) => {
     const now = BigInt(Date.parse(workflow.updatedAt));
     const record = {
       workflow: {
         id: workflow.id,
+        namespace: "local",
         name: workflow.name,
         publishedSnapshotId: null as string | null,
         createdAt: now,
@@ -45,7 +73,14 @@ function seedDemoWorkflows(state: MockClientState): void {
         createdAt: now,
         updatedAt: now,
       },
-      published: [] as { id: string; workflowId: string; version: string; graph: string; createdAt: bigint; updatedAt: bigint | null }[],
+      published: [] as {
+        id: string;
+        workflowId: string;
+        version: string;
+        graph: string;
+        createdAt: bigint;
+        updatedAt: bigint | null;
+      }[],
     };
     (versionsByWorkflow[workflow.id] ?? []).forEach((version, index) => {
       record.published.push({
@@ -80,20 +115,91 @@ function renderSettings(
   state.projects = [{ id: "p1", name: "Demo", rootPath: "/demo" }];
   // Live Agent/Skill catalogs consumed by the workflow inspector's selectors.
   state.agents = [
-    { id: "ag-architect", name: "Architect", description: "role" },
-    { id: "ag-planner", name: "Planner", description: "role" },
-    { id: "ag-researcher", name: "Researcher", description: "role" },
-    { id: "ag-implementer", name: "Implementer", description: "role" },
-    { id: "ag-reviewer", name: "Reviewer", description: "role" },
-    { id: "ag-tester", name: "Tester", description: "role" },
-    { id: "ag-debugger", name: "Debugger", description: "role" },
-    { id: "ag-documentation", name: "Documentation Agent", description: "role" },
+    {
+      id: "ag-architect",
+      namespace: "local",
+      name: "Architect",
+      description: "role",
+    },
+    {
+      id: "ag-planner",
+      namespace: "local",
+      name: "Planner",
+      description: "role",
+    },
+    {
+      id: "ag-researcher",
+      namespace: "local",
+      name: "Researcher",
+      description: "role",
+    },
+    {
+      id: "ag-implementer",
+      namespace: "local",
+      name: "Implementer",
+      description: "role",
+    },
+    {
+      id: "ag-reviewer",
+      namespace: "local",
+      name: "Reviewer",
+      description: "role",
+    },
+    {
+      id: "ag-tester",
+      namespace: "local",
+      name: "Tester",
+      description: "role",
+    },
+    {
+      id: "ag-debugger",
+      namespace: "local",
+      name: "Debugger",
+      description: "role",
+    },
+    {
+      id: "ag-documentation",
+      namespace: "local",
+      name: "Documentation Agent",
+      description: "role",
+    },
   ];
   state.skills = [
-    { id: "openspec-verify-change", name: "openspec-verify-change", description: "skill" },
-    { id: "openspec-archive-change", name: "openspec-archive-change", description: "skill" },
-    { id: "openspec-explore", name: "openspec-explore", description: "skill" },
-    { id: "cdase:sfmea_review", name: "cdase:sfmea_review", description: "skill" },
+    {
+      id: "openspec-verify-change",
+      namespace: "local",
+      name: "openspec-verify-change",
+      description: "skill",
+      availability: "available",
+    },
+    {
+      id: "openspec-archive-change",
+      namespace: "local",
+      name: "openspec-archive-change",
+      description: "skill",
+      availability: "available",
+    },
+    {
+      id: "openspec-explore",
+      namespace: "local",
+      name: "openspec-explore",
+      description: "skill",
+      availability: "available",
+    },
+    {
+      id: "cdase:sfmea_review",
+      namespace: "local",
+      name: "cdase:sfmea_review",
+      description: "skill",
+      availability: "available",
+    },
+    {
+      id: "missing-skill",
+      namespace: "local",
+      name: "missing-skill",
+      description: "skill",
+      availability: "unavailable",
+    },
   ];
   // Warm-session model catalog consumed by the workflow inspector's model selector.
   state.configOptions = [
@@ -167,15 +273,25 @@ describe("WorkflowSettings", () => {
 
     expect(await screen.findByText("代码审查工作流")).toBeInTheDocument();
     expect(await screen.findByLabelText("工作流画布")).toBeInTheDocument();
-    expect(screen.getByRole("separator", {
-      name: "调整工作流列表宽度；双击恢复默认宽度",
-    })).toBeInTheDocument();
-    expect(screen.getByRole("separator", {
-      name: "调整节点配置宽度；双击恢复默认宽度",
-    })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "部署到项目" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "导出工作流" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "测试运行" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("separator", {
+        name: "调整工作流列表宽度；双击恢复默认宽度",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("separator", {
+        name: "调整节点配置宽度；双击恢复默认宽度",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "部署到项目" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "导出工作流" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "测试运行" }),
+    ).not.toBeInTheDocument();
   });
 
   it("previews and activates a mock published workflow version", async () => {
@@ -186,18 +302,28 @@ describe("WorkflowSettings", () => {
     await user.click(screen.getByLabelText("版本历史"));
     expect(screen.getByText("当前草稿")).toBeInTheDocument();
 
-    const versionButtons = screen.getAllByRole("button", { name: /已发布版本|生效中/ });
+    const versionButtons = screen.getAllByRole("button", {
+      name: /已发布版本|生效中/,
+    });
     // Seed marks the first published snapshot as active; pick a non-active one.
-    const inactiveButton = versionButtons.find((button) => !/生效中/.test(button.getAttribute("aria-label") ?? ""));
+    const inactiveButton = versionButtons.find(
+      (button) => !/生效中/.test(button.getAttribute("aria-label") ?? ""),
+    );
     expect(inactiveButton).toBeDefined();
     await user.click(inactiveButton!);
-    expect(await screen.findByRole("button", { name: "设为生效版本" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "设为生效版本" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("工作流名称")).toBeDisabled();
-    expect(screen.queryByLabelText("输出节点: 输出报告")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("输出节点: 输出报告"),
+    ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "设为生效版本" }));
     await waitFor(() => {
-      expect(screen.queryByLabelText("输出节点: 输出报告")).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("输出节点: 输出报告"),
+      ).not.toBeInTheDocument();
       expect(screen.getByLabelText("工作流名称")).toBeEnabled();
     });
 
@@ -209,8 +335,12 @@ describe("WorkflowSettings", () => {
     const activePreview = screen.getAllByRole("button", { name: /生效中/ })[0];
     expect(activePreview).toBeDefined();
     await user.click(activePreview!);
-    expect(screen.queryByRole("button", { name: "设为生效版本" })).not.toBeInTheDocument();
-    expect(screen.getByText("这是当前生效的版本，部署会使用它。")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "设为生效版本" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("这是当前生效的版本，部署会使用它。"),
+    ).toBeInTheDocument();
   });
 
   it("zooms around the pointer with the mouse wheel", async () => {
@@ -243,7 +373,9 @@ describe("WorkflowSettings", () => {
       expect(screen.queryByText("100%")).not.toBeInTheDocument();
     });
 
-    expect(screen.getByRole("button", { name: "显示完整工作流" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "显示完整工作流" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("工作流小地图")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "重置画布视图" }));
@@ -313,14 +445,18 @@ describe("WorkflowSettings", () => {
     const flowNode = startNode.closest(".react-flow__node") ?? startNode;
 
     await user.click(flowNode);
-    expect(screen.getByRole("button", { name: "收起节点配置" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "收起节点配置" }),
+    ).toBeInTheDocument();
 
     const pane = document.querySelector(".react-flow__pane");
     expect(pane).not.toBeNull();
     await user.click(pane!);
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "收起节点配置" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "收起节点配置" }),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -330,10 +466,14 @@ describe("WorkflowSettings", () => {
     await screen.findByText("代码审查工作流");
 
     await user.click(screen.getByRole("button", { name: "收起工作流列表" }));
-    const expandButton = await screen.findByRole("button", { name: "展开工作流列表" });
+    const expandButton = await screen.findByRole("button", {
+      name: "展开工作流列表",
+    });
     await user.click(expandButton);
 
-    expect(screen.getByRole("button", { name: "收起工作流列表" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "收起工作流列表" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps only one auxiliary panel expanded in a narrow editor", async () => {
@@ -346,7 +486,9 @@ describe("WorkflowSettings", () => {
     await user.click(screen.getByRole("button", { name: "展开工作流列表" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "展开节点配置" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "展开节点配置" }),
+      ).toBeInTheDocument();
     });
   });
 
@@ -360,13 +502,17 @@ describe("WorkflowSettings", () => {
     await user.click(screen.getByRole("button", { name: "展开工作流列表" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "展开节点配置" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "展开节点配置" }),
+      ).toBeInTheDocument();
     });
 
     await user.click(flowNode);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "收起节点配置" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "收起节点配置" }),
+      ).toBeInTheDocument();
     });
   });
 
@@ -378,13 +524,17 @@ describe("WorkflowSettings", () => {
 
     await user.click(flowNode);
     await user.click(screen.getByRole("button", { name: "收起节点配置" }));
-    expect(screen.queryByRole("button", { name: "收起节点配置" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "收起节点配置" }),
+    ).not.toBeInTheDocument();
 
     await user.click(flowNode);
     fireEvent.keyDown(startNode, { key: "Escape" });
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "收起节点配置" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "收起节点配置" }),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -467,7 +617,9 @@ describe("WorkflowSettings", () => {
     });
     fireEvent.click(toolButton);
 
-    expect(document.querySelector("[data-workflow-node-preview]")).not.toBeInTheDocument();
+    expect(
+      document.querySelector("[data-workflow-node-preview]"),
+    ).not.toBeInTheDocument();
     expect(nodeGraphPosition("工具节点: 工具 1")).toEqual({
       x: "360px",
       y: "260px",
@@ -485,9 +637,11 @@ describe("WorkflowSettings", () => {
     await user.dblClick(connection);
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", {
-        name: "Edge from start to understand",
-      })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: "Edge from start to understand",
+        }),
+      ).not.toBeInTheDocument();
     });
 
     const keyboardConnection = screen.getByRole("button", {
@@ -497,9 +651,11 @@ describe("WorkflowSettings", () => {
     await user.keyboard("{Delete}");
 
     await waitFor(() => {
-      expect(screen.queryByRole("button", {
-        name: "Edge from understand to quality",
-      })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: "Edge from understand to quality",
+        }),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -531,24 +687,34 @@ describe("WorkflowSettings", () => {
     renderSettings();
 
     const node = await screen.findByLabelText("Agent节点: 理解改动");
-    expect(screen.getByRole("button", {
-      name: "Edge from start to understand",
-    })).toBeInTheDocument();
-    expect(screen.getByRole("button", {
-      name: "Edge from understand to quality",
-    })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Edge from start to understand",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Edge from understand to quality",
+      }),
+    ).toBeInTheDocument();
 
     await user.click(node.closest(".react-flow__node") ?? node);
     await user.click(screen.getByRole("button", { name: "删除理解改动" }));
 
     await waitFor(() => {
-      expect(screen.queryByLabelText("Agent节点: 理解改动")).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", {
-        name: "Edge from start to understand",
-      })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", {
-        name: "Edge from understand to quality",
-      })).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("Agent节点: 理解改动"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: "Edge from start to understand",
+        }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: "Edge from understand to quality",
+        }),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -594,11 +760,17 @@ describe("WorkflowSettings", () => {
       bubbles: true,
     });
 
-    expect(canvas.querySelectorAll(".react-flow__node.selected").length).toBeGreaterThan(1);
+    expect(
+      canvas.querySelectorAll(".react-flow__node.selected").length,
+    ).toBeGreaterThan(1);
     await user.keyboard("{Delete}");
     await waitFor(() => {
-      expect(screen.queryByLabelText("Agent节点: 理解改动")).not.toBeInTheDocument();
-      expect(screen.queryByLabelText("条件分支节点: 质量门禁")).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("Agent节点: 理解改动"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("条件分支节点: 质量门禁"),
+      ).not.toBeInTheDocument();
       // The required start node is not deletable and survives the batch delete.
       expect(screen.getByLabelText("开始节点: 开始")).toBeInTheDocument();
     });
@@ -611,7 +783,9 @@ describe("WorkflowSettings", () => {
     const startNode = await screen.findByLabelText("开始节点: 开始");
     await user.click(startNode.closest(".react-flow__node") ?? startNode);
 
-    expect(screen.queryByRole("button", { name: "删除开始" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "删除开始" }),
+    ).not.toBeInTheDocument();
     await user.keyboard("{Delete}");
     expect(screen.getByLabelText("开始节点: 开始")).toBeInTheDocument();
   });
@@ -639,9 +813,15 @@ describe("WorkflowSettings", () => {
     });
     const configuredParameters = within(reviewNode).getByLabelText("配置参数");
     expect(configuredParameters).toHaveTextContent("角色Reviewer");
-    expect(configuredParameters).toHaveTextContent("code_agent_cli · opencode/big-pickle");
-    expect(configuredParameters).toHaveTextContent("Skillsopenspec-verify-change");
-    expect(configuredParameters).not.toHaveTextContent("按严重程度整理问题，并给出定位与修复建议。");
+    expect(configuredParameters).toHaveTextContent(
+      "code_agent_cli · opencode/big-pickle",
+    );
+    expect(configuredParameters).toHaveTextContent(
+      "Skillsopenspec-verify-change",
+    );
+    expect(configuredParameters).not.toHaveTextContent(
+      "按严重程度整理问题，并给出定位与修复建议。",
+    );
   });
 
   it("limits node descriptions to 30 characters and shows their count", async () => {
@@ -658,7 +838,9 @@ describe("WorkflowSettings", () => {
       target: { value: "1234567890123456789012345678901" },
     });
 
-    expect(screen.getByLabelText("说明")).toHaveValue("123456789012345678901234567890");
+    expect(screen.getByLabelText("说明")).toHaveValue(
+      "123456789012345678901234567890",
+    );
     expect(screen.getByText("30/30")).toBeInTheDocument();
   });
 
@@ -672,12 +854,12 @@ describe("WorkflowSettings", () => {
     await user.click(screen.getByLabelText("Agent 模型"));
     const modelSearch = screen.getByLabelText("搜索可用 Agent 模型");
     await user.type(modelSearch, "pickle");
-    await user.click(await screen.findByRole("option", {
-      name: "Big Pickle",
-    }));
-    expect(screen.getByLabelText("Agent 模型")).toHaveTextContent(
-      "Big Pickle",
+    await user.click(
+      await screen.findByRole("option", {
+        name: "Big Pickle",
+      }),
     );
+    expect(screen.getByLabelText("Agent 模型")).toHaveTextContent("Big Pickle");
 
     await user.click(screen.getByLabelText("角色"));
     const roleSearch = screen.getByLabelText("搜索可用角色");
@@ -690,17 +872,58 @@ describe("WorkflowSettings", () => {
     const user = userEvent.setup();
     const state = createMockClientState();
     state.agents = [
-      { id: "Architect", name: "架构师", description: "role" },
-      { id: "Planner", name: "规划师", description: "role" },
-      { id: "Researcher", name: "研究员", description: "role" },
-      { id: "Implementer", name: "实施者", description: "role" },
-      { id: "Reviewer", name: "审查员", description: "role" },
-      { id: "Tester", name: "测试员", description: "role" },
-      { id: "Debugger", name: "调试员", description: "role" },
-      { id: "Documentation Agent", name: "文档专员", description: "role" },
+      {
+        id: "Architect",
+        namespace: "local",
+        name: "架构师",
+        description: "role",
+      },
+      {
+        id: "Planner",
+        namespace: "local",
+        name: "规划师",
+        description: "role",
+      },
+      {
+        id: "Researcher",
+        namespace: "local",
+        name: "研究员",
+        description: "role",
+      },
+      {
+        id: "Implementer",
+        namespace: "local",
+        name: "实施者",
+        description: "role",
+      },
+      {
+        id: "Reviewer",
+        namespace: "local",
+        name: "审查员",
+        description: "role",
+      },
+      { id: "Tester", namespace: "local", name: "测试员", description: "role" },
+      {
+        id: "Debugger",
+        namespace: "local",
+        name: "调试员",
+        description: "role",
+      },
+      {
+        id: "Documentation Agent",
+        namespace: "local",
+        name: "文档专员",
+        description: "role",
+      },
     ];
     state.skills = [
-      { id: "openspec-verify-change", name: "openspec-verify-change", description: "skill" },
+      {
+        id: "openspec-verify-change",
+        namespace: "local",
+        name: "openspec-verify-change",
+        description: "skill",
+        availability: "available",
+      },
     ];
     // NGA exists as a CLI but its warm session reports no model catalog, so
     // picking it must keep the node on NGA instead of snapping back to the
@@ -735,8 +958,12 @@ describe("WorkflowSettings", () => {
     await waitFor(() => expect(modelSelect).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Agent" }));
 
-    expect(await screen.findByLabelText("Agent节点: Agent 1")).toBeInTheDocument();
-    expect(screen.getAllByText("open_code · opencode/big-pickle").length).toBeGreaterThan(0);
+    expect(
+      await screen.findByLabelText("Agent节点: Agent 1"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText("open_code · opencode/big-pickle").length,
+    ).toBeGreaterThan(0);
   });
 
   it("adds, disables, and removes configured Agent Skills", async () => {
@@ -752,6 +979,7 @@ describe("WorkflowSettings", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "添加 Skill" }));
+    expect(screen.queryByText("missing-skill")).not.toBeInTheDocument();
     const skillSearch = screen.getByLabelText("搜索可添加的 Skill");
     await user.type(skillSearch, "archive");
     await user.click(screen.getByText("openspec-archive-change"));
@@ -763,10 +991,14 @@ describe("WorkflowSettings", () => {
     await user.click(archiveSwitch);
     expect(archiveSwitch).not.toBeChecked();
 
-    await user.click(screen.getByRole("button", {
-      name: "移除 openspec-archive-change",
-    }));
-    expect(screen.queryByText("openspec-archive-change")).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", {
+        name: "移除 openspec-archive-change",
+      }),
+    );
+    expect(
+      screen.queryByText("openspec-archive-change"),
+    ).not.toBeInTheDocument();
   });
 
   it("routes inspector deletion through the shared React Flow store", async () => {
@@ -778,13 +1010,19 @@ describe("WorkflowSettings", () => {
     await user.click(screen.getByRole("button", { name: "删除节点" }));
 
     await waitFor(() => {
-      expect(screen.queryByLabelText("Agent节点: 审查 Agent")).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", {
-        name: "Edge from quality to review",
-      })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", {
-        name: "Edge from review to output",
-      })).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("Agent节点: 审查 Agent"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: "Edge from quality to review",
+        }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: "Edge from review to output",
+        }),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -798,8 +1036,12 @@ describe("WorkflowSettings", () => {
     await user.click(connection);
 
     await waitFor(() => {
-      expect(document.querySelector(".react-flow__edgeupdater-source")).not.toBeNull();
-      expect(document.querySelector(".react-flow__edgeupdater-target")).not.toBeNull();
+      expect(
+        document.querySelector(".react-flow__edgeupdater-source"),
+      ).not.toBeNull();
+      expect(
+        document.querySelector(".react-flow__edgeupdater-target"),
+      ).not.toBeNull();
     });
   });
 
@@ -810,10 +1052,14 @@ describe("WorkflowSettings", () => {
     await screen.findByText("代码审查工作流");
     await screen.findByLabelText("工作流画布");
     await user.click(screen.getByLabelText("新建工作流"));
-    const createDialog = await screen.findByRole("alertdialog", { name: "新建工作流" });
+    const createDialog = await screen.findByRole("alertdialog", {
+      name: "新建工作流",
+    });
     const createNameInput = within(createDialog).getByLabelText("工作流名称");
     await user.type(createNameInput, "发布复盘");
-    await user.click(within(createDialog).getByRole("button", { name: "新建工作流" }));
+    await user.click(
+      within(createDialog).getByRole("button", { name: "新建工作流" }),
+    );
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("发布复盘")).toBeInTheDocument();
@@ -821,11 +1067,15 @@ describe("WorkflowSettings", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "重命名发布复盘" }));
-    const renameDialog = await screen.findByRole("alertdialog", { name: "重命名“发布复盘”" });
+    const renameDialog = await screen.findByRole("alertdialog", {
+      name: "重命名“发布复盘”",
+    });
     const renameNameInput = within(renameDialog).getByDisplayValue("发布复盘");
     await user.clear(renameNameInput);
     await user.type(renameNameInput, "发布复盘 v2");
-    await user.click(within(renameDialog).getByRole("button", { name: "重命名" }));
+    await user.click(
+      within(renameDialog).getByRole("button", { name: "重命名" }),
+    );
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("发布复盘 v2")).toBeInTheDocument();
@@ -845,11 +1095,18 @@ describe("WorkflowSettings", () => {
 
     fireEvent.change(nameInput, { target: { value: "自动保存草稿" } });
 
-    await waitFor(() => {
-      const record = state.workflows.find((item) => item.workflow.id === openId);
-      expect(record?.workflow.name).toBe("自动保存草稿");
-      expect(screen.getByText(/已实时保存 最近修改时间：/)).toBeInTheDocument();
-    }, { timeout: 3_000 });
+    await waitFor(
+      () => {
+        const record = state.workflows.find(
+          (item) => item.workflow.id === openId,
+        );
+        expect(record?.workflow.name).toBe("自动保存草稿");
+        expect(
+          screen.getByText(/已实时保存 最近修改时间：/),
+        ).toBeInTheDocument();
+      },
+      { timeout: 3_000 },
+    );
   });
 
   it("keeps edits only for the mounted demo session", async () => {
@@ -858,11 +1115,15 @@ describe("WorkflowSettings", () => {
 
     fireEvent.change(nameInput, { target: { value: "当前会话草稿" } });
     expect(screen.getByDisplayValue("当前会话草稿")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "保存" }),
+    ).not.toBeInTheDocument();
 
     view.unmount();
     renderSettings();
-    expect(await screen.findByDisplayValue("代码审查工作流")).toBeInTheDocument();
+    expect(
+      await screen.findByDisplayValue("代码审查工作流"),
+    ).toBeInTheDocument();
   });
 
   it("preserves the current draft when the display language changes", async () => {
@@ -887,8 +1148,12 @@ describe("WorkflowSettings", () => {
         "Left-drag to box-select nodes · Middle-drag to pan · Scroll to zoom · Nodes snap to grid",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Deploy to project" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Test run" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Deploy to project" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Test run" }),
+    ).not.toBeInTheDocument();
   });
 
   it("deleting the selected workflow auto-selects the next one and loads its canvas", async () => {
@@ -901,14 +1166,22 @@ describe("WorkflowSettings", () => {
     expect(screen.getByDisplayValue("代码审查工作流")).toBeInTheDocument();
 
     // Delete the currently selected workflow.
-    await user.click(screen.getByRole("button", { name: "删除代码审查工作流" }));
-    const deleteDialog = await screen.findByRole("alertdialog", { name: "删除“代码审查工作流”？" });
-    await user.click(within(deleteDialog).getByRole("button", { name: "删除" }));
+    await user.click(
+      screen.getByRole("button", { name: "删除代码审查工作流" }),
+    );
+    const deleteDialog = await screen.findByRole("alertdialog", {
+      name: "删除“代码审查工作流”？",
+    });
+    await user.click(
+      within(deleteDialog).getByRole("button", { name: "删除" }),
+    );
 
     // The deleted workflow leaves the list and the first remaining one becomes selected,
     // without a "workflow not found" error or a stale canvas from the deleted workflow.
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "删除代码审查工作流" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "删除代码审查工作流" }),
+      ).not.toBeInTheDocument();
     });
     expect(screen.getByText("错开并行演示")).toBeInTheDocument();
     expect(screen.getByDisplayValue("错开并行演示")).toBeInTheDocument();
@@ -921,13 +1194,18 @@ describe("useDeleteWorkflow", () => {
     const state = createMockClientState();
     seedDemoWorkflows(state);
     const client = createMockClient(state);
-    const { result, queryClient } = renderHookWithClient(() => useDeleteWorkflow(), client);
+    const { result, queryClient } = renderHookWithClient(
+      () => useDeleteWorkflow(),
+      client,
+    );
     // Pre-warm the library query like the settings page does.
     await queryClient.fetchQuery({
       queryKey: ["workflow", "library"],
       queryFn: async () => (await client.workflow.list({})).workflows,
     });
-    const before = queryClient.getQueryData(["workflow", "library"]) as Array<{ id: string }>;
+    const before = queryClient.getQueryData(["workflow", "library"]) as Array<{
+      id: string;
+    }>;
     expect(before.some((item) => item.id === "code-review")).toBe(true);
 
     await act(async () => {
@@ -936,7 +1214,9 @@ describe("useDeleteWorkflow", () => {
 
     // The cache must drop the row immediately, before any invalidateQueries refetch lands,
     // so the settings auto-select reads a list that no longer contains the deleted id.
-    const after = queryClient.getQueryData(["workflow", "library"]) as Array<{ id: string }>;
+    const after = queryClient.getQueryData(["workflow", "library"]) as Array<{
+      id: string;
+    }>;
     expect(after.some((item) => item.id === "code-review")).toBe(false);
   });
 });

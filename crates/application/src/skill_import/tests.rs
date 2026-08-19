@@ -2,14 +2,16 @@ use super::{
     NoopSkillImportProgressPublisher, SkillImportConfig, SkillImportError, SkillImportIdGenerator,
     SkillImportService,
 };
-use crate::skill::FilesystemSkillStorage;
+use crate::skill::{
+    BACKUP_DIR_NAME, DeleteSkillHandler, FilesystemSkillStorage, JOURNAL_DIR_NAME, STAGING_DIR_NAME,
+};
 use crate::{Clock, RepositoryError, SkillRepository};
 use ora_contracts::{
-    CommitSkillImportRequest, GetSkillImportSessionRequest, PrepareSkillImportRequest,
-    SkillImportConflictDecision, SkillImportDecision, SkillImportSession, SkillImportSessionStatus,
-    SkillImportSource,
+    CommitSkillImportRequest, DeleteSkillRequest, GetSkillImportSessionRequest,
+    PrepareSkillImportRequest, SkillImportConflictDecision, SkillImportDecision,
+    SkillImportSession, SkillImportSessionStatus, SkillImportSource,
 };
-use ora_domain::{AuditFields, Skill, SkillId};
+use ora_domain::{AuditFields, Namespace, Skill, SkillId};
 use pretty_assertions::assert_eq;
 use std::fs;
 use std::io::Write;
@@ -335,6 +337,7 @@ fn previews_conflicts_with_existing_skills() {
     let temp = TempDir::new().unwrap();
     let repository = FakeSkillRepository::new();
     repository.push_skill("skill-1", "review", "Existing review", 100, 100);
+    seed_formal_skill(&temp, "review", "Existing review");
 
     let source = temp.path().join("source");
     write_manifest(&source, "SKILL.md", "review", "New review");
@@ -417,7 +420,10 @@ fn commits_ready_skip_and_overwrite_candidates() {
     // The database now reflects all three skills, with the overwrite keeping its id.
     let skills = repository.snapshot();
     assert_eq!(skills.len(), 3);
-    let review = repository.find_skill_by_name("review").unwrap().unwrap();
+    let review = repository
+        .find_skill_by_name(&Namespace::local(), "review")
+        .unwrap()
+        .unwrap();
     assert_eq!(review.id.to_string(), "skill-1");
     assert_eq!(review.description, "New review");
     assert_eq!(review.audit_fields.created_at, 100);
@@ -472,7 +478,7 @@ fn skips_conflict_candidates_on_skip_decision() {
     // The existing skill is untouched.
     assert_eq!(
         repository
-            .find_skill_by_name("review")
+            .find_skill_by_name(&Namespace::local(), "review")
             .unwrap()
             .unwrap()
             .description,
@@ -486,6 +492,64 @@ fn skips_conflict_candidates_on_skip_decision() {
             .join("SKILL.md")
             .is_file()
     );
+}
+
+/// Guards the namespace split between committed skills and reserved transaction directories.
+///
+/// A skill named after a reserved directory used to be promoted onto that directory, leaving
+/// startup reconciliation to delete the package while sweeping transaction leftovers. The name
+/// must now be refused during preparation, before anything reaches the formal tree.
+#[test]
+fn rejects_skill_names_reserved_by_the_storage_layer() {
+    for reserved in [STAGING_DIR_NAME, BACKUP_DIR_NAME, JOURNAL_DIR_NAME] {
+        let temp = TempDir::new().unwrap();
+        let repository = FakeSkillRepository::new();
+        let source = temp.path().join("source");
+        write_manifest(&source, "pkg/SKILL.md", reserved, "Collides with reserved");
+
+        let (service, _) = test_service(repository.clone(), &temp, Duration::from_secs(30));
+        let session = prepare_folder(&service, &source);
+        let session_id = session.session_id.clone();
+
+        assert_eq!(session.candidates.len(), 1);
+        assert_eq!(
+            session.candidates[0].status,
+            ora_contracts::SkillImportCandidateStatus::Invalid
+        );
+        assert_eq!(
+            session.candidates[0].error_code.as_deref(),
+            Some("name_invalid")
+        );
+
+        service
+            .commit(CommitSkillImportRequest {
+                session_id: session_id.clone(),
+                decisions: vec![],
+            })
+            .unwrap();
+        let completed = wait_for_completion(&service, &session_id);
+
+        assert_eq!(
+            completed.progress.results[0].status,
+            ora_contracts::SkillImportResultStatus::Failed
+        );
+        // Neither the database nor the reserved directory may be touched by the refused import.
+        assert_eq!(
+            repository
+                .find_skill_by_name(&Namespace::local(), reserved)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            temp.path()
+                .join("atoms")
+                .join("skills")
+                .join(reserved)
+                .join("SKILL.md")
+                .is_file(),
+            false
+        );
+    }
 }
 
 #[test]
@@ -573,6 +637,7 @@ fn reports_missing_decisions_before_commit() {
     let temp = TempDir::new().unwrap();
     let repository = FakeSkillRepository::new();
     repository.push_skill("skill-1", "review", "Existing", 100, 100);
+    seed_formal_skill(&temp, "review", "Existing");
 
     let source = temp.path().join("source");
     write_manifest(&source, "SKILL.md", "review", "New review");
@@ -610,7 +675,10 @@ fn marks_stale_conflict_when_target_changes_before_commit() {
 
     // The target's updated_at changes between preview and commit.
     repository.push_skill("skill-2", "fresh", "Fresh skill", 200, 200);
-    let existing = repository.find_skill_by_name("review").unwrap().unwrap();
+    let existing = repository
+        .find_skill_by_name(&Namespace::local(), "review")
+        .unwrap()
+        .unwrap();
     repository.replace(existing.id, "review", "Changed before commit", 300);
 
     let decisions = vec![SkillImportConflictDecision {
@@ -632,11 +700,68 @@ fn marks_stale_conflict_when_target_changes_before_commit() {
     // The stale candidate must not have modified the target.
     assert_eq!(
         repository
-            .find_skill_by_name("review")
+            .find_skill_by_name(&Namespace::local(), "review")
             .unwrap()
             .unwrap()
             .description,
         "Changed before commit"
+    );
+}
+
+#[test]
+fn concurrent_same_name_imports_do_not_report_storage_failure() {
+    let temp = TempDir::new().unwrap();
+    let repository = FakeSkillRepository::new();
+    let source_a = temp.path().join("source-a");
+    let source_b = temp.path().join("source-b");
+    write_manifest(&source_a, "SKILL.md", "grilling", "First");
+    write_manifest(&source_b, "SKILL.md", "grilling", "Second");
+
+    let (service, _) = test_service(repository.clone(), &temp, Duration::from_secs(30));
+    let session_a = prepare_folder(&service, &source_a);
+    let session_b = prepare_folder(&service, &source_b);
+    assert_eq!(
+        session_a.candidates[0].status,
+        ora_contracts::SkillImportCandidateStatus::Ready
+    );
+    assert_eq!(
+        session_b.candidates[0].status,
+        ora_contracts::SkillImportCandidateStatus::Ready
+    );
+
+    service
+        .commit(CommitSkillImportRequest {
+            session_id: session_a.session_id.clone(),
+            decisions: vec![],
+        })
+        .unwrap();
+    service
+        .commit(CommitSkillImportRequest {
+            session_id: session_b.session_id.clone(),
+            decisions: vec![],
+        })
+        .unwrap();
+
+    let completed_a = wait_for_completion(&service, &session_a.session_id);
+    let completed_b = wait_for_completion(&service, &session_b.session_id);
+    let statuses = [
+        completed_a.progress.results[0].status.clone(),
+        completed_b.progress.results[0].status.clone(),
+    ];
+    let imported = statuses
+        .iter()
+        .filter(|status| **status == ora_contracts::SkillImportResultStatus::Imported)
+        .count();
+    let stale = statuses
+        .iter()
+        .filter(|status| **status == ora_contracts::SkillImportResultStatus::StaleConflict)
+        .count();
+
+    assert_eq!((imported, stale), (1, 1));
+    assert_eq!(repository.snapshot().len(), 1);
+    assert!(
+        completed_a.progress.results[0].error_code.is_none()
+            && completed_b.progress.results[0].error_code.is_none()
     );
 }
 
@@ -690,6 +815,145 @@ fn continues_after_individual_candidate_failure() {
             .join("skills")
             .join("alpha")
             .exists()
+    );
+}
+
+#[test]
+fn imports_over_an_untracked_package_when_the_name_is_unclaimed() {
+    let temp = TempDir::new().unwrap();
+    let repository = FakeSkillRepository::new();
+    seed_formal_skill(&temp, "review", "Untracked review");
+
+    let source = temp.path().join("source");
+    write_manifest(&source, "SKILL.md", "review", "Imported review");
+    let (service, _) = test_service(repository.clone(), &temp, Duration::from_secs(30));
+    let session = prepare_folder(&service, &source);
+    assert_eq!(
+        session.candidates[0].status,
+        ora_contracts::SkillImportCandidateStatus::Ready
+    );
+
+    service
+        .commit(CommitSkillImportRequest {
+            session_id: session.session_id.clone(),
+            decisions: vec![],
+        })
+        .unwrap();
+    let completed = wait_for_completion(&service, &session.session_id);
+    let result = &completed.progress.results[0];
+    assert_eq!(
+        result.status,
+        ora_contracts::SkillImportResultStatus::Imported
+    );
+    assert_eq!(repository.snapshot().len(), 1);
+    assert!(
+        fs::read_to_string(
+            temp.path()
+                .join("atoms")
+                .join("skills")
+                .join("review")
+                .join("SKILL.md")
+        )
+        .unwrap()
+        .contains("Imported review")
+    );
+}
+
+#[test]
+fn importing_over_an_unavailable_row_preserves_residual_sibling_files() {
+    let temp = TempDir::new().unwrap();
+    let repository = FakeSkillRepository::new();
+    repository.push_skill("skill-1", "review", "Reviews", 100, 100);
+    let formal = temp.path().join("atoms").join("skills").join("review");
+    fs::create_dir_all(formal.join("scripts")).unwrap();
+    fs::write(formal.join("SKILL.md"), "---\nname: [unterminated").unwrap();
+    fs::write(formal.join("scripts/helper.js"), "preserve me").unwrap();
+
+    let source = temp.path().join("source");
+    write_manifest(&source, "SKILL.md", "review", "Imported review");
+    let (service, _) = test_service(repository.clone(), &temp, Duration::from_secs(30));
+    let session = prepare_folder(&service, &source);
+    assert_eq!(
+        session.candidates[0].status,
+        ora_contracts::SkillImportCandidateStatus::Ready
+    );
+
+    service
+        .commit(CommitSkillImportRequest {
+            session_id: session.session_id.clone(),
+            decisions: vec![],
+        })
+        .unwrap();
+    let completed = wait_for_completion(&service, &session.session_id);
+
+    assert_eq!(
+        completed.progress.results[0].status,
+        ora_contracts::SkillImportResultStatus::Imported
+    );
+    assert_eq!(repository.snapshot()[0].id.to_string(), "skill-1");
+    assert_eq!(
+        fs::read_to_string(formal.join("scripts/helper.js")).unwrap(),
+        "preserve me"
+    );
+    assert!(
+        fs::read_to_string(formal.join("SKILL.md"))
+            .unwrap()
+            .contains("Imported review")
+    );
+}
+
+#[test]
+fn imports_the_same_name_after_deleting_an_unavailable_skill() {
+    let temp = TempDir::new().unwrap();
+    let repository = FakeSkillRepository::new();
+    repository.push_skill("skill-1", "review", "Reviews", 100, 100);
+    let leftover = temp.path().join("atoms").join("skills").join("review");
+    fs::create_dir_all(&leftover).unwrap();
+    fs::write(leftover.join("notes.md"), "stale leftover").unwrap();
+
+    DeleteSkillHandler::new(
+        repository.clone(),
+        FilesystemSkillStorage::new(temp.path().join("atoms").join("skills")),
+        TestClock::new(200),
+    )
+    .handle(DeleteSkillRequest {
+        skill_id: "skill-1".to_string(),
+    })
+    .unwrap();
+    assert!(repository.snapshot().is_empty());
+
+    let source = temp.path().join("source");
+    write_manifest(&source, "SKILL.md", "review", "Imported review");
+    let (service, _) = test_service(repository.clone(), &temp, Duration::from_secs(30));
+    let session = prepare_folder(&service, &source);
+    assert_eq!(
+        session.candidates[0].status,
+        ora_contracts::SkillImportCandidateStatus::Ready
+    );
+
+    service
+        .commit(CommitSkillImportRequest {
+            session_id: session.session_id.clone(),
+            decisions: vec![],
+        })
+        .unwrap();
+    let completed = wait_for_completion(&service, &session.session_id);
+    assert_eq!(
+        completed.progress.results[0].status,
+        ora_contracts::SkillImportResultStatus::Imported
+    );
+    assert_eq!(repository.snapshot().len(), 1);
+    assert_ne!(repository.snapshot()[0].id.to_string(), "skill-1");
+    assert!(
+        fs::read_to_string(
+            temp.path()
+                .join("atoms")
+                .join("skills")
+                .join("review")
+                .join("SKILL.md")
+        )
+        .unwrap()
+        .contains("Imported review")
     );
 }
 
@@ -847,6 +1111,7 @@ impl FakeSkillRepository {
     fn push_skill(&self, id: &str, name: &str, description: &str, created: i64, updated: i64) {
         let skill = Skill::new(
             SkillId::new(id),
+            Namespace::local(),
             name,
             description,
             AuditFields::new(created, updated, false),
@@ -898,13 +1163,21 @@ impl SkillRepository for Arc<FakeSkillRepository> {
             .find(|skill| skill.id == *skill_id && !skill.audit_fields.is_deleted)
             .cloned())
     }
-    fn find_skill_by_name(&self, name: &str) -> Result<Option<Skill>, RepositoryError> {
+    fn find_skill_by_name(
+        &self,
+        namespace: &Namespace,
+        name: &str,
+    ) -> Result<Option<Skill>, RepositoryError> {
         Ok(self
             .skills
             .lock()
             .unwrap()
             .iter()
-            .find(|skill| !skill.audit_fields.is_deleted && skill.name.eq_ignore_ascii_case(name))
+            .find(|skill| {
+                skill.namespace == *namespace
+                    && !skill.audit_fields.is_deleted
+                    && skill.name.eq_ignore_ascii_case(name)
+            })
             .cloned())
     }
     fn list_skills(&self) -> Result<Vec<Skill>, RepositoryError> {

@@ -112,9 +112,9 @@ impl SqliteWorktreeProvisioningLeaseRepository {
         &self,
         now: i64,
     ) -> Result<Vec<GitCleanupJob>, crate::DatabaseError> {
-        self.pool.with_connection(|connection| {
+        self.pool.with_connection_mut(|connection| {
             let transaction =
-                Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)?;
+                Transaction::new(connection, rusqlite::TransactionBehavior::Immediate)?;
             let expired = {
                 let mut statement = transaction.prepare(
                     "SELECT id, project_id, task_id, repository_root, checkout_root, branch_name,
@@ -180,8 +180,8 @@ impl WorktreeProvisioningLeaseStore for SqliteWorktreeProvisioningLeaseRepositor
         now: i64,
     ) -> Result<(), RepositoryError> {
         self.pool
-            .with_connection(|connection| {
-                let transaction = Transaction::new_unchecked(
+            .with_connection_mut(|connection| {
+                let transaction = Transaction::new(
                     connection,
                     rusqlite::TransactionBehavior::Immediate,
                 )?;

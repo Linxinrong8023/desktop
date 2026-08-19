@@ -10,7 +10,9 @@
     "./memory": "./src/memory.ts"
   },
   "scripts": {
-    "lint": "tsc -p tsconfig.json --noEmit && eslint src tests",
+    "format": "prettier --write . --ignore-path ../../.prettierignore",
+    "format:check": "prettier --check . --ignore-path ../../.prettierignore",
+    "lint": "tsc -p tsconfig.json --noEmit && eslint src tests --max-warnings 0",
     "test": "node ../../scripts/run-with-clean-stderr.mjs \"vitest run\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

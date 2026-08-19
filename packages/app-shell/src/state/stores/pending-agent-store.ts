@@ -36,9 +36,13 @@ export const usePendingAgentStore = create<PendingAgentState>((set) => ({
   selections: {},
   switches: {},
   setPendingAgent: (targetKey, agentCli) =>
-    set((state) => ({ selections: { ...state.selections, [targetKey]: agentCli } })),
+    set((state) => ({
+      selections: { ...state.selections, [targetKey]: agentCli },
+    })),
   setPendingSwitch: (sessionId, agentCli) =>
-    set((state) => ({ switches: { ...state.switches, [sessionId]: agentCli } })),
+    set((state) => ({
+      switches: { ...state.switches, [sessionId]: agentCli },
+    })),
   clearPendingSwitch: (sessionId) =>
     set((state) => {
       const switches = { ...state.switches };
@@ -55,7 +59,9 @@ export const usePendingAgentStore = create<PendingAgentState>((set) => ({
  * *because a move is pending*". Only the latter warms a session for the incoming
  * CLI and commits the rebind on the next send.
  */
-export function usePendingSwitch(sessionId: string | null): AgentCli | undefined {
+export function usePendingSwitch(
+  sessionId: string | null,
+): AgentCli | undefined {
   return usePendingAgentStore((state) =>
     sessionId === null ? undefined : state.switches[sessionId],
   );

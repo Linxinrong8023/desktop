@@ -57,7 +57,9 @@ export function SelectedPluginsButton({
             );
           })}
         </span>
-        {overflow > 0 && <span className="whitespace-nowrap text-xs">+{overflow}</span>}
+        {overflow > 0 && (
+          <span className="whitespace-nowrap text-xs">+{overflow}</span>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-56">
         {selected.map((plugin) => {
@@ -70,7 +72,10 @@ export function SelectedPluginsButton({
             >
               <Mark className={`size-3.5 shrink-0 ${plugin.tone}`} />
               <span className="min-w-0 flex-1 truncate">{plugin.name}</span>
-              <IconX className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <IconX
+                className="size-3.5 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
             </DropdownMenuItem>
           );
         })}

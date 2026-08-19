@@ -28,7 +28,10 @@ function editTool(
 }
 
 /** Creates one response turn with a stable user message for component tests. */
-function turn(items: ChatToolCall[], status: ChatTurn["status"] = "completed"): ChatTurn {
+function turn(
+  items: ChatToolCall[],
+  status: ChatTurn["status"] = "completed",
+): ChatTurn {
   return {
     id: "turn-1",
     userMessage: {
@@ -48,11 +51,25 @@ function turn(items: ChatToolCall[], status: ChatTurn["status"] = "completed"): 
 
 describe("turn diff summary", () => {
   it("merges repeated edits and reports the final per-file line totals", () => {
-    expect(collectTurnDiffFiles(turn([
-      editTool("edit-1", "src/main.ts", "const value = 1;\n", "const value = 2;\n"),
-      editTool("edit-2", "src/main.ts", "const value = 2;\n", "const value = 3;\n"),
-      editTool("edit-3", "src/new.ts", "", "export {};\n"),
-    ]))).toEqual([
+    expect(
+      collectTurnDiffFiles(
+        turn([
+          editTool(
+            "edit-1",
+            "src/main.ts",
+            "const value = 1;\n",
+            "const value = 2;\n",
+          ),
+          editTool(
+            "edit-2",
+            "src/main.ts",
+            "const value = 2;\n",
+            "const value = 3;\n",
+          ),
+          editTool("edit-3", "src/new.ts", "", "export {};\n"),
+        ]),
+      ),
+    ).toEqual([
       {
         path: "src/main.ts",
         oldText: "const value = 1;\n",
@@ -78,7 +95,12 @@ describe("turn diff summary", () => {
         <TaskChangesNavigationProvider onOpenFile={openFile}>
           <TurnDiffSummary
             turn={turn([
-              editTool("edit-1", "src/main.ts", "const value = 1;\n", "const value = 2;\n"),
+              editTool(
+                "edit-1",
+                "src/main.ts",
+                "const value = 1;\n",
+                "const value = 2;\n",
+              ),
             ])}
           />
         </TaskChangesNavigationProvider>
@@ -97,19 +119,33 @@ describe("turn diff summary", () => {
       <AppI18nProvider>
         <TurnDiffSummary
           turn={turn([
-            editTool("edit-1", "src/main.ts", "const value = 1;\n", "const value = 2;\n"),
+            editTool(
+              "edit-1",
+              "src/main.ts",
+              "const value = 1;\n",
+              "const value = 2;\n",
+            ),
           ])}
         />
       </AppI18nProvider>,
     );
 
-    const fileButton = () => screen.queryByRole("button", { name: /src\/main\.ts/ });
+    const fileButton = () =>
+      screen.queryByRole("button", { name: /src\/main\.ts/ });
     expect(fileButton()).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /收起变更文件列表|Collapse changed files/ }));
+    await user.click(
+      screen.getByRole("button", {
+        name: /收起变更文件列表|Collapse changed files/,
+      }),
+    );
     expect(fileButton()).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /展开变更文件列表|Expand changed files/ }));
+    await user.click(
+      screen.getByRole("button", {
+        name: /展开变更文件列表|Expand changed files/,
+      }),
+    );
     expect(fileButton()).toBeInTheDocument();
   });
 
@@ -118,9 +154,11 @@ describe("turn diff summary", () => {
     const openFile = vi.fn();
     const newFile = editTool("write-1", "quicksort.py", "", "");
     newFile.content = [];
-    newFile.locations = [{
-      path: "C:\\Users\\Blue\\AppData\\Roaming\\space.ora.desktop\\worktrees\\task-1\\quicksort.py",
-    }];
+    newFile.locations = [
+      {
+        path: "C:\\Users\\Blue\\AppData\\Roaming\\space.ora.desktop\\worktrees\\task-1\\quicksort.py",
+      },
+    ];
     newFile.rawInput = {
       filePath: newFile.locations[0].path,
       content: "def quicksort(values):\n    return values\n",
@@ -134,7 +172,9 @@ describe("turn diff summary", () => {
       </AppI18nProvider>,
     );
 
-    const fileButton = screen.getByRole("button", { name: /quicksort\.py.*2.*0/ });
+    const fileButton = screen.getByRole("button", {
+      name: /quicksort\.py.*2.*0/,
+    });
     await user.click(fileButton);
 
     expect(openFile).toHaveBeenCalledWith("quicksort.py");
@@ -144,13 +184,16 @@ describe("turn diff summary", () => {
     render(
       <AppI18nProvider>
         <TurnDiffSummary
-          turn={turn([
-            editTool("edit-1", "src/main.ts", "", "export {};\n"),
-          ], "streaming")}
+          turn={turn(
+            [editTool("edit-1", "src/main.ts", "", "export {};\n")],
+            "streaming",
+          )}
         />
       </AppI18nProvider>,
     );
 
-    expect(screen.queryByRole("button", { name: /src\/main\.ts/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /src\/main\.ts/ }),
+    ).not.toBeInTheDocument();
   });
 });

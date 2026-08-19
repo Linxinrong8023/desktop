@@ -18,13 +18,15 @@ import { useProjects } from "../../state/hooks/use-projects";
 import { useTasks } from "../../state/hooks/use-tasks";
 import { useSessions } from "../../state/hooks/use-sessions";
 import { useSkills } from "../../state/hooks/use-skills";
-import { useWarmSession, warmTargetKey } from "../../state/hooks/use-warm-session";
+import {
+  useWarmSession,
+  warmTargetKey,
+} from "../../state/hooks/use-warm-session";
 import { queryKeys } from "../../state/hooks/query-keys";
 import { useContractsClient } from "../../contracts-client-context";
 import { useUiStore } from "../../state/stores/ui-store";
 import { useTargetAgentCli } from "../../state/hooks/use-target-agent-cli";
 import { usePendingAgentStore } from "../../state/stores/pending-agent-store";
-import { clientId } from "../../state/client-id";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
 import {
   buildWorkflowReminder,
@@ -47,7 +49,10 @@ import type { ChatTurn } from "@ora/chat";
 import { LocationActionsButton } from "./location-actions-button";
 import { WorkflowRunWorkspace } from "../workflow-run/workflow-run-workspace";
 import { directChatTitle } from "./workspace-view-utils";
-import { WorkspaceReviewLayout, type WorkspaceReviewContext } from "./workspace-review-layout";
+import {
+  WorkspaceReviewLayout,
+  type WorkspaceReviewContext,
+} from "./workspace-review-layout";
 import { useTaskDiffLiveSync } from "../../state/hooks/use-task-diff-live-sync";
 
 interface WorkspaceViewProps {
@@ -177,11 +182,12 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
   // model picker act on. Resolving it the same way here is what lets anything
   // reported before that first send reach the screen.
   const conversationSessionId = selection.sessionId ?? warmSessionId;
-  const reviewContext: WorkspaceReviewContext = task !== undefined && project !== undefined
-    ? { kind: "task", taskId: task.id, projectId: project.id, projectRootPath: project.rootPath }
-    : project !== undefined
-      ? { kind: "project", projectId: project.id, projectRootPath: project.rootPath }
-      : { kind: "none" };
+  const reviewContext: WorkspaceReviewContext =
+    task !== undefined && project !== undefined
+      ? { kind: "task", taskId: task.id, projectId: project.id }
+      : project !== undefined
+        ? { kind: "project", projectId: project.id }
+        : { kind: "none" };
   const conversation = useStore(chatStore, (state) =>
     conversationSessionId === null
       ? undefined
@@ -262,7 +268,8 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
       // naming the CLI this session already runs on is one the user withdrew by
       // arriving back where they started, and committing it would be refused.
       const recorded = usePendingAgentStore.getState().switches[session.id];
-      const pendingSwitch = recorded === session.agentCli ? undefined : recorded;
+      const pendingSwitch =
+        recorded === session.agentCli ? undefined : recorded;
       const prepare =
         pendingSwitch === undefined
           ? undefined
@@ -270,7 +277,6 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
               const response = await client.session.switchAgent({
                 sessionId: session.id,
                 agentCli: pendingSwitch,
-                clientId: clientId(),
               });
               usePendingAgentStore.getState().clearPendingSwitch(session.id);
               // The claim consumed the warm entry, so this surface must warm a
@@ -281,12 +287,15 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
                   pendingSwitch,
                 ),
               });
-              queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
-                upsertById(current, response.session),
+              queryClient.setQueryData<Session[]>(
+                queryKeys.sessions,
+                (current) => upsertById(current, response.session),
               );
               // Recorded against the session being moved, not the warm one, so
               // the transcript is marked where the move actually takes effect.
-              chatStore.getState().adoptSwitchedAgent(session.id, response.configOptions);
+              chatStore
+                .getState()
+                .adoptSwitchedAgent(session.id, response.configOptions);
               return { availableCommands: response.availableCommands };
             };
       try {
@@ -328,7 +337,10 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
       setPendingSend((current) =>
         current === null
           ? null
-          : { ...current, turn: { ...current.turn, status: "failed", error: message } },
+          : {
+              ...current,
+              turn: { ...current.turn, status: "failed", error: message },
+            },
       );
       throw error;
     }
@@ -337,7 +349,8 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
     // user back to a chat they had left.
     if (token !== pendingSendToken.current) return;
     if (
-      chatSurfaceKeyFor(useWorkspaceSelectionStore.getState().selection) !== surfaceKey
+      chatSurfaceKeyFor(useWorkspaceSelectionStore.getState().selection) !==
+      surfaceKey
     ) {
       return;
     }
@@ -374,7 +387,6 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
           const response = await client.task.create({
             projectId,
             title: directChatTitle(displayText),
-            status: "todo",
             workspaceMode: "project_root",
           });
           const createdTask = response.task;
@@ -440,8 +452,13 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
   // Composer send. In Spec mode, a message typed while a stage is highlighted (none
   // running) launches that stage and rides its reminder; the reminder shows only in
   // `agentText`, never the transcript. Within a running stage nothing is injected.
-  const sendOrStartSession = async (text: string, images: acp.ImageContent[] = []) => {
-    const key = conversationKeyFor(useWorkspaceSelectionStore.getState().selection);
+  const sendOrStartSession = async (
+    text: string,
+    images: acp.ImageContent[] = [],
+  ) => {
+    const key = conversationKeyFor(
+      useWorkspaceSelectionStore.getState().selection,
+    );
     const nodeId = kickNode(getRun(useWorkflowStore.getState(), key));
     let agentText: string | undefined;
     if (nodeId !== null) {
@@ -455,10 +472,16 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
   // agent starts that stage. The transcript shows a short action label while the
   // agent receives the full reminder; the node flips to running.
   const launchWorkflowNode = (id: WorkflowNodeId) => {
-    const key = conversationKeyFor(useWorkspaceSelectionStore.getState().selection);
+    const key = conversationKeyFor(
+      useWorkspaceSelectionStore.getState().selection,
+    );
     useWorkflowStore.getState().launchNode(key, id);
-    const displayText = t("workflow.startNode", { node: t(`workflow.node.${id}`) });
-    void dispatchSend(displayText, buildWorkflowReminder(id, skillsDir)).catch(() => undefined);
+    const displayText = t("workflow.startNode", {
+      node: t(`workflow.node.${id}`),
+    });
+    void dispatchSend(displayText, buildWorkflowReminder(id, skillsDir)).catch(
+      () => undefined,
+    );
   };
 
   // Graph workflow runs own a dedicated workspace branch (D2), not the chat layout.
@@ -488,7 +511,8 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
     // A pending send is waiting on its handshake, which is exactly the state the
     // thinking indicator describes.
     const isResponding =
-      (conversation?.isResponding ?? false) || pendingTurn?.status === "streaming";
+      (conversation?.isResponding ?? false) ||
+      pendingTurn?.status === "streaming";
     const lastTurn = conversation?.turns.at(-1);
     // Output has begun once the live turn carries any item; until then the turn is
     // still starting up (session creation or the wait for the first token).
@@ -533,7 +557,10 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
               </div>
             )}
           </DragRegion>
-          <LocationActionsButton taskId={task?.id} projectPath={project?.rootPath} />
+          <LocationActionsButton
+            taskId={task?.id}
+            projectPath={project?.rootPath}
+          />
           <Button
             variant="ghost"
             size="icon"
@@ -554,7 +581,10 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
           </Button>
           <WindowControls />
         </div>
-        <SessionHistoryBanner session={session} />
+        <SessionHistoryBanner
+          session={session}
+          notices={conversation?.historyNotices ?? []}
+        />
         <WorkspaceReviewLayout context={reviewContext}>
           <ChatView
             taskId={task?.id}
@@ -578,7 +608,10 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
               ) : undefined
             }
             workflowBar={
-              <WorkflowStepper onLaunch={launchWorkflowNode} disabled={!canChat} />
+              <WorkflowStepper
+                onLaunch={launchWorkflowNode}
+                disabled={!canChat}
+              />
             }
             // Failures land in chatError; the rejection itself is expected.
             onSend={(text, images) =>

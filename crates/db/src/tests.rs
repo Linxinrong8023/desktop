@@ -43,17 +43,14 @@ fn bootstraps_empty_database_with_default_catalog() {
         load_table_names(database.connection()),
         vec![
             "agents".to_string(),
-            "artifacts".to_string(),
             "git_cleanup_jobs".to_string(),
             "migrations".to_string(),
-            "project_spec_source_overrides".to_string(),
+            "plugin_state".to_string(),
             "projects".to_string(),
             "sessions".to_string(),
             "skills".to_string(),
             "task_diff_comments".to_string(),
             "tasks".to_string(),
-            "virtual_entries".to_string(),
-            "virtual_folders".to_string(),
             "workflow_node_runs".to_string(),
             "workflow_runs".to_string(),
             "workflow_snapshots".to_string(),
@@ -72,116 +69,87 @@ fn bootstraps_empty_database_with_default_catalog() {
             AppliedMigration::new("0005", 1_700_000_000_000),
             AppliedMigration::new("0006", 1_700_000_000_000),
             AppliedMigration::new("0007", 1_700_000_000_000),
-            AppliedMigration::new("0008", 1_700_000_000_000),
-            AppliedMigration::new("0009", 1_700_000_000_000),
-            AppliedMigration::new("0010", 1_700_000_000_000),
-            AppliedMigration::new("0011", 1_700_000_000_000),
         ]
     );
 }
 
-/// Verifies the removal migration drops only multi-client context state during an upgrade.
+/// Verifies every namespaced catalog table assigns local ownership when callers omit it.
 #[test]
-fn removes_project_work_context_schema_without_changing_project_data() {
-    let temp_dir = TempDir::new().unwrap();
-    let database_path = temp_dir.path().join("remove-project-work-context.sqlite3");
+fn catalog_namespaces_default_to_local() {
     let catalog = default_migration_catalog().unwrap();
-    let pre_removal_versions = [
-        "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010",
-    ];
-    let migrations = pre_removal_versions
-        .iter()
-        .chain(["0011"].iter())
-        .map(|version| {
-            catalog
-                .migration(version)
-                .cloned()
-                .unwrap_or_else(|| panic!("missing migration {version}"))
-        })
-        .collect::<Vec<_>>();
-    let pre_removal_catalog =
-        MigrationCatalog::with_target_versions(migrations, pre_removal_versions.to_vec()).unwrap();
+    let database = with_trace_logging(|| {
+        DatabaseBootstrapper::new(FixedTimestampSource { now: 1 })
+            .bootstrap(&DatabaseLocation::in_memory(), &catalog)
+            .unwrap()
+    });
+    let connection = database.connection();
 
-    bootstrap_file_database(&database_path, pre_removal_catalog, 100);
-    let connection = Connection::open(&database_path).unwrap();
-    connection
-        .execute_batch(
-            "INSERT INTO projects (id, name, root_path, created_at, updated_at, is_deleted)
-             VALUES ('project-1', 'Ora', '/workspace/ora', 1, 1, 0);
-             INSERT INTO project_work_contexts (id, surface, window_id, project_id, lease_expires_at, created_at, updated_at)
-             VALUES ('context-1', 'web', 'main', 'project-1', 100, 1, 1);",
-        )
-        .unwrap();
-    drop(connection);
-
-    bootstrap_file_database(&database_path, default_migration_catalog().unwrap(), 200);
-    let connection = Connection::open(&database_path).unwrap();
-
-    assert_eq!(
+    for table_name in ["skills", "agents", "workflows"] {
+        let description_column = if table_name == "workflows" {
+            String::new()
+        } else {
+            ", description".to_string()
+        };
+        let description_value = if table_name == "workflows" {
+            String::new()
+        } else {
+            ", 'description'".to_string()
+        };
         connection
-            .query_row(
-                "SELECT name FROM projects WHERE id = 'project-1'",
+            .execute(
+                &format!(
+                    "INSERT INTO {table_name} (id, name{description_column}, created_at, updated_at, is_deleted) VALUES ('id', 'name'{description_value}, 1, 1, 0)"
+                ),
                 [],
-                |row| { row.get::<_, String>(0) }
             )
-            .unwrap(),
-        "Ora"
-    );
-    assert_eq!(table_exists(&connection, "project_work_contexts"), false);
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    &format!("SELECT namespace FROM {table_name} WHERE id = 'id'"),
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "local"
+        );
+    }
 }
 
-/// Verifies session lifecycle and display-title columns are installed and rolled back predictably.
+/// Verifies session lifecycle and display-title columns are part of the compressed base schema.
 #[test]
-fn manages_session_columns_lifecycle() {
-    let temp_dir = TempDir::new().unwrap();
-    let database_path = temp_dir.path().join("session-history.sqlite3");
+fn includes_session_columns_in_base_schema() {
     let catalog = default_migration_catalog().unwrap();
-    let migrations = [
-        "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011",
-    ]
-    .map(|version| {
-        catalog
-            .migration(version)
-            .cloned()
-            .unwrap_or_else(|| panic!("missing migration {version}"))
+    let database = with_trace_logging(|| {
+        DatabaseBootstrapper::new(FixedTimestampSource { now: 1 })
+            .bootstrap(&DatabaseLocation::in_memory(), &catalog)
+            .unwrap()
     });
 
-    bootstrap_file_database(&database_path, catalog, 1_700_000_000_000);
-
-    let connection = Connection::open(&database_path).unwrap();
-    assert!(
-        load_table_column_names(&connection, "sessions")
-            .contains(&"history_degraded_reason".to_string())
+    assert_eq!(
+        load_table_column_names(database.connection(), "sessions"),
+        vec![
+            "id".to_string(),
+            "task_id".to_string(),
+            "title".to_string(),
+            "agent_cli".to_string(),
+            "agent_session_id".to_string(),
+            "history_degraded_reason".to_string(),
+            "status".to_string(),
+            "created_at".to_string(),
+            "updated_at".to_string(),
+            "is_deleted".to_string(),
+        ]
     );
-    assert!(load_table_column_names(&connection, "sessions").contains(&"title".to_string()));
-    drop(connection);
-
-    let rolled_back = MigrationCatalog::with_target_versions(
-        migrations.to_vec(),
-        vec!["0001", "0002", "0003", "0004"],
-    )
-    .unwrap();
-    bootstrap_file_database(&database_path, rolled_back, 1_700_000_000_100);
-
-    let connection = Connection::open(&database_path).unwrap();
-    assert!(
-        !load_table_column_names(&connection, "sessions")
-            .contains(&"history_degraded_reason".to_string())
-    );
-    assert!(!load_table_column_names(&connection, "sessions").contains(&"title".to_string()));
 }
 
-/// Verifies the catalog creates ID-keyed schema without name indexes, removes it during rollback,
-/// and restores the project work context schema that migration `0011` drops.
+/// Verifies the catalog creates ID-keyed skill and agent schema and removes it during rollback.
 #[test]
 fn manages_skill_and_agent_definition_schema_lifecycle() {
     let temp_dir = TempDir::new().unwrap();
     let database_path = temp_dir.path().join("skill-agent.sqlite3");
     let catalog = default_migration_catalog().unwrap();
-    let migrations = [
-        "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009", "0010", "0011",
-    ]
-    .map(|version| {
+    let migrations = ["0001", "0002", "0003", "0004", "0005", "0006", "0007"].map(|version| {
         catalog
             .migration(version)
             .cloned()
@@ -192,17 +160,26 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
 
     let connection = Connection::open(&database_path).unwrap();
     for table_name in ["skills", "agents"] {
-        let mut expected_columns = vec![
+        let expected_columns = vec![
             "id".to_string(),
+            "namespace".to_string(),
             "name".to_string(),
             "description".to_string(),
-            "created_at".to_string(),
-            "updated_at".to_string(),
-            "is_deleted".to_string(),
         ];
-        if table_name == "agents" {
-            expected_columns.push("content".to_string());
-        }
+        let expected_columns = if table_name == "agents" {
+            [expected_columns, vec!["content".to_string()]].concat()
+        } else {
+            expected_columns
+        };
+        let expected_columns = [
+            expected_columns,
+            vec![
+                "created_at".to_string(),
+                "updated_at".to_string(),
+                "is_deleted".to_string(),
+            ],
+        ]
+        .concat();
         assert_eq!(
             load_table_column_names(&connection, table_name),
             expected_columns
@@ -219,16 +196,37 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
         connection
             .execute(
                 &format!(
-                    "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                     VALUES (?1, ?2, ?3, ?4, ?5, 0)"
+                    "INSERT INTO {table_name} (id, namespace, name, description, created_at, updated_at, is_deleted)\n                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)"
                 ),
-                params!["second", "opencode", "OpenCode duplicate", 2_i64, 2_i64],
+                params![
+                    "second",
+                    "ora.plugin",
+                    "opencode",
+                    "OpenCode duplicate",
+                    2_i64,
+                    2_i64
+                ],
             )
             .unwrap();
+        let duplicate_name = connection.execute(
+            &format!(
+                "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                 VALUES (?1, ?2, ?3, ?4, ?5, 0)"
+            ),
+            params!["duplicate-name", "OPENCODE", "Duplicate name", 3_i64, 3_i64],
+        );
+        assert_eq!(
+            matches!(
+                duplicate_name,
+                Err(rusqlite::Error::SqliteFailure(error, _))
+                    if error.code == ErrorCode::ConstraintViolation
+            ),
+            true
+        );
         let duplicate_id = connection.execute(
             &format!(
                 "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                 VALUES (?1, ?2, ?3, ?4, ?5, 0)"
             ),
-            params!["first", "different-name", "Duplicate ID", 3_i64, 3_i64],
+            params!["first", "different-name", "Duplicate ID", 4_i64, 4_i64],
         );
 
         assert_eq!(
@@ -259,25 +257,12 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
 
     drop(connection);
     let rollback_catalog =
-        MigrationCatalog::with_target_versions(migrations.to_vec(), vec!["0001", "0002"]).unwrap();
+        MigrationCatalog::with_target_versions(migrations.to_vec(), vec!["0001"]).unwrap();
     bootstrap_file_database(&database_path, rollback_catalog, 1_700_000_000_100);
 
     let connection = Connection::open(&database_path).unwrap();
     assert_eq!(table_exists(&connection, "skills"), false);
     assert_eq!(table_exists(&connection, "agents"), false);
-    assert_eq!(table_exists(&connection, "project_work_contexts"), true);
-    assert_eq!(
-        load_table_column_names(&connection, "project_work_contexts"),
-        vec![
-            "id".to_string(),
-            "surface".to_string(),
-            "window_id".to_string(),
-            "project_id".to_string(),
-            "lease_expires_at".to_string(),
-            "created_at".to_string(),
-            "updated_at".to_string(),
-        ]
-    );
 }
 
 /// Verifies the runner applies only the missing tail of a linear migration history in ascending order.

@@ -45,7 +45,8 @@ export function createDefaultMockPathPolicy(): MockPathPolicy {
         throw new Error("Condition node has no outgoing edges");
       }
       const input = (context.kickoffInput ?? "").toLowerCase();
-      const labelOf = (edge: WorkflowEdge) => String(edge.label ?? "").toLowerCase();
+      const labelOf = (edge: WorkflowEdge) =>
+        String(edge.label ?? "").toLowerCase();
 
       // Doc-only style kickoff prefers the documentation branch when labels match.
       if (/doc|readme|markdown|\.md|文档|说明|注释/.test(input)) {
@@ -101,9 +102,10 @@ export function planMockExecution(
   const seeds = nodes
     .filter((node) => node.data.kind === "start")
     .map((node) => node.id);
-  const startIds = seeds.length > 0
-    ? seeds
-    : ids.filter((id) => (indegree.get(id) ?? 0) === 0);
+  const startIds =
+    seeds.length > 0
+      ? seeds
+      : ids.filter((id) => (indegree.get(id) ?? 0) === 0);
 
   const reachable = new Set<string>();
   const walk: string[] = [...startIds];
@@ -119,7 +121,9 @@ export function planMockExecution(
       if (outs.length > 0) {
         const chosen = policy.chooseConditionEdge(outs, node, context);
         if (!outs.includes(chosen)) {
-          throw new Error(`Condition policy returned an unrelated edge for node ${id}`);
+          throw new Error(
+            `Condition policy returned an unrelated edge for node ${id}`,
+          );
         }
         walk.push(chosen.target);
       }

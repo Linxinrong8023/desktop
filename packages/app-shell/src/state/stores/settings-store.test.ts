@@ -25,7 +25,9 @@ describe("useSettingsStore", () => {
   });
 
   it("merges a partial patch into settings", () => {
-    useSettingsStore.getState().updateSettings({ theme: "dark", commandTimeout: "60" });
+    useSettingsStore
+      .getState()
+      .updateSettings({ theme: "dark", commandTimeout: "60" });
     expect(useSettingsStore.getState().settings).toEqual({
       ...DEFAULT_SETTINGS,
       theme: "dark",
@@ -34,7 +36,9 @@ describe("useSettingsStore", () => {
   });
 
   it("resets settings back to defaults", () => {
-    useSettingsStore.getState().updateSettings({ theme: "dark", diagnostics: true });
+    useSettingsStore
+      .getState()
+      .updateSettings({ theme: "dark", diagnostics: true });
     useSettingsStore.getState().resetSettings();
     expect(useSettingsStore.getState().settings).toEqual(DEFAULT_SETTINGS);
   });
@@ -43,7 +47,9 @@ describe("useSettingsStore", () => {
     useSettingsStore.getState().updateSettings({ agentCli: "nga" });
     const raw = window.localStorage.getItem(STORAGE_KEY);
     expect(raw).not.toBeNull();
-    const parsed = JSON.parse(raw!) as { state: { settings: SettingsPreferences } };
+    const parsed = JSON.parse(raw!) as {
+      state: { settings: SettingsPreferences };
+    };
     expect(parsed.state.settings.agentCli).toBe("nga");
   });
 
@@ -55,7 +61,10 @@ describe("useSettingsStore", () => {
     );
     // Force rehydrate by reloading the persisted slice through the store's persist API.
     useSettingsStore.persist.rehydrate();
-    expect(useSettingsStore.getState().settings).toEqual({ ...DEFAULT_SETTINGS, theme: "light" });
+    expect(useSettingsStore.getState().settings).toEqual({
+      ...DEFAULT_SETTINGS,
+      theme: "light",
+    });
   });
 
   it("falls back to defaults when persisted JSON is corrupt", () => {
@@ -83,7 +92,9 @@ describe("startThemeSubscription", () => {
     cleanup = null;
     setThemeApplier((settings) => {
       const media = window.matchMedia("(prefers-color-scheme: dark)");
-      const dark = settings.theme === "dark" || (settings.theme === "system" && media.matches);
+      const dark =
+        settings.theme === "dark" ||
+        (settings.theme === "system" && media.matches);
       document.documentElement.classList.toggle("dark", dark);
       document.documentElement.dataset.theme = settings.theme;
       document.documentElement.dataset.density = settings.density;

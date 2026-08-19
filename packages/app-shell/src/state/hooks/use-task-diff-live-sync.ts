@@ -15,11 +15,16 @@ interface ConversationDiffSnapshot {
  * Invalidates task diff snapshots after each completed file-change item and
  * once more when its turn ends.
  */
-export function useTaskDiffLiveSync(chatStore: ChatStore, sessions: Session[]): void {
+export function useTaskDiffLiveSync(
+  chatStore: ChatStore,
+  sessions: Session[],
+): void {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const taskBySession = new Map(sessions.map((session) => [session.id, session.taskId]));
+    const taskBySession = new Map(
+      sessions.map((session) => [session.id, session.taskId]),
+    );
     const snapshots = new Map<string, ConversationDiffSnapshot>();
     const pendingTaskIds = new Set<string>();
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -65,8 +70,9 @@ export function useTaskDiffLiveSync(chatStore: ChatStore, sessions: Session[]): 
         // Replayed history may introduce old completed tools in one batch. Only a
         // live turn can promote a newly observed tool into a diff refresh event.
         if (
-          (completedFileChange && (previous.isResponding || next.isResponding))
-          || turnCompleted
+          (completedFileChange &&
+            (previous.isResponding || next.isResponding)) ||
+          turnCompleted
         ) {
           scheduleRefresh(taskId);
         }
@@ -90,9 +96,9 @@ function conversationDiffSnapshot(
         turn.items
           .filter(
             (item): item is ChatToolCall =>
-              item.kind === "toolCall"
-              && item.status === "completed"
-              && isFileChange(item),
+              item.kind === "toolCall" &&
+              item.status === "completed" &&
+              isFileChange(item),
           )
           .map((item) => `${turn.id}:${item.id}`),
       ),
@@ -103,8 +109,10 @@ function conversationDiffSnapshot(
 
 /** Recognizes ACP file-change items without depending on agent-specific tool titles. */
 function isFileChange(toolCall: ChatToolCall): boolean {
-  return toolCall.toolKind === "edit"
-    || toolCall.toolKind === "delete"
-    || toolCall.toolKind === "move"
-    || toolCall.content.some((content) => content.type === "diff");
+  return (
+    toolCall.toolKind === "edit" ||
+    toolCall.toolKind === "delete" ||
+    toolCall.toolKind === "move" ||
+    toolCall.content.some((content) => content.type === "diff")
+  );
 }

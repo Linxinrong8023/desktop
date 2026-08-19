@@ -1,10 +1,5 @@
 import { useTranslation } from "react-i18next";
-import {
-  IconBan,
-  IconCheck,
-  IconLoader2,
-  IconX,
-} from "@tabler/icons-react";
+import { IconBan, IconCheck, IconLoader2, IconX } from "@tabler/icons-react";
 import { Badge, cn } from "@ora/ui";
 import { isNodeWorking, runStatusTone } from "./run-status-style";
 import type {
@@ -15,15 +10,12 @@ import "./theater-motion.css";
 
 type Status = GraphWorkflowRunStatus | GraphWorkflowNodeStatus;
 
-type TerminalStatus = Extract<
-  Status,
-  "succeeded" | "failed" | "cancelled"
->;
+type TerminalStatus = Extract<Status, "succeeded" | "failed" | "cancelled">;
 
 function isTerminal(status: Status): status is TerminalStatus {
-  return status === "succeeded"
-    || status === "failed"
-    || status === "cancelled";
+  return (
+    status === "succeeded" || status === "failed" || status === "cancelled"
+  );
 }
 
 const ICON_BOX = "size-3.5";
@@ -85,7 +77,11 @@ export function RunStatusMark({
 
   return (
     <span
-      className={cn("inline-flex size-1.5 shrink-0 rounded-full", tone.dot, className)}
+      className={cn(
+        "inline-flex size-1.5 shrink-0 rounded-full",
+        tone.dot,
+        className,
+      )}
       aria-hidden
     />
   );

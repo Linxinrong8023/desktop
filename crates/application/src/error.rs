@@ -23,8 +23,8 @@ pub enum ApplicationError {
     SkillDescriptionBlank,
     #[error("skill description exceeds 4096 bytes")]
     SkillDescriptionTooLarge,
-    #[error("skill name already exists: {name}")]
-    SkillNameConflict { name: String },
+    #[error("skill name already exists: {namespace}/{name}")]
+    SkillNameConflict { namespace: String, name: String },
     #[error("skill not found: {skill_id}")]
     SkillNotFound { skill_id: String },
     #[error("skill repository operation failed")]
@@ -32,14 +32,6 @@ pub enum ApplicationError {
         #[source]
         source: RepositoryError,
     },
-    #[error("skill upload contained no files")]
-    SkillUploadEmpty,
-    #[error("skill upload exceeds the {max_files}-file limit")]
-    SkillUploadTooManyFiles { max_files: usize },
-    #[error("skill upload contains an unsafe path")]
-    SkillUploadPathInvalid,
-    #[error("skill upload contains a duplicate path")]
-    SkillUploadPathDuplicate,
     #[error("skill upload is missing a root SKILL.md manifest")]
     SkillManifestMissing,
     #[error("skill manifest is invalid")]
@@ -66,8 +58,8 @@ pub enum ApplicationError {
     SkillImport(#[source] SkillImportError),
     #[error("agent definition name must not be blank")]
     AgentDefinitionNameBlank,
-    #[error("agent definition name already exists: {name}")]
-    AgentDefinitionNameConflict { name: String },
+    #[error("agent definition name already exists: {namespace}/{name}")]
+    AgentDefinitionNameConflict { namespace: String, name: String },
     #[error("agent import Markdown is invalid")]
     AgentImportInvalid,
     #[error("agent import conflict decision is missing")]
@@ -83,13 +75,6 @@ pub enum ApplicationError {
     ProjectNotFound { project_id: String },
     #[error("project repository operation failed")]
     ProjectRepository {
-        #[source]
-        source: RepositoryError,
-    },
-    #[error("specification source configuration is invalid")]
-    SpecSourceInvalid,
-    #[error("specification source repository operation failed")]
-    SpecSourceRepository {
         #[source]
         source: RepositoryError,
     },
@@ -162,6 +147,10 @@ pub enum ApplicationError {
     },
     #[error("session not found: {session_id}")]
     SessionNotFound { session_id: String },
+    #[error("session title must not be blank")]
+    SessionTitleBlank,
+    #[error("session title exceeds the maximum length")]
+    SessionTitleTooLong,
     #[error("session repository operation failed")]
     SessionRepository {
         #[source]
@@ -169,6 +158,8 @@ pub enum ApplicationError {
     },
     #[error("workflow name must not be blank")]
     WorkflowNameBlank,
+    #[error("workflow name already exists: {namespace}/{name}")]
+    WorkflowNameConflict { namespace: String, name: String },
     #[error("workflow not found: {workflow_id}")]
     WorkflowNotFound { workflow_id: String },
     #[error("workflow snapshot not found: {workflow_id}/{version}")]
@@ -251,8 +242,11 @@ impl ApplicationError {
     /// Converts formal-storage failures into the stable application contract.
     pub(crate) fn from_skill_storage_error(error: SkillStorageError) -> Self {
         match error {
-            SkillStorageError::FormalDirectoryMissing { name }
-            | SkillStorageError::FormalDirectoryExists { name } => {
+            // Destination occupancy is a client-visible conflict whether the handler
+            // observed it before staging or only at promotion; missing directories are
+            // the inconsistent half of the same package invariant.
+            SkillStorageError::FormalDirectoryExists { name } => Self::SkillFolderConflict { name },
+            SkillStorageError::FormalDirectoryMissing { name } => {
                 Self::SkillStorageInconsistent { name }
             }
             source @ SkillStorageError::OperationFailed { .. } => Self::SkillStorage { source },
@@ -290,11 +284,6 @@ impl ApplicationError {
     /// Maps infrastructure-facing repository failures into stable application errors.
     pub(crate) fn from_project_repository_error(error: RepositoryError) -> Self {
         Self::ProjectRepository { source: error }
-    }
-
-    /// Maps specification source persistence failures into stable application errors.
-    pub(crate) fn from_spec_source_repository_error(error: RepositoryError) -> Self {
-        Self::SpecSourceRepository { source: error }
     }
 
     /// Maps Git-facing branch listing failures into stable application errors.
@@ -373,6 +362,14 @@ impl ApplicationError {
         Self::SessionRepository { source: error }
     }
 
+    /// Maps session-title validation failures into stable application errors.
+    pub(crate) fn from_session_title_error(error: ora_domain::SessionTitleError) -> Self {
+        match error {
+            ora_domain::SessionTitleError::Blank => Self::SessionTitleBlank,
+            ora_domain::SessionTitleError::TooLong { .. } => Self::SessionTitleTooLong,
+        }
+    }
+
     /// Converts workflow-construction validation failures into application errors.
     pub(crate) fn from_workflow_domain_error(error: DomainModelError) -> Self {
         match error {
@@ -427,9 +424,6 @@ impl PartialEq for ApplicationError {
 
         match (self, other) {
             (SkillNameBlank, SkillNameBlank)
-            | (SkillUploadEmpty, SkillUploadEmpty)
-            | (SkillUploadPathInvalid, SkillUploadPathInvalid)
-            | (SkillUploadPathDuplicate, SkillUploadPathDuplicate)
             | (SkillManifestMissing, SkillManifestMissing)
             | (SkillManifestInvalid { .. }, SkillManifestInvalid { .. })
             | (SkillManifestNameBlank, SkillManifestNameBlank)
@@ -438,7 +432,6 @@ impl PartialEq for ApplicationError {
             | (SkillStorage { .. }, SkillStorage { .. })
             | (SkillImport(_), SkillImport(_))
             | (AgentDefinitionNameBlank, AgentDefinitionNameBlank)
-            | (SpecSourceInvalid, SpecSourceInvalid)
             | (AgentImportInvalid, AgentImportInvalid)
             | (AgentImportDecisionMissing, AgentImportDecisionMissing)
             | (TaskWorktreeRequiresGitRepository, TaskWorktreeRequiresGitRepository)
@@ -469,17 +462,20 @@ impl PartialEq for ApplicationError {
             | (WorkflowRepository { .. }, WorkflowRepository { .. })
             | (TaskFilesystem { .. }, TaskFilesystem { .. }) => true,
             (SkillNotFound { skill_id: left }, SkillNotFound { skill_id: right }) => left == right,
-            (
-                SkillUploadTooManyFiles { max_files: left },
-                SkillUploadTooManyFiles { max_files: right },
-            ) => left == right,
             (SkillFolderConflict { name: left }, SkillFolderConflict { name: right }) => {
                 left == right
             }
-            (SkillNameInvalid { name: left }, SkillNameInvalid { name: right })
-            | (SkillNameConflict { name: left }, SkillNameConflict { name: right }) => {
-                left == right
-            }
+            (SkillNameInvalid { name: left }, SkillNameInvalid { name: right }) => left == right,
+            (
+                SkillNameConflict {
+                    namespace: left_namespace,
+                    name: left_name,
+                },
+                SkillNameConflict {
+                    namespace: right_namespace,
+                    name: right_name,
+                },
+            ) => left_namespace == right_namespace && left_name == right_name,
             (SkillNameTooLong, SkillNameTooLong)
             | (SkillDescriptionBlank, SkillDescriptionBlank)
             | (SkillDescriptionTooLarge, SkillDescriptionTooLarge) => true,
@@ -487,9 +483,25 @@ impl PartialEq for ApplicationError {
                 left == right
             }
             (
-                AgentDefinitionNameConflict { name: left },
-                AgentDefinitionNameConflict { name: right },
-            ) => left == right,
+                AgentDefinitionNameConflict {
+                    namespace: left_namespace,
+                    name: left_name,
+                },
+                AgentDefinitionNameConflict {
+                    namespace: right_namespace,
+                    name: right_name,
+                },
+            ) => left_namespace == right_namespace && left_name == right_name,
+            (
+                WorkflowNameConflict {
+                    namespace: left_namespace,
+                    name: left_name,
+                },
+                WorkflowNameConflict {
+                    namespace: right_namespace,
+                    name: right_name,
+                },
+            ) => left_namespace == right_namespace && left_name == right_name,
             (
                 AgentDefinitionNotFound { agent_id: left },
                 AgentDefinitionNotFound { agent_id: right },
@@ -537,6 +549,9 @@ impl PartialEq for ApplicationError {
             }
             (SessionNotFound { session_id: left }, SessionNotFound { session_id: right }) => {
                 left == right
+            }
+            (SessionTitleBlank, SessionTitleBlank) | (SessionTitleTooLong, SessionTitleTooLong) => {
+                true
             }
             (WorkflowNotFound { workflow_id: left }, WorkflowNotFound { workflow_id: right }) => {
                 left == right

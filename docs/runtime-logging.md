@@ -10,21 +10,6 @@ Ora Rust services initialize shared structured logging through `ora-logging`.
 
 Initialization is process-wide and the timezone can be set only once, so it must happen before any `ora_logging::clock` access. If a file sink cannot be created or prepared, initialization fails with a typed `LoggingInitError` instead of silently degrading to another sink.
 
-## Web server configuration
-
-`apps/web/server` maps these environment variables into `ora-logging`:
-
-- `ORA_LOG_LEVEL`: `trace`, `debug`, `info`, `warn`, or `error`. Default: `info`. An unrecognized value fails startup.
-- `ORA_LOG_MODE`: `stdout`, `file`, or `stdout_and_file`. Default: `stdout`. An unrecognized value fails startup.
-- `ORA_LOG_MAX_DAYS`: retention window in days for file-backed logging, counting the current active file. Default: `3`. A non-numeric or zero value fails startup.
-- `ORA_TIMEZONE`: IANA timezone used by structured event timestamps, such as `Asia/Shanghai` or `Europe/London`.
-
-The log file path is **not** independently configurable. It is derived from the runtime data root as `<ORA_DATA_DIR>/logs/ora.log`, alongside the SQLite database and worktree root. See [Web Server Runtime](web-server-runtime.md).
-
-`ORA_LOG_MODE=stdout` writes JSON lines to standard output only — no files are created and retention cleanup does not run. File-backed modes rotate daily and delete the oldest matching files first once the retained daily window would exceed `ORA_LOG_MAX_DAYS`. `stdout_and_file` emits every event to both sinks using the same envelope.
-
-The Web server resolves its process timezone once during startup. A non-empty `ORA_TIMEZONE` takes precedence over the generic `TZ` environment variable. If neither is configured, startup warns and uses `Asia/Shanghai`. If the selected value is not a valid IANA timezone, startup warns and uses UTC without trying a lower-priority source. Values are trimmed before parsing.
-
 ## Desktop configuration
 
 Desktop does not read logging environment variables. It builds its `LoggingConfig` in code: the file sink is `app_data_dir/logs/ora.log` with daily rotation and three retained days, debug builds write to stdout and the file while release builds write to the file only, and the timezone comes from the operating system. See [Desktop Runtime](desktop-runtime.md).
@@ -67,15 +52,17 @@ The RFC 3339 timestamp uses the configured process timezone and includes its UTC
 
 ## Request completion and errors
 
-Long-lived streams, including task workspace watching, mark the response as deferred and emit completion only when the stream ends or reports its typed contract error.
+Long-lived streams, including task workspace watching, mark the response as deferred and emit completion when the stream ends, reports its typed contract error, is cancelled by the caller, or loses its Desktop channel. A dropped channel completes as `cancelled` because the caller stopped listening rather than the backend failing, so every stream forms exactly one completion event no matter which path tears it down. A terminal frame claims its completion from the backend outcome before it is sent, so the recorded outcome describes how the backend stream ended even when that last frame never reaches the client.
 
-Ora frontend requests receive a canonical UUID v4 at the Web, Tauri, or stream entry seam. The same identifier correlates the request span, public error payload or stream error frame, and completion event; Web also returns it through `X-Request-Id`. Client-provided request identifiers are never canonical.
+Ora frontend requests receive a canonical UUID v4 at the Tauri or stream entry seam. The same identifier correlates the request span, public error payload or stream error frame, and completion event. Client-provided request identifiers are never canonical.
 
-Each request records at most one completion event with `operation`, `request_id`, `outcome`, and `duration_ms`. Failures additionally record the stable public `error.code` plus the build-appropriate `error.message`, `error.chain`, and `error.chain_depth` produced by `ErrorReport::from_error`. Internal errors use `ERROR`, conflicts use `WARN`, `InvalidRequest` / `NotFound` / `PayloadTooLarge` / `Unprocessable` use `INFO`, and cancellation uses `DEBUG`. Successful health and readiness checks also use `DEBUG`.
+Each request records exactly one completion event with `operation`, `request_id`, `outcome`, and `duration_ms`. Failures additionally record the stable public `error.code` plus the build-appropriate `error.message`, `error.chain`, and `error.chain_depth` produced by `ErrorReport::from_error`. Internal errors use `ERROR`, conflicts use `WARN`, `InvalidRequest` / `NotFound` / `PayloadTooLarge` / `Unprocessable` use `INFO`, and cancellation uses `DEBUG`. Successful health and readiness checks also use `DEBUG`.
+
+`RequestLifecycle` guarantees that closing record structurally rather than by convention: when its last handle is dropped without any explicit completion, it emits `outcome = "abandoned"` at `DEBUG`. That covers a seam that forgets to complete and a deferred stream future that is dropped when its transport disappears, so a request can never leave only an opening record. The distinct outcome keeps those cases greppable instead of hiding them inside `cancelled`.
 
 `ErrorReport` traverses the Rust `Error::source()` chain. In debug builds it preserves the original chain text without redaction, single-line conversion, or rendered length and depth limits so local diagnostics retain available context. In release builds it removes control characters, limits individual nodes, total output, and rendered chain depth, marks truncation, and applies precompiled regular expressions to residual secret-like text. In both modes traversal itself stops after 1,024 source nodes so a malformed cyclic chain cannot block completion logging; `error.chain_depth` saturates at that safety limit when the chain continues. Callers must still provide only approved structured fields: absolute paths, full Git arguments or remotes, SQL values, prompts, environment values, credentials, and unbounded stderr are not valid release log fields.
 
-If cleanup or rollback also fails, the primary error remains unchanged. The secondary failure is recorded as a separate operation with the same request id and its own bounded error report; it is never attached to the primary source chain. Bootstrap, migration, and state-transition events likewise remain independent lifecycle facts.
+Git worktree and branch cleanup never runs synchronously inside a request: failures after Git resources are provisioned hand off to the durable `git_cleanup` background worker (see [Task Worktrees](task-worktrees.md)) instead of rolling back inline, so a later cleanup outcome never touches the primary request's error or source chain. That worker's own failures are recorded as independent `operation = "git_cleanup"` events — decoupled from the originating request id and carrying a plain error string rather than `ErrorReport::from_error`'s bounded chain — with retry/backoff state until a job completes or is marked for manual attention. Bootstrap, migration, and state-transition events likewise remain independent lifecycle facts.
 
 These changes do not alter the deployment boundary: local JSONL and Logdy remain local viewing tools, while OTLP, Loki, Tempo, and Grafana retain their existing production responsibilities.
 
@@ -99,4 +86,4 @@ Both runtime roots call `register_gitlancer_logger()` immediately after `init_lo
 
 ## Testing
 
-`with_trace_logging` and `with_recorded_trace_logging` install a thread-scoped `TRACE` dispatcher. Use them for tests that assert on structured output *and* for ordinary tests that merely touch the same callsites — `tracing` caches callsite interest, so an unscoped test running first can otherwise make a later log assertion fail intermittently.
+`with_trace_logging` and `with_recorded_trace_logging` install a thread-scoped `TRACE` dispatcher. Use them for tests that assert on structured output _and_ for ordinary tests that merely touch the same callsites — `tracing` caches callsite interest, so an unscoped test running first can otherwise make a later log assertion fail intermittently.

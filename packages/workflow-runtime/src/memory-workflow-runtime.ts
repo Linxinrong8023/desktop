@@ -49,7 +49,9 @@ function nowIso(): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}${offset}`;
 }
 
-function idleNodeStates(workflow: WorkflowDefinition): Record<string, GraphWorkflowNodeState> {
+function idleNodeStates(
+  workflow: WorkflowDefinition,
+): Record<string, GraphWorkflowNodeState> {
   return Object.fromEntries(
     workflow.nodes.map((node) => [node.id, { status: "idle" as const }]),
   );
@@ -222,7 +224,9 @@ export function createMemoryWorkflowRuntime(
           mount.projectId === projectId && mount.definitionId === definitionId,
       );
       if (!mounted) {
-        throw new Error(`Workflow ${definitionId} is not mounted on project ${projectId}`);
+        throw new Error(
+          `Workflow ${definitionId} is not mounted on project ${projectId}`,
+        );
       }
       const definition = definitions.get(definitionId);
       if (definition === undefined) {
@@ -283,9 +287,9 @@ export function createMemoryWorkflowRuntime(
       }
       // Cancel in-flight work first; sibling runs keep their own state machines.
       if (
-        run.status === "pending"
-        || run.status === "running"
-        || run.status === "awaiting_input"
+        run.status === "pending" ||
+        run.status === "running" ||
+        run.status === "awaiting_input"
       ) {
         engine.cancel(runId);
       } else {
@@ -410,14 +414,18 @@ export function createMemoryWorkflowRuntime(
       set.add(liveListener);
       if ("afterCursor" in subscribeOptions) {
         const log = eventLogs.get(runId) ?? [];
-        const cursorIndex = afterCursor === null
-          ? -1
-          : log.findIndex((event) => event.cursor === afterCursor);
-        const replayFrom = afterCursor === null || cursorIndex < 0
-          ? 0
-          : cursorIndex + 1;
+        const cursorIndex =
+          afterCursor === null
+            ? -1
+            : log.findIndex((event) => event.cursor === afterCursor);
+        const replayFrom =
+          afterCursor === null || cursorIndex < 0 ? 0 : cursorIndex + 1;
         for (const event of log.slice(replayFrom)) {
-          notifyListener(onEvent, structuredClone(event), options.onListenerError);
+          notifyListener(
+            onEvent,
+            structuredClone(event),
+            options.onListenerError,
+          );
         }
       }
       replaying = false;

@@ -62,7 +62,9 @@ export function WorkflowManager({
       return workflows;
     }
     return workflows.filter((workflow) =>
-      `${workflow.name} ${workflow.description}`.toLocaleLowerCase().includes(normalizedQuery),
+      `${workflow.name} ${workflow.description}`
+        .toLocaleLowerCase()
+        .includes(normalizedQuery),
     );
   }, [query, workflows]);
 
@@ -115,9 +117,13 @@ export function WorkflowManager({
       <div className="space-y-3 border-b border-border p-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="text-xs font-semibold">{t("settings.workflow.library")}</h3>
+            <h3 className="text-xs font-semibold">
+              {t("settings.workflow.library")}
+            </h3>
             <p className="mt-0.5 text-[10px] text-muted-foreground">
-              {t("settings.workflow.workflowCount", { count: workflows.length })}
+              {t("settings.workflow.workflowCount", {
+                count: workflows.length,
+              })}
             </p>
           </div>
           <div className="flex items-center gap-1">
@@ -170,13 +176,17 @@ export function WorkflowManager({
                 <span
                   className={cn(
                     "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md",
-                    selected ? "bg-foreground text-background" : "bg-muted text-muted-foreground",
+                    selected
+                      ? "bg-foreground text-background"
+                      : "bg-muted text-muted-foreground",
                   )}
                 >
                   <IconRoute className="size-3.5" />
                 </span>
                 <span className="min-w-0 flex-1 pr-6">
-                  <span className="block truncate text-[11px] font-medium">{workflow.name}</span>
+                  <span className="block truncate text-[11px] font-medium">
+                    {workflow.name}
+                  </span>
                   <span className="mt-0.5 block truncate text-[9px] text-muted-foreground">
                     {new Intl.DateTimeFormat(i18n.resolvedLanguage, {
                       month: "short",
@@ -187,22 +197,30 @@ export function WorkflowManager({
               </button>
               <button
                 type="button"
-                aria-label={t("settings.workflow.renameNamed", { name: workflow.name })}
+                aria-label={t("settings.workflow.renameNamed", {
+                  name: workflow.name,
+                })}
                 onClick={() => openRenameDialog(workflow)}
                 className={cn(
                   "absolute right-8 top-1.5 flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-                  selected ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+                  selected
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
                 )}
               >
                 <IconPencil className="size-3.5" />
               </button>
               <button
                 type="button"
-                aria-label={t("settings.workflow.deleteNamed", { name: workflow.name })}
+                aria-label={t("settings.workflow.deleteNamed", {
+                  name: workflow.name,
+                })}
                 onClick={() => setDeleteTarget(workflow)}
                 className={cn(
                   "absolute right-1.5 top-1.5 flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring",
-                  selected ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+                  selected
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
                 )}
               >
                 <IconTrash className="size-3.5" />
@@ -218,7 +236,10 @@ export function WorkflowManager({
       </div>
       <div className="border-t border-border p-3">
         {error !== null && (
-          <p role="alert" className="mb-2 text-[10px] leading-4 text-destructive">
+          <p
+            role="alert"
+            className="mb-2 text-[10px] leading-4 text-destructive"
+          >
             {error}
           </p>
         )}
@@ -252,7 +273,9 @@ export function WorkflowManager({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("settings.workflow.createWorkflowTitle")}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t("settings.workflow.createWorkflowTitle")}
+            </AlertDialogTitle>
           </AlertDialogHeader>
           <Input
             value={newWorkflowName}
@@ -289,7 +312,9 @@ export function WorkflowManager({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t("settings.workflow.renameWorkflowTitle", { name: renameTarget?.name ?? "" })}
+              {t("settings.workflow.renameWorkflowTitle", {
+                name: renameTarget?.name ?? "",
+              })}
             </AlertDialogTitle>
           </AlertDialogHeader>
           <Input
@@ -327,7 +352,9 @@ export function WorkflowManager({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t("settings.workflow.deleteWorkflowTitle", { name: deleteTarget?.name ?? "" })}
+              {t("settings.workflow.deleteWorkflowTitle", {
+                name: deleteTarget?.name ?? "",
+              })}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t("settings.workflow.deleteWorkflowDescription")}

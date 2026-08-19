@@ -5,10 +5,10 @@ use crate::SessionTitleError;
 /// Enumerates domain-model conversion failures that adapters must handle explicitly.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DomainModelError {
+    #[error("namespace must not be blank")]
+    EmptyNamespace,
     #[error("worktree baseline commit must not be empty")]
     EmptyWorktreeBaseline,
-    #[error("invalid task status value: {0}")]
-    InvalidTaskStatus(i64),
     #[error("invalid task type value: {0}")]
     InvalidTaskType(i64),
     #[error("invalid workflow run status value: {0}")]
@@ -19,10 +19,10 @@ pub enum DomainModelError {
     InvalidWorktreeActivity(i64),
     #[error("invalid git cleanup job state value: {0}")]
     InvalidGitCleanupJobState(String),
-    #[error("invalid virtual entry kind value: {0}")]
-    InvalidVirtualEntryKind(i64),
     #[error("invalid session status value: {0}")]
     InvalidSessionStatus(i64),
+    #[error("invalid plugin enabled state value: {0}")]
+    InvalidPluginEnabledState(i64),
     #[error("invalid agent CLI value: {0}")]
     InvalidAgentCli(String),
     #[error("invalid session title: {0}")]

@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -35,7 +41,8 @@ const VIEWPORT_MARGIN_PX = 12;
 const WHEEL_ANCHORS_PER_STEP = 1;
 const TRACK_SHIFT_DURATION_MS = 240;
 const NEW_ANCHOR_DURATION_MS = 180;
-const NAVIGATION_OVERLAY_SURFACE_CLASS = "rounded-md border border-border/70 bg-popover text-popover-foreground shadow-lg shadow-black/10 ring-1 ring-black/5 dark:border-white/10 dark:shadow-black/45 dark:ring-white/10 [&_[data-base-ui-tooltip-arrow]]:bg-popover [&_[data-base-ui-tooltip-arrow]]:fill-popover";
+const NAVIGATION_OVERLAY_SURFACE_CLASS =
+  "rounded-md border border-border/70 bg-popover text-popover-foreground shadow-lg shadow-black/10 ring-1 ring-black/5 dark:border-white/10 dark:shadow-black/45 dark:ring-white/10 [&_[data-base-ui-tooltip-arrow]]:bg-popover [&_[data-base-ui-tooltip-arrow]]:fill-popover";
 const ANCHOR_WIDTH = {
   user: "28%",
   assistant: "46%",
@@ -74,7 +81,11 @@ export function ConversationNavigator({
     const bounds = target.getBoundingClientRect();
     const anchorTop = bounds.top + bounds.height / 2;
     setPreview((current) => {
-      if (current?.anchorId === anchorId && current.anchorLeft === bounds.left && current.anchorTop === anchorTop) {
+      if (
+        current?.anchorId === anchorId &&
+        current.anchorLeft === bounds.left &&
+        current.anchorTop === anchorTop
+      ) {
         return current;
       }
       return {
@@ -93,7 +104,8 @@ export function ConversationNavigator({
       setPreview(null);
       return;
     }
-    if (previewSyncFrameRef.current !== null) window.cancelAnimationFrame(previewSyncFrameRef.current);
+    if (previewSyncFrameRef.current !== null)
+      window.cancelAnimationFrame(previewSyncFrameRef.current);
     previewSyncFrameRef.current = window.requestAnimationFrame(() => {
       previewSyncFrameRef.current = null;
       const list = anchorListRef.current;
@@ -103,7 +115,9 @@ export function ConversationNavigator({
         return;
       }
 
-      const hoveredTick = Array.from(list.querySelectorAll<HTMLElement>("[data-conversation-tick]")).find((tick) => {
+      const hoveredTick = Array.from(
+        list.querySelectorAll<HTMLElement>("[data-conversation-tick]"),
+      ).find((tick) => {
         const bounds = tick.getBoundingClientRect();
         return pointer.y >= bounds.top && pointer.y < bounds.bottom;
       });
@@ -116,14 +130,19 @@ export function ConversationNavigator({
   useLayoutEffect(() => {
     const list = anchorListRef.current;
     const track = anchorTrackRef.current;
-    const activeButton = anchorListRef.current?.querySelector<HTMLElement>('[aria-current="location"]');
+    const activeButton = anchorListRef.current?.querySelector<HTMLElement>(
+      '[aria-current="location"]',
+    );
     if (!list || !track) return;
 
     const previousCount = previousAnchorCountRef.current;
-    const addedCount = previousCount === null ? 0 : Math.max(0, anchors.length - previousCount);
+    const addedCount =
+      previousCount === null ? 0 : Math.max(0, anchors.length - previousCount);
     const previousHeight = previousTrackHeightRef.current;
     const trackHeight = track.scrollHeight;
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
 
     if (addedCount > 0 && activeAnchorId === lastGeneratedAnchorId) {
       const overflows = list.scrollHeight > list.clientHeight;
@@ -132,26 +151,49 @@ export function ConversationNavigator({
         const shift = Math.max(0, trackHeight - previousHeight);
         if (!reduceMotion && shift > 0 && typeof track.animate === "function") {
           track.animate(
-            [{ transform: `translateY(${shift}px)` }, { transform: "translateY(0)" }],
-            { duration: TRACK_SHIFT_DURATION_MS, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+            [
+              { transform: `translateY(${shift}px)` },
+              { transform: "translateY(0)" },
+            ],
+            {
+              duration: TRACK_SHIFT_DURATION_MS,
+              easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+            },
           );
         }
-      } else if (activeButton && typeof activeButton.scrollIntoView === "function") {
-        activeButton.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
+      } else if (
+        activeButton &&
+        typeof activeButton.scrollIntoView === "function"
+      ) {
+        activeButton.scrollIntoView({
+          block: "nearest",
+          behavior: reduceMotion ? "auto" : "smooth",
+        });
       }
 
       if (!reduceMotion) {
-        const newButtons = Array.from(track.querySelectorAll<HTMLElement>("[data-conversation-tick]")).slice(-addedCount);
+        const newButtons = Array.from(
+          track.querySelectorAll<HTMLElement>("[data-conversation-tick]"),
+        ).slice(-addedCount);
         for (const button of newButtons) {
           if (typeof button.animate !== "function") continue;
           button.animate(
-            [{ opacity: 0, transform: "translateY(3px)" }, { opacity: 1, transform: "translateY(0)" }],
+            [
+              { opacity: 0, transform: "translateY(3px)" },
+              { opacity: 1, transform: "translateY(0)" },
+            ],
             { duration: NEW_ANCHOR_DURATION_MS, easing: "ease-out" },
           );
         }
       }
-    } else if (activeButton && typeof activeButton.scrollIntoView === "function") {
-      activeButton.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
+    } else if (
+      activeButton &&
+      typeof activeButton.scrollIntoView === "function"
+    ) {
+      activeButton.scrollIntoView({
+        block: "nearest",
+        behavior: reduceMotion ? "auto" : "smooth",
+      });
     }
 
     previousAnchorCountRef.current = anchors.length;
@@ -165,8 +207,13 @@ export function ConversationNavigator({
       if (list.scrollHeight <= list.clientHeight || event.deltaY === 0) return;
       event.preventDefault();
       event.stopPropagation();
-      const anchorHeight = list.querySelector<HTMLElement>("[data-conversation-tick]")?.offsetHeight ?? 0;
-      const maxStep = anchorHeight > 0 ? anchorHeight * WHEEL_ANCHORS_PER_STEP : list.clientHeight / 4;
+      const anchorHeight =
+        list.querySelector<HTMLElement>("[data-conversation-tick]")
+          ?.offsetHeight ?? 0;
+      const maxStep =
+        anchorHeight > 0
+          ? anchorHeight * WHEEL_ANCHORS_PER_STEP
+          : list.clientHeight / 4;
       const previousScrollTop = list.scrollTop;
       list.scrollTop += Math.max(-maxStep, Math.min(maxStep, event.deltaY));
       if (list.scrollTop !== previousScrollTop) syncPreviewWithPointer();
@@ -174,7 +221,8 @@ export function ConversationNavigator({
     list.addEventListener("wheel", handleWheel, { passive: false });
     return () => {
       list.removeEventListener("wheel", handleWheel);
-      if (previewSyncFrameRef.current !== null) window.cancelAnimationFrame(previewSyncFrameRef.current);
+      if (previewSyncFrameRef.current !== null)
+        window.cancelAnimationFrame(previewSyncFrameRef.current);
     };
   }, [anchors.length, syncPreviewWithPointer]);
 
@@ -183,21 +231,30 @@ export function ConversationNavigator({
     if (!preview || !element) return;
     const bounds = element.getBoundingClientRect();
     const halfHeight = bounds.height / 2;
-    const left = Math.max(VIEWPORT_MARGIN_PX, preview.anchorLeft - PREVIEW_GAP_PX - bounds.width);
+    const left = Math.max(
+      VIEWPORT_MARGIN_PX,
+      preview.anchorLeft - PREVIEW_GAP_PX - bounds.width,
+    );
     const top = Math.min(
-        window.innerHeight - VIEWPORT_MARGIN_PX - halfHeight,
-        Math.max(VIEWPORT_MARGIN_PX + halfHeight, preview.anchorTop),
-      );
+      window.innerHeight - VIEWPORT_MARGIN_PX - halfHeight,
+      Math.max(VIEWPORT_MARGIN_PX + halfHeight, preview.anchorTop),
+    );
     setPreview((current) => {
-      if (current !== preview || current.left === left && current.top === top) return current;
+      if (current !== preview || (current.left === left && current.top === top))
+        return current;
       return { ...current, left, top };
     });
   }, [preview]);
 
   if (anchors.length < minAnchors) return null;
 
-  const matchedActiveIndex = anchors.findIndex((anchor) => anchor.id === activeAnchorId);
-  const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : Math.max(0, anchors.length - 1);
+  const matchedActiveIndex = anchors.findIndex(
+    (anchor) => anchor.id === activeAnchorId,
+  );
+  const activeIndex =
+    matchedActiveIndex >= 0
+      ? matchedActiveIndex
+      : Math.max(0, anchors.length - 1);
   const isAtLastAnchor = activeIndex === anchors.length - 1;
   const isAtNavigationEnd = isAtLastAnchor && isAtTail;
 
@@ -217,156 +274,205 @@ export function ConversationNavigator({
     <>
       <nav
         aria-label={t("chat.historyNavigation")}
-        className={placement === "container"
-          ? "group/history-nav pointer-events-none absolute right-0 top-1/2 z-20 -translate-y-1/2"
-          : "group/history-nav pointer-events-none fixed right-1.5 top-1/2 z-20 hidden -translate-y-1/2 sm:block"}
+        className={
+          placement === "container"
+            ? "group/history-nav pointer-events-none absolute right-0 top-1/2 z-20 -translate-y-1/2"
+            : "group/history-nav pointer-events-none fixed right-1.5 top-1/2 z-20 hidden -translate-y-1/2 sm:block"
+        }
       >
         <div className="pointer-events-auto relative flex w-7 flex-col items-center">
-        <Tooltip open={activeIndex === 0 && previousControlHovered}>
-          <TooltipTrigger
-            render={
-              <span
-                className="mb-px inline-flex size-6"
-                onMouseEnter={() => setPreviousControlHovered(true)}
-                onMouseLeave={() => setPreviousControlHovered(false)}
-              />
-            }
-          >
-            <button
-              type="button"
-              aria-label={activeIndex === 0 ? t("chat.firstMessageReached") : t("chat.previousMessage")}
-              disabled={activeIndex === 0}
-              onClick={() => navigateByAnchor(-1)}
-              className="flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-[color,background-color,opacity] duration-150 group-hover/history-nav:opacity-100 group-focus-within/history-nav:opacity-100 hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:text-muted-foreground/35"
+          <Tooltip open={activeIndex === 0 && previousControlHovered}>
+            <TooltipTrigger
+              render={
+                <span
+                  className="mb-px inline-flex size-6"
+                  onMouseEnter={() => setPreviousControlHovered(true)}
+                  onMouseLeave={() => setPreviousControlHovered(false)}
+                />
+              }
             >
-              <IconChevronUp className="size-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="left" className={NAVIGATION_OVERLAY_SURFACE_CLASS}>
-            {t("chat.firstMessageReached")}
-          </TooltipContent>
-        </Tooltip>
-
-        <div
-          ref={anchorListRef}
-          data-testid="conversation-anchor-list"
-          onMouseMove={(event) => {
-            pointerPositionRef.current = { y: event.clientY };
-          }}
-          onMouseLeave={() => {
-            pointerPositionRef.current = null;
-            setPreview(null);
-          }}
-          onScroll={syncPreviewWithPointer}
-          className="scrollbar-hide max-h-48 overflow-y-auto overscroll-contain py-px"
-        >
-          <div ref={anchorTrackRef} data-testid="conversation-anchor-track" className="flex flex-col items-end">
-          {anchors.map((anchor) => {
-            const active = anchor.id === activeAnchorId;
-            const previewed = anchor.id === previewAnchorId;
-            const baseWidth = ANCHOR_WIDTH[anchor.role];
-
-            return (
               <button
-                key={anchor.id}
                 type="button"
-                aria-label={t("chat.jumpToAnchor", { label: anchor.label, message: anchor.summary })}
-                aria-current={active ? "location" : undefined}
-                onMouseEnter={(event) => {
-                  pointerPositionRef.current = { y: event.clientY };
-                  showPreview(anchor.id, event.currentTarget);
-                }}
-                onFocus={(event) => showPreview(anchor.id, event.currentTarget)}
-                onBlur={() => setPreview(null)}
-                onClick={() => onNavigate(anchor.id)}
-                data-conversation-tick
-                data-conversation-anchor-id={anchor.id}
-                className="group/tick relative flex h-4 w-7 shrink-0 cursor-pointer items-center justify-end rounded-md pr-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={
+                  activeIndex === 0
+                    ? t("chat.firstMessageReached")
+                    : t("chat.previousMessage")
+                }
+                disabled={activeIndex === 0}
+                onClick={() => navigateByAnchor(-1)}
+                className="flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-[color,background-color,opacity] duration-150 group-hover/history-nav:opacity-100 group-focus-within/history-nav:opacity-100 hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:text-muted-foreground/35"
               >
+                <IconChevronUp className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              side="left"
+              className={NAVIGATION_OVERLAY_SURFACE_CLASS}
+            >
+              {t("chat.firstMessageReached")}
+            </TooltipContent>
+          </Tooltip>
+
+          <div
+            ref={anchorListRef}
+            data-testid="conversation-anchor-list"
+            onMouseMove={(event) => {
+              pointerPositionRef.current = { y: event.clientY };
+            }}
+            onMouseLeave={() => {
+              pointerPositionRef.current = null;
+              setPreview(null);
+            }}
+            onScroll={syncPreviewWithPointer}
+            className="scrollbar-hide max-h-48 overflow-y-auto overscroll-contain py-px"
+          >
+            <div
+              ref={anchorTrackRef}
+              data-testid="conversation-anchor-track"
+              className="flex flex-col items-end"
+            >
+              {anchors.map((anchor) => {
+                const active = anchor.id === activeAnchorId;
+                const previewed = anchor.id === previewAnchorId;
+                const baseWidth = ANCHOR_WIDTH[anchor.role];
+
+                return (
+                  <button
+                    key={anchor.id}
+                    type="button"
+                    aria-label={t("chat.jumpToAnchor", {
+                      label: anchor.label,
+                      message: anchor.summary,
+                    })}
+                    aria-current={active ? "location" : undefined}
+                    onMouseEnter={(event) => {
+                      pointerPositionRef.current = { y: event.clientY };
+                      showPreview(anchor.id, event.currentTarget);
+                    }}
+                    onFocus={(event) =>
+                      showPreview(anchor.id, event.currentTarget)
+                    }
+                    onBlur={() => setPreview(null)}
+                    onClick={() => onNavigate(anchor.id)}
+                    data-conversation-tick
+                    data-conversation-anchor-id={anchor.id}
+                    className="group/tick relative flex h-4 w-7 shrink-0 cursor-pointer items-center justify-end rounded-md pr-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`h-px origin-right rounded-full transition-[width,background-color,opacity] duration-200 ease-out motion-reduce:transition-none ${active ? "bg-foreground/85" : anchor.role === "user" ? "bg-muted-foreground/65" : "bg-muted-foreground/45 group-hover/tick:bg-foreground/70"}`}
+                      style={{
+                        width:
+                          active || previewed
+                            ? ANCHOR_WIDTH.emphasized
+                            : baseWidth,
+                        opacity:
+                          previewAnchorId === null || previewed ? 1 : 0.72,
+                      }}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <Tooltip open={isAtLastAnchor && nextControlHovered}>
+            <TooltipTrigger
+              render={
+                <span
+                  className="mt-px inline-flex size-6"
+                  onMouseEnter={() => setNextControlHovered(true)}
+                  onMouseLeave={() => setNextControlHovered(false)}
+                />
+              }
+            >
+              <button
+                type="button"
+                aria-label={
+                  isAtNavigationEnd
+                    ? t("chat.conversationBottomReached")
+                    : isAtLastAnchor
+                      ? t("chat.scrollToBottom")
+                      : t("chat.nextMessage")
+                }
+                disabled={isAtNavigationEnd}
+                onClick={() => navigateByAnchor(1)}
+                className="flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-[color,background-color,opacity] duration-150 group-hover/history-nav:opacity-100 group-focus-within/history-nav:opacity-100 hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:text-muted-foreground/35"
+              >
+                <IconChevronDown className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              side="left"
+              className={NAVIGATION_OVERLAY_SURFACE_CLASS}
+            >
+              <span className="grid">
+                {/* Invisible copies keep the overlay's footprint stable while the
+                  visible label changes, so the positioner has nothing to reflow. */}
                 <span
                   aria-hidden="true"
-                  className={`h-px origin-right rounded-full transition-[width,background-color,opacity] duration-200 ease-out motion-reduce:transition-none ${active ? "bg-foreground/85" : anchor.role === "user" ? "bg-muted-foreground/65" : "bg-muted-foreground/45 group-hover/tick:bg-foreground/70"}`}
-                  style={{
-                    width: active || previewed ? ANCHOR_WIDTH.emphasized : baseWidth,
-                    opacity: previewAnchorId === null || previewed ? 1 : 0.72,
-                  }}
-                />
-              </button>
-            );
-          })}
-          </div>
-        </div>
-
-        <Tooltip open={isAtLastAnchor && nextControlHovered}>
-          <TooltipTrigger
-            render={
-              <span
-                className="mt-px inline-flex size-6"
-                onMouseEnter={() => setNextControlHovered(true)}
-                onMouseLeave={() => setNextControlHovered(false)}
-              />
-            }
-          >
-            <button
-              type="button"
-              aria-label={isAtNavigationEnd
-                ? t("chat.conversationBottomReached")
-                : isAtLastAnchor
-                  ? t("chat.scrollToBottom")
-                  : t("chat.nextMessage")}
-              disabled={isAtNavigationEnd}
-              onClick={() => navigateByAnchor(1)}
-              className="flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none transition-[color,background-color,opacity] duration-150 group-hover/history-nav:opacity-100 group-focus-within/history-nav:opacity-100 hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:text-muted-foreground/35"
-            >
-              <IconChevronDown className="size-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="left" className={NAVIGATION_OVERLAY_SURFACE_CLASS}>
-            <span className="grid">
-              {/* Invisible copies keep the overlay's footprint stable while the
-                  visible label changes, so the positioner has nothing to reflow. */}
-              <span aria-hidden="true" className="invisible col-start-1 row-start-1">
-                {t("chat.scrollToBottom")}
+                  className="invisible col-start-1 row-start-1"
+                >
+                  {t("chat.scrollToBottom")}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="invisible col-start-1 row-start-1"
+                >
+                  {t("chat.conversationBottomReached")}
+                </span>
+                <span
+                  key={isAtNavigationEnd ? "reached" : "action"}
+                  data-testid="conversation-navigation-end-hint"
+                  className="col-start-1 row-start-1 animate-in fade-in-0 duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none"
+                >
+                  {isAtNavigationEnd
+                    ? t("chat.conversationBottomReached")
+                    : t("chat.scrollToBottom")}
+                </span>
               </span>
-              <span aria-hidden="true" className="invisible col-start-1 row-start-1">
-                {t("chat.conversationBottomReached")}
-              </span>
-              <span
-                key={isAtNavigationEnd ? "reached" : "action"}
-                data-testid="conversation-navigation-end-hint"
-                className="col-start-1 row-start-1 animate-in fade-in-0 duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none"
-              >
-                {isAtNavigationEnd ? t("chat.conversationBottomReached") : t("chat.scrollToBottom")}
-              </span>
-            </span>
-          </TooltipContent>
-        </Tooltip>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </nav>
-      {preview && previewAnchor && createPortal(
-        <div
-          ref={previewRef}
-          data-testid="conversation-anchor-preview"
-          className={`pointer-events-none fixed z-30 w-56 max-w-[calc(100vw-var(--spacing)*6)] -translate-y-1/2 p-3 text-left ${NAVIGATION_OVERLAY_SURFACE_CLASS} ${preview.left === undefined ? "invisible" : "animate-preview-fade-in motion-reduce:animate-none"}`}
-          style={{ left: preview.left ?? preview.anchorLeft, top: preview.top ?? preview.anchorTop }}
-        >
-          {previewAnchor.role === "assistant" && (
-            <p className="mb-1 text-[11px] text-muted-foreground">Ora</p>
-          )}
-          <ConversationPreviewMarkdown content={previewAnchor.preview} />
-        </div>,
-        document.body,
-      )}
+      {preview &&
+        previewAnchor &&
+        createPortal(
+          <div
+            ref={previewRef}
+            data-testid="conversation-anchor-preview"
+            className={`pointer-events-none fixed z-30 w-56 max-w-[calc(100vw-var(--spacing)*6)] -translate-y-1/2 p-3 text-left ${NAVIGATION_OVERLAY_SURFACE_CLASS} ${preview.left === undefined ? "invisible" : "animate-preview-fade-in motion-reduce:animate-none"}`}
+            style={{
+              left: preview.left ?? preview.anchorLeft,
+              top: preview.top ?? preview.anchorTop,
+            }}
+          >
+            {previewAnchor.role === "assistant" && (
+              <p className="mb-1 text-[11px] text-muted-foreground">Ora</p>
+            )}
+            <ConversationPreviewMarkdown content={previewAnchor.preview} />
+          </div>,
+          document.body,
+        )}
     </>
   );
 }
 
 /** Builds stable prompt/response pairs so line length communicates message role. */
-function conversationAnchors(turns: ChatTurn[], t: ReturnType<typeof useTranslation>["t"]): ConversationAnchor[] {
+function conversationAnchors(
+  turns: ChatTurn[],
+  t: ReturnType<typeof useTranslation>["t"],
+): ConversationAnchor[] {
   return turns.flatMap((turn, index) => {
     const number = index + 1;
-    const userPreview = previewMessage(turn.userMessage.content, t("chat.untitledTurn", { index: number }));
-    const userSummary = summarizeMessage(userPreview, t("chat.untitledTurn", { index: number }));
+    const userPreview = previewMessage(
+      turn.userMessage.content,
+      t("chat.untitledTurn", { index: number }),
+    );
+    const userSummary = summarizeMessage(
+      userPreview,
+      t("chat.untitledTurn", { index: number }),
+    );
     const userAnchor: ConversationAnchor = {
       id: `${turn.id}:user`,
       label: t("chat.userAnchorLabel", { index: number }),
@@ -374,9 +480,13 @@ function conversationAnchors(turns: ChatTurn[], t: ReturnType<typeof useTranslat
       summary: userSummary,
       role: "user",
     };
-    if (turn.items.length === 0 && turn.status === "streaming") return [userAnchor];
+    if (turn.items.length === 0 && turn.status === "streaming")
+      return [userAnchor];
     const assistantPreview = responsePreview(turn, t("chat.assistantReplied"));
-    const assistantSummary = summarizeMessage(assistantPreview, t("chat.assistantReplied"));
+    const assistantSummary = summarizeMessage(
+      assistantPreview,
+      t("chat.assistantReplied"),
+    );
     return [
       userAnchor,
       {
@@ -403,7 +513,7 @@ function responsePreview(turn: ChatTurn, fallback: string): string {
         return item.entries.at(-1)?.content ?? fallback;
       case "content":
         return item.content.type === "resource_link"
-          ? item.content.title ?? item.content.name
+          ? (item.content.title ?? item.content.name)
           : fallback;
     }
   }

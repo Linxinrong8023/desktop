@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{ApplicationError, Clock, RepositoryError};
 use ora_contracts::{CreateAgentRequest, DeleteAgentRequest, GetAgentRequest, UpdateAgentRequest};
-use ora_domain::{AgentDefinition, AgentDefinitionId, AuditFields};
+use ora_domain::{AgentDefinition, AgentDefinitionId, AuditFields, Namespace};
 use pretty_assertions::assert_eq;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -112,12 +112,14 @@ fn rejects_case_insensitive_name_conflicts_on_create_and_rename() {
     assert_eq!(
         create_error,
         ApplicationError::AgentDefinitionNameConflict {
+            namespace: "local".to_string(),
             name: "OpenCode".to_string(),
         }
     );
     assert_eq!(
         rename_error,
         ApplicationError::AgentDefinitionNameConflict {
+            namespace: "local".to_string(),
             name: "REVIEWER".to_string(),
         }
     );
@@ -229,6 +231,7 @@ impl AgentDefinitionRepository for Rc<FakeAgentRepository> {
     }
     fn find_agent_definition_by_name(
         &self,
+        namespace: &Namespace,
         name: &str,
     ) -> Result<Option<AgentDefinition>, RepositoryError> {
         self.take_error()?;
@@ -236,7 +239,11 @@ impl AgentDefinitionRepository for Rc<FakeAgentRepository> {
             .agents
             .borrow()
             .iter()
-            .find(|agent| agent.name.eq_ignore_ascii_case(name) && !agent.audit_fields.is_deleted)
+            .find(|agent| {
+                agent.namespace == *namespace
+                    && agent.name.eq_ignore_ascii_case(name)
+                    && !agent.audit_fields.is_deleted
+            })
             .cloned())
     }
 
@@ -297,6 +304,7 @@ fn agent(
 ) -> AgentDefinition {
     AgentDefinition::new(
         AgentDefinitionId::new(id),
+        Namespace::local(),
         name,
         description,
         "",

@@ -23,7 +23,9 @@ describe("WorkflowNodeCatalog", () => {
       </AppI18nProvider>,
     );
     const catalog = screen.getByRole("toolbar");
-    const viewport = catalog.querySelector<HTMLElement>("[data-workflow-node-scroll]");
+    const viewport = catalog.querySelector<HTMLElement>(
+      "[data-workflow-node-scroll]",
+    );
     expect(viewport).not.toBeNull();
     configureScrollViewport(viewport!, {
       clientWidth: 240,
@@ -31,7 +33,11 @@ describe("WorkflowNodeCatalog", () => {
       scrollLeft: 40,
     });
 
-    const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 80 });
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 80,
+    });
     const propagationSpy = vi.spyOn(event, "stopPropagation");
     fireEvent(catalog, event);
 
@@ -52,8 +58,12 @@ describe("WorkflowNodeCatalog", () => {
       </AppI18nProvider>,
     );
     const catalog = screen.getByRole("toolbar");
-    const viewport = catalog.querySelector<HTMLElement>("[data-workflow-node-scroll]");
-    const track = catalog.querySelector<HTMLElement>("[data-workflow-node-track]");
+    const viewport = catalog.querySelector<HTMLElement>(
+      "[data-workflow-node-scroll]",
+    );
+    const track = catalog.querySelector<HTMLElement>(
+      "[data-workflow-node-track]",
+    );
     expect(viewport).not.toBeNull();
     expect(track).not.toBeNull();
     configureScrollViewport(viewport!, {
@@ -105,6 +115,10 @@ function configureScrollViewport(
   Object.defineProperties(viewport, {
     clientWidth: { configurable: true, value: dimensions.clientWidth },
     scrollWidth: { configurable: true, value: dimensions.scrollWidth },
-    scrollLeft: { configurable: true, writable: true, value: dimensions.scrollLeft },
+    scrollLeft: {
+      configurable: true,
+      writable: true,
+      value: dimensions.scrollLeft,
+    },
   });
 }

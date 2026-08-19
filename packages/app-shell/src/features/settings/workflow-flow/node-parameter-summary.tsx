@@ -17,17 +17,34 @@ interface NodeParameter {
 }
 
 /** Displays the persisted node configuration without introducing card-level editing controls. */
-export function WorkflowNodeParameterSummary({ data }: { data: WorkflowNodeData }) {
+export function WorkflowNodeParameterSummary({
+  data,
+}: {
+  data: WorkflowNodeData;
+}) {
   const { i18n, t } = useTranslation();
   const agentsQuery = useAgents();
   const skillsQuery = useSkills();
   // The workflow JSON stores role/skill by name, so name-keyed lookups resolve directly.
-  const agentNameById = new Map((agentsQuery.data ?? []).map((agent) => [agent.name, agent.name]));
-  const skillNameById = new Map((skillsQuery.data ?? []).map((skill) => [skill.name, skill.name]));
+  const agentNameById = new Map(
+    (agentsQuery.data ?? []).map((agent) => [agent.name, agent.name]),
+  );
+  const skillNameById = new Map(
+    (skillsQuery.data ?? []).map((skill) => [skill.name, skill.name]),
+  );
   const mcpNameById = new Map(MCP_CATALOG.map((mcp) => [mcp.id, mcp.name]));
-  const locale = i18n.resolvedLanguage === "en-US" ? "en-US" as const : "zh-CN" as const;
+  const locale =
+    i18n.resolvedLanguage === "en-US" ? ("en-US" as const) : ("zh-CN" as const);
   const labels = createWorkflowSummaryLabels(locale);
-  const parameters = configuredParameters(data, t, agentNameById, skillNameById, mcpNameById, labels, locale);
+  const parameters = configuredParameters(
+    data,
+    t,
+    agentNameById,
+    skillNameById,
+    mcpNameById,
+    labels,
+    locale,
+  );
 
   if (parameters.length === 0) {
     return null;
@@ -80,11 +97,15 @@ function configuredParameters(
     parameters.push(
       {
         label: t("settings.workflow.field.role"),
-        values: [agentNameById.get(data.agentConfig.roleId) ?? data.agentConfig.roleId],
+        values: [
+          agentNameById.get(data.agentConfig.roleId) ?? data.agentConfig.roleId,
+        ],
       },
       {
         label: t("settings.workflow.field.agentModel"),
-        values: [`${data.agentConfig.executor.agentCli} · ${data.agentConfig.executor.modelId}`],
+        values: [
+          `${data.agentConfig.executor.agentCli} · ${data.agentConfig.executor.modelId}`,
+        ],
       },
     );
     if (enabledSkills.length > 0) {
@@ -107,7 +128,11 @@ function configuredParameters(
       t("settings.workflow.field.condition"),
       conditionBranchesSummary(data, labels, locale) ?? undefined,
     );
-    appendParameter(parameters, t("settings.workflow.field.instruction"), data.instruction);
+    appendParameter(
+      parameters,
+      t("settings.workflow.field.instruction"),
+      data.instruction,
+    );
     return parameters;
   }
   if (data.kind === "tool") {
@@ -123,10 +148,16 @@ function configuredParameters(
       appendParameter(
         parameters,
         t("settings.workflow.section.parameters"),
-        data.toolParameters!.map((parameter) => `${parameter.key} = ${parameter.value}`),
+        data.toolParameters!.map(
+          (parameter) => `${parameter.key} = ${parameter.value}`,
+        ),
       );
     }
-    appendParameter(parameters, t("settings.workflow.field.instruction"), data.instruction);
+    appendParameter(
+      parameters,
+      t("settings.workflow.field.instruction"),
+      data.instruction,
+    );
     return parameters;
   }
 
@@ -134,9 +165,15 @@ function configuredParameters(
     appendParameter(
       parameters,
       t("settings.workflow.field.trigger"),
-      data.trigger === undefined ? undefined : labels.triggerLabel(data.trigger),
+      data.trigger === undefined
+        ? undefined
+        : labels.triggerLabel(data.trigger),
     );
-    appendParameter(parameters, t("settings.workflow.field.instruction"), data.instruction);
+    appendParameter(
+      parameters,
+      t("settings.workflow.field.instruction"),
+      data.instruction,
+    );
     return parameters;
   }
   if (data.kind === "junction") {
@@ -150,7 +187,11 @@ function configuredParameters(
       t("settings.workflow.field.failureStrategy"),
       junctionFailureStrategyLabel(data.failureStrategy, t),
     );
-    appendParameter(parameters, t("settings.workflow.field.instruction"), data.instruction);
+    appendParameter(
+      parameters,
+      t("settings.workflow.field.instruction"),
+      data.instruction,
+    );
     return parameters;
   }
   if (data.kind === "loop") {
@@ -159,12 +200,24 @@ function configuredParameters(
       t("settings.workflow.field.maxAttempts"),
       data.maxAttempts?.toString(),
     );
-    appendParameter(parameters, t("settings.workflow.field.exitCondition"), data.exitCondition);
-    appendParameter(parameters, t("settings.workflow.field.instruction"), data.instruction);
+    appendParameter(
+      parameters,
+      t("settings.workflow.field.exitCondition"),
+      data.exitCondition,
+    );
+    appendParameter(
+      parameters,
+      t("settings.workflow.field.instruction"),
+      data.instruction,
+    );
     return parameters;
   }
 
-  appendParameter(parameters, t("settings.workflow.field.instruction"), data.instruction);
+  appendParameter(
+    parameters,
+    t("settings.workflow.field.instruction"),
+    data.instruction,
+  );
   return parameters;
 }
 

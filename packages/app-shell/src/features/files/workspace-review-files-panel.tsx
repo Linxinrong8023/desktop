@@ -16,7 +16,6 @@ export type FilesSurface = "explorer" | "search" | "specs";
 
 interface WorkspaceReviewFilesPanelProps {
   projectId: string;
-  projectRootPath: string;
   taskId?: string;
   toolbar?: ReactNode;
 }
@@ -24,21 +23,24 @@ interface WorkspaceReviewFilesPanelProps {
 /** Hosts task file browsing and the read-only Spec catalog inside one review panel. */
 export function WorkspaceReviewFilesPanel({
   projectId,
-  projectRootPath,
   taskId,
   toolbar,
 }: WorkspaceReviewFilesPanelProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const specsOnly = taskId === undefined;
-  const [surface, setSurface] = useState<FilesSurface>(specsOnly ? "specs" : "explorer");
+  const [surface, setSurface] = useState<FilesSurface>(
+    specsOnly ? "specs" : "explorer",
+  );
   const specsRef = useRef<SpecsContentHandle>(null);
   const [specsRefreshing, setSpecsRefreshing] = useState(false);
 
   const refreshSpecs = () => void specsRef.current?.refresh();
   const refreshFiles = () => {
     if (taskId === undefined) return;
-    void queryClient.invalidateQueries({ queryKey: queryKeys.workspaceFiles(taskId) });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.workspaceFiles(taskId),
+    });
   };
 
   return (
@@ -86,7 +88,9 @@ export function WorkspaceReviewFilesPanel({
             aria-label={t("specs.refresh")}
             onClick={refreshSpecs}
           >
-            <IconRefresh className={specsRefreshing ? "animate-spin" : undefined} />
+            <IconRefresh
+              className={specsRefreshing ? "animate-spin" : undefined}
+            />
           </Button>
         ) : (
           <Button
@@ -105,16 +109,11 @@ export function WorkspaceReviewFilesPanel({
           <SpecsContent
             ref={specsRef}
             projectId={projectId}
-            projectRootPath={projectRootPath}
             taskId={taskId}
             onRefreshingChange={setSpecsRefreshing}
           />
         ) : (
-          <WorkspaceFilesView
-            taskId={taskId!}
-            surface={surface}
-            hideHeader
-          />
+          <WorkspaceFilesView taskId={taskId!} surface={surface} hideHeader />
         )}
       </div>
     </section>

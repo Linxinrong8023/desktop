@@ -5,6 +5,7 @@ use ora_domain::AgentDefinition;
 pub(crate) fn map_agent_definition(agent_definition: AgentDefinition) -> ContractAgent {
     ContractAgent {
         id: agent_definition.id.to_string(),
+        namespace: agent_definition.namespace.to_string(),
         name: agent_definition.name,
         description: agent_definition.description,
     }
@@ -14,6 +15,7 @@ pub(crate) fn map_agent_definition(agent_definition: AgentDefinition) -> Contrac
 pub(crate) fn map_agent_definition_details(agent_definition: AgentDefinition) -> AgentDetails {
     AgentDetails {
         id: agent_definition.id.to_string(),
+        namespace: agent_definition.namespace.to_string(),
         name: agent_definition.name,
         description: agent_definition.description,
         content: agent_definition.content,

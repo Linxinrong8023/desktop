@@ -1,11 +1,11 @@
 mod agent_definition;
 mod error;
+mod plugin;
 mod project;
 mod repository_error;
 mod session;
 mod skill;
 mod skill_import;
-mod spec;
 mod task;
 mod task_diff;
 mod workflow;
@@ -18,6 +18,7 @@ pub use agent_definition::{
     ListAgentDefinitionsHandler, UpdateAgentDefinitionHandler, UuidAgentDefinitionIdGenerator,
 };
 pub use error::ApplicationError;
+pub use plugin::PluginStateRepository;
 pub use project::{
     BranchLister, BranchListingError, BranchReference, Clock, CreateProjectHandler,
     GetProjectHandler, ListProjectBranchesHandler, ListProjectsHandler, ProjectIdGenerator,
@@ -25,24 +26,20 @@ pub use project::{
 };
 pub use repository_error::{BoxRepositorySource, RepositoryError};
 pub use session::{
-    DeleteSessionHandler, GetSessionHandler, ListSessionsHandler, SessionIdGenerator,
-    SessionRepository, UuidSessionIdGenerator,
+    DeleteSessionHandler, GetSessionHandler, ListSessionsHandler, RenameSessionHandler,
+    SessionIdGenerator, SessionRepository, UuidSessionIdGenerator,
 };
 pub use skill::{
     BACKUP_DIR_NAME, CreateHandle, CreateSkillHandler, DeleteHandle, DeleteSkillHandler,
     FilesystemSkillStorage, GetSkillHandler, JOURNAL_DIR_NAME, JournalOp, JournalPhase,
     ListSkillsHandler, STAGING_DIR_NAME, SkillIdGenerator, SkillRepository, SkillStorage,
     SkillStorageError, SwapHandle, TransactionJournal, UpdateSkillHandler, UuidSkillIdGenerator,
+    has_usable_package,
 };
 pub use skill_import::{
     DuplicateSkillName, NoopSkillImportProgressPublisher, SkillImportConfig, SkillImportError,
     SkillImportIdGenerator, SkillImportProgressEvent, SkillImportProgressPublisher,
     SkillImportService, UuidSkillImportIdGenerator,
-};
-pub use spec::{
-    ListProjectSpecSourceOverridesHandler, ProjectSpecSourceOverrideIdGenerator,
-    ProjectSpecSourceOverrideRepository, UpdateProjectSpecSourcesHandler,
-    UuidProjectSpecSourceOverrideIdGenerator,
 };
 pub use task::{
     CleanupJobDisposition, CleanupStage, CreateTaskHandler, CreateTaskWorktreeRequest,

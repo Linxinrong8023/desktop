@@ -50,9 +50,9 @@ const CONVERSATION: WorkflowNodeConversationItem[] = [
     sessionId: "session-1",
     role: "assistant",
     markdown: "## Review complete\n\n- Found **one** regression.",
-  status: "complete",
-  createdAt: "2026-08-04T12:00:00+08:00",
-  updatedAt: "2026-08-04T12:00:00+08:00",
+    status: "complete",
+    createdAt: "2026-08-04T12:00:00+08:00",
+    updatedAt: "2026-08-04T12:00:00+08:00",
   },
   {
     kind: "message",
@@ -119,7 +119,10 @@ describe("RunTheaterActCard conversation", () => {
             description: "只读探索",
             agentConfig: {
               schemaVersion: 3,
-              executor: { agentCli: "open_code", modelId: "deepseek/deepseek-v4-flash" },
+              executor: {
+                agentCli: "open_code",
+                modelId: "deepseek/deepseek-v4-flash",
+              },
               roleId: "researcher",
               skills: [],
               mcps: [],
@@ -132,7 +135,9 @@ describe("RunTheaterActCard conversation", () => {
       </AppI18nProvider>,
     );
 
-    expect(screen.getByText("OpenCode · deepseek/deepseek-v4-flash")).toBeInTheDocument();
+    expect(
+      screen.getByText("OpenCode · deepseek/deepseek-v4-flash"),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "查看完整指令" }));
     expect(await screen.findByRole("dialog")).toHaveTextContent(longPrompt);
   });
@@ -142,11 +147,19 @@ describe("RunTheaterActCard conversation", () => {
 
     await user.click(screen.getByRole("button", { name: "查看节点会话" }));
 
-    expect(screen.getByText("Review src/auth.ts and report regressions.")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Review complete" })).toBeInTheDocument();
-    expect(screen.queryByText("Find regressions and summarize them.")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Review src/auth.ts and report regressions."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Review complete" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Find regressions and summarize them."),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("已隐藏 1 条过程消息")).toBeInTheDocument();
-    expect(screen.getByTestId("node-conversation-scroll")).toHaveClass("overflow-y-auto");
+    expect(screen.getByTestId("node-conversation-scroll")).toHaveClass(
+      "overflow-y-auto",
+    );
     expect(screen.getByTestId("conversation-anchor-list")).toBeInTheDocument();
   });
 
@@ -156,7 +169,9 @@ describe("RunTheaterActCard conversation", () => {
     await user.click(screen.getByRole("button", { name: "查看节点会话" }));
     expect(screen.queryByText("Mock thought")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /已隐藏 1 条过程消息/ }));
+    await user.click(
+      screen.getByRole("button", { name: /已隐藏 1 条过程消息/ }),
+    );
     expect(screen.getByText("Mock thought")).toBeInTheDocument();
   });
 
@@ -199,7 +214,9 @@ describe("RunTheaterActCard conversation", () => {
 
     expect(screen.getByText("HITL composer stub")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "查看节点会话" }));
-    expect(screen.getByRole("heading", { name: "Review complete" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Review complete" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("HITL composer stub")).toBeInTheDocument();
   });
 });

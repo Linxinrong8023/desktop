@@ -4,7 +4,11 @@ import { useContractsClient } from "../../contracts-client-context";
 import { queryKeys } from "./query-keys";
 
 /** Loads the current Git snapshot for one task-owned worktree. */
-export function useTaskDiff(taskId: string, scope: TaskDiffScope, enabled = true) {
+export function useTaskDiff(
+  taskId: string,
+  scope: TaskDiffScope,
+  enabled = true,
+) {
   const client = useContractsClient();
   return useQuery({
     queryKey: queryKeys.taskDiff(taskId, scope),
@@ -18,6 +22,9 @@ export function useTaskDiffComments(taskId: string) {
   const client = useContractsClient();
   return useQuery({
     queryKey: queryKeys.taskDiffComments(taskId),
-    queryFn: () => client.task.listDiffComments({ taskId }).then((response) => response.comments),
+    queryFn: () =>
+      client.task
+        .listDiffComments({ taskId })
+        .then((response) => response.comments),
   });
 }

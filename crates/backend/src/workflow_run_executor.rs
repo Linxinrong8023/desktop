@@ -1,11 +1,6 @@
-// The executor is wired into the composition root in the endpoints stage; until then every item
-// in this module is only referenced by tests, so the dead-code lint is suppressed here.
-#![allow(dead_code)]
-
-use crate::agent_runtime::AgentRuntimeManager;
+use crate::agent_runtime::{AgentRuntimeManager, WarmOwner};
 use crate::clock::SystemClock;
 use crate::error::BackendError;
-use crate::task::resolve_task_cwd;
 use crate::workflow_run_prerequisites::resolve_executable_skill_name;
 use agent_client_protocol_schema::v1::SessionUpdate;
 use agent_client_protocol_schema::v1::StopReason;
@@ -28,8 +23,8 @@ use ora_db::{
     SqliteWorkflowRunEngineRepository,
 };
 use ora_domain::{
-    AgentDefinitionId, SessionId, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus,
-    WorkflowRunId,
+    AgentDefinitionId, Namespace, SessionId, WorkflowNodeRun, WorkflowNodeRunId,
+    WorkflowNodeStatus, WorkflowRunId,
 };
 use serde::{Deserialize, Serialize};
 use similar::{ChangeTag, TextDiff};
@@ -249,13 +244,18 @@ async fn drive_agent_node(
 
     // Warm a reusable provider session for this run's task.
     let warm = agent_runtime
-        .warm_session(WarmSessionRequest {
-            target: WarmSessionTarget::Task {
-                task_id: context.task.id.to_string(),
+        .warm_session_for_owner(
+            WarmSessionRequest {
+                target: WarmSessionTarget::Task {
+                    task_id: context.task.id.to_string(),
+                },
+                agent_cli,
             },
-            agent_cli,
-            client_id: format!("{}:{}", context.run.id, node.id),
-        })
+            WarmOwner::WorkflowNode {
+                run_id: context.run.id.to_string(),
+                node_id: node.id.clone(),
+            },
+        )
         .await?;
 
     // Attach the warm session to the run task and bind it to the node run immediately, so the
@@ -288,7 +288,8 @@ async fn drive_agent_node(
     // system-instructions block is sent. Name is preferred; the id is a legacy fallback.
     let role_content = match &config.role_id {
         Some(role_id) if !role_id.trim().is_empty() => {
-            let by_name = agent_repository.find_agent_definition_by_name(role_id)?;
+            let by_name =
+                agent_repository.find_agent_definition_by_name(&Namespace::local(), role_id)?;
             let definition = if by_name.is_some() {
                 by_name
             } else {
@@ -306,7 +307,7 @@ async fn drive_agent_node(
     let skill_names = resolve_skill_names(pool, skills_root, &config.skills)?;
     let prompt = assemble_prompt(node, role_content.as_deref(), &upstream, &skill_names);
 
-    let worktree_root = resolve_task_cwd(pool, &context.task.id)?;
+    let worktree_root = agent_runtime.task_cwd(&context.task.id)?;
 
     // Snapshot the worktree before this node runs so its completion diff is the node's own
     // incremental change (previous nodes' changes are already in the baseline).
@@ -739,16 +740,15 @@ mod tests {
     /// so the before/after delta reports the node's own edits rather than whole-file additions.
     #[test]
     fn capture_worktree_snapshot_diffs_clean_tracked_and_untracked_dir_files() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let root = temp.path();
-        run_git(root, &["init"]);
-        run_git(root, &["config", "user.email", "test@example.com"]);
-        run_git(root, &["config", "user.name", "Test"]);
+        let scaffold = ora_test_support::GitTestScaffold::new("backend-workflow-snapshot")
+            .expect("create Git test scaffold");
+        let root = scaffold.repo_path();
         std::fs::create_dir_all(root.join("src")).unwrap();
         // A tracked file that is clean at the baseline and modified by the node.
         std::fs::write(root.join("src/a.ts"), "one\ntwo\n").unwrap();
-        run_git(root, &["add", "."]);
-        run_git(root, &["commit", "-m", "init"]);
+        scaffold
+            .stage_all_and_commit("init")
+            .expect("create snapshot baseline commit");
 
         let baseline = capture_worktree_snapshot(root);
         // The clean tracked file is part of the baseline.
@@ -777,16 +777,6 @@ mod tests {
                 },
             ]
         );
-    }
-
-    /// Runs one git command in the worktree, panicking on failure.
-    fn run_git(cwd: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(cwd)
-            .status()
-            .unwrap_or_else(|error| panic!("git {args:?} failed: {error}"));
-        assert!(status.success(), "git {args:?} exited with {status}");
     }
 
     fn model_option(options: Vec<SessionConfigSelectOption>) -> SessionConfigOption {

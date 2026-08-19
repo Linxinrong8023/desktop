@@ -24,9 +24,9 @@ impl SqliteGitCleanupJobRepository {
 
     /// Inserts one job outside of a cascade transaction (lease reclaim, tests).
     pub fn insert_job(&self, job: &GitCleanupJob) -> Result<(), crate::DatabaseError> {
-        self.pool.with_connection(|connection| {
+        self.pool.with_connection_mut(|connection| {
             let transaction =
-                Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)?;
+                Transaction::new(connection, rusqlite::TransactionBehavior::Immediate)?;
             insert_jobs(&transaction, std::slice::from_ref(job))?;
             transaction.commit()?;
             Ok(())

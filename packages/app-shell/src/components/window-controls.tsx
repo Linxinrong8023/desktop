@@ -1,13 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { usePlatform } from "@ora/platform";
+import { usePlatform } from "../platform";
 import { cn } from "@ora/ui";
 
 /**
  * Custom caption buttons for a frameless desktop window (minimize / maximize /
  * close), painted only where the platform asks the app to own its chrome -
- * Windows and Linux. The Web host and macOS report `windowControls.kind ===
- * "none"`, so this renders nothing and the surrounding header collapses back to
+ * Windows and Linux. macOS reports `windowControls.kind === "none"`, so this
+ * renders nothing and the surrounding header collapses back to
  * its native layout.
  *
  * The glyphs are hand-drawn at a 10px cap height so they read crisply at the
@@ -28,7 +28,9 @@ export function WindowControls() {
     void overlay.isMaximized().then((value) => {
       if (active) setMaximized(value);
     });
-    const unsubscribe = overlay.subscribeMaximized((value) => setMaximized(value));
+    const unsubscribe = overlay.subscribeMaximized((value) =>
+      setMaximized(value),
+    );
     return () => {
       active = false;
       unsubscribe();
@@ -38,8 +40,15 @@ export function WindowControls() {
   if (overlay === null) return null;
 
   return (
-    <div className="flex items-center gap-0.5 pl-1" role="group" aria-label={t("window.controls")}>
-      <CaptionButton label={t("window.minimize")} onClick={() => void overlay.minimize()}>
+    <div
+      className="flex items-center gap-0.5 pl-1"
+      role="group"
+      aria-label={t("window.controls")}
+    >
+      <CaptionButton
+        label={t("window.minimize")}
+        onClick={() => void overlay.minimize()}
+      >
         <MinimizeGlyph />
       </CaptionButton>
       <CaptionButton
@@ -48,7 +57,11 @@ export function WindowControls() {
       >
         {maximized ? <RestoreGlyph /> : <MaximizeGlyph />}
       </CaptionButton>
-      <CaptionButton label={t("window.close")} tone="close" onClick={() => void overlay.close()}>
+      <CaptionButton
+        label={t("window.close")}
+        tone="close"
+        onClick={() => void overlay.close()}
+      >
         <CloseGlyph />
       </CaptionButton>
     </div>

@@ -1,33 +1,21 @@
 use crate::{BackendError, ErrorClassification};
-use ora_application::{
-    ListProjectSpecSourceOverridesHandler, ProjectRepository, TaskRepository,
-    UpdateProjectSpecSourcesHandler, UuidProjectSpecSourceOverrideIdGenerator,
-};
+use ora_application::{ProjectRepository, TaskRepository};
 use ora_contracts::{
     EmptyErrorParams, GetSpecCatalogRequest, PublicError, ReadSpecRequest, ReadSpecResponse,
-    ResolveSpecSourceRequest, ResolveSpecSourceResponse, SpecCatalogResponse, SpecDocument,
-    SpecSource, SpecSourceAvailability, SpecSourceOrigin, SpecSourceVisibility, SpecTarget,
-    SpecWorkflow as ContractWorkflow, UpdateProjectSpecSourcesRequest,
-    UpdateProjectSpecSourcesResponse,
+    SpecCatalogResponse, SpecDocument, SpecTarget, SpecWorkflow as ContractWorkflow,
 };
-use ora_db::{
-    RepositoryPool, SqliteProjectRepository, SqliteProjectSpecSourceOverrideRepository,
-    SqliteTaskRepository,
-};
-use ora_domain::{
-    ProjectId, SpecSourceVisibility as DomainVisibility, SpecWorkflow as DomainWorkflow, TaskId,
-};
+use ora_db::{RepositoryPool, SqliteProjectRepository, SqliteTaskRepository};
+use ora_domain::{ProjectId, TaskId};
 use ora_fs::WorkspaceFileSystem;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-use crate::clock::SystemClock;
 
 /// Composes project configuration, target resolution, and bounded filesystem discovery.
 pub(crate) struct SpecApi {
     pool: RepositoryPool,
     file_system: WorkspaceFileSystem,
     git_cleanup: crate::git_cleanup::GitCleanupHandle,
+    relative_path_base: PathBuf,
 }
 
 impl SpecApi {
@@ -36,11 +24,13 @@ impl SpecApi {
         pool: RepositoryPool,
         ripgrep_path: PathBuf,
         git_cleanup: crate::git_cleanup::GitCleanupHandle,
+        relative_path_base: PathBuf,
     ) -> Self {
         Self {
             pool,
             file_system: WorkspaceFileSystem::system(ripgrep_path),
             git_cleanup,
+            relative_path_base,
         }
     }
 
@@ -55,12 +45,6 @@ impl SpecApi {
             .discover_spec_markdown(&context.root)
             .await
             .map_err(spec_filesystem_error)?;
-        let overrides = ListProjectSpecSourceOverridesHandler::new(
-            SqliteProjectSpecSourceOverrideRepository::new(self.pool.clone()),
-        )
-        .handle(&context.project_id)
-        .map_err(BackendError::from)?;
-
         let mut candidates = default_candidates();
         for file in &discovered.files {
             for (path, workflow) in infer_sources(&file.path) {
@@ -69,75 +53,17 @@ impl SpecApi {
                     SourceCandidate {
                         relative_path: path,
                         workflow,
-                        origin: SpecSourceOrigin::Discovered,
-                        visibility: SpecSourceVisibility::Enabled,
-                        configured: false,
                     },
                 );
             }
         }
-        for source in overrides {
-            let key = source_key(&source.relative_path);
-            let origin = candidates
-                .get(&key)
-                .map_or(SpecSourceOrigin::Manual, |candidate| candidate.origin);
-            candidates.insert(
-                key,
-                SourceCandidate {
-                    relative_path: source.relative_path,
-                    workflow: map_domain_workflow(source.workflow),
-                    origin,
-                    visibility: map_domain_visibility(source.visibility),
-                    configured: true,
-                },
-            );
-        }
-
-        let mut sources = candidates
-            .into_values()
-            .map(|mut candidate| {
-                let availability = match self.file_system.resolve_spec_source(
-                    &context.root,
-                    &context.root.join(&candidate.relative_path),
-                ) {
-                    Ok(relative_path) => {
-                        // Preserve canonical on-disk spelling so later path ownership checks
-                        // remain correct on both case-sensitive and case-insensitive filesystems.
-                        candidate.relative_path = relative_path;
-                        SpecSourceAvailability::Available
-                    }
-                    Err(_) => SpecSourceAvailability::Missing,
-                };
-                EffectiveSource {
-                    source: SpecSource {
-                        relative_path: candidate.relative_path,
-                        workflow: candidate.workflow,
-                        origin: candidate.origin,
-                        visibility: candidate.visibility,
-                        availability,
-                    },
-                    configured: candidate.configured,
-                }
-            })
-            .collect::<Vec<_>>();
-        sources.sort_by(|left, right| {
-            left.source
-                .relative_path
-                .to_lowercase()
-                .cmp(&right.source.relative_path.to_lowercase())
-        });
-
-        let enabled_paths = sources
-            .iter()
-            .filter(|source| {
-                source.source.visibility == SpecSourceVisibility::Enabled
-                    && source.source.availability == SpecSourceAvailability::Available
-            })
-            .map(|source| source.source.relative_path.clone())
+        let source_paths = candidates
+            .values()
+            .map(|source| source.relative_path.clone())
             .collect::<Vec<_>>();
         let explicit = self
             .file_system
-            .enumerate_spec_sources(&context.root, &enabled_paths)
+            .enumerate_spec_sources(&context.root, &source_paths)
             .await
             .map_err(spec_filesystem_error)?;
         let mut indexed_files = discovered
@@ -155,18 +81,17 @@ impl SpecApi {
         let documents = indexed_files
             .into_values()
             .filter_map(|file| {
-                let owner = select_source(&sources, &file.path)?;
+                let owner = select_source(&candidates, &file.path)?;
                 Some(SpecDocument {
                     relative_path: file.path,
-                    source_relative_path: owner.source.relative_path.clone(),
-                    workflow: owner.source.workflow.clone(),
+                    source_relative_path: owner.relative_path.clone(),
+                    workflow: owner.workflow.clone(),
                     byte_size: u32::try_from(file.size_bytes).unwrap_or(u32::MAX),
                 })
             })
             .collect();
 
         Ok(SpecCatalogResponse {
-            sources: sources.into_iter().map(|source| source.source).collect(),
             documents,
             truncated: discovered.truncated || explicit.truncated,
         })
@@ -201,48 +126,6 @@ impl SpecApi {
         })
     }
 
-    /// Validates a platform picker result and infers its initial workflow classification.
-    pub(crate) fn resolve_source(
-        &self,
-        request: ResolveSpecSourceRequest,
-    ) -> Result<ResolveSpecSourceResponse, BackendError> {
-        let context = self.resolve_target(&request.target)?;
-        let relative_path = self
-            .file_system
-            .resolve_spec_source(&context.root, Path::new(&request.absolute_path))
-            .map_err(spec_source_error)?;
-        if relative_path.is_empty() {
-            return Err(spec_source_workspace_root());
-        }
-        let workflow = infer_sources(&format!("{relative_path}/placeholder.md"))
-            .into_iter()
-            .last()
-            .map_or_else(
-                || ContractWorkflow::Custom {
-                    name: "Custom".to_string(),
-                },
-                |(_, workflow)| workflow,
-            );
-        Ok(ResolveSpecSourceResponse {
-            relative_path,
-            workflow,
-        })
-    }
-
-    /// Runs the application-owned atomic replacement handler.
-    pub(crate) fn update_project_sources(
-        &self,
-        request: UpdateProjectSpecSourcesRequest,
-    ) -> Result<UpdateProjectSpecSourcesResponse, BackendError> {
-        let handler = UpdateProjectSpecSourcesHandler::new(
-            SqliteProjectSpecSourceOverrideRepository::new(self.pool.clone()),
-            SqliteProjectRepository::new(self.pool.clone()),
-            UuidProjectSpecSourceOverrideIdGenerator,
-            SystemClock,
-        );
-        handler.handle(request).map_err(BackendError::from)
-    }
-
     /// Resolves a watch target to the same authoritative root used by catalog and read operations.
     pub(crate) fn watch_root(&self, target: &SpecTarget) -> Result<PathBuf, BackendError> {
         self.resolve_target(target).map(|context| context.root)
@@ -259,9 +142,11 @@ impl SpecApi {
                         BackendError::internal("project repository operation failed", source)
                     })?
                     .ok_or_else(|| project_not_found(&project_id))?;
-                let root = absolute_existing_root(PathBuf::from(project.root_path))?;
+                let root = crate::task::absolute_project_root(
+                    PathBuf::from(project.root_path),
+                    &self.relative_path_base,
+                )?;
                 Ok(SpecContext {
-                    project_id,
                     root,
                     _worktree_use: None,
                 })
@@ -271,15 +156,15 @@ impl SpecApi {
                 // resolved from it are being read; dropped with the context.
                 let worktree_use = self.git_cleanup.shared_worktree_use(task_id);
                 let task_id = TaskId::new(task_id);
-                let task = SqliteTaskRepository::new(self.pool.clone())
+                SqliteTaskRepository::new(self.pool.clone())
                     .find_task(&task_id)
                     .map_err(|source| {
                         BackendError::internal("task repository operation failed", source)
                     })?
                     .ok_or_else(|| task_not_found(&task_id))?;
-                let root = crate::task::resolve_task_cwd(&self.pool, &task_id)?;
+                let root =
+                    crate::task::resolve_task_cwd(&self.pool, &task_id, &self.relative_path_base)?;
                 Ok(SpecContext {
-                    project_id: task.project_id,
                     root,
                     _worktree_use: Some(worktree_use),
                 })
@@ -289,7 +174,6 @@ impl SpecApi {
 }
 
 struct SpecContext {
-    project_id: ProjectId,
     root: PathBuf,
     /// Holds the task checkout on disk for the lifetime of this resolution.
     _worktree_use: Option<crate::git_cleanup::SharedLeaseGuard>,
@@ -298,17 +182,9 @@ struct SpecContext {
 struct SourceCandidate {
     relative_path: String,
     workflow: ContractWorkflow,
-    origin: SpecSourceOrigin,
-    visibility: SpecSourceVisibility,
-    configured: bool,
 }
 
-struct EffectiveSource {
-    source: SpecSource,
-    configured: bool,
-}
-
-/// Builds Ora's built-in source candidates before discovery and project overrides are applied.
+/// Builds Ora's built-in source candidates before filesystem discovery is applied.
 fn default_candidates() -> BTreeMap<String, SourceCandidate> {
     [
         ("openspec/specs", ContractWorkflow::OpenSpec),
@@ -336,28 +212,24 @@ fn default_candidates() -> BTreeMap<String, SourceCandidate> {
             SourceCandidate {
                 relative_path: relative_path.to_string(),
                 workflow,
-                origin: SpecSourceOrigin::Default,
-                visibility: SpecSourceVisibility::Enabled,
-                configured: false,
             },
         )
     })
     .collect()
 }
 
-/// Keeps explicit/default candidates ahead of inferred duplicates while still adding new discoveries.
+/// Keeps built-in classifications ahead of inferred duplicates while preserving on-disk spelling.
 fn insert_candidate(
     candidates: &mut BTreeMap<String, SourceCandidate>,
     candidate: SourceCandidate,
 ) {
     let key = source_key(&candidate.relative_path);
     match candidates.get_mut(&key) {
-        Some(existing) if !existing.configured => {
+        Some(existing) => {
             // Preserve the higher-confidence default classification while using the exact
             // on-disk spelling required by case-sensitive filesystems.
             existing.relative_path = candidate.relative_path;
         }
-        Some(_) => {}
         None => {
             candidates.insert(key, candidate);
         }
@@ -403,24 +275,15 @@ fn infer_sources(file_path: &str) -> Vec<(String, ContractWorkflow)> {
     inferred
 }
 
-/// Chooses the deepest enabled available source; a configured tie wins over inference.
+/// Chooses the deepest inferred or built-in source that owns the file.
 fn select_source<'a>(
-    sources: &'a [EffectiveSource],
+    sources: &'a BTreeMap<String, SourceCandidate>,
     file_path: &str,
-) -> Option<&'a EffectiveSource> {
+) -> Option<&'a SourceCandidate> {
     sources
-        .iter()
-        .filter(|candidate| {
-            candidate.source.visibility == SpecSourceVisibility::Enabled
-                && candidate.source.availability == SpecSourceAvailability::Available
-                && path_is_within(file_path, &candidate.source.relative_path)
-        })
-        .max_by_key(|candidate| {
-            (
-                candidate.source.relative_path.split('/').count(),
-                usize::from(candidate.configured),
-            )
-        })
+        .values()
+        .filter(|candidate| path_is_within(file_path, &candidate.relative_path))
+        .max_by_key(|candidate| candidate.relative_path.split('/').count())
 }
 
 /// Tests source ownership on normalized slash-separated path segment boundaries.
@@ -452,42 +315,6 @@ fn path_segment_eq(left: &str, right: &str) -> bool {
     }
 }
 
-/// Converts the persistence workflow into its transport representation.
-fn map_domain_workflow(workflow: DomainWorkflow) -> ContractWorkflow {
-    match workflow {
-        DomainWorkflow::OpenSpec => ContractWorkflow::OpenSpec,
-        DomainWorkflow::Superpowers => ContractWorkflow::Superpowers,
-        DomainWorkflow::Custom { name } => ContractWorkflow::Custom { name },
-    }
-}
-
-/// Converts persisted visibility into the public source state.
-fn map_domain_visibility(visibility: DomainVisibility) -> SpecSourceVisibility {
-    match visibility {
-        DomainVisibility::Enabled => SpecSourceVisibility::Enabled,
-        DomainVisibility::Disabled => SpecSourceVisibility::Disabled,
-    }
-}
-
-/// Resolves a stored project root without requiring the project to be a Git repository.
-fn absolute_existing_root(path: PathBuf) -> Result<PathBuf, BackendError> {
-    let path = if path.is_absolute() {
-        path
-    } else {
-        std::env::current_dir()
-            .map_err(|source| BackendError::internal("project root resolution failed", source))?
-            .join(path)
-    };
-    if !path.is_dir() {
-        return Err(BackendError::new(
-            ErrorClassification::Conflict,
-            PublicError::TaskProjectRootUnavailable(EmptyErrorParams {}),
-            "project root is unavailable",
-        ));
-    }
-    Ok(path)
-}
-
 /// Builds the stable not-found response for a missing project target.
 fn project_not_found(project_id: &ProjectId) -> BackendError {
     BackendError::new(
@@ -503,67 +330,6 @@ fn task_not_found(task_id: &TaskId) -> BackendError {
         ErrorClassification::NotFound,
         PublicError::TaskNotFound(EmptyErrorParams {}),
         format!("task not found: {task_id}"),
-    )
-}
-
-/// Maps platform-picker failures to stable public errors without exposing local paths.
-fn spec_source_error(source: ora_fs::WorkspaceFileSystemError) -> BackendError {
-    let (classification, public_error, context) = match source {
-        ora_fs::WorkspaceFileSystemError::PathNotRelative { .. } => (
-            ErrorClassification::InvalidRequest,
-            PublicError::FileSystemPathNotAbsolute(EmptyErrorParams {}),
-            "specification source path must be absolute",
-        ),
-        ora_fs::WorkspaceFileSystemError::PathNotFound { .. } => (
-            ErrorClassification::NotFound,
-            PublicError::FileSystemPathNotFound(EmptyErrorParams {}),
-            "specification source path was not found",
-        ),
-        ora_fs::WorkspaceFileSystemError::NotDirectory { .. } => (
-            ErrorClassification::InvalidRequest,
-            PublicError::FileSystemPathNotDirectory(EmptyErrorParams {}),
-            "specification source path is not a directory",
-        ),
-        ora_fs::WorkspaceFileSystemError::PathOutsideWorkspace { .. } => (
-            ErrorClassification::InvalidRequest,
-            PublicError::SpecSourceOutsideWorkspace(EmptyErrorParams {}),
-            "specification source path is outside the workspace",
-        ),
-        ora_fs::WorkspaceFileSystemError::Io { ref source, .. }
-            if source.kind() == std::io::ErrorKind::PermissionDenied =>
-        {
-            (
-                ErrorClassification::InvalidRequest,
-                PublicError::FileSystemPathPermissionDenied(EmptyErrorParams {}),
-                "specification source path is not readable",
-            )
-        }
-        ora_fs::WorkspaceFileSystemError::WorkspaceUnavailable { .. }
-        | ora_fs::WorkspaceFileSystemError::Io { .. }
-        | ora_fs::WorkspaceFileSystemError::NotFile { .. }
-        | ora_fs::WorkspaceFileSystemError::FileTooLarge { .. }
-        | ora_fs::WorkspaceFileSystemError::BinaryFile { .. }
-        | ora_fs::WorkspaceFileSystemError::InvalidUtf8 { .. }
-        | ora_fs::WorkspaceFileSystemError::SearchToolUnavailable { .. }
-        | ora_fs::WorkspaceFileSystemError::SearchTimedOut
-        | ora_fs::WorkspaceFileSystemError::SearchOutputTooLarge { .. }
-        | ora_fs::WorkspaceFileSystemError::SearchFailed { .. }
-        | ora_fs::WorkspaceFileSystemError::InvalidSearchOutput { .. }
-        | ora_fs::WorkspaceFileSystemError::WatchFailed { .. } => (
-            ErrorClassification::Internal,
-            PublicError::InternalError(EmptyErrorParams {}),
-            "specification source resolution failed",
-        ),
-    };
-    BackendError::with_source(classification, public_error, context, source)
-}
-
-/// Builds the public error when the picker selects the workspace root instead of a subdirectory.
-fn spec_source_workspace_root() -> BackendError {
-    BackendError::new(
-        ErrorClassification::InvalidRequest,
-        PublicError::SpecSourceWorkspaceRoot(EmptyErrorParams {}),
-        "specification source cannot be the workspace root",
     )
 }
 
@@ -583,45 +349,10 @@ fn spec_document_not_found() -> BackendError {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        EffectiveSource, infer_sources, path_is_within, select_source, spec_source_error,
-        spec_source_workspace_root,
-    };
-    use crate::ErrorClassification;
-    use ora_contracts::{
-        EmptyErrorParams, PublicError, SpecSource, SpecSourceAvailability, SpecSourceOrigin,
-        SpecSourceVisibility, SpecWorkflow,
-    };
-    use ora_fs::WorkspaceFileSystemError;
+    use super::{SourceCandidate, infer_sources, path_is_within, select_source, source_key};
+    use ora_contracts::SpecWorkflow;
     use pretty_assertions::assert_eq;
-    use std::path::PathBuf;
-
-    /// Verifies picker containment failures surface dedicated public error codes.
-    #[test]
-    fn maps_spec_source_filesystem_failures_to_public_errors() {
-        assert_eq!(
-            spec_source_error(WorkspaceFileSystemError::PathOutsideWorkspace {
-                path: PathBuf::from("C:/outside"),
-            })
-            .public_error(),
-            &PublicError::SpecSourceOutsideWorkspace(EmptyErrorParams {})
-        );
-        assert_eq!(
-            spec_source_error(WorkspaceFileSystemError::NotDirectory {
-                path: PathBuf::from("C:/repo/file.txt"),
-            })
-            .public_error(),
-            &PublicError::FileSystemPathNotDirectory(EmptyErrorParams {})
-        );
-        assert_eq!(
-            spec_source_workspace_root().public_error(),
-            &PublicError::SpecSourceWorkspaceRoot(EmptyErrorParams {})
-        );
-        assert_eq!(
-            spec_source_workspace_root().classification(),
-            ErrorClassification::InvalidRequest
-        );
-    }
+    use std::collections::BTreeMap;
 
     /// Verifies controlled discovery recognizes workflow-owned and generic spec directories.
     #[test]
@@ -676,27 +407,24 @@ mod tests {
     /// Verifies overlapping enabled sources assign a document to the deepest directory.
     #[test]
     fn assigns_documents_to_the_most_specific_source() {
-        let sources = [source("docs/specs", false), source("docs/specs/api", true)];
+        let sources = BTreeMap::from([source("docs/specs"), source("docs/specs/api")]);
         let selected = select_source(&sources, "docs/specs/api/auth.md").unwrap();
 
-        assert_eq!(selected.source.relative_path, "docs/specs/api");
+        assert_eq!(selected.relative_path, "docs/specs/api");
         assert!(path_is_within("docs/specs/a.md", "docs/specs"));
         assert!(!path_is_within("docs/specs-old/a.md", "docs/specs"));
     }
 
     /// Builds one enabled source fixture for ownership selection tests.
-    fn source(relative_path: &str, configured: bool) -> EffectiveSource {
-        EffectiveSource {
-            source: SpecSource {
+    fn source(relative_path: &str) -> (String, SourceCandidate) {
+        (
+            source_key(relative_path),
+            SourceCandidate {
                 relative_path: relative_path.to_string(),
                 workflow: SpecWorkflow::Custom {
                     name: "Custom".to_string(),
                 },
-                origin: SpecSourceOrigin::Discovered,
-                visibility: SpecSourceVisibility::Enabled,
-                availability: SpecSourceAvailability::Available,
             },
-            configured,
-        }
+        )
     }
 }

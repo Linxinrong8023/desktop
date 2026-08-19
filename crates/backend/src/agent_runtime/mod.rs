@@ -1,8 +1,10 @@
 mod actor;
+mod cli_path;
 mod connection;
 mod events;
 mod handoff;
 mod history;
+mod replay;
 mod routing;
 mod scheduling;
 mod stream;
@@ -11,8 +13,12 @@ mod title_acquisition;
 mod warm;
 mod warm_pool;
 
+#[cfg(test)]
+mod history_tests;
+
 use crate::app_event::AppEventPublisher;
-use history::{RecordOutcome, SessionRecorder};
+use cli_path::resolve_agent_cli_path;
+use history::{LocalHistoryClock, RecordOutcome, SessionRecorder};
 pub use stream::SessionEventStream;
 use support::*;
 use title_acquisition::TitleAcquisition;
@@ -38,9 +44,10 @@ use ora_contracts::{
 };
 use ora_db::{RepositoryPool, SqliteSessionRepository};
 use ora_domain::{
-    AgentCli, AuditFields, HistoryState, ProjectId, Session, SessionId, SessionStatus, TaskId,
+    AgentCli, AuditFields, HistoryState, ProjectId, Session, SessionId, SessionStatus,
+    SessionTitle, TaskId,
 };
-use ora_history::{binding_needs_handoff, read_session_history};
+use ora_history::{HistoryIntegrity, binding_needs_handoff, read_session_history};
 use ora_logging::{ora_debug, ora_warn};
 use ora_scheduler::Scheduler;
 use routing::{SessionChannel, SessionEvent};
@@ -58,6 +65,18 @@ const SESSION_SETUP_TIMEOUT: Duration = Duration::from_secs(30);
 const CANCELLATION_GRACE: Duration = Duration::from_secs(5);
 const CONTRACT_QUEUE_CAPACITY: usize = 256;
 const MAX_PROMPT_BYTES: usize = 16 * 1024 * 1024;
+
+/// Identifies the internal owner of a warm provider session.
+///
+/// Interactive sessions are single-window Desktop state. Workflow nodes keep
+/// their run and node identity so concurrent graph branches cannot claim one
+/// another's configured provider session without exposing that ownership in a
+/// frontend contract.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum WarmOwner {
+    Interactive,
+    WorkflowNode { run_id: String, node_id: String },
+}
 
 /// Coordinates one serialized actor per Ora session on its selected supervised CLI connection.
 #[derive(Clone)]
@@ -79,6 +98,7 @@ struct ManagerInner {
     // Stored so resolve_session_locator can hand the dashboard resolver the user
     // home directory under which each agent CLI writes its trace artifacts.
     home_directory: PathBuf,
+    relative_path_base: PathBuf,
 }
 
 #[derive(Clone)]
@@ -109,6 +129,10 @@ pub(super) enum RuntimeCommand {
         operation_id: u64,
     },
     PreemptTitlePolling {
+        response: oneshot::Sender<()>,
+    },
+    AdoptUserTitle {
+        title: SessionTitle,
         response: oneshot::Sender<()>,
     },
     TitlePoll {
@@ -177,6 +201,7 @@ impl AgentRuntimeManager {
     pub(crate) fn new(
         pool: RepositoryPool,
         home_directory: PathBuf,
+        relative_path_base: PathBuf,
         sessions_root: PathBuf,
         clock: SystemClock,
         scheduler: Scheduler,
@@ -197,6 +222,7 @@ impl AgentRuntimeManager {
                 scheduler,
                 app_events,
                 home_directory,
+                relative_path_base,
             }),
         })
     }
@@ -211,12 +237,22 @@ impl AgentRuntimeManager {
         &self,
         request: WarmSessionRequest,
     ) -> Result<WarmSessionResponse, BackendError> {
+        self.warm_session_for_owner(request, WarmOwner::Interactive)
+            .await
+    }
+
+    /// Returns a warm provider session for an explicitly owned internal workflow surface.
+    pub(crate) async fn warm_session_for_owner(
+        &self,
+        request: WarmSessionRequest,
+        owner: WarmOwner,
+    ) -> Result<WarmSessionResponse, BackendError> {
         let agent_cli = domain_agent_cli(request.agent_cli);
         let cwd = self.resolve_warm_cwd(&request.target)?;
         let key = WarmKey {
             target: request.target,
             agent_cli,
-            client_id: request.client_id,
+            owner,
         };
         let (session_id, config_options) = self.inner.warm.warm(key, cwd).await?;
         Ok(WarmSessionResponse {
@@ -290,6 +326,26 @@ impl AgentRuntimeManager {
         Ok(SetSessionConfigResponse { config_options })
     }
 
+    /// Locks first-title acquisition so a later agent title cannot overwrite a user rename.
+    ///
+    /// Missing actors are a no-op: restored sessions already start with acquisition disabled.
+    pub(crate) async fn adopt_user_title(
+        &self,
+        session_id: &str,
+        title: SessionTitle,
+    ) -> Result<(), BackendError> {
+        let session_id = SessionId::new(session_id);
+        let Some(handle) = self.lookup_actor(&session_id)? else {
+            return Ok(());
+        };
+        let (response, acknowledged) = oneshot::channel();
+        handle
+            .commands
+            .send(RuntimeCommand::AdoptUserTitle { title, response })
+            .map_err(|_error| runtime_unavailable())?;
+        acknowledged.await.map_err(|_error| runtime_unavailable())
+    }
+
     /// Persists one warm session against the Task that now owns it.
     ///
     /// `warm.take` only reserves the warm session; it stays in the pool until
@@ -304,7 +360,7 @@ impl AgentRuntimeManager {
     ) -> Result<AttachSessionResponse, BackendError> {
         let session_id = SessionId::new(request.session_id.as_str());
         let task_id = TaskId::new(request.task_id);
-        let cwd = resolve_task_cwd(&self.inner.pool, &task_id)?;
+        let cwd = self.task_cwd(&task_id)?;
         // The provider handshake a rebuild may need runs before the lifecycle
         // lock is taken, so attaching never blocks other sessions on the network.
         let reservation = self.inner.warm.take(&session_id, &cwd).await?;
@@ -401,7 +457,7 @@ impl AgentRuntimeManager {
         if let HistoryState::Degraded { .. } = session.history_state {
             return Err(history_degraded());
         }
-        let cwd = resolve_task_cwd(&self.inner.pool, &session.task_id)?;
+        let cwd = self.task_cwd(&session.task_id)?;
         // Keyed by Task, the same way the picker warmed it: one warm session per
         // chat surface and CLI, shared by every session under that Task rather
         // than one per conversation.
@@ -414,7 +470,7 @@ impl AgentRuntimeManager {
                         task_id: session.task_id.to_string(),
                     },
                     agent_cli: target,
-                    client_id: request.client_id,
+                    owner: WarmOwner::Interactive,
                 },
                 &cwd,
             )
@@ -563,10 +619,10 @@ impl AgentRuntimeManager {
         let session_id = session.id.as_ref();
         match read_session_history(root, session_id) {
             Ok(history) => {
-                if history.dropped_lines > 0 {
+                if let HistoryIntegrity::Damaged { unreadable_lines } = history.integrity {
                     ora_warn!(
                         session_id = %session.id,
-                        dropped_lines = history.dropped_lines,
+                        unreadable_lines = unreadable_lines.get(),
                         "session history contains unreadable lines",
                     );
                 }
@@ -575,6 +631,7 @@ impl AgentRuntimeManager {
                     session_id,
                     history.next_seq,
                     &session.history_state,
+                    LocalHistoryClock,
                 )
                 .map_err(|source| {
                     BackendError::internal("failed to open session history", source)
@@ -597,6 +654,7 @@ impl AgentRuntimeManager {
                     &HistoryState::Degraded {
                         reason: failure.clone(),
                     },
+                    LocalHistoryClock,
                 )
                 .map_err(|source| {
                     BackendError::internal("failed to open session history", source)
@@ -633,13 +691,18 @@ impl AgentRuntimeManager {
     /// Derives the directory a warm session must be created against.
     fn resolve_warm_cwd(&self, target: &WarmSessionTarget) -> Result<PathBuf, BackendError> {
         match target {
-            WarmSessionTarget::Task { task_id } => {
-                resolve_task_cwd(&self.inner.pool, &TaskId::new(task_id.as_str()))
-            }
-            WarmSessionTarget::ProjectRoot { project_id } => {
-                resolve_project_cwd(&self.inner.pool, &ProjectId::new(project_id.as_str()))
-            }
+            WarmSessionTarget::Task { task_id } => self.task_cwd(&TaskId::new(task_id.as_str())),
+            WarmSessionTarget::ProjectRoot { project_id } => resolve_project_cwd(
+                &self.inner.pool,
+                &ProjectId::new(project_id.as_str()),
+                &self.inner.relative_path_base,
+            ),
         }
+    }
+
+    /// Resolves a task's execution directory against the bootstrap path base.
+    pub(crate) fn task_cwd(&self, task_id: &TaskId) -> Result<PathBuf, BackendError> {
+        resolve_task_cwd(&self.inner.pool, task_id, &self.inner.relative_path_base)
     }
 
     /// Starts an explicit ACP load stream for one persisted Ora session.
@@ -812,7 +875,7 @@ impl AgentRuntimeManager {
         session_id: &str,
     ) -> Result<SessionLocator, BackendError> {
         let session = self.find_session(session_id)?;
-        let cwd = resolve_task_cwd(&self.inner.pool, &session.task_id)?;
+        let cwd = self.task_cwd(&session.task_id)?;
         Ok(SessionLocator {
             agent_session_id: session.agent_session_id.clone(),
             agent_cli: contract_agent_cli(session.agent_cli),
@@ -834,7 +897,7 @@ impl AgentRuntimeManager {
         if let Some(handle) = self.lookup_actor(&session.id)? {
             return Ok(handle);
         }
-        let cwd = resolve_task_cwd(&self.inner.pool, &session.task_id)?;
+        let cwd = self.task_cwd(&session.task_id)?;
         let connection = self.inner.connections.for_agent(session.agent_cli);
         let mut opened = self.open_recorder(&session)?;
         let session = match opened.failure.take() {

@@ -14,11 +14,11 @@ export function useAgentRuntimeStatus() {
   const client = useContractsClient();
   return useQuery({
     queryKey: queryKeys.agentRuntimeStatus,
-    queryFn: () => client.agentRuntime.getStatus({}).then((response) => response.statuses),
-    refetchInterval: (query) => (
+    queryFn: () =>
+      client.agentRuntime.getStatus({}).then((response) => response.statuses),
+    refetchInterval: (query) =>
       query.state.data?.some((status) => status.status === "starting")
         ? STARTING_POLL_INTERVAL_MS
-        : false
-    ),
+        : false,
   });
 }

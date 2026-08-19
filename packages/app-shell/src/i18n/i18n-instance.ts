@@ -5,10 +5,12 @@ export type Locale = "zh-CN" | "en-US";
 
 export const translationResources = {
   "zh-CN": {
-    "errors.internal_error": "内部错误。请提供请求编号 {{requestId}} 以便排查。",
+    "errors.internal_error":
+      "内部错误。请提供请求编号 {{requestId}} 以便排查。",
     "errors.invalid_request": "请求内容无效。",
     "errors.skill_name_blank": "技能名称不能为空。",
-    "errors.skill_name_invalid": "技能名称只能使用安全 slug 字符。",
+    "errors.skill_name_invalid":
+      "技能名称只能使用安全 slug 字符，且不能使用系统保留名称。",
     "errors.skill_name_too_long": "技能名称过长。",
     "errors.skill_description_blank": "技能描述不能为空。",
     "errors.skill_description_too_large": "技能描述超过最大长度。",
@@ -17,10 +19,14 @@ export const translationResources = {
     "errors.agent_name_blank": "Agent 名称不能为空。",
     "errors.agent_name_conflict": "已存在同名 Role。",
     "errors.agent_not_found": "未找到该 Agent。",
+    "errors.plugin_not_found": "未找到该插件。",
+    "errors.plugin_disabled": "请先启用该插件，再进行激活。",
+    "errors.workflow_name_conflict": "已存在同名工作流。",
     "errors.project_not_found": "未找到该项目。",
     "errors.task_not_found": "未找到该任务。",
     "errors.resource_in_use": "资源正在使用中，暂时无法删除。",
-    "errors.worktree_requires_git_repository": "该目录不是 Git 仓库。请在 Git 仓库下创建 worktree 模式任务。",
+    "errors.worktree_requires_git_repository":
+      "该目录不是 Git 仓库。请在 Git 仓库下创建 worktree 模式任务。",
     "errors.task_base_branch_required": "worktree 模式任务必须选择基础分支。",
     "errors.task_base_branch_not_found": "未找到基础分支 {{branchName}}。",
     "errors.worktree_not_found": "未找到该工作树。",
@@ -30,7 +36,8 @@ export const translationResources = {
     "errors.task_diff_stale": "任务变更已更新，请刷新后重新评论。",
     "errors.task_diff_comment_not_found": "未找到该 Diff 评论。",
     "errors.task_diff_comment_invalid": "该 Diff 评论的位置或内容无效。",
-    "errors.task_diff_comment_conflict": "该 Diff 评论已被其他更新覆盖，请刷新后重试。",
+    "errors.task_diff_comment_conflict":
+      "该 Diff 评论已被其他更新覆盖，请刷新后重试。",
     "errors.session_not_found": "未找到该会话。",
     "errors.agent_cli_not_found": "未找到所选 Agent CLI。",
     "errors.agent_runtime_unavailable": "Agent 运行时当前不可用。",
@@ -45,22 +52,12 @@ export const translationResources = {
     "errors.prompt_too_large": "消息内容过大。",
     "errors.task_worktree_unavailable": "任务工作树当前不可用。",
     "errors.task_project_root_unavailable": "任务项目目录当前不可用。",
-    "errors.file_system_path_not_absolute": "请选择绝对路径。",
-    "errors.file_system_path_not_directory": "所选路径不是目录。",
     "errors.file_system_path_not_found": "所选路径不存在。",
-    "errors.spec_source_invalid": "Spec 来源配置无效。",
-    "errors.spec_source_outside_workspace": "所选 Spec 目录不在当前工作区内。",
-    "errors.spec_source_workspace_root": "不能选择工作区根目录，请选择其下的子文件夹（例如 openspec/specs）。",
-    "errors.spec_document_not_found": "该 Spec 文档已不存在或不再属于当前目录配置。",
-    "errors.file_system_path_permission_denied": "没有权限读取所选目录。",
+    "errors.spec_document_not_found":
+      "该 Spec 文档已不存在或不再属于自动发现目录。",
     "errors.worktree_root_not_absolute": "工作树根目录必须是绝对路径。",
     "errors.worktree_root_not_directory": "工作树根目录必须是已存在的目录。",
     "errors.open_location_failed": "无法使用 {{target}} 打开所选位置。",
-    "errors.skill_upload_empty": "上传内容为空。",
-    "errors.skill_upload_too_large": "上传内容超过 {{maxBytes}} 字节上限。",
-    "errors.skill_upload_too_many_files": "上传文件数超过上限 {{maxFiles}}。",
-    "errors.skill_upload_path_invalid": "上传文件路径无效。",
-    "errors.skill_upload_path_duplicate": "上传内容包含重复路径。",
     "errors.skill_manifest_missing": "缺少技能清单。",
     "errors.skill_manifest_invalid": "技能清单格式无效。",
     "errors.skill_manifest_name_blank": "技能清单名称不能为空。",
@@ -70,13 +67,16 @@ export const translationResources = {
     "errors.skill_manifest_not_found": "未在导入来源中找到 SKILL.md。",
     "errors.skill_manifest_too_large": "SKILL.md 超过最大大小。",
     "errors.too_many_skills": "导入来源包含过多技能。",
-    "errors.archive_format_unsupported": "仅支持 ZIP、.skill、.tar.gz 和 .tgz 压缩包。",
+    "errors.archive_format_unsupported":
+      "仅支持 ZIP、.skill、.tar.gz 和 .tgz 压缩包。",
     "errors.archive_format_mismatch": "压缩包内容与其扩展名不匹配。",
     "errors.archive_corrupt": "压缩包已损坏或无法读取。",
     "errors.archive_encrypted_unsupported": "不支持加密压缩包。",
-    "errors.archive_special_entry_unsupported": "压缩包包含不安全的特殊文件项。",
+    "errors.archive_special_entry_unsupported":
+      "压缩包包含不安全的特殊文件项。",
     "errors.archive_path_encoding_invalid": "压缩包包含无效文件路径编码。",
-    "errors.archive_path_case_conflict": "导入来源包含在不同平台上会冲突的路径。",
+    "errors.archive_path_case_conflict":
+      "导入来源包含在不同平台上会冲突的路径。",
     "errors.path_segment_too_long": "文件路径片段过长。",
     "errors.path_too_long": "文件路径过长。",
     "errors.path_too_deep": "文件夹嵌套层级过深。",
@@ -94,35 +94,33 @@ export const translationResources = {
     "errors.workflow_version_invalid": "工作流版本无效。",
     "errors.workflow_version_reserved": "该工作流版本名称已保留。",
     "errors.workflow_cannot_delete_draft": "不能删除工作流草稿。",
-    "errors.workflow_cannot_delete_active_version": "不能删除当前生效的工作流版本。",
+    "errors.workflow_cannot_delete_active_version":
+      "不能删除当前生效的工作流版本。",
     "errors.workflow_active_runs": "该工作流仍有运行中的任务。",
     "errors.workflow_cannot_rollback_to_draft": "不能回滚到工作流草稿。",
     "errors.workflow_cannot_activate_draft": "不能激活工作流草稿。",
     "errors.workflow_snapshot_in_use": "该工作流快照正在使用中。",
     "errors.workflow_no_published_snapshot": "该工作流没有已发布的快照。",
-    "errors.workflow_run_cannot_use_draft_snapshot": "工作流运行不能使用草稿快照。",
+    "errors.workflow_run_cannot_use_draft_snapshot":
+      "工作流运行不能使用草稿快照。",
     "errors.workflow_run_not_found": "未找到该工作流运行。",
     "errors.workflow_run_active": "该工作流运行仍处于活动状态。",
     "errors.workflow_run_graph_parse": "工作流图解析失败。",
     "errors.workflow_run_validation": "工作流运行校验失败。",
-    "errors.workflow_skill_not_found": "未找到该工作流技能。",
+    "errors.workflow_skill_not_found": "该工作流需要的技能不可用。",
     "errors.workflow_role_not_found": "未找到该工作流角色。",
     "errors.workflow_run_start_failed": "启动工作流运行失败。",
     "errors.workflow_run_not_restartable": "该工作流运行无法重新启动。",
     "errors.workflow_run_not_editable": "该工作流运行当前不可编辑。",
     "errors.unknown": "发生未知错误。请提供请求编号 {{requestId}} 以便排查。",
-    "errors.transport.network_failure": "无法连接到 Ora。",
     "errors.transport.tauri_invoke_failure": "桌面命令调用失败。",
     "errors.transport.malformed_response": "Ora 返回了无法识别的响应。",
-    "errors.transport.malformed_stream_frame": "Ora 返回了无效的流数据。",
-    "errors.transport.stream_interrupted": "数据流意外中断。",
-    "errors.transport.stream_frame_too_large": "数据流中的单条消息过大。",
     "errors.transport.stream_queue_overflow": "数据流消费速度过慢。",
     "errors.transport.stream_already_consumed": "该数据流已被读取。",
-    "errors.transport.unsupported_operation": "当前平台不支持此操作。",
     "errors.transport.cancelled": "操作已取消。",
     "common.cancel": "取消",
     "common.saving": "保存中…",
+    "common.creating": "创建中…",
     "common.delete": "删除",
     "common.edit": "编辑",
     "common.settings": "设置",
@@ -131,9 +129,6 @@ export const translationResources = {
     "common.running": "运行中",
     "common.stopped": "已停止",
     "common.stop": "停止生成",
-    "common.todo": "待处理",
-    "common.doing": "进行中",
-    "common.done": "已完成",
     "common.retry": "重试",
     "sidebar.collapse": "收起侧边栏",
     "sidebar.expand": "展开侧边栏",
@@ -148,6 +143,14 @@ export const translationResources = {
     "sidebar.newSession": "新建会话",
     "sidebar.newTask": "新建工作树任务",
     "sidebar.newDirectChat": "新建任务",
+    "sidebar.createInProject": "在此项目中新建",
+    "sidebar.newWorkflow": "新建工作流任务",
+    "sidebar.searchWorkflows": "搜索工作流模板",
+    "sidebar.noWorkflows": "暂无已发布的工作流。",
+    "sidebar.rename": "重命名",
+    "sidebar.renameTooLong": "标题最多 255 个字符。",
+    "sidebar.archive": "归档",
+    "sidebar.archiveSoon": "归档即将推出",
     "sidebar.console": "控制台",
     "sidebar.openActions": "打开操作菜单",
     "sidebar.navigation": "主导航",
@@ -156,17 +159,15 @@ export const translationResources = {
     "sidebar.unread": "有未读更新",
     "sidebar.directChatTask": "直聊任务",
     "sidebar.worktreeTask": "Git 工作树任务",
+    "sidebar.session": "会话",
     "sidebar.startWorkflow": "启动已挂载工作流",
     "sidebar.workflowRun": "工作流运行",
     "workflowRun.loading": "正在加载运行…",
     "workflowRun.placeholderTitle": "工作流运行台",
     "workflowRun.placeholderSubtitle": "运行工作区",
-    "workflowRun.placeholderBody": "在舞台跟进当前节点，或在全图俯瞰整条执行路径。",
+    "workflowRun.placeholderBody":
+      "在舞台跟进当前节点，或在全图俯瞰整条执行路径。",
     "appEvents.connecting": "正在连接应用…",
-    "appEvents.multipleClients.title": "应用已在其他页面打开",
-    "appEvents.multipleClients.description": "Ora 一次只能在一个页面中使用。关闭另一页面后，此页面会自动进入。",
-    "appEvents.ownershipUnavailable.title": "浏览器不支持页面协调",
-    "appEvents.ownershipUnavailable.description": "Ora 需要浏览器支持 Web Locks 才能安全运行。请升级浏览器后重试。",
     "workflowRun.field.status": "状态",
     "workflowRun.field.nodes": "节点数",
     "workflowRun.field.progress": "进度",
@@ -183,7 +184,8 @@ export const translationResources = {
     "workflowRun.runAgainAction": "再次运行",
     "workflowRun.stopAction": "终止",
     "workflowRun.stopTitle": "终止此次运行？",
-    "workflowRun.stopDescription": "将立即停止“{{name}}”的执行。已完成的节点会保留，未完成的进度无法继续。",
+    "workflowRun.stopDescription":
+      "将立即停止“{{name}}”的执行。已完成的节点会保留，未完成的进度无法继续。",
     "workflowRun.stopConfirmAction": "确认终止",
     "workflowRun.stopping": "终止中…",
     "workflowRun.missing": "找不到此次运行。",
@@ -193,7 +195,8 @@ export const translationResources = {
     "workflowRun.theater.path": "执行路径",
     "workflowRun.theater.instruction": "指令",
     "workflowRun.theater.empty": "此运行没有可展示的节点。",
-    "workflowRun.theater.parallelHint": "{{count}} 个节点并行 · 当前 {{index}}/{{count}}，可拖拽或点选切换",
+    "workflowRun.theater.parallelHint":
+      "{{count}} 个节点并行 · 当前 {{index}}/{{count}}，可拖拽或点选切换",
     "workflowRun.theater.parallelSwitch": "切换并行节点",
     "workflowRun.theater.parallelPrev": "上一个并行节点",
     "workflowRun.theater.parallelNext": "下一个并行节点",
@@ -209,7 +212,8 @@ export const translationResources = {
     "workflowRun.conversation.sessionMode": "节点会话",
     "workflowRun.conversation.nodeInput": "节点输入",
     "workflowRun.conversation.agentReply": "Agent",
-    "workflowRun.conversation.inputPending": "节点开始运行后，输入会显示在这里。",
+    "workflowRun.conversation.inputPending":
+      "节点开始运行后，输入会显示在这里。",
     "workflowRun.conversation.waiting": "Agent 正在处理",
     "workflowRun.conversation.empty": "尚无消息",
     "workflowRun.conversation.hiddenActivity": "已隐藏 {{count}} 条过程消息",
@@ -218,12 +222,16 @@ export const translationResources = {
     "workflowRun.result.title.succeeded": "运行完成",
     "workflowRun.result.title.failed": "运行失败",
     "workflowRun.result.title.cancelled": "已取消",
-    "workflowRun.result.body.succeeded": "本轮工作流已成功结束。可在路径中回顾各步骤，或从顶栏再跑一次。",
-    "workflowRun.result.body.failed": "运行在某个步骤失败后结束。打开路径查看失败节点与详情。",
-    "workflowRun.result.body.cancelled": "运行已停止。已执行的步骤仍可在路径中回顾。",
+    "workflowRun.result.body.succeeded":
+      "本轮工作流已成功结束。可在路径中回顾各步骤，或从顶栏再跑一次。",
+    "workflowRun.result.body.failed":
+      "运行在某个步骤失败后结束。打开路径查看失败节点与详情。",
+    "workflowRun.result.body.cancelled":
+      "运行已停止。已执行的步骤仍可在路径中回顾。",
     "workflowRun.result.showOverview": "查看全图",
     "workflowRun.result.openArtifacts": "打开最近成果",
-    "workflowRun.result.pathHint": "点路径上的「结果」或步骤可切换回顾；再跑一次请用顶栏按钮。",
+    "workflowRun.result.pathHint":
+      "点路径上的「结果」或步骤可切换回顾；再跑一次请用顶栏按钮。",
     "workflowRun.result.pathChip": "结果",
     "workflowRun.result.finishedToastTitle": "运行已结束",
     "workflowRun.result.finishedToastDescription": "可切到舞台查看结果摘要。",
@@ -240,10 +248,12 @@ export const translationResources = {
     "workflowRun.inspector.ioCollapse": "收起",
     "workflowRun.inspector.selectHint": "与舞台当前步骤同步",
     "workflowRun.inspector.empty": "尚未聚焦步骤",
-    "workflowRun.inspector.emptyHint": "从上方路径选择一个节点，即可查看其设置与成果。",
+    "workflowRun.inspector.emptyHint":
+      "从上方路径选择一个节点，即可查看其设置与成果。",
     "workflowRun.inspector.collapse": "关闭阶段详情",
     "workflowRun.inspector.expand": "展开阶段详情",
-    "workflowRun.inspector.resize": "拖拽调整阶段详情宽度；双击恢复默认；拖窄可关闭",
+    "workflowRun.inspector.resize":
+      "拖拽调整阶段详情宽度；双击恢复默认；拖窄可关闭",
     "workflowRun.inspector.skillOpen": "查看 Skill「{{name}}」简介",
     "workflowRun.inspector.roleOpen": "查看角色「{{name}}」简介",
     "workflowRun.inspector.mcpOpen": "查看 MCP「{{name}}」简介",
@@ -284,8 +294,10 @@ export const translationResources = {
     "workflowRun.hitl.composerPlaceholder": "补充说明，Enter 发送…",
     "workflowRun.hitl.choiceOnlyPlaceholder": "在下方选择一项以继续",
     "workflowRun.hitl.toastTitle": "需要你参与",
-    "workflowRun.hitl.toastDescription": "有节点在等待确认。可在全图找到暖色节点，或切到舞台处理。",
-    "workflowRun.hitl.toastClarifyDescription": "模型在提问。可在全图找到暖色节点，或切到舞台回答。",
+    "workflowRun.hitl.toastDescription":
+      "有节点在等待确认。可在全图找到暖色节点，或切到舞台处理。",
+    "workflowRun.hitl.toastClarifyDescription":
+      "模型在提问。可在全图找到暖色节点，或切到舞台回答。",
     "workflowRun.hitl.toastAction": "去处理",
     "workflowRun.hitl.sidebarBadge": "待参与",
     "workflowRun.hitl.kind.approval": "审批",
@@ -298,7 +310,8 @@ export const translationResources = {
     "workflowRun.status.cancelled": "已取消",
     "workflowRun.deployAction": "部署到项目",
     "workflowRun.deployTitle": "部署工作流到项目",
-    "workflowRun.deployDescription": "将“{{name}}”部署到项目：创建一次待启动的运行，需提供一个运行名称。",
+    "workflowRun.deployDescription":
+      "将“{{name}}”部署到项目：创建一次待启动的运行，需提供一个运行名称。",
     "workflowRun.deployPickWorkflow": "请先选择一个工作流。",
     "workflowRun.deployProject": "目标项目",
     "workflowRun.deployProjectEmpty": "请选择项目",
@@ -325,11 +338,15 @@ export const translationResources = {
     "workflowRun.deployConfirm": "部署",
     "workflowRun.deploying": "部署中…",
     "workflowRun.deployFailed": "部署失败。",
-    "workflowRun.deployNoPublishedSnapshot": "该工作流还没有已发布的快照，请先发布。",
-    "workflowRun.deployAutoPublished": "已自动发布版本 {{version}}，可继续部署到项目。",
+    "workflowRun.deployNoPublishedSnapshot":
+      "该工作流还没有已发布的快照，请先发布。",
+    "workflowRun.deployAutoPublished":
+      "已自动发布版本 {{version}}，可继续部署到项目。",
     "workflowRun.startTitle": "启动工作流",
-    "workflowRun.startDescription": "从本项目已挂载的工作流中选择一个并开始运行。",
-    "workflowRun.startEmptyMounts": "此项目还没有挂载的工作流。请先在设置 → 工作流中「部署到项目」。",
+    "workflowRun.startDescription":
+      "从本项目已挂载的工作流中选择一个并开始运行。",
+    "workflowRun.startEmptyMounts":
+      "此项目还没有挂载的工作流。请先在设置 → 工作流中「部署到项目」。",
     "workflowRun.startDefinition": "已挂载工作流",
     "workflowRun.startDefinitionPlaceholder": "选择工作流…",
     "workflowRun.kickoffInput": "启动输入（可选）",
@@ -347,7 +364,8 @@ export const translationResources = {
     "account.switchChinese": "简体中文",
     "settings.productName": "Ora Agent IDE",
     "settings.prototypeLabel": "原型设置",
-    "settings.description": "配置 Ora 的界面、角色、技能、模型和 Agent 执行策略。",
+    "settings.description":
+      "配置 Ora 的界面、角色、技能、模型和 Agent 执行策略。",
     "settings.nav.appearance": "外观",
     "settings.nav.roles": "角色",
     "settings.nav.skills": "技能",
@@ -374,13 +392,16 @@ export const translationResources = {
     "settings.workflow.exportWorkflow": "导出工作流",
     "settings.workflow.importHint": "支持 Ora 工作流 JSON 文件",
     "settings.workflow.importError": "无法导入：请选择有效的工作流 JSON 文件。",
-    "settings.workflow.importPublishSuccess": "已导入“{{name}}”并发布版本 {{version}}",
+    "settings.workflow.importPublishSuccess":
+      "已导入“{{name}}”并发布版本 {{version}}",
     "settings.workflow.exportError": "无法导出工作流文件。",
     "settings.workflow.noWorkflows": "没有匹配的工作流",
     "settings.workflow.deleteWorkflowTitle": "删除“{{name}}”？",
-    "settings.workflow.deleteWorkflowDescription": "此操作会从当前 mock 数据中移除工作流，且无法撤销。",
+    "settings.workflow.deleteWorkflowDescription":
+      "此操作会从当前 mock 数据中移除工作流，且无法撤销。",
     "settings.workflow.emptyTitle": "还没有工作流",
-    "settings.workflow.emptyDescription": "新建或导入一个工作流，开始在画布中编排节点。",
+    "settings.workflow.emptyDescription":
+      "新建或导入一个工作流，开始在画布中编排节点。",
     "settings.workflow.canvas": "工作流画布",
     "settings.workflow.connections": "工作流连线",
     "settings.workflow.canvasControls": "画布视图控制",
@@ -389,13 +410,15 @@ export const translationResources = {
     "settings.workflow.resizeLibrary": "调整工作流列表宽度；双击恢复默认宽度",
     "settings.workflow.closeConfiguration": "收起节点配置",
     "settings.workflow.expandConfiguration": "展开节点配置",
-    "settings.workflow.resizeConfiguration": "调整节点配置宽度；双击恢复默认宽度",
+    "settings.workflow.resizeConfiguration":
+      "调整节点配置宽度；双击恢复默认宽度",
     "settings.workflow.zoomOut": "缩小画布",
     "settings.workflow.zoomIn": "放大画布",
     "settings.workflow.fitView": "显示完整工作流",
     "settings.workflow.resetView": "重置画布视图",
     "settings.workflow.minimap": "工作流小地图",
-    "settings.workflow.canvasHint": "左键拖拽框选节点 · 中键拖拽移动 · 滚轮缩放 · 节点自动对齐网格",
+    "settings.workflow.canvasHint":
+      "左键拖拽框选节点 · 中键拖拽移动 · 滚轮缩放 · 节点自动对齐网格",
     "settings.workflow.connectTo": "连接到{{name}}",
     "settings.workflow.connectFrom": "从{{name}}开始连接",
     "settings.workflow.selectConnection": "选择从{{source}}到{{target}}的连线",
@@ -406,7 +429,8 @@ export const translationResources = {
     "settings.workflow.configuration": "配置",
     "settings.workflow.selectNodeHint": "选择节点以编辑详细参数",
     "settings.workflow.noSelection": "尚未选择节点",
-    "settings.workflow.noSelectionHint": "选择画布中的卡片，或直接运行一次 mock 预览。",
+    "settings.workflow.noSelectionHint":
+      "选择画布中的卡片，或直接运行一次 mock 预览。",
     "settings.workflow.nodeSuffix": "{{type}}节点",
     "settings.workflow.section.advanced": "高级设置",
     "settings.workflow.section.inputVariables": "输入变量",
@@ -419,7 +443,8 @@ export const translationResources = {
     "settings.workflow.section.availableVariables": "可用变量",
     "settings.workflow.start.addVariable": "添加变量",
     "settings.workflow.start.removeVariable": "移除变量",
-    "settings.workflow.start.availableHint": "可在变量默认值中引用以下上下文变量。",
+    "settings.workflow.start.availableHint":
+      "可在变量默认值中引用以下上下文变量。",
     "settings.workflow.field.operation": "操作",
     "settings.workflow.field.variable": "变量 {{index}}",
     "settings.workflow.field.operator": "条件 {{index}}",
@@ -455,8 +480,10 @@ export const translationResources = {
     "settings.workflow.junction.waitCount": "至少 N 个完成",
     "settings.workflow.junction.failFast": "任一失败则失败",
     "settings.workflow.junction.collectResults": "收集结果继续",
-    "settings.workflow.loop.exitConditionPlaceholder": "如 verification.status == passed",
-    "settings.workflow.subflow.hint": "子流程用于封装可复用的复杂业务步骤。执行引擎接入后生效。",
+    "settings.workflow.loop.exitConditionPlaceholder":
+      "如 verification.status == passed",
+    "settings.workflow.subflow.hint":
+      "子流程用于封装可复用的复杂业务步骤。执行引擎接入后生效。",
     "settings.workflow.field.name": "名称",
     "settings.workflow.field.description": "说明",
     "settings.workflow.characterCount": "{{count}}/{{max}}",
@@ -470,7 +497,8 @@ export const translationResources = {
     "settings.workflow.activeVersion": "生效中",
     "settings.workflow.activateVersion": "设为生效版本",
     "settings.workflow.activateVersionSuccess": "已将 {{version}} 设为生效版本",
-    "settings.workflow.previewingActiveVersion": "这是当前生效的版本，部署会使用它。",
+    "settings.workflow.previewingActiveVersion":
+      "这是当前生效的版本，部署会使用它。",
     "settings.workflow.restoreVersion": "恢复到此版本",
     "settings.workflow.save": "保存",
     "settings.workflow.saving": "保存中…",
@@ -480,8 +508,10 @@ export const translationResources = {
     "settings.workflow.saveError": "保存工作流失败。",
     "settings.workflow.publish": "发布",
     "settings.workflow.publishTitle": "发布工作流",
-    "settings.workflow.publishDescription": "发布会把当前草稿保存为一个不可变的版本。",
-    "settings.workflow.publishVersionPlaceholder": "版本名（可选，留空自动生成）",
+    "settings.workflow.publishDescription":
+      "发布会把当前草稿保存为一个不可变的版本。",
+    "settings.workflow.publishVersionPlaceholder":
+      "版本名（可选，留空自动生成）",
     "settings.workflow.publishError": "发布工作流失败。",
     "settings.workflow.publishSuccess": "已发布版本 {{version}}",
     "settings.workflow.createError": "创建工作流失败。",
@@ -494,7 +524,8 @@ export const translationResources = {
     "settings.workflow.deleteVersionError": "删除版本失败。",
     "settings.workflow.deleteVersionSuccess": "已删除版本 {{version}}",
     "settings.workflow.deleteVersionConfirmTitle": "删除此版本？",
-    "settings.workflow.deleteVersionConfirmDescription": "此操作会删除该已发布版本，无法撤销。",
+    "settings.workflow.deleteVersionConfirmDescription":
+      "此操作会删除该已发布版本，无法撤销。",
     "settings.workflow.field.model": "模型",
     "settings.workflow.field.tool": "工具",
     "settings.workflow.field.condition": "分支条件",
@@ -532,7 +563,8 @@ export const translationResources = {
     "settings.workflow.runningHint": "逐步执行节点并收集输出",
     "settings.workflow.runSuccess": "模拟运行成功",
     "settings.workflow.runFailed": "模拟运行失败",
-    "settings.workflow.runError": "工作流定义无效，无法完成模拟运行。请检查节点配置和连线。",
+    "settings.workflow.runError":
+      "工作流定义无效，无法完成模拟运行。请检查节点配置和连线。",
     "settings.workflow.trace": "执行轨迹",
     "settings.workflow.output": "输出",
     "settings.workflow.testInput": "测试输入",
@@ -540,21 +572,26 @@ export const translationResources = {
     "settings.nav.permissions": "权限与执行",
     "settings.nav.privacy": "数据与隐私",
     "settings.appearance.title": "外观",
-    "settings.appearance.description": "调整 Ora 在桌面端和 Web 端的显示方式。更改会立即应用。",
+    "settings.appearance.description":
+      "调整 Ora 在桌面端和 Web 端的显示方式。更改会立即应用。",
     "settings.appearance.theme": "主题",
-    "settings.appearance.themeDescription": "选择界面的明暗外观，或跟随操作系统设置。",
+    "settings.appearance.themeDescription":
+      "选择界面的明暗外观，或跟随操作系统设置。",
     "settings.appearance.system": "跟随系统",
     "settings.appearance.light": "浅色",
     "settings.appearance.dark": "深色",
     "settings.appearance.language": "界面语言",
-    "settings.appearance.languageDescription": "设置菜单、提示和 Agent 工作区使用的语言。",
+    "settings.appearance.languageDescription":
+      "设置菜单、提示和 Agent 工作区使用的语言。",
     "settings.appearance.density": "界面密度",
-    "settings.appearance.densityDescription": "控制工作区列表和设置项的信息密度。",
+    "settings.appearance.densityDescription":
+      "控制工作区列表和设置项的信息密度。",
     "settings.appearance.comfortable": "舒适",
     "settings.appearance.compact": "紧凑",
     "common.save": "保存",
     "settings.roles.title": "角色",
-    "settings.roles.description": "管理可在 Ora 会话中调用的角色（原 Agents）。这里的命令直接使用共享 contracts。",
+    "settings.roles.description":
+      "管理可在 Ora 会话中调用的角色（原 Agents）。这里的命令直接使用共享 contracts。",
     "settings.roles.sectionLabel": "Roles",
     "settings.roles.search": "搜索名称或描述",
     "settings.roles.new": "新建 Role",
@@ -575,7 +612,8 @@ export const translationResources = {
     "settings.roles.contentLoadError": "无法加载内容。",
     "settings.roles.import": "导入 Role",
     "settings.roles.importTitle": "导入 Role",
-    "settings.roles.importDescription": "选择一个本地 Markdown 文件。导入前会检查名称冲突。",
+    "settings.roles.importDescription":
+      "选择一个本地 Markdown 文件。导入前会检查名称冲突。",
     "settings.roles.importInvalidFile": "请选择一个 .md Markdown 文件。",
     "settings.roles.importPreparing": "正在读取…",
     "settings.roles.importChoose": "选择 Markdown 文件",
@@ -587,9 +625,11 @@ export const translationResources = {
     "settings.roles.importCommit": "确认导入",
     "settings.roles.importStale": "目标 Agent 已发生变化，请重新确认处理方式。",
     "settings.roles.deleteTitle": "删除“{{name}}”？",
-    "settings.roles.deleteDescription": "该角色将从可用命令中移除，此操作无法撤销。",
+    "settings.roles.deleteDescription":
+      "该角色将从可用命令中移除，此操作无法撤销。",
     "settings.skills.title": "技能",
-    "settings.skills.description": "管理可在 Ora 会话中调用的技能。这里的命令直接使用共享 contracts。",
+    "settings.skills.description":
+      "管理可在 Ora 会话中调用的技能。这里的命令直接使用共享 contracts。",
     "settings.skills.sectionLabel": "Skills",
     "settings.skills.search": "搜索名称或描述",
     "settings.skills.new": "新建 Skill",
@@ -604,18 +644,24 @@ export const translationResources = {
     "settings.skills.namePlaceholder": "给这个技能起个名字",
     "settings.skills.descriptionLabel": "描述",
     "settings.skills.descriptionPlaceholder": "一句话说明它的用途",
-    "settings.skills.nameInvalid": "名称只能使用英文字母、数字、点、下划线和连字符。",
-    "settings.skills.descriptionInvalid": "描述不能为空，且最多 4096 个 UTF-8 字节。",
+    "settings.skills.nameInvalid":
+      "名称只能使用英文字母、数字、点、下划线和连字符。",
+    "settings.skills.descriptionInvalid":
+      "描述不能为空，且最多 4096 个 UTF-8 字节。",
     "settings.skills.contentLabel": "内容",
     "settings.skills.contentLoading": "正在加载内容…",
     "settings.skills.contentHint": "支持 Markdown；留空可清除内容。",
     "settings.skills.contentLoadError": "无法加载内容。",
     "settings.skills.import": "导入 Skill",
     "settings.skills.importTitle": "导入技能",
-    "settings.skills.importDescription": "选择一个技能文件夹或 ZIP、.skill、.tar.gz、.tgz 压缩包。导入前会先检查所有候选项。",
+    "settings.skills.importDescription":
+      "选择一个技能文件夹或 ZIP、.skill、.tar.gz、.tgz 压缩包。导入前会先检查所有候选项。",
     "settings.skills.importFolder": "选择文件夹",
     "settings.skills.importArchive": "选择压缩包",
-    "settings.skills.importProgress": "正在处理 {{processed}} / {{total}} 个技能",
+    "settings.skills.importing": "导入中…",
+    "settings.skills.importDiscovered": "共 {{count}} 个技能",
+    "settings.skills.importResultLine": "{{name}}：{{reason}}",
+    "settings.skills.importProgress": "导入中… {{processed}} / {{total}}",
     "settings.skills.importFiles": "个文件",
     "settings.skills.importExisting": "现有描述：{{description}}",
     "settings.skills.importSkip": "跳过",
@@ -623,33 +669,86 @@ export const translationResources = {
     "settings.skills.importCommit": "确认导入",
     "settings.skills.importCompleted": "导入已完成。",
     "settings.skills.importAnother": "继续导入",
+    "settings.skills.importChooseAnother": "重新选择",
     "settings.skills.deleteTitle": "删除“{{name}}”？",
-    "settings.skills.deleteDescription": "该技能将从可用命令中移除，此操作无法撤销。",
+    "settings.skills.deleteDescription":
+      "该技能将从可用命令中移除，此操作无法撤销。",
+    "settings.skills.unavailable": "不可用",
+    "settings.skills.unavailableTitle": "“{{name}}”的技能包已丢失",
+    "settings.skills.unavailableDescription":
+      "这个技能还在列表里，但本地文件找不到了。请删除，或重新上传同名技能包。",
+    "settings.skills.unavailableRestore": "重新上传",
+    "settings.skills.unavailableAction": "处理",
+    "settings.skills.unavailableBanner":
+      "{{count}} 个技能的本地文件已丢失，请删除或重新上传。",
+    "settings.skills.importRestoreHint": "请导入名为“{{name}}”的技能包以恢复。",
+    "settings.skills.importRestoreMissing":
+      "导入内容里没有名为“{{name}}”的技能。",
+    "settings.skills.importCompletedWithFailures": "{{count}} 个技能导入失败。",
+    "settings.skills.importStatus.ready": "待导入",
+    "settings.skills.importStatus.conflict": "同名冲突",
+    "settings.skills.importStatus.invalid": "无效",
+    "settings.skills.importStatus.imported": "已导入",
+    "settings.skills.importStatus.overwritten": "已覆盖",
+    "settings.skills.importStatus.skipped": "已跳过",
+    "settings.skills.importStatus.failed": "导入失败",
+    "settings.skills.importStatus.staleconflict": "目标已变化",
+    "settings.skills.importStatus.prepared": "待确认",
+    "settings.skills.importStatus.committing": "导入中",
+    "settings.skills.importStatus.completed": "已完成",
+    "settings.skills.importStatus.cancelled": "已取消",
+    "settings.skills.importStatus.unknown": "未知状态",
+    "settings.skills.importReason.yaml_invalid": "SKILL.md 格式无效。",
+    "settings.skills.importReason.name_missing": "SKILL.md 缺少名称。",
+    "settings.skills.importReason.name_invalid":
+      "技能名称只能使用字母、数字、点、下划线和连字符。",
+    "settings.skills.importReason.description_missing": "SKILL.md 缺少描述。",
+    "settings.skills.importReason.description_too_large":
+      "技能描述超过最大长度。",
+    "settings.skills.importReason.skill_manifest_too_large":
+      "SKILL.md 超过最大大小。",
+    "settings.skills.importReason.invalid_candidate": "该技能无效，无法导入。",
+    "settings.skills.importReason.decision_missing":
+      "同名技能尚未选择跳过或覆盖。",
+    "settings.skills.importReason.skill_storage_error": "无法写入技能文件。",
+    "settings.skills.importReason.skill_repository_error": "无法保存技能记录。",
+    "settings.skills.importReason.skill_name_invalid": "技能名称无效。",
+    "settings.skills.importReason.stale_conflict":
+      "目标技能已变化，请重新导入。",
+    "settings.skills.importReason.unknown": "导入失败。",
     "settings.skills.marketplacesTitle": "Skill 市场",
-    "settings.skills.marketplacesDescription": "从公开市场发现 Skill，或在企业内网接入组织专属能力。",
+    "settings.skills.marketplacesDescription":
+      "从公开市场发现 Skill，或在企业内网接入组织专属能力。",
     "settings.skills.marketplaceTitle": "SkillHub 技能市场",
-    "settings.skills.marketplaceDescription": "浏览真实 SkillHub 市场；下载 ZIP 后，Ora 会自动校验并安装 Skill。",
+    "settings.skills.marketplaceDescription":
+      "浏览真实 SkillHub 市场；下载 ZIP 后，Ora 会自动校验并安装 Skill。",
     "settings.skills.marketplacePublicBadge": "公开市场",
     "settings.skills.marketplaceOpen": "打开技能市场",
     "settings.skills.marketplaceOpening": "正在打开…",
-    "settings.skills.marketplaceUnsupported": "技能市场仅在 Ora 桌面端可用。",
-    "settings.skills.marketplaceConnectionFailed": "无法打开技能市场或读取下载状态，请重试。",
+    "settings.skills.marketplaceConnectionFailed":
+      "无法打开技能市场或读取下载状态，请重试。",
     "settings.skills.marketplaceDownloading": "正在下载 {{fileName}}…",
     "settings.skills.marketplaceSavedTo": "保存位置",
     "settings.skills.marketplaceOpenFolderFailed": "无法打开 Skill 下载目录。",
-    "settings.skills.marketplaceDownloadFailed": "下载失败，请在技能市场中重试。",
-    "settings.skills.marketplaceInstalling": "已下载 {{fileName}}，正在自动安装…",
-    "settings.skills.marketplaceInstallReview": "{{fileName}} 需要确认冲突或无效候选项。",
+    "settings.skills.marketplaceDownloadFailed":
+      "下载失败，请在技能市场中重试。",
+    "settings.skills.marketplaceInstalling":
+      "已下载 {{fileName}}，正在自动安装…",
+    "settings.skills.marketplaceInstallReview":
+      "{{fileName}} 需要确认冲突或无效候选项。",
     "settings.skills.marketplaceInstalled": "已自动安装 {{count}} 个 Skill。",
-    "settings.skills.marketplaceInstallIncomplete": "{{fileName}} 未能完整安装，请查看处理结果。",
+    "settings.skills.marketplaceInstallIncomplete":
+      "{{fileName}} 未能完整安装，请查看处理结果。",
     "settings.skills.marketplaceInstallFailed": "无法安装 {{fileName}}。",
     "settings.skills.marketplaceInstallReviewed": "Skill 安装处理已完成。",
     "settings.skills.huaweiTitle": "华为 Skill Market",
-    "settings.skills.huaweiDescription": "浏览华为内部 Skill 市场，发现并接入企业专属 Skill；连接华为内网后即可打开。",
+    "settings.skills.huaweiDescription":
+      "浏览华为内部 Skill 市场，发现并接入企业专属 Skill；连接华为内网后即可打开。",
     "settings.skills.huaweiBadge": "企业内网",
     "settings.skills.huaweiOpen": "打开内网 Skill Market",
     "settings.plugins.title": "插件",
-    "settings.plugins.description": "在你常用的工具中与 Ora Agent 协作。插件目录为原型数据，安装状态不会持久化。",
+    "settings.plugins.description":
+      "在你常用的工具中与 Ora Agent 协作。插件目录为原型数据，安装状态不会持久化。",
     "settings.plugins.search": "搜索插件",
     "settings.plugins.clearSearch": "清除搜索",
     "settings.plugins.installed": "已安装",
@@ -686,7 +785,8 @@ export const translationResources = {
     "settings.plugins.prompt.nga.3": "用 {{name}} 完成这个编码任务",
     "settings.plugins.prompt.codeagentcli.1": "唤起 {{name}} 处理这个任务",
     "settings.plugins.prompt.codeagentcli.2": "让 {{name}} 检查这次改动",
-    "settings.plugins.prompt.codeagentcli.3": "用 {{name}} 完成这个通用编码任务",
+    "settings.plugins.prompt.codeagentcli.3":
+      "用 {{name}} 完成这个通用编码任务",
     "settings.plugins.prompt.claude.1": "在当前会话中调用 {{name}}",
     "settings.plugins.prompt.claude.2": "让 {{name}} 用 Subagent 审查这次改动",
     "settings.plugins.prompt.claude.3": "用 {{name}} 的技能完成这个任务",
@@ -718,7 +818,8 @@ export const translationResources = {
     "settings.plugins.prompt.slack.2": "让 {{name}} 通知团队这次改动",
     "settings.plugins.prompt.slack.3": "用 {{name}} 发送一条部署通知",
     "settings.plugins.prompt.postgres.1": "用 {{name}} 查询这张表的数据",
-    "settings.plugins.prompt.postgres.2": "让 {{name}} 检查这次改动涉及的表结构",
+    "settings.plugins.prompt.postgres.2":
+      "让 {{name}} 检查这次改动涉及的表结构",
     "settings.plugins.prompt.postgres.3": "用 {{name}} 运行一次数据校验",
     "settings.plugins.prompt.docker.1": "用 {{name}} 构建这个镜像",
     "settings.plugins.prompt.docker.2": "让 {{name}} 检查容器的运行状态",
@@ -728,28 +829,36 @@ export const translationResources = {
     "settings.plugins.prompt.sentry.3": "让 {{name}} 生成一份错误趋势报告",
     "settings.plugins.prompt.playwright.1": "用 {{name}} 运行端到端测试",
     "settings.plugins.prompt.playwright.2": "让 {{name}} 回放这次失败的用例",
-    "settings.plugins.prompt.playwright.3": "用 {{name}} 给这个页面补充测试用例",
+    "settings.plugins.prompt.playwright.3":
+      "用 {{name}} 给这个页面补充测试用例",
     "settings.plugins.prompt.jira.1": "用 {{name}} 查询这个 Sprint 的进度",
     "settings.plugins.prompt.jira.2": "让 {{name}} 关联这次改动的缺陷",
     "settings.plugins.prompt.jira.3": "用 {{name}} 更新这个 Story 的状态",
     "settings.plugins.prompt.runbooks.1": "让 {{name}} 查一下部署流程",
-    "settings.plugins.prompt.runbooks.2": "用 {{name}} 核对这次改动是否符合规范",
+    "settings.plugins.prompt.runbooks.2":
+      "用 {{name}} 核对这次改动是否符合规范",
     "settings.plugins.prompt.runbooks.3": "让 {{name}} 给出排障步骤",
     "settings.plugins.prompt.deploybot.1": "用 {{name}} 触发一次部署",
     "settings.plugins.prompt.deploybot.2": "让 {{name}} 检查这次改动能否发布",
     "settings.plugins.prompt.deploybot.3": "用 {{name}} 跟踪发布状态",
     "settings.plugins.prompt.tokens.1": "用 {{name}} 读取当前的主题变量",
-    "settings.plugins.prompt.tokens.2": "让 {{name}} 检查这次改动是否用了正确的 token",
+    "settings.plugins.prompt.tokens.2":
+      "让 {{name}} 检查这次改动是否用了正确的 token",
     "settings.plugins.prompt.tokens.3": "用 {{name}} 更新这个组件的样式变量",
-    "settings.plugins.overview": "{{summary}}。{{name}} 由 {{publisher}} 维护，安装后可在任意 Agent 会话中直接调用，无需离开工作区。",
+    "settings.plugins.overview":
+      "{{summary}}。{{name}} 由 {{publisher}} 维护，安装后可在任意 Agent 会话中直接调用，无需离开工作区。",
     "settings.plugins.skills": "技能",
     "settings.plugins.skillSummary": "由 {{name}} 提供的工具集。",
     "settings.plugins.toggleSkill": "启用或停用 {{name}}",
     "settings.plugins.details": "详情",
-    "settings.plugins.feature1": "在 Agent 会话中直接调用 {{name}} 提供的工具与命令。",
-    "settings.plugins.feature2": "工具调用沿用当前的权限与执行策略，必要时会先请求确认。",
-    "settings.plugins.feature3": "可在工作树任务中复用，无需为每个项目重复配置。",
-    "settings.plugins.feature4": "所有调用都会记录在会话时间线上，便于回溯与审计。",
+    "settings.plugins.feature1":
+      "在 Agent 会话中直接调用 {{name}} 提供的工具与命令。",
+    "settings.plugins.feature2":
+      "工具调用沿用当前的权限与执行策略，必要时会先请求确认。",
+    "settings.plugins.feature3":
+      "可在工作树任务中复用，无需为每个项目重复配置。",
+    "settings.plugins.feature4":
+      "所有调用都会记录在会话时间线上，便于回溯与审计。",
     "settings.plugins.info": "信息",
     "settings.plugins.identifier": "标识符",
     "settings.plugins.version": "版本",
@@ -779,7 +888,8 @@ export const translationResources = {
     "settings.plugins.catalog.codeagentcli": "Ora 内置的通用编码 Agent 运行时",
     "settings.plugins.catalog.claude": "Anthropic 的编码 Agent 与技能体系",
     "settings.plugins.catalog.codex": "OpenAI 的编码 Agent 与代码审查",
-    "settings.plugins.catalog.rtk": "CLI 代理，将常见开发命令的 LLM Token 消耗降低 60-90%",
+    "settings.plugins.catalog.rtk":
+      "CLI 代理，将常见开发命令的 LLM Token 消耗降低 60-90%",
     "settings.plugins.catalog.github": "处理 PR、Issue、CI 与发布流程",
     "settings.plugins.catalog.devtools": "调试页面、网络请求与性能",
     "settings.plugins.catalog.analytics": "回答产品与业务数据问题",
@@ -796,41 +906,53 @@ export const translationResources = {
     "settings.plugins.catalog.deploybot": "触发部署并跟踪发布状态",
     "settings.plugins.catalog.tokens": "读取与更新设计令牌",
     "settings.permissions.title": "权限与执行",
-    "settings.permissions.description": "定义 Agent 执行命令前需要确认的范围，以及默认可用的运行时能力。",
+    "settings.permissions.description":
+      "定义 Agent 执行命令前需要确认的范围，以及默认可用的运行时能力。",
     "settings.permissions.approval": "审批策略",
-    "settings.permissions.approvalDescription": "控制 Agent 在执行工具和命令前何时请求确认。",
+    "settings.permissions.approvalDescription":
+      "控制 Agent 在执行工具和命令前何时请求确认。",
     "settings.permissions.always": "每次询问",
     "settings.permissions.risky": "仅高风险操作",
     "settings.permissions.trusted": "信任工作区",
     "settings.permissions.terminal": "终端命令",
-    "settings.permissions.terminalDescription": "允许 Agent 在当前工作区运行终端命令。",
+    "settings.permissions.terminalDescription":
+      "允许 Agent 在当前工作区运行终端命令。",
     "settings.permissions.files": "文件写入",
-    "settings.permissions.filesDescription": "允许 Agent 创建和修改工作区文件。",
+    "settings.permissions.filesDescription":
+      "允许 Agent 创建和修改工作区文件。",
     "settings.permissions.network": "网络访问",
-    "settings.permissions.networkDescription": "允许 Agent 请求外部服务和下载资源。",
+    "settings.permissions.networkDescription":
+      "允许 Agent 请求外部服务和下载资源。",
     "settings.permissions.timeout": "命令超时",
-    "settings.permissions.timeoutDescription": "单个命令默认允许的最长运行时间。",
+    "settings.permissions.timeoutDescription":
+      "单个命令默认允许的最长运行时间。",
     "settings.permissions.timeoutSeconds": "{{count}} 秒",
     "settings.permissions.timeoutMinutes": "{{count}} 分钟",
     "settings.permissions.noTimeout": "不限制",
     "settings.privacy.title": "数据与隐私",
-    "settings.privacy.description": "控制本地会话记录、诊断数据以及原型数据清理。",
+    "settings.privacy.description":
+      "控制本地会话记录、诊断数据以及原型数据清理。",
     "settings.privacy.worktreeRoot": "工作树存储位置",
-    "settings.privacy.worktreeRootDescription": "新建工作树会存储在此目录；更改位置不会移动已有工作树。",
+    "settings.privacy.worktreeRootDescription":
+      "新建工作树会存储在此目录；更改位置不会移动已有工作树。",
     "settings.privacy.worktreeRootLoading": "正在读取…",
     "settings.privacy.changeWorktreeRoot": "更改位置",
     "settings.privacy.retention": "历史记录保留",
-    "settings.privacy.retentionDescription": "决定本地会话历史默认保留多长时间。",
+    "settings.privacy.retentionDescription":
+      "决定本地会话历史默认保留多长时间。",
     "settings.privacy.days30": "30 天",
     "settings.privacy.days90": "90 天",
     "settings.privacy.forever": "永久保留",
     "settings.privacy.diagnostics": "共享诊断数据",
-    "settings.privacy.diagnosticsDescription": "发送匿名性能和错误信息，帮助改进 Ora。",
+    "settings.privacy.diagnosticsDescription":
+      "发送匿名性能和错误信息，帮助改进 Ora。",
     "settings.privacy.clearHistory": "清除会话历史",
-    "settings.privacy.clearHistoryDescription": "清除当前运行期内存中的所有 Agent 对话，不会删除项目和工作树。",
+    "settings.privacy.clearHistoryDescription":
+      "清除当前运行期内存中的所有 Agent 对话，不会删除项目和工作树。",
     "settings.privacy.clear": "清除历史",
     "settings.privacy.clearTitle": "清除所有会话历史？",
-    "settings.privacy.clearConfirm": "当前运行期内存中的所有 Agent 对话都将被清除。",
+    "settings.privacy.clearConfirm":
+      "当前运行期内存中的所有 Agent 对话都将被清除。",
     "dialog.addProject": "添加项目",
     "dialog.editProject": "编辑项目",
     "dialog.projectDescription": "将代码仓库连接到 Ora 工作区。",
@@ -847,13 +969,14 @@ export const translationResources = {
     "dialog.workspaceMode": "工作区模式",
     "dialog.workspaceModeWorktree": "工作树（Git 分支）",
     "dialog.workspaceModeProjectRoot": "直接对话（项目根目录）",
-    "dialog.worktreeRequiresGitRepository": "该目录不是 Git 仓库。请在 Git 仓库下创建 worktree 模式任务。",
+    "dialog.worktreeRequiresGitRepository":
+      "该目录不是 Git 仓库。请在 Git 仓库下创建 worktree 模式任务。",
     "dialog.saveTask": "保存任务",
     "dialog.createTask": "创建任务",
     "dialog.taskTitle": "任务标题",
     "dialog.baseBranch": "基础分支",
-    "dialog.status": "状态",
     "dialog.required": "请填写所有必填字段。",
+    "dialog.optionsLoading": "选项仍在加载，请稍候再提交。",
     "dialog.submitError": "请求失败，请重试。",
     "dialog.editSession": "编辑会话",
     "dialog.startSession": "启动 Agent 会话",
@@ -865,18 +988,23 @@ export const translationResources = {
     "dialog.workflowRunName": "运行名称",
     "dialog.workflowRunNamePlaceholder": "例如：代码审查 #2",
     "delete.title": "删除“{{name}}”？",
-    "delete.projectDescription": "该项目下所有任务的数据、会话记录、Git 工作树及 ora/* 分支都将被删除。工作树中未提交的修改和仅存在于这些分支上的提交将永久丢失，此操作无法撤销。",
-    "delete.taskDescription": "该任务的会话记录、Git 工作树及其 ora/* 分支将被删除。未提交的修改和仅存在于该分支的提交将永久丢失，此操作无法撤销。",
-    "delete.directTaskDescription": "仅删除该会话记录；项目目录本身不受影响，此操作无法撤销。",
+    "delete.projectDescription":
+      "该项目下所有任务的数据、会话记录、Git 工作树及 ora/* 分支都将被删除。工作树中未提交的修改和仅存在于这些分支上的提交将永久丢失，此操作无法撤销。",
+    "delete.taskDescription":
+      "该任务的会话记录、Git 工作树及其 ora/* 分支将被删除。未提交的修改和仅存在于该分支的提交将永久丢失，此操作无法撤销。",
+    "delete.directTaskDescription":
+      "仅删除该会话记录；项目目录本身不受影响，此操作无法撤销。",
     "delete.sessionDescription": "该 Agent 会话将被永久删除，此操作无法撤销。",
-    "delete.workflowRunDescription": "将删除此次工作流运行及其任务的 Git 工作树和 ora/* 分支；未提交的修改将永久丢失。若仍在进行中，会先取消再删除；同项目下其他运行不受影响。",
+    "delete.workflowRunDescription":
+      "将删除此次工作流运行及其任务的 Git 工作树和 ora/* 分支；未提交的修改将永久丢失。若仍在进行中，会先取消再删除；同项目下其他运行不受影响。",
     "delete.deleting": "删除中…",
     "delete.failed": "无法删除，请先停止正在运行的会话。",
     "delete.runningSession": "直聊会话仍在停止，请稍后再试。",
     "workspace.overview": "工作区概览",
     "workspace.defaultTitle": "你的 Agent 工作区",
     "workspace.taskHint": "从侧边栏选择已有会话，或从任务菜单启动一个新会话。",
-    "workspace.projectHint": "选择一个工作树任务查看会话，或从项目菜单创建新任务。",
+    "workspace.projectHint":
+      "选择一个工作树任务查看会话，或从项目菜单创建新任务。",
     "workspace.emptyHint": "添加项目后即可组织工作树与 Agent 会话。",
     "workspace.repository": "代码仓库",
     "workspace.agentSessions": "Agent 会话",
@@ -900,7 +1028,8 @@ export const translationResources = {
     "diff.commitAndPush": "提交并推送",
     "diff.committing": "提交中…",
     "diff.commitDialogTitle": "提交任务变更",
-    "diff.commitDialogDescription": "所有已暂存、未暂存和未跟踪文件都会包含在这次提交中。",
+    "diff.commitDialogDescription":
+      "所有已暂存、未暂存和未跟踪文件都会包含在这次提交中。",
     "diff.commitMessage": "提交说明",
     "diff.commitMessagePlaceholder": "简要说明这次变更",
     "diff.commitShortcut": "Ctrl+Enter",
@@ -910,7 +1039,8 @@ export const translationResources = {
     "diff.push": "推送",
     "diff.pushing": "推送中…",
     "diff.pushDialogTitle": "推送任务分支？",
-    "diff.pushDialogDescription": "当前任务分支将推送到 origin，并设置为上游分支。",
+    "diff.pushDialogDescription":
+      "当前任务分支将推送到 origin，并设置为上游分支。",
     "diff.pushSucceeded": "已将 {{branch}} 推送到 {{remote}}",
     "diff.refresh": "刷新变更",
     "diff.refreshing": "正在刷新变更",
@@ -921,9 +1051,6 @@ export const translationResources = {
     "review.panels": "工作区审查面板",
     "specs.specs": "Specs",
     "specs.refresh": "刷新 Specs",
-    "specs.configure": "配置 Spec 来源",
-    "specs.manageSources": "管理来源",
-    "specs.currentWorkspaceLabel": "当前工作区",
     "specs.filter": "按文件名或路径筛选…",
     "specs.loading": "正在加载 Specs…",
     "specs.empty": "当前上下文没有可展示的 Spec 文档",
@@ -933,20 +1060,6 @@ export const translationResources = {
     "specs.resizeTree": "调整 Spec 目录宽度",
     "specs.truncated": "结果已达到扫描上限，目录可能不完整。",
     "specs.localImageBlocked": "已阻止本地图片",
-    "specs.sourcesTitle": "Spec 来源",
-    "specs.configuredSources": "已配置目录",
-    "specs.sourcesDescription": "这些设置作用于项目根目录及所有 worktree。添加目录时请选择当前工作区内的子文件夹。",
-    "specs.noSources": "尚未配置 Spec 来源。",
-    "specs.addDirectory": "添加目录",
-    "specs.custom": "自定义",
-    "specs.customName": "自定义来源名称",
-    "specs.toggleSource": "启用或禁用来源",
-    "specs.removeSource": "移除手动来源",
-    "specs.origin.default": "默认",
-    "specs.origin.discovered": "自动发现",
-    "specs.origin.manual": "手动添加",
-    "specs.availability.available": "可用",
-    "specs.availability.missing": "当前上下文缺失",
     "files.explorer": "资源管理器",
     "files.search": "搜索",
     "files.refresh": "刷新工作区文件",
@@ -961,8 +1074,10 @@ export const translationResources = {
     "files.resultsTruncated": "结果过多，仅显示前 500 条。",
     "files.largeFilePlainText": "文件较大，已关闭语法高亮以保持流畅。",
     "files.resizePanel": "调整文件资源管理器宽度",
-    "files.addLineSelectionToChat": "加入 AI 对话（第 {{startLine}}-{{endLine}} 行）",
-    "files.lineSelectionAdded": "已将第 {{startLine}}-{{endLine}} 行加入 AI 对话",
+    "files.addLineSelectionToChat":
+      "加入 AI 对话（第 {{startLine}}-{{endLine}} 行）",
+    "files.lineSelectionAdded":
+      "已将第 {{startLine}}-{{endLine}} 行加入 AI 对话",
     "files.selectLine": "选择第 {{line}} 行",
     "diff.fileTree": "变更文件目录",
     "diff.toggleFileTree": "显示或隐藏变更文件目录",
@@ -984,7 +1099,8 @@ export const translationResources = {
     "diff.noChanges": "没有变更",
     "diff.noChangesDetail": "任务工作树与固定基线提交一致。",
     "diff.outdated": "过期讨论",
-    "diff.outdatedDetail": "这些评论属于较早的 Diff 快照，因此不会附着到当前代码行。",
+    "diff.outdatedDetail":
+      "这些评论属于较早的 Diff 快照，因此不会附着到当前代码行。",
     "diff.binary": "二进制文件已变更",
     "diff.metadataOnly": "仅元数据或空文件变更",
     "diff.expandUnchanged": "展开 {{count}} 行未修改内容",
@@ -1060,6 +1176,10 @@ export const translationResources = {
     "chat.modelSelector.empty": "该 Agent 未提供可选模型",
     "chat.historyDegraded.title": "会话记录已中断",
     "chat.historyDegraded.resume": "恢复记录",
+    "chat.historyNotice.title": "会话历史不完整",
+    "chat.historyNotice.unreadableRecords":
+      "有 {{count}} 条历史记录无法读取，缺失位置未知。",
+    "chat.historyNotice.unrecordedContent": "部分对话未能记录：{{reason}}",
     "chat.send": "发送消息",
     "chat.starting": "正在启动…",
     "chat.commands.available": "可用命令",
@@ -1079,12 +1199,15 @@ export const translationResources = {
     "chat.attachments.add": "添加图片",
     "chat.attachments.selected": "已选择的图片",
     "chat.attachments.remove": "移除图片 {{name}}",
-    "chat.attachments.unsupported": "请选择 PNG、JPEG、WebP、GIF、AVIF 或 BMP 图片。",
-    "chat.attachments.tooLarge": "单张图片不能超过 5 MB，总大小不能超过 10 MB。",
+    "chat.attachments.unsupported":
+      "请选择 PNG、JPEG、WebP、GIF、AVIF 或 BMP 图片。",
+    "chat.attachments.tooLarge":
+      "单张图片不能超过 5 MB，总大小不能超过 10 MB。",
     "chat.attachments.readFailed": "无法读取所选图片，请重试。",
     "chat.loadingHistory": "正在加载历史记录…",
     "chat.typing": "助手正在运行",
-    "chat.runningWords": "思考中…|冥思中…|构思中…|酝酿中…|推演中…|琢磨中…|捣鼓中…|开动脑筋…|苦思冥想…|灵光闪现…|运转中…|加载脑洞…|盘算中…|推敲中…|排查中…|摸索中…|绞尽脑汁…|拼命运转…|一顿操作…|正在思索…|脑力全开…|深度思考…",
+    "chat.runningWords":
+      "思考中…|冥思中…|构思中…|酝酿中…|推演中…|琢磨中…|捣鼓中…|开动脑筋…|苦思冥想…|灵光闪现…|运转中…|加载脑洞…|盘算中…|推敲中…|排查中…|摸索中…|绞尽脑汁…|拼命运转…|一顿操作…|正在思索…|脑力全开…|深度思考…",
     "chat.thinking": "正在分析",
     "chat.thought": "推演",
     "chat.activity.active.analysis": "正在分析",
@@ -1164,7 +1287,8 @@ export const translationResources = {
     "chat.toolGroup.commands.failed_other": "{{count}} 条命令执行失败",
     "chat.toolGroup.commands.cancelled_one": "已取消执行 {{count}} 条命令",
     "chat.toolGroup.commands.cancelled_other": "已取消执行 {{count}} 条命令",
-    "chat.toolGroup.changeStats": "增加 {{additions}} 行，删除 {{deletions}} 行",
+    "chat.toolGroup.changeStats":
+      "增加 {{additions}} 行，删除 {{deletions}} 行",
     "chat.terminalSession": "终端会话 {{id}}",
     "chat.rawData": "原始数据",
     "chat.diffExpand": "展开完整差异",
@@ -1186,7 +1310,8 @@ export const translationResources = {
     "chat.imagePreview.zoomIn": "放大",
     "chat.imagePreview.zoomLevel": "当前缩放比例",
     "chat.imagePreview.close": "关闭图片预览",
-    "chat.imagePreview.description": "使用鼠标滚轮或缩放按钮放大和缩小图片。按住鼠标左键拖动图片。按 Escape 关闭预览。",
+    "chat.imagePreview.description":
+      "使用鼠标滚轮或缩放按钮放大和缩小图片。按住鼠标左键拖动图片。按 Escape 关闭预览。",
     "chat.imagePreview.canvas": "{{name}}，缩放 {{zoom}}%",
     "chat.content.audio": "音频",
     "chat.content.binaryResource": "二进制资源",
@@ -1236,131 +1361,170 @@ export const translationResources = {
     "dashboard.tab.dashboard": "Dashboard",
     "dashboard.tab.compare": "Token 对比",
     "dashboard.noSession": "请先选择一个会话。",
-    "dashboard.serverUnreachable": "Dashboard 服务未启动。请在本地运行 streamlit（端口与 Ora 配置一致）。",
+    "dashboard.serverUnreachable":
+      "Dashboard 服务未启动。请在本地运行 streamlit（端口与 Ora 配置一致）。",
     "dashboard.resolving": "正在解析 trace…",
     "dashboard.compareResolving": "正在打开 Token 对比…",
     "dashboard.resolveError": "无法解析该会话的 trace（可能尚未生成）。",
     "dashboard.compareResolveError": "无法打开 Token 对比页面。",
   },
   "en-US": {
-    "errors.internal_error": "An internal error occurred. Provide request ID {{requestId}} for support.",
+    "errors.internal_error":
+      "An internal error occurred. Provide request ID {{requestId}} for support.",
     "errors.invalid_request": "The request is invalid.",
     "errors.skill_name_blank": "Skill name cannot be blank.",
-    "errors.skill_name_invalid": "Skill name must use safe slug characters.",
+    "errors.skill_name_invalid":
+      "Skill name must use safe slug characters and cannot be a system-reserved name.",
     "errors.skill_name_too_long": "Skill name is too long.",
     "errors.skill_description_blank": "Skill description cannot be blank.",
-    "errors.skill_description_too_large": "Skill description exceeds the maximum length.",
+    "errors.skill_description_too_large":
+      "Skill description exceeds the maximum length.",
     "errors.skill_name_conflict": "A skill with this name already exists.",
     "errors.skill_not_found": "The skill was not found.",
     "errors.agent_name_blank": "Agent name cannot be blank.",
     "errors.agent_name_conflict": "A role with this name already exists.",
     "errors.agent_not_found": "The agent was not found.",
+    "errors.plugin_not_found": "The plugin was not found.",
+    "errors.plugin_disabled": "Enable the plugin before activating it.",
+    "errors.workflow_name_conflict":
+      "A workflow with this name already exists.",
     "errors.project_not_found": "The project was not found.",
     "errors.task_not_found": "The task was not found.",
-    "errors.resource_in_use": "The resource is currently in use and cannot be deleted.",
-    "errors.worktree_requires_git_repository": "This directory is not a Git repository. Choose a Git repository to create a worktree task.",
-    "errors.task_base_branch_required": "A base branch is required for worktree tasks.",
-    "errors.task_base_branch_not_found": "The base branch {{branchName}} was not found.",
+    "errors.resource_in_use":
+      "The resource is currently in use and cannot be deleted.",
+    "errors.worktree_requires_git_repository":
+      "This directory is not a Git repository. Choose a Git repository to create a worktree task.",
+    "errors.task_base_branch_required":
+      "A base branch is required for worktree tasks.",
+    "errors.task_base_branch_not_found":
+      "The base branch {{branchName}} was not found.",
     "errors.worktree_not_found": "The worktree was not found.",
-    "errors.task_diff_baseline_unavailable": "The task diff baseline is unavailable.",
-    "errors.task_diff_commit_message_blank": "The commit message must not be blank.",
-    "errors.task_diff_too_large": "The task changes are too large to display as a complete diff.",
-    "errors.task_diff_stale": "The task changes have been updated. Refresh before commenting again.",
+    "errors.task_diff_baseline_unavailable":
+      "The task diff baseline is unavailable.",
+    "errors.task_diff_commit_message_blank":
+      "The commit message must not be blank.",
+    "errors.task_diff_too_large":
+      "The task changes are too large to display as a complete diff.",
+    "errors.task_diff_stale":
+      "The task changes have been updated. Refresh before commenting again.",
     "errors.task_diff_comment_not_found": "The diff comment was not found.",
-    "errors.task_diff_comment_invalid": "The diff comment location or content is invalid.",
-    "errors.task_diff_comment_conflict": "The diff comment was changed elsewhere. Refresh and try again.",
+    "errors.task_diff_comment_invalid":
+      "The diff comment location or content is invalid.",
+    "errors.task_diff_comment_conflict":
+      "The diff comment was changed elsewhere. Refresh and try again.",
     "errors.session_not_found": "The session was not found.",
     "errors.agent_cli_not_found": "The selected agent CLI was not found.",
     "errors.agent_runtime_unavailable": "The agent runtime is unavailable.",
     "errors.session_busy": "The session is busy with another operation.",
     "errors.session_stopped": "Load the session before continuing.",
-    "errors.session_load_unsupported": "The selected agent does not support loading sessions.",
-    "errors.session_history_degraded": "This session's history could not be recorded. Resume it before continuing.",
-    "errors.session_agent_unchanged": "This session already runs on that agent.",
-    "errors.permission_request_not_pending": "The permission request is no longer pending.",
-    "errors.permission_option_invalid": "The selected permission option is invalid.",
+    "errors.session_load_unsupported":
+      "The selected agent does not support loading sessions.",
+    "errors.session_history_degraded":
+      "This session's history could not be recorded. Resume it before continuing.",
+    "errors.session_agent_unchanged":
+      "This session already runs on that agent.",
+    "errors.permission_request_not_pending":
+      "The permission request is no longer pending.",
+    "errors.permission_option_invalid":
+      "The selected permission option is invalid.",
     "errors.prompt_empty": "The message cannot be empty.",
     "errors.prompt_too_large": "The message is too large.",
     "errors.task_worktree_unavailable": "The task worktree is unavailable.",
-    "errors.task_project_root_unavailable": "The task project directory is unavailable.",
-    "errors.file_system_path_not_absolute": "Select an absolute path.",
-    "errors.file_system_path_not_directory": "The selected path is not a directory.",
+    "errors.task_project_root_unavailable":
+      "The task project directory is unavailable.",
     "errors.file_system_path_not_found": "The selected path was not found.",
-    "errors.spec_source_invalid": "The Spec source configuration is invalid.",
-    "errors.spec_source_outside_workspace": "The selected Spec directory is outside the current workspace.",
-    "errors.spec_source_workspace_root": "The workspace root cannot be used as a Spec source. Choose a subdirectory such as openspec/specs.",
-    "errors.spec_document_not_found": "The Spec document no longer exists or is outside the configured sources.",
-    "errors.file_system_path_permission_denied": "Permission to read the selected directory was denied.",
-    "errors.worktree_root_not_absolute": "The worktree root must be an absolute path.",
-    "errors.worktree_root_not_directory": "The worktree root must be an existing directory.",
-    "errors.open_location_failed": "Could not open the selected location with {{target}}.",
-    "errors.skill_upload_empty": "The upload is empty.",
-    "errors.skill_upload_too_large": "The upload exceeds the {{maxBytes}} byte limit.",
-    "errors.skill_upload_too_many_files": "The upload exceeds the {{maxFiles}} file limit.",
-    "errors.skill_upload_path_invalid": "An uploaded file path is invalid.",
-    "errors.skill_upload_path_duplicate": "The upload contains a duplicate path.",
+    "errors.spec_document_not_found":
+      "The Spec document no longer exists or is outside the automatically detected sources.",
+    "errors.worktree_root_not_absolute":
+      "The worktree root must be an absolute path.",
+    "errors.worktree_root_not_directory":
+      "The worktree root must be an existing directory.",
+    "errors.open_location_failed":
+      "Could not open the selected location with {{target}}.",
     "errors.skill_manifest_missing": "The skill manifest is missing.",
     "errors.skill_manifest_invalid": "The skill manifest is invalid.",
-    "errors.skill_manifest_name_blank": "The skill manifest name cannot be blank.",
-    "errors.skill_manifest_description_blank": "The skill manifest description cannot be blank.",
+    "errors.skill_manifest_name_blank":
+      "The skill manifest name cannot be blank.",
+    "errors.skill_manifest_description_blank":
+      "The skill manifest description cannot be blank.",
     "errors.skill_manifest_name_invalid": "The skill manifest name is invalid.",
     "errors.skill_folder_conflict": "The skill folder {{name}} already exists.",
-    "errors.skill_manifest_not_found": "No SKILL.md was found in the import source.",
+    "errors.skill_manifest_not_found":
+      "No SKILL.md was found in the import source.",
     "errors.skill_manifest_too_large": "SKILL.md exceeds the maximum size.",
     "errors.too_many_skills": "The import source contains too many skills.",
-    "errors.archive_format_unsupported": "Only ZIP, .skill, .tar.gz, and .tgz archives are supported.",
-    "errors.archive_format_mismatch": "The archive contents do not match its extension.",
+    "errors.archive_format_unsupported":
+      "Only ZIP, .skill, .tar.gz, and .tgz archives are supported.",
+    "errors.archive_format_mismatch":
+      "The archive contents do not match its extension.",
     "errors.archive_corrupt": "The archive is corrupt or unreadable.",
-    "errors.archive_encrypted_unsupported": "Encrypted archives are not supported.",
-    "errors.archive_special_entry_unsupported": "The archive contains an unsafe special entry.",
-    "errors.archive_path_encoding_invalid": "The archive contains an invalid path encoding.",
-    "errors.archive_path_case_conflict": "Source paths would conflict on another supported platform.",
+    "errors.archive_encrypted_unsupported":
+      "Encrypted archives are not supported.",
+    "errors.archive_special_entry_unsupported":
+      "The archive contains an unsafe special entry.",
+    "errors.archive_path_encoding_invalid":
+      "The archive contains an invalid path encoding.",
+    "errors.archive_path_case_conflict":
+      "Source paths would conflict on another supported platform.",
     "errors.path_segment_too_long": "A file path segment is too long.",
     "errors.path_too_long": "A file path is too long.",
     "errors.path_too_deep": "The folder nesting is too deep.",
-    "errors.archive_expansion_ratio_exceeded": "The archive exceeds the safe expansion limit.",
+    "errors.archive_expansion_ratio_exceeded":
+      "The archive exceeds the safe expansion limit.",
     "errors.import_preparation_timeout": "Import preparation timed out.",
     "errors.import_session_expired": "The import session has expired.",
     "errors.import_session_cancelled": "The import session was cancelled.",
-    "errors.import_session_commit_in_progress": "The import is running and cannot be cancelled.",
-    "errors.import_session_already_committed": "This import session was committed with different decisions.",
-    "errors.skill_storage_inconsistent": "The skill database record and package storage are inconsistent.",
+    "errors.import_session_commit_in_progress":
+      "The import is running and cannot be cancelled.",
+    "errors.import_session_already_committed":
+      "This import session was committed with different decisions.",
+    "errors.skill_storage_inconsistent":
+      "The skill database record and package storage are inconsistent.",
     "errors.workflow_name_blank": "Workflow name cannot be blank.",
     "errors.workflow_not_found": "Workflow not found.",
     "errors.workflow_snapshot_not_found": "Workflow snapshot not found.",
-    "errors.workflow_version_already_exists": "That workflow version already exists.",
+    "errors.workflow_version_already_exists":
+      "That workflow version already exists.",
     "errors.workflow_version_invalid": "Workflow version is invalid.",
     "errors.workflow_version_reserved": "That workflow version is reserved.",
     "errors.workflow_cannot_delete_draft": "Cannot delete the workflow draft.",
-    "errors.workflow_cannot_delete_active_version": "Cannot delete the active workflow version.",
+    "errors.workflow_cannot_delete_active_version":
+      "Cannot delete the active workflow version.",
     "errors.workflow_active_runs": "The workflow has active runs.",
-    "errors.workflow_cannot_rollback_to_draft": "Cannot roll back to the workflow draft.",
-    "errors.workflow_cannot_activate_draft": "Cannot activate the workflow draft.",
+    "errors.workflow_cannot_rollback_to_draft":
+      "Cannot roll back to the workflow draft.",
+    "errors.workflow_cannot_activate_draft":
+      "Cannot activate the workflow draft.",
     "errors.workflow_snapshot_in_use": "The workflow snapshot is in use.",
-    "errors.workflow_no_published_snapshot": "The workflow has no published snapshot.",
-    "errors.workflow_run_cannot_use_draft_snapshot": "Workflow runs cannot use a draft snapshot.",
+    "errors.workflow_no_published_snapshot":
+      "The workflow has no published snapshot.",
+    "errors.workflow_run_cannot_use_draft_snapshot":
+      "Workflow runs cannot use a draft snapshot.",
     "errors.workflow_run_not_found": "Workflow run not found.",
     "errors.workflow_run_active": "The workflow run is still active.",
     "errors.workflow_run_graph_parse": "Failed to parse the workflow graph.",
     "errors.workflow_run_validation": "Workflow run validation failed.",
-    "errors.workflow_skill_not_found": "Workflow skill not found.",
+    "errors.workflow_skill_not_found":
+      "A skill required by this workflow is unavailable.",
     "errors.workflow_role_not_found": "Workflow role not found.",
     "errors.workflow_run_start_failed": "Failed to start the workflow run.",
-    "errors.workflow_run_not_restartable": "The workflow run cannot be restarted.",
-    "errors.workflow_run_not_editable": "The workflow run is not editable right now.",
-    "errors.unknown": "An unknown error occurred. Provide request ID {{requestId}} for support.",
-    "errors.transport.network_failure": "Could not connect to Ora.",
+    "errors.workflow_run_not_restartable":
+      "The workflow run cannot be restarted.",
+    "errors.workflow_run_not_editable":
+      "The workflow run is not editable right now.",
+    "errors.unknown":
+      "An unknown error occurred. Provide request ID {{requestId}} for support.",
     "errors.transport.tauri_invoke_failure": "The Desktop command failed.",
-    "errors.transport.malformed_response": "Ora returned an unrecognized response.",
-    "errors.transport.malformed_stream_frame": "Ora returned invalid stream data.",
-    "errors.transport.stream_interrupted": "The stream ended unexpectedly.",
-    "errors.transport.stream_frame_too_large": "A stream message was too large.",
-    "errors.transport.stream_queue_overflow": "The stream consumer could not keep up.",
-    "errors.transport.stream_already_consumed": "This stream has already been consumed.",
-    "errors.transport.unsupported_operation": "This operation is not supported on the current platform.",
+    "errors.transport.malformed_response":
+      "Ora returned an unrecognized response.",
+    "errors.transport.stream_queue_overflow":
+      "The stream consumer could not keep up.",
+    "errors.transport.stream_already_consumed":
+      "This stream has already been consumed.",
     "errors.transport.cancelled": "The operation was cancelled.",
     "common.cancel": "Cancel",
     "common.saving": "Saving...",
+    "common.creating": "Creating...",
     "common.delete": "Delete",
     "common.edit": "Edit",
     "common.settings": "Settings",
@@ -1369,9 +1533,6 @@ export const translationResources = {
     "common.running": "Running",
     "common.stopped": "Stopped",
     "common.stop": "Stop generating",
-    "common.todo": "To do",
-    "common.doing": "In progress",
-    "common.done": "Done",
     "common.retry": "Retry",
     "sidebar.collapse": "Collapse sidebar",
     "sidebar.expand": "Expand sidebar",
@@ -1386,6 +1547,14 @@ export const translationResources = {
     "sidebar.newSession": "New session",
     "sidebar.newTask": "New worktree task",
     "sidebar.newDirectChat": "New task",
+    "sidebar.createInProject": "Create in this project",
+    "sidebar.newWorkflow": "New workflow task",
+    "sidebar.searchWorkflows": "Search workflow templates",
+    "sidebar.noWorkflows": "No published workflows yet.",
+    "sidebar.rename": "Rename",
+    "sidebar.renameTooLong": "Title can be at most 255 characters.",
+    "sidebar.archive": "Archive",
+    "sidebar.archiveSoon": "Archive is coming soon",
     "sidebar.console": "Console",
     "sidebar.openActions": "Open actions",
     "sidebar.navigation": "Main navigation",
@@ -1394,17 +1563,15 @@ export const translationResources = {
     "sidebar.unread": "Unread updates",
     "sidebar.directChatTask": "Direct chat task",
     "sidebar.worktreeTask": "Git worktree task",
+    "sidebar.session": "Session",
     "sidebar.startWorkflow": "Start mounted workflow",
     "sidebar.workflowRun": "Workflow run",
     "workflowRun.loading": "Loading run…",
     "workflowRun.placeholderTitle": "Workflow run workspace",
     "workflowRun.placeholderSubtitle": "Run workspace",
-    "workflowRun.placeholderBody": "Follow the focused act on Theater, or survey the full path on Overview.",
+    "workflowRun.placeholderBody":
+      "Follow the focused act on Theater, or survey the full path on Overview.",
     "appEvents.connecting": "Connecting to the application…",
-    "appEvents.multipleClients.title": "The application is open elsewhere",
-    "appEvents.multipleClients.description": "Ora can be used in one page at a time. Close the other page and this page will enter automatically.",
-    "appEvents.ownershipUnavailable.title": "Browser coordination is unavailable",
-    "appEvents.ownershipUnavailable.description": "Ora requires Web Locks to run safely. Upgrade your browser and try again.",
     "workflowRun.field.status": "Status",
     "workflowRun.field.nodes": "Nodes",
     "workflowRun.field.progress": "Progress",
@@ -1421,7 +1588,8 @@ export const translationResources = {
     "workflowRun.runAgainAction": "Run again",
     "workflowRun.stopAction": "Stop",
     "workflowRun.stopTitle": "Stop this run?",
-    "workflowRun.stopDescription": "This immediately stops “{{name}}”. Finished nodes stay; unfinished work cannot continue.",
+    "workflowRun.stopDescription":
+      "This immediately stops “{{name}}”. Finished nodes stay; unfinished work cannot continue.",
     "workflowRun.stopConfirmAction": "Stop run",
     "workflowRun.stopping": "Stopping…",
     "workflowRun.missing": "This run could not be found.",
@@ -1431,40 +1599,50 @@ export const translationResources = {
     "workflowRun.theater.path": "Execution path",
     "workflowRun.theater.instruction": "Instruction",
     "workflowRun.theater.empty": "This run has no nodes to show.",
-    "workflowRun.theater.parallelHint": "{{count}} in parallel · {{index}}/{{count}} — drag or pick to switch",
+    "workflowRun.theater.parallelHint":
+      "{{count}} in parallel · {{index}}/{{count}} — drag or pick to switch",
     "workflowRun.theater.parallelSwitch": "Switch parallel nodes",
     "workflowRun.theater.parallelPrev": "Previous parallel node",
     "workflowRun.theater.parallelNext": "Next parallel node",
     "workflowRun.theater.parallelCount": "{{count}} parallel",
     "workflowRun.theater.focusAct": "Focus {{name}}",
-    "workflowRun.theater.parallelDragHint": "Drag sideways to switch · tap to open details",
+    "workflowRun.theater.parallelDragHint":
+      "Drag sideways to switch · tap to open details",
     "workflowRun.theater.returnOverviewHint": "Press Esc for Overview",
     "workflowRun.theater.inspectorHint": "Click the card to open act details",
-    "workflowRun.theater.hitlHint": "Collapse the input panel to open act details from the card",
+    "workflowRun.theater.hitlHint":
+      "Collapse the input panel to open act details from the card",
     "workflowRun.conversation.label": "Node conversation",
     "workflowRun.conversation.open": "View node conversation",
     "workflowRun.conversation.backToAct": "Return to the act summary",
     "workflowRun.conversation.sessionMode": "Node conversation",
     "workflowRun.conversation.nodeInput": "Node input",
     "workflowRun.conversation.agentReply": "Agent",
-    "workflowRun.conversation.inputPending": "Input appears here after this node starts.",
+    "workflowRun.conversation.inputPending":
+      "Input appears here after this node starts.",
     "workflowRun.conversation.waiting": "Agent is working",
     "workflowRun.conversation.empty": "No messages yet",
-    "workflowRun.conversation.hiddenActivity": "{{count}} process messages hidden",
+    "workflowRun.conversation.hiddenActivity":
+      "{{count}} process messages hidden",
     "workflowRun.conversation.userAnchorLabel": "User message {{index}}",
     "workflowRun.conversation.agentAnchorLabel": "Agent message {{index}}",
     "workflowRun.result.title.succeeded": "Run complete",
     "workflowRun.result.title.failed": "Run failed",
     "workflowRun.result.title.cancelled": "Cancelled",
-    "workflowRun.result.body.succeeded": "This workflow run finished successfully. Review acts on the path, or use Run again in the header.",
-    "workflowRun.result.body.failed": "The run ended after a step failed. Open the path for the failing node and details.",
-    "workflowRun.result.body.cancelled": "The run was stopped. Completed steps remain available on the path.",
+    "workflowRun.result.body.succeeded":
+      "This workflow run finished successfully. Review acts on the path, or use Run again in the header.",
+    "workflowRun.result.body.failed":
+      "The run ended after a step failed. Open the path for the failing node and details.",
+    "workflowRun.result.body.cancelled":
+      "The run was stopped. Completed steps remain available on the path.",
     "workflowRun.result.showOverview": "Show Overview",
     "workflowRun.result.openArtifacts": "Open recent outcomes",
-    "workflowRun.result.pathHint": "Use Result or a path chip to switch review; Run again stays in the header.",
+    "workflowRun.result.pathHint":
+      "Use Result or a path chip to switch review; Run again stays in the header.",
     "workflowRun.result.pathChip": "Result",
     "workflowRun.result.finishedToastTitle": "Run finished",
-    "workflowRun.result.finishedToastDescription": "Open Theater to see the result summary.",
+    "workflowRun.result.finishedToastDescription":
+      "Open Theater to see the result summary.",
     "workflowRun.result.finishedToastAction": "View result",
     "workflowRun.inspector.label": "Act details",
     "workflowRun.inspector.title": "Act details",
@@ -1473,15 +1651,18 @@ export const translationResources = {
     "workflowRun.inspector.execution": "Execution",
     "workflowRun.inspector.input": "Input",
     "workflowRun.inspector.output": "Output",
-    "workflowRun.inspector.ioEmpty": "No runtime input/output for this step yet",
+    "workflowRun.inspector.ioEmpty":
+      "No runtime input/output for this step yet",
     "workflowRun.inspector.ioExpand": "Expand",
     "workflowRun.inspector.ioCollapse": "Collapse",
     "workflowRun.inspector.selectHint": "Synced with the focused stage act",
     "workflowRun.inspector.empty": "No act focused",
-    "workflowRun.inspector.emptyHint": "Pick a step from the path above to see its settings and outcomes.",
+    "workflowRun.inspector.emptyHint":
+      "Pick a step from the path above to see its settings and outcomes.",
     "workflowRun.inspector.collapse": "Close act details",
     "workflowRun.inspector.expand": "Expand act details",
-    "workflowRun.inspector.resize": "Drag to resize act details; double-click to reset; drag narrow to close",
+    "workflowRun.inspector.resize":
+      "Drag to resize act details; double-click to reset; drag narrow to close",
     "workflowRun.inspector.skillOpen": "View brief for skill “{{name}}”",
     "workflowRun.inspector.roleOpen": "View brief for role “{{name}}”",
     "workflowRun.inspector.mcpOpen": "View brief for MCP “{{name}}”",
@@ -1492,13 +1673,15 @@ export const translationResources = {
     "workflowRun.inspector.discardDraft": "Discard",
     "workflowRun.artifacts.title": "Outcomes",
     "workflowRun.artifacts.countBadge": "{{count}} outcomes",
-    "workflowRun.artifacts.empty": "Outputs will appear here when this step produces them.",
+    "workflowRun.artifacts.empty":
+      "Outputs will appear here when this step produces them.",
     "workflowRun.artifacts.kind.text": "Text",
     "workflowRun.artifacts.kind.markdown": "Markdown",
     "workflowRun.artifacts.kind.file": "File",
     "workflowRun.artifacts.kind.diff": "Diff",
     "workflowRun.overview.label": "Workflow run overview",
-    "workflowRun.overview.hint": "Click a node to return to Theater focused on that step",
+    "workflowRun.overview.hint":
+      "Click a node to return to Theater focused on that step",
     "workflowRun.nodeStatus.idle": "Idle",
     "workflowRun.status.pending": "Pending",
     "workflowRun.status.running": "Running",
@@ -1520,10 +1703,13 @@ export const translationResources = {
     "workflowRun.hitl.chooseHint": "Pick an option to continue",
     "workflowRun.hitl.chooseRequired": "Choose “{{label}}”",
     "workflowRun.hitl.composerPlaceholder": "Add a note, Enter to send…",
-    "workflowRun.hitl.choiceOnlyPlaceholder": "Pick an option below to continue",
+    "workflowRun.hitl.choiceOnlyPlaceholder":
+      "Pick an option below to continue",
     "workflowRun.hitl.toastTitle": "Input needed",
-    "workflowRun.hitl.toastDescription": "A node is waiting. Find the amber node on Overview, or switch to Theater when ready.",
-    "workflowRun.hitl.toastClarifyDescription": "The model is asking a question. Find the amber node on Overview, or answer on Theater.",
+    "workflowRun.hitl.toastDescription":
+      "A node is waiting. Find the amber node on Overview, or switch to Theater when ready.",
+    "workflowRun.hitl.toastClarifyDescription":
+      "The model is asking a question. Find the amber node on Overview, or answer on Theater.",
     "workflowRun.hitl.toastAction": "Review",
     "workflowRun.hitl.sidebarBadge": "Needs you",
     "workflowRun.hitl.kind.approval": "Approval",
@@ -1536,7 +1722,8 @@ export const translationResources = {
     "workflowRun.status.cancelled": "Cancelled",
     "workflowRun.deployAction": "Deploy to project",
     "workflowRun.deployTitle": "Deploy workflow to project",
-    "workflowRun.deployDescription": "Deploy “{{name}}” to a project: create a pending run with a required name.",
+    "workflowRun.deployDescription":
+      "Deploy “{{name}}” to a project: create a pending run with a required name.",
     "workflowRun.deployPickWorkflow": "Select a workflow first.",
     "workflowRun.deployProject": "Target project",
     "workflowRun.deployProjectEmpty": "Please select a project",
@@ -1550,10 +1737,12 @@ export const translationResources = {
     "workflowRun.deployBaseBranchEmpty": "Select a base branch",
     "workflowRun.deployBaseBranchEmptySearch": "No branches found",
     "workflowRun.deployBaseBranchLoading": "Loading branches…",
-    "workflowRun.deployBaseBranchLoadingHint": "Enumerating branches from the repository. This may take a moment.",
+    "workflowRun.deployBaseBranchLoadingHint":
+      "Enumerating branches from the repository. This may take a moment.",
     "workflowRun.deployBaseBranchRefreshing": "Syncing latest branches…",
     "workflowRun.deployBaseBranchRefresh": "Refresh branch list",
-    "workflowRun.deployBaseBranchUnavailable": "This project has no available base branches.",
+    "workflowRun.deployBaseBranchUnavailable":
+      "This project has no available base branches.",
     "workflowRun.deployRequiredRunName": "Enter a run name.",
     "workflowRun.deployRequiredProject": "Select a target project.",
     "workflowRun.deployRequiredBaseBranch": "Select a base branch.",
@@ -1563,15 +1752,20 @@ export const translationResources = {
     "workflowRun.deployConfirm": "Deploy",
     "workflowRun.deploying": "Deploying…",
     "workflowRun.deployFailed": "Deploy failed.",
-    "workflowRun.deployNoPublishedSnapshot": "This workflow has no published snapshot yet. Publish it first.",
-    "workflowRun.deployAutoPublished": "Published version {{version}} automatically. Continue deploying to a project.",
+    "workflowRun.deployNoPublishedSnapshot":
+      "This workflow has no published snapshot yet. Publish it first.",
+    "workflowRun.deployAutoPublished":
+      "Published version {{version}} automatically. Continue deploying to a project.",
     "workflowRun.startTitle": "Start workflow",
-    "workflowRun.startDescription": "Pick a workflow already mounted on this project and start a run.",
-    "workflowRun.startEmptyMounts": "This project has no mounted workflows yet. Deploy one from Settings → Workflow.",
+    "workflowRun.startDescription":
+      "Pick a workflow already mounted on this project and start a run.",
+    "workflowRun.startEmptyMounts":
+      "This project has no mounted workflows yet. Deploy one from Settings → Workflow.",
     "workflowRun.startDefinition": "Mounted workflow",
     "workflowRun.startDefinitionPlaceholder": "Choose a workflow…",
     "workflowRun.kickoffInput": "Kickoff input (optional)",
-    "workflowRun.kickoffPlaceholder": "e.g. Review uncommitted changes on this branch",
+    "workflowRun.kickoffPlaceholder":
+      "e.g. Review uncommitted changes on this branch",
     "workflowRun.startConfirm": "Start",
     "workflowRun.starting": "Starting…",
     "workflowRun.startFailed": "Failed to start.",
@@ -1585,18 +1779,22 @@ export const translationResources = {
     "account.switchChinese": "简体中文",
     "settings.productName": "Ora Agent IDE",
     "settings.prototypeLabel": "Prototype settings",
-    "settings.description": "Configure Ora appearance, roles, skills, models, and agent execution policies.",
+    "settings.description":
+      "Configure Ora appearance, roles, skills, models, and agent execution policies.",
     "settings.nav.appearance": "Appearance",
     "settings.nav.roles": "Roles",
     "settings.nav.skills": "Skills",
     "settings.nav.plugins": "Plugins",
     "settings.nav.workflow": "Workflows",
     "settings.workflow.nodes": "Nodes",
-    "settings.workflow.nodesHint": "Click to add a node, then connect the execution order.",
+    "settings.workflow.nodesHint":
+      "Click to add a node, then connect the execution order.",
     "settings.workflow.add": "Add",
     "settings.workflow.addNode": "Add workflow node",
-    "settings.workflow.startAlreadyPresent": "The workflow already has a start node",
-    "settings.workflow.dragNodeHint": "Drag onto the canvas or click to add at the center",
+    "settings.workflow.startAlreadyPresent":
+      "The workflow already has a start node",
+    "settings.workflow.dragNodeHint":
+      "Drag onto the canvas or click to add at the center",
     "settings.workflow.library": "Workflows",
     "settings.workflow.workflowCount": "{{count}} workflows",
     "settings.workflow.searchWorkflows": "Search workflows",
@@ -1611,40 +1809,52 @@ export const translationResources = {
     "settings.workflow.importWorkflow": "Import workflow",
     "settings.workflow.exportWorkflow": "Export workflow",
     "settings.workflow.importHint": "Supports Ora workflow JSON files",
-    "settings.workflow.importError": "Import failed. Select a valid workflow JSON file.",
-    "settings.workflow.importPublishSuccess": "Imported “{{name}}” and published version {{version}}",
+    "settings.workflow.importError":
+      "Import failed. Select a valid workflow JSON file.",
+    "settings.workflow.importPublishSuccess":
+      "Imported “{{name}}” and published version {{version}}",
     "settings.workflow.exportError": "The workflow file could not be exported.",
     "settings.workflow.noWorkflows": "No matching workflows",
     "settings.workflow.deleteWorkflowTitle": "Delete “{{name}}”?",
-    "settings.workflow.deleteWorkflowDescription": "This removes the workflow from the current mock data and cannot be undone.",
+    "settings.workflow.deleteWorkflowDescription":
+      "This removes the workflow from the current mock data and cannot be undone.",
     "settings.workflow.emptyTitle": "No workflows yet",
-    "settings.workflow.emptyDescription": "Create or import a workflow to start arranging nodes on the canvas.",
+    "settings.workflow.emptyDescription":
+      "Create or import a workflow to start arranging nodes on the canvas.",
     "settings.workflow.canvas": "Workflow canvas",
     "settings.workflow.connections": "Workflow connections",
     "settings.workflow.canvasControls": "Canvas view controls",
     "settings.workflow.collapseLibrary": "Collapse workflow library",
     "settings.workflow.expandLibrary": "Expand workflow library",
-    "settings.workflow.resizeLibrary": "Resize workflow library; double-click to reset its width",
+    "settings.workflow.resizeLibrary":
+      "Resize workflow library; double-click to reset its width",
     "settings.workflow.closeConfiguration": "Collapse node configuration",
     "settings.workflow.expandConfiguration": "Expand node configuration",
-    "settings.workflow.resizeConfiguration": "Resize node configuration; double-click to reset its width",
+    "settings.workflow.resizeConfiguration":
+      "Resize node configuration; double-click to reset its width",
     "settings.workflow.zoomOut": "Zoom out",
     "settings.workflow.zoomIn": "Zoom in",
     "settings.workflow.fitView": "Fit workflow to view",
     "settings.workflow.resetView": "Reset canvas view",
     "settings.workflow.minimap": "Workflow minimap",
-    "settings.workflow.canvasHint": "Left-drag to box-select nodes · Middle-drag to pan · Scroll to zoom · Nodes snap to grid",
+    "settings.workflow.canvasHint":
+      "Left-drag to box-select nodes · Middle-drag to pan · Scroll to zoom · Nodes snap to grid",
     "settings.workflow.connectTo": "Connect to {{name}}",
     "settings.workflow.connectFrom": "Connect from {{name}}",
-    "settings.workflow.selectConnection": "Select connection from {{source}} to {{target}}",
-    "settings.workflow.moveConnectionSource": "Move connection source: {{name}}",
-    "settings.workflow.moveConnectionTarget": "Move connection target: {{name}}",
+    "settings.workflow.selectConnection":
+      "Select connection from {{source}} to {{target}}",
+    "settings.workflow.moveConnectionSource":
+      "Move connection source: {{name}}",
+    "settings.workflow.moveConnectionTarget":
+      "Move connection target: {{name}}",
     "settings.workflow.deleteNamed": "Delete {{name}}",
     "settings.workflow.immediate": "Run immediately",
     "settings.workflow.configuration": "Configuration",
-    "settings.workflow.selectNodeHint": "Select a node to edit its configuration",
+    "settings.workflow.selectNodeHint":
+      "Select a node to edit its configuration",
     "settings.workflow.noSelection": "No node selected",
-    "settings.workflow.noSelectionHint": "Select a card on the canvas or start a mock preview.",
+    "settings.workflow.noSelectionHint":
+      "Select a card on the canvas or start a mock preview.",
     "settings.workflow.nodeSuffix": "{{type}} node",
     "settings.workflow.section.advanced": "Advanced settings",
     "settings.workflow.section.inputVariables": "Input variables",
@@ -1657,7 +1867,8 @@ export const translationResources = {
     "settings.workflow.section.availableVariables": "Available variables",
     "settings.workflow.start.addVariable": "Add variable",
     "settings.workflow.start.removeVariable": "Remove variable",
-    "settings.workflow.start.availableHint": "Reference these context variables in default values.",
+    "settings.workflow.start.availableHint":
+      "Reference these context variables in default values.",
     "settings.workflow.field.operation": "Operation",
     "settings.workflow.field.variable": "Variable {{index}}",
     "settings.workflow.field.operator": "Condition {{index}}",
@@ -1670,7 +1881,8 @@ export const translationResources = {
     "settings.workflow.condition.logicAnd": "Match all conditions",
     "settings.workflow.condition.logicOr": "Match any condition",
     "settings.workflow.condition.not": "NOT",
-    "settings.workflow.condition.toggleNot": "Toggle NOT on condition {{index}}",
+    "settings.workflow.condition.toggleNot":
+      "Toggle NOT on condition {{index}}",
     "settings.workflow.condition.addRule": "Add condition",
     "settings.workflow.condition.removeRule": "Remove condition",
     "settings.workflow.condition.addBranch": "Add branch",
@@ -1681,7 +1893,8 @@ export const translationResources = {
     "settings.workflow.condition.valuePlaceholder": "e.g. 0",
     "settings.workflow.tool.addParameter": "Add parameter",
     "settings.workflow.tool.removeParameter": "Remove parameter",
-    "settings.workflow.tool.noOperations": "No operations available for this tool",
+    "settings.workflow.tool.noOperations":
+      "No operations available for this tool",
     "settings.workflow.field.waitStrategy": "Wait strategy",
     "settings.workflow.field.failureStrategy": "Failure strategy",
     "settings.workflow.field.waitCount": "Completion count",
@@ -1693,8 +1906,10 @@ export const translationResources = {
     "settings.workflow.junction.waitCount": "At least N complete",
     "settings.workflow.junction.failFast": "Fail if any fails",
     "settings.workflow.junction.collectResults": "Collect results and continue",
-    "settings.workflow.loop.exitConditionPlaceholder": "e.g. verification.status == passed",
-    "settings.workflow.subflow.hint": "Subflows encapsulate reusable complex business steps. Effective once the execution engine lands.",
+    "settings.workflow.loop.exitConditionPlaceholder":
+      "e.g. verification.status == passed",
+    "settings.workflow.subflow.hint":
+      "Subflows encapsulate reusable complex business steps. Effective once the execution engine lands.",
     "settings.workflow.field.name": "Name",
     "settings.workflow.field.description": "Description",
     "settings.workflow.characterCount": "{{count}}/{{max}}",
@@ -1707,8 +1922,10 @@ export const translationResources = {
     "settings.workflow.publishedVersion": "Published version",
     "settings.workflow.activeVersion": "Active",
     "settings.workflow.activateVersion": "Make this version active",
-    "settings.workflow.activateVersionSuccess": "Made {{version}} the active version",
-    "settings.workflow.previewingActiveVersion": "This is the active version used by deploy.",
+    "settings.workflow.activateVersionSuccess":
+      "Made {{version}} the active version",
+    "settings.workflow.previewingActiveVersion":
+      "This is the active version used by deploy.",
     "settings.workflow.restoreVersion": "Restore this version",
     "settings.workflow.save": "Save",
     "settings.workflow.saving": "Saving…",
@@ -1718,8 +1935,10 @@ export const translationResources = {
     "settings.workflow.saveError": "Failed to save the workflow.",
     "settings.workflow.publish": "Publish",
     "settings.workflow.publishTitle": "Publish workflow",
-    "settings.workflow.publishDescription": "Publishing saves the current draft as an immutable version.",
-    "settings.workflow.publishVersionPlaceholder": "Version name (optional; auto-generated when empty)",
+    "settings.workflow.publishDescription":
+      "Publishing saves the current draft as an immutable version.",
+    "settings.workflow.publishVersionPlaceholder":
+      "Version name (optional; auto-generated when empty)",
     "settings.workflow.publishError": "Failed to publish the workflow.",
     "settings.workflow.publishSuccess": "Published version {{version}}",
     "settings.workflow.createError": "Failed to create the workflow.",
@@ -1730,7 +1949,8 @@ export const translationResources = {
     "settings.workflow.restoreError": "Failed to restore the version.",
     "settings.workflow.deleteVersion": "Delete version {{version}}",
     "settings.workflow.deleteVersionConfirmTitle": "Delete this version?",
-    "settings.workflow.deleteVersionConfirmDescription": "This will permanently delete the published version.",
+    "settings.workflow.deleteVersionConfirmDescription":
+      "This will permanently delete the published version.",
     "settings.workflow.deleteVersionError": "Failed to delete the version.",
     "settings.workflow.deleteVersionSuccess": "Deleted version {{version}}",
     "settings.workflow.field.model": "Model",
@@ -1740,7 +1960,8 @@ export const translationResources = {
     "settings.workflow.field.agentModel": "Agent model",
     "settings.workflow.field.role": "Role",
     "settings.workflow.nodeParameters": "Configured parameters",
-    "settings.workflow.searchAvailableAgentModels": "Search available Agent models",
+    "settings.workflow.searchAvailableAgentModels":
+      "Search available Agent models",
     "settings.workflow.noAvailableAgentModels": "No available Agent models",
     "settings.workflow.searchAvailableRoles": "Search available Roles",
     "settings.workflow.noAvailableRoles": "No available Roles",
@@ -1763,14 +1984,17 @@ export const translationResources = {
     "settings.workflow.removeMcp": "Remove {{name}}",
     "settings.workflow.field.prompt": "Custom prompt",
     "settings.workflow.deleteNode": "Delete node",
-    "settings.workflow.previewInput": "Review uncommitted changes in the current workspace",
-    "settings.workflow.mockNotice": "Uses mock data only and does not execute real tools",
+    "settings.workflow.previewInput":
+      "Review uncommitted changes in the current workspace",
+    "settings.workflow.mockNotice":
+      "Uses mock data only and does not execute real tools",
     "settings.workflow.closePreview": "Close test results",
     "settings.workflow.running": "Simulating workflow…",
     "settings.workflow.runningHint": "Executing nodes and collecting output",
     "settings.workflow.runSuccess": "Simulation successful",
     "settings.workflow.runFailed": "Simulation failed",
-    "settings.workflow.runError": "The workflow definition is invalid. Check node configuration and connections.",
+    "settings.workflow.runError":
+      "The workflow definition is invalid. Check node configuration and connections.",
     "settings.workflow.trace": "Execution trace",
     "settings.workflow.output": "Output",
     "settings.workflow.testInput": "Test input",
@@ -1778,21 +2002,26 @@ export const translationResources = {
     "settings.nav.permissions": "Permissions",
     "settings.nav.privacy": "Data & privacy",
     "settings.appearance.title": "Appearance",
-    "settings.appearance.description": "Adjust how Ora looks across desktop and web. Changes apply immediately.",
+    "settings.appearance.description":
+      "Adjust how Ora looks across desktop and web. Changes apply immediately.",
     "settings.appearance.theme": "Theme",
-    "settings.appearance.themeDescription": "Choose a light or dark interface, or follow the operating system.",
+    "settings.appearance.themeDescription":
+      "Choose a light or dark interface, or follow the operating system.",
     "settings.appearance.system": "System",
     "settings.appearance.light": "Light",
     "settings.appearance.dark": "Dark",
     "settings.appearance.language": "Display language",
-    "settings.appearance.languageDescription": "Set the language used by menus, prompts, and the agent workspace.",
+    "settings.appearance.languageDescription":
+      "Set the language used by menus, prompts, and the agent workspace.",
     "settings.appearance.density": "Interface density",
-    "settings.appearance.densityDescription": "Control the information density of workspace lists and settings.",
+    "settings.appearance.densityDescription":
+      "Control the information density of workspace lists and settings.",
     "settings.appearance.comfortable": "Comfortable",
     "settings.appearance.compact": "Compact",
     "common.save": "Save",
     "settings.roles.title": "Roles",
-    "settings.roles.description": "Manage the roles (formerly Agents) available to Ora sessions. Commands use the shared contracts directly.",
+    "settings.roles.description":
+      "Manage the roles (formerly Agents) available to Ora sessions. Commands use the shared contracts directly.",
     "settings.roles.sectionLabel": "Roles",
     "settings.roles.search": "Search name or description",
     "settings.roles.new": "New role",
@@ -1809,11 +2038,13 @@ export const translationResources = {
     "settings.roles.descriptionPlaceholder": "One line on what it is for",
     "settings.roles.contentLabel": "Content",
     "settings.roles.contentLoading": "Loading content...",
-    "settings.roles.contentHint": "Markdown is supported; leave empty to clear the content.",
+    "settings.roles.contentHint":
+      "Markdown is supported; leave empty to clear the content.",
     "settings.roles.contentLoadError": "Unable to load content.",
     "settings.roles.import": "Import agent",
     "settings.roles.importTitle": "Import agent",
-    "settings.roles.importDescription": "Choose one local Markdown file. Ora checks for name conflicts before importing.",
+    "settings.roles.importDescription":
+      "Choose one local Markdown file. Ora checks for name conflicts before importing.",
     "settings.roles.importInvalidFile": "Choose a .md Markdown file.",
     "settings.roles.importPreparing": "Reading...",
     "settings.roles.importChoose": "Choose Markdown file",
@@ -1823,11 +2054,14 @@ export const translationResources = {
     "settings.roles.importChooseAnother": "Choose another",
     "settings.roles.importCommitting": "Importing...",
     "settings.roles.importCommit": "Confirm import",
-    "settings.roles.importStale": "The target Agent changed. Review the conflict decision again.",
+    "settings.roles.importStale":
+      "The target Agent changed. Review the conflict decision again.",
     "settings.roles.deleteTitle": "Delete “{{name}}”?",
-    "settings.roles.deleteDescription": "This role will be removed from available commands. This cannot be undone.",
+    "settings.roles.deleteDescription":
+      "This role will be removed from available commands. This cannot be undone.",
     "settings.skills.title": "Skills",
-    "settings.skills.description": "Manage the skills available to Ora sessions. Commands use the shared contracts directly.",
+    "settings.skills.description":
+      "Manage the skills available to Ora sessions. Commands use the shared contracts directly.",
     "settings.skills.sectionLabel": "Skills",
     "settings.skills.search": "Search name or description",
     "settings.skills.new": "New skill",
@@ -1842,18 +2076,25 @@ export const translationResources = {
     "settings.skills.namePlaceholder": "Name this skill",
     "settings.skills.descriptionLabel": "Description",
     "settings.skills.descriptionPlaceholder": "One line on what it is for",
-    "settings.skills.nameInvalid": "Use only letters, numbers, dots, underscores, and hyphens.",
-    "settings.skills.descriptionInvalid": "Description is required and limited to 4096 UTF-8 bytes.",
+    "settings.skills.nameInvalid":
+      "Use only letters, numbers, dots, underscores, and hyphens.",
+    "settings.skills.descriptionInvalid":
+      "Description is required and limited to 4096 UTF-8 bytes.",
     "settings.skills.contentLabel": "Content",
     "settings.skills.contentLoading": "Loading content...",
-    "settings.skills.contentHint": "Markdown is supported; leave empty to clear the content.",
+    "settings.skills.contentHint":
+      "Markdown is supported; leave empty to clear the content.",
     "settings.skills.contentLoadError": "Unable to load content.",
     "settings.skills.import": "Import skill",
     "settings.skills.importTitle": "Import skills",
-    "settings.skills.importDescription": "Select one skill folder or a ZIP, .skill, .tar.gz, or .tgz archive. Ora validates every candidate before importing.",
+    "settings.skills.importDescription":
+      "Select one skill folder or a ZIP, .skill, .tar.gz, or .tgz archive. Ora validates every candidate before importing.",
     "settings.skills.importFolder": "Choose folder",
     "settings.skills.importArchive": "Choose archive",
-    "settings.skills.importProgress": "Processed {{processed}} / {{total}} skills",
+    "settings.skills.importing": "Importing...",
+    "settings.skills.importDiscovered": "{{count}} skill(s)",
+    "settings.skills.importResultLine": "{{name}}: {{reason}}",
+    "settings.skills.importProgress": "Importing... {{processed}} / {{total}}",
     "settings.skills.importFiles": "files",
     "settings.skills.importExisting": "Existing description: {{description}}",
     "settings.skills.importSkip": "Skip",
@@ -1861,39 +2102,105 @@ export const translationResources = {
     "settings.skills.importCommit": "Confirm import",
     "settings.skills.importCompleted": "Import completed.",
     "settings.skills.importAnother": "Import another",
+    "settings.skills.importChooseAnother": "Choose another",
     "settings.skills.deleteTitle": "Delete “{{name}}”?",
-    "settings.skills.deleteDescription": "This skill will be removed from available commands. This cannot be undone.",
+    "settings.skills.deleteDescription":
+      "This skill will be removed from available commands. This cannot be undone.",
+    "settings.skills.unavailable": "Unavailable",
+    "settings.skills.unavailableTitle":
+      "The “{{name}}” skill package is missing",
+    "settings.skills.unavailableDescription":
+      "The skill is still listed, but its local files are gone. Delete it, or re-upload a package with the same name.",
+    "settings.skills.unavailableRestore": "Re-upload",
+    "settings.skills.unavailableAction": "Fix",
+    "settings.skills.unavailableBanner":
+      "{{count}} skill(s) lost local files. Delete or re-upload.",
+    "settings.skills.importRestoreHint":
+      "Import a package named “{{name}}” to restore it.",
+    "settings.skills.importRestoreMissing":
+      "This import does not include a skill named “{{name}}”.",
+    "settings.skills.importCompletedWithFailures":
+      "{{count}} skill(s) failed to import.",
+    "settings.skills.importStatus.ready": "Ready",
+    "settings.skills.importStatus.conflict": "Name conflict",
+    "settings.skills.importStatus.invalid": "Invalid",
+    "settings.skills.importStatus.imported": "Imported",
+    "settings.skills.importStatus.overwritten": "Overwritten",
+    "settings.skills.importStatus.skipped": "Skipped",
+    "settings.skills.importStatus.failed": "Import failed",
+    "settings.skills.importStatus.staleconflict": "Target changed",
+    "settings.skills.importStatus.prepared": "Ready to confirm",
+    "settings.skills.importStatus.committing": "Importing",
+    "settings.skills.importStatus.completed": "Completed",
+    "settings.skills.importStatus.cancelled": "Cancelled",
+    "settings.skills.importStatus.unknown": "Unknown status",
+    "settings.skills.importReason.yaml_invalid": "SKILL.md is not valid YAML.",
+    "settings.skills.importReason.name_missing": "SKILL.md is missing a name.",
+    "settings.skills.importReason.name_invalid":
+      "Skill names may only use letters, numbers, dots, underscores, and hyphens.",
+    "settings.skills.importReason.description_missing":
+      "SKILL.md is missing a description.",
+    "settings.skills.importReason.description_too_large":
+      "The skill description exceeds the maximum length.",
+    "settings.skills.importReason.skill_manifest_too_large":
+      "SKILL.md exceeds the maximum size.",
+    "settings.skills.importReason.invalid_candidate":
+      "This skill is invalid and cannot be imported.",
+    "settings.skills.importReason.decision_missing":
+      "Choose skip or overwrite for the existing skill.",
+    "settings.skills.importReason.skill_storage_error":
+      "The skill files could not be written.",
+    "settings.skills.importReason.skill_repository_error":
+      "The skill record could not be saved.",
+    "settings.skills.importReason.skill_name_invalid":
+      "The skill name is invalid.",
+    "settings.skills.importReason.stale_conflict":
+      "The target skill changed. Import it again.",
+    "settings.skills.importReason.unknown": "Import failed.",
     "settings.skills.marketplacesTitle": "Skill marketplaces",
-    "settings.skills.marketplacesDescription": "Discover public skills or connect organization-specific capabilities on an enterprise network.",
+    "settings.skills.marketplacesDescription":
+      "Discover public skills or connect organization-specific capabilities on an enterprise network.",
     "settings.skills.marketplaceTitle": "SkillHub marketplace",
-    "settings.skills.marketplaceDescription": "Browse the live SkillHub marketplace. Ora validates and installs downloaded ZIP archives automatically.",
+    "settings.skills.marketplaceDescription":
+      "Browse the live SkillHub marketplace. Ora validates and installs downloaded ZIP archives automatically.",
     "settings.skills.marketplacePublicBadge": "Public",
     "settings.skills.marketplaceOpen": "Open marketplace",
     "settings.skills.marketplaceOpening": "Opening...",
-    "settings.skills.marketplaceUnsupported": "The skill marketplace is available in Ora Desktop only.",
-    "settings.skills.marketplaceConnectionFailed": "Unable to open the skill marketplace or read download status. Try again.",
+    "settings.skills.marketplaceConnectionFailed":
+      "Unable to open the skill marketplace or read download status. Try again.",
     "settings.skills.marketplaceDownloading": "Downloading {{fileName}}...",
     "settings.skills.marketplaceSavedTo": "Saved to",
-    "settings.skills.marketplaceOpenFolderFailed": "Could not open the Skill download folder.",
-    "settings.skills.marketplaceDownloadFailed": "Download failed. Try again in the marketplace.",
-    "settings.skills.marketplaceInstalling": "Downloaded {{fileName}}. Installing automatically...",
-    "settings.skills.marketplaceInstallReview": "{{fileName}} needs conflict or invalid-candidate review.",
-    "settings.skills.marketplaceInstalled": "Automatically installed {{count}} skills.",
-    "settings.skills.marketplaceInstallIncomplete": "{{fileName}} was not fully installed. Review the results.",
-    "settings.skills.marketplaceInstallFailed": "Could not install {{fileName}}.",
-    "settings.skills.marketplaceInstallReviewed": "Skill installation processing completed.",
+    "settings.skills.marketplaceOpenFolderFailed":
+      "Could not open the Skill download folder.",
+    "settings.skills.marketplaceDownloadFailed":
+      "Download failed. Try again in the marketplace.",
+    "settings.skills.marketplaceInstalling":
+      "Downloaded {{fileName}}. Installing automatically...",
+    "settings.skills.marketplaceInstallReview":
+      "{{fileName}} needs conflict or invalid-candidate review.",
+    "settings.skills.marketplaceInstalled":
+      "Automatically installed {{count}} skills.",
+    "settings.skills.marketplaceInstallIncomplete":
+      "{{fileName}} was not fully installed. Review the results.",
+    "settings.skills.marketplaceInstallFailed":
+      "Could not install {{fileName}}.",
+    "settings.skills.marketplaceInstallReviewed":
+      "Skill installation processing completed.",
     "settings.skills.huaweiTitle": "Huawei Skill Market",
-    "settings.skills.huaweiDescription": "Browse Huawei's internal Skill Market to discover and connect enterprise skills. Huawei internal network access is required.",
+    "settings.skills.huaweiDescription":
+      "Browse Huawei's internal Skill Market to discover and connect enterprise skills. Huawei internal network access is required.",
     "settings.skills.huaweiBadge": "Enterprise",
     "settings.skills.huaweiOpen": "Open internal Skill Market",
     "settings.plugins.title": "Plugins",
-    "settings.plugins.description": "Work with Ora agents inside the tools you already use. The catalog is prototype data and install state is not persisted.",
+    "settings.plugins.description":
+      "Work with Ora agents inside the tools you already use. The catalog is prototype data and install state is not persisted.",
     "settings.plugins.search": "Search plugins",
     "settings.plugins.clearSearch": "Clear search",
     "settings.plugins.installed": "Installed",
     "settings.plugins.noneInstalled": "No plugins installed yet.",
     "settings.plugins.manageInstalled": "Manage plugins",
-    "settings.plugins.manageDescription": "Enable, disable, or uninstall the plugins you have installed.",
+    "settings.plugins.manageDescription":
+      "Enable, disable, or uninstall the plugins you have installed.",
     "settings.plugins.viewAll": "View all",
     "settings.plugins.viewAllInstalled_one": "View all {{count}} plugin",
     "settings.plugins.viewAllInstalled_other": "View all {{count}} plugins",
@@ -1916,78 +2223,122 @@ export const translationResources = {
     "settings.plugins.disable": "Disable",
     "settings.plugins.enabling": "Enabling",
     "settings.plugins.disabling": "Disabling",
-    "settings.plugins.prompt.opencode.1": "Run a coding task with {{name}} in the terminal",
-    "settings.plugins.prompt.opencode.2": "Have {{name}} review this code change",
+    "settings.plugins.prompt.opencode.1":
+      "Run a coding task with {{name}} in the terminal",
+    "settings.plugins.prompt.opencode.2":
+      "Have {{name}} review this code change",
     "settings.plugins.prompt.opencode.3": "Hand this coding task to {{name}}",
     "settings.plugins.prompt.nga.1": "Invoke {{name}} in the current project",
     "settings.plugins.prompt.nga.2": "Have {{name}} review this change",
     "settings.plugins.prompt.nga.3": "Finish this coding task with {{name}}",
     "settings.plugins.prompt.codeagentcli.1": "Call {{name}} on this task",
-    "settings.plugins.prompt.codeagentcli.2": "Have {{name}} review this change",
-    "settings.plugins.prompt.codeagentcli.3": "Finish this general coding task with {{name}}",
+    "settings.plugins.prompt.codeagentcli.2":
+      "Have {{name}} review this change",
+    "settings.plugins.prompt.codeagentcli.3":
+      "Finish this general coding task with {{name}}",
     "settings.plugins.prompt.claude.1": "Call {{name}} in this session",
-    "settings.plugins.prompt.claude.2": "Have {{name}} review this change with a subagent",
-    "settings.plugins.prompt.claude.3": "Finish this task with a {{name}} skill",
+    "settings.plugins.prompt.claude.2":
+      "Have {{name}} review this change with a subagent",
+    "settings.plugins.prompt.claude.3":
+      "Finish this task with a {{name}} skill",
     "settings.plugins.prompt.codex.1": "Call {{name}} in this session",
-    "settings.plugins.prompt.codex.2": "Have {{name}} do a code review of this change",
+    "settings.plugins.prompt.codex.2":
+      "Have {{name}} do a code review of this change",
     "settings.plugins.prompt.codex.3": "Finish this coding task with {{name}}",
-    "settings.plugins.prompt.rtk.1": "Compress this terminal command's output with {{name}}",
-    "settings.plugins.prompt.rtk.2": "Have {{name}} trim this command-line log before I read it",
-    "settings.plugins.prompt.rtk.3": "Cut this session's token usage with {{name}}",
+    "settings.plugins.prompt.rtk.1":
+      "Compress this terminal command's output with {{name}}",
+    "settings.plugins.prompt.rtk.2":
+      "Have {{name}} trim this command-line log before I read it",
+    "settings.plugins.prompt.rtk.3":
+      "Cut this session's token usage with {{name}}",
     "settings.plugins.prompt.github.1": "Check this PR's status with {{name}}",
-    "settings.plugins.prompt.github.2": "Open a PR for this change with {{name}}",
-    "settings.plugins.prompt.github.3": "Track CI and release status with {{name}}",
-    "settings.plugins.prompt.devtools.1": "Open the page and take a screenshot with {{name}}",
-    "settings.plugins.prompt.devtools.2": "Inspect network requests with {{name}}",
-    "settings.plugins.prompt.devtools.3": "Analyze this page's performance with {{name}}",
-    "settings.plugins.prompt.analytics.1": "Ask {{name}} a product data question",
-    "settings.plugins.prompt.analytics.2": "Have {{name}} assess this change's impact",
-    "settings.plugins.prompt.analytics.3": "Generate a data report with {{name}}",
+    "settings.plugins.prompt.github.2":
+      "Open a PR for this change with {{name}}",
+    "settings.plugins.prompt.github.3":
+      "Track CI and release status with {{name}}",
+    "settings.plugins.prompt.devtools.1":
+      "Open the page and take a screenshot with {{name}}",
+    "settings.plugins.prompt.devtools.2":
+      "Inspect network requests with {{name}}",
+    "settings.plugins.prompt.devtools.3":
+      "Analyze this page's performance with {{name}}",
+    "settings.plugins.prompt.analytics.1":
+      "Ask {{name}} a product data question",
+    "settings.plugins.prompt.analytics.2":
+      "Have {{name}} assess this change's impact",
+    "settings.plugins.prompt.analytics.3":
+      "Generate a data report with {{name}}",
     "settings.plugins.prompt.figma.1": "Read this design file with {{name}}",
-    "settings.plugins.prompt.figma.2": "Check this change against the {{name}} design",
+    "settings.plugins.prompt.figma.2":
+      "Check this change against the {{name}} design",
     "settings.plugins.prompt.figma.3": "Export component specs with {{name}}",
     "settings.plugins.prompt.linear.1": "Look up related issues with {{name}}",
-    "settings.plugins.prompt.linear.2": "Link this change to its {{name}} issue",
+    "settings.plugins.prompt.linear.2":
+      "Link this change to its {{name}} issue",
     "settings.plugins.prompt.linear.3": "Update this task's status in {{name}}",
     "settings.plugins.prompt.notion.1": "Search related docs with {{name}}",
-    "settings.plugins.prompt.notion.2": "Write notes on this change in {{name}}",
-    "settings.plugins.prompt.notion.3": "Update the team knowledge base with {{name}}",
-    "settings.plugins.prompt.slack.1": "Check related discussion in a {{name}} channel",
-    "settings.plugins.prompt.slack.2": "Notify the team about this change via {{name}}",
+    "settings.plugins.prompt.notion.2":
+      "Write notes on this change in {{name}}",
+    "settings.plugins.prompt.notion.3":
+      "Update the team knowledge base with {{name}}",
+    "settings.plugins.prompt.slack.1":
+      "Check related discussion in a {{name}} channel",
+    "settings.plugins.prompt.slack.2":
+      "Notify the team about this change via {{name}}",
     "settings.plugins.prompt.slack.3": "Send a deployment notice with {{name}}",
     "settings.plugins.prompt.postgres.1": "Query this table with {{name}}",
-    "settings.plugins.prompt.postgres.2": "Inspect the schema touched by this change with {{name}}",
+    "settings.plugins.prompt.postgres.2":
+      "Inspect the schema touched by this change with {{name}}",
     "settings.plugins.prompt.postgres.3": "Run a data validation with {{name}}",
     "settings.plugins.prompt.docker.1": "Build this image with {{name}}",
     "settings.plugins.prompt.docker.2": "Check container status with {{name}}",
-    "settings.plugins.prompt.docker.3": "Restart the affected service container with {{name}}",
-    "settings.plugins.prompt.sentry.1": "Check recent production errors with {{name}}",
-    "settings.plugins.prompt.sentry.2": "Trace the error related to this change with {{name}}",
-    "settings.plugins.prompt.sentry.3": "Generate an error trend report with {{name}}",
-    "settings.plugins.prompt.playwright.1": "Run end-to-end tests with {{name}}",
-    "settings.plugins.prompt.playwright.2": "Replay this failing test case with {{name}}",
-    "settings.plugins.prompt.playwright.3": "Add test coverage for this page with {{name}}",
-    "settings.plugins.prompt.jira.1": "Check this sprint's progress in {{name}}",
+    "settings.plugins.prompt.docker.3":
+      "Restart the affected service container with {{name}}",
+    "settings.plugins.prompt.sentry.1":
+      "Check recent production errors with {{name}}",
+    "settings.plugins.prompt.sentry.2":
+      "Trace the error related to this change with {{name}}",
+    "settings.plugins.prompt.sentry.3":
+      "Generate an error trend report with {{name}}",
+    "settings.plugins.prompt.playwright.1":
+      "Run end-to-end tests with {{name}}",
+    "settings.plugins.prompt.playwright.2":
+      "Replay this failing test case with {{name}}",
+    "settings.plugins.prompt.playwright.3":
+      "Add test coverage for this page with {{name}}",
+    "settings.plugins.prompt.jira.1":
+      "Check this sprint's progress in {{name}}",
     "settings.plugins.prompt.jira.2": "Link this change to its {{name}} bug",
     "settings.plugins.prompt.jira.3": "Update this story's status in {{name}}",
-    "settings.plugins.prompt.runbooks.1": "Look up the deploy procedure in {{name}}",
+    "settings.plugins.prompt.runbooks.1":
+      "Look up the deploy procedure in {{name}}",
     "settings.plugins.prompt.runbooks.2": "Check this change against {{name}}",
-    "settings.plugins.prompt.runbooks.3": "Get troubleshooting steps from {{name}}",
+    "settings.plugins.prompt.runbooks.3":
+      "Get troubleshooting steps from {{name}}",
     "settings.plugins.prompt.deploybot.1": "Trigger a deploy with {{name}}",
-    "settings.plugins.prompt.deploybot.2": "Have {{name}} check if this change is ready to ship",
+    "settings.plugins.prompt.deploybot.2":
+      "Have {{name}} check if this change is ready to ship",
     "settings.plugins.prompt.deploybot.3": "Track release status with {{name}}",
-    "settings.plugins.prompt.tokens.1": "Read the current theme tokens with {{name}}",
-    "settings.plugins.prompt.tokens.2": "Check this change uses the right tokens with {{name}}",
-    "settings.plugins.prompt.tokens.3": "Update this component's style tokens with {{name}}",
-    "settings.plugins.overview": "{{summary}}. {{name}} is maintained by {{publisher}} and, once installed, can be called from any agent session without leaving the workspace.",
+    "settings.plugins.prompt.tokens.1":
+      "Read the current theme tokens with {{name}}",
+    "settings.plugins.prompt.tokens.2":
+      "Check this change uses the right tokens with {{name}}",
+    "settings.plugins.prompt.tokens.3":
+      "Update this component's style tokens with {{name}}",
+    "settings.plugins.overview":
+      "{{summary}}. {{name}} is maintained by {{publisher}} and, once installed, can be called from any agent session without leaving the workspace.",
     "settings.plugins.skills": "Skills",
     "settings.plugins.skillSummary": "The toolset contributed by {{name}}.",
     "settings.plugins.toggleSkill": "Enable or disable {{name}}",
     "settings.plugins.details": "Details",
-    "settings.plugins.feature1": "Call the tools and commands {{name}} contributes directly from an agent session.",
-    "settings.plugins.feature2": "Tool calls follow the current permission and execution policy, asking for confirmation when required.",
-    "settings.plugins.feature3": "Reusable across worktree tasks, so it does not need reconfiguring per project.",
-    "settings.plugins.feature4": "Every call is recorded on the session timeline for review and auditing.",
+    "settings.plugins.feature1":
+      "Call the tools and commands {{name}} contributes directly from an agent session.",
+    "settings.plugins.feature2":
+      "Tool calls follow the current permission and execution policy, asking for confirmation when required.",
+    "settings.plugins.feature3":
+      "Reusable across worktree tasks, so it does not need reconfiguring per project.",
+    "settings.plugins.feature4":
+      "Every call is recorded on the session timeline for review and auditing.",
     "settings.plugins.info": "Info",
     "settings.plugins.identifier": "Identifier",
     "settings.plugins.version": "Version",
@@ -2013,62 +2364,85 @@ export const translationResources = {
     "settings.plugins.capability.terminal": "Terminal",
     "settings.plugins.capability.network": "Network",
     "settings.plugins.catalog.opencode": "Open-source terminal coding agent",
-    "settings.plugins.catalog.nga": "Ora's built-in application-scoped coding agent runtime",
-    "settings.plugins.catalog.codeagentcli": "Ora's built-in general-purpose coding agent runtime",
-    "settings.plugins.catalog.claude": "Anthropic's coding agent and skill system",
+    "settings.plugins.catalog.nga":
+      "Ora's built-in application-scoped coding agent runtime",
+    "settings.plugins.catalog.codeagentcli":
+      "Ora's built-in general-purpose coding agent runtime",
+    "settings.plugins.catalog.claude":
+      "Anthropic's coding agent and skill system",
     "settings.plugins.catalog.codex": "OpenAI's coding agent and code review",
-    "settings.plugins.catalog.rtk": "CLI proxy that cuts LLM token usage 60-90% on common dev commands",
+    "settings.plugins.catalog.rtk":
+      "CLI proxy that cuts LLM token usage 60-90% on common dev commands",
     "settings.plugins.catalog.github": "Triage PRs, issues, and CI",
-    "settings.plugins.catalog.devtools": "Debug pages, network, and performance",
-    "settings.plugins.catalog.analytics": "Answer product and business questions",
+    "settings.plugins.catalog.devtools":
+      "Debug pages, network, and performance",
+    "settings.plugins.catalog.analytics":
+      "Answer product and business questions",
     "settings.plugins.catalog.figma": "Read design files and component specs",
     "settings.plugins.catalog.linear": "Query and update engineering issues",
-    "settings.plugins.catalog.notion": "Search and edit the team knowledge base",
-    "settings.plugins.catalog.slack": "Read channel messages and send notifications",
+    "settings.plugins.catalog.notion":
+      "Search and edit the team knowledge base",
+    "settings.plugins.catalog.slack":
+      "Read channel messages and send notifications",
     "settings.plugins.catalog.postgres": "Query databases and inspect schemas",
     "settings.plugins.catalog.docker": "Build images and manage containers",
-    "settings.plugins.catalog.sentry": "Track production errors and stack traces",
-    "settings.plugins.catalog.playwright": "Run end-to-end tests and replay failures",
+    "settings.plugins.catalog.sentry":
+      "Track production errors and stack traces",
+    "settings.plugins.catalog.playwright":
+      "Run end-to-end tests and replay failures",
     "settings.plugins.catalog.jira": "Sync stories, bugs, and sprint progress",
     "settings.plugins.catalog.runbooks": "Look up the team's internal runbooks",
-    "settings.plugins.catalog.deploybot": "Trigger deploys and follow release status",
+    "settings.plugins.catalog.deploybot":
+      "Trigger deploys and follow release status",
     "settings.plugins.catalog.tokens": "Read and update design tokens",
     "settings.permissions.title": "Permissions & execution",
-    "settings.permissions.description": "Define when agents ask before commands and which runtime capabilities are available by default.",
+    "settings.permissions.description":
+      "Define when agents ask before commands and which runtime capabilities are available by default.",
     "settings.permissions.approval": "Approval policy",
-    "settings.permissions.approvalDescription": "Control when an agent requests confirmation before using tools and commands.",
+    "settings.permissions.approvalDescription":
+      "Control when an agent requests confirmation before using tools and commands.",
     "settings.permissions.always": "Ask every time",
     "settings.permissions.risky": "Risky actions only",
     "settings.permissions.trusted": "Trusted workspace",
     "settings.permissions.terminal": "Terminal commands",
-    "settings.permissions.terminalDescription": "Allow agents to run terminal commands in the current workspace.",
+    "settings.permissions.terminalDescription":
+      "Allow agents to run terminal commands in the current workspace.",
     "settings.permissions.files": "File writes",
-    "settings.permissions.filesDescription": "Allow agents to create and modify workspace files.",
+    "settings.permissions.filesDescription":
+      "Allow agents to create and modify workspace files.",
     "settings.permissions.network": "Network access",
-    "settings.permissions.networkDescription": "Allow agents to call external services and download resources.",
+    "settings.permissions.networkDescription":
+      "Allow agents to call external services and download resources.",
     "settings.permissions.timeout": "Command timeout",
-    "settings.permissions.timeoutDescription": "The default maximum runtime for an individual command.",
+    "settings.permissions.timeoutDescription":
+      "The default maximum runtime for an individual command.",
     "settings.permissions.timeoutSeconds": "{{count}}s",
     "settings.permissions.timeoutMinutes": "{{count}} min",
     "settings.permissions.noTimeout": "No limit",
     "settings.privacy.title": "Data & privacy",
-    "settings.privacy.description": "Control local conversation records, diagnostics, and prototype data cleanup.",
+    "settings.privacy.description":
+      "Control local conversation records, diagnostics, and prototype data cleanup.",
     "settings.privacy.worktreeRoot": "Worktree storage location",
-    "settings.privacy.worktreeRootDescription": "New worktrees are stored here. Changing it does not move existing worktrees.",
+    "settings.privacy.worktreeRootDescription":
+      "New worktrees are stored here. Changing it does not move existing worktrees.",
     "settings.privacy.worktreeRootLoading": "Loading…",
     "settings.privacy.changeWorktreeRoot": "Change location",
     "settings.privacy.retention": "History retention",
-    "settings.privacy.retentionDescription": "Choose how long local conversation history is retained by default.",
+    "settings.privacy.retentionDescription":
+      "Choose how long local conversation history is retained by default.",
     "settings.privacy.days30": "30 days",
     "settings.privacy.days90": "90 days",
     "settings.privacy.forever": "Keep forever",
     "settings.privacy.diagnostics": "Share diagnostics",
-    "settings.privacy.diagnosticsDescription": "Send anonymous performance and error data to help improve Ora.",
+    "settings.privacy.diagnosticsDescription":
+      "Send anonymous performance and error data to help improve Ora.",
     "settings.privacy.clearHistory": "Clear conversation history",
-    "settings.privacy.clearHistoryDescription": "Clear all Agent conversations held in memory for this runtime without removing projects or worktrees.",
+    "settings.privacy.clearHistoryDescription":
+      "Clear all Agent conversations held in memory for this runtime without removing projects or worktrees.",
     "settings.privacy.clear": "Clear history",
     "settings.privacy.clearTitle": "Clear all conversation history?",
-    "settings.privacy.clearConfirm": "All Agent conversations held in memory for this runtime will be cleared.",
+    "settings.privacy.clearConfirm":
+      "All Agent conversations held in memory for this runtime will be cleared.",
     "dialog.addProject": "Add project",
     "dialog.editProject": "Edit project",
     "dialog.projectDescription": "Connect a repository to the Ora workspace.",
@@ -2080,22 +2454,26 @@ export const translationResources = {
     "dialog.pathSelectionError": "Unable to open the path picker. Try again.",
     "dialog.editWorktree": "Edit worktree",
     "dialog.createWorktree": "Create worktree task",
-    "dialog.worktreeDescription": "Make agent focus on one task in an isolated worktree.",
+    "dialog.worktreeDescription":
+      "Make agent focus on one task in an isolated worktree.",
     "dialog.editTask": "Edit task",
     "dialog.workspaceMode": "Workspace mode",
     "dialog.workspaceModeWorktree": "Worktree (Git branch)",
     "dialog.workspaceModeProjectRoot": "Direct chat (project root)",
-    "dialog.worktreeRequiresGitRepository": "This directory is not a Git repository. Choose a Git repository to create a worktree task.",
+    "dialog.worktreeRequiresGitRepository":
+      "This directory is not a Git repository. Choose a Git repository to create a worktree task.",
     "dialog.saveTask": "Save task",
     "dialog.createTask": "Create task",
     "dialog.taskTitle": "Task title",
     "dialog.baseBranch": "Base branch",
-    "dialog.status": "Status",
     "dialog.required": "Complete all required fields.",
+    "dialog.optionsLoading":
+      "Options are still loading. Try again in a moment.",
     "dialog.submitError": "The request failed. Try again.",
     "dialog.editSession": "Edit session",
     "dialog.startSession": "Start agent session",
-    "dialog.sessionDescription": "Choose the agent identity and the session lifecycle state.",
+    "dialog.sessionDescription":
+      "Choose the agent identity and the session lifecycle state.",
     "dialog.saveSession": "Save session",
     "dialog.agent": "Agent",
     "dialog.editWorkflowRun": "Rename workflow run",
@@ -2103,19 +2481,28 @@ export const translationResources = {
     "dialog.workflowRunName": "Run name",
     "dialog.workflowRunNamePlaceholder": "e.g. Code review #2",
     "delete.title": "Delete “{{name}}”?",
-    "delete.projectDescription": "All task data, session history, Git worktrees, and ora/* branches in this project will be deleted. Uncommitted changes and commits that exist only on those branches will be permanently lost. This cannot be undone.",
-    "delete.taskDescription": "This task's session history, Git worktree, and its ora/* branch will be deleted. Uncommitted changes and commits that exist only on that branch will be permanently lost. This cannot be undone.",
-    "delete.directTaskDescription": "Only this session's history is deleted; the project directory itself is untouched. This cannot be undone.",
-    "delete.sessionDescription": "This agent session will be permanently deleted. This cannot be undone.",
-    "delete.workflowRunDescription": "This workflow run and its task's Git worktree and ora/* branch will be deleted; uncommitted changes will be permanently lost. If it is still active it is cancelled first; other runs in the same project are unaffected.",
+    "delete.projectDescription":
+      "All task data, session history, Git worktrees, and ora/* branches in this project will be deleted. Uncommitted changes and commits that exist only on those branches will be permanently lost. This cannot be undone.",
+    "delete.taskDescription":
+      "This task's session history, Git worktree, and its ora/* branch will be deleted. Uncommitted changes and commits that exist only on that branch will be permanently lost. This cannot be undone.",
+    "delete.directTaskDescription":
+      "Only this session's history is deleted; the project directory itself is untouched. This cannot be undone.",
+    "delete.sessionDescription":
+      "This agent session will be permanently deleted. This cannot be undone.",
+    "delete.workflowRunDescription":
+      "This workflow run and its task's Git worktree and ora/* branch will be deleted; uncommitted changes will be permanently lost. If it is still active it is cancelled first; other runs in the same project are unaffected.",
     "delete.deleting": "Deleting...",
     "delete.failed": "Unable to delete. Stop any running session first.",
-    "delete.runningSession": "The direct-chat session is still stopping. Try deleting again in a moment.",
+    "delete.runningSession":
+      "The direct-chat session is still stopping. Try deleting again in a moment.",
     "workspace.overview": "Workspace overview",
     "workspace.defaultTitle": "Your agent workspace",
-    "workspace.taskHint": "Select an existing session in the sidebar or start a new one from the task menu.",
-    "workspace.projectHint": "Choose a worktree task to review its sessions, or create focused work from the project menu.",
-    "workspace.emptyHint": "Add a project to organize worktrees and agent sessions.",
+    "workspace.taskHint":
+      "Select an existing session in the sidebar or start a new one from the task menu.",
+    "workspace.projectHint":
+      "Choose a worktree task to review its sessions, or create focused work from the project menu.",
+    "workspace.emptyHint":
+      "Add a project to organize worktrees and agent sessions.",
     "workspace.repository": "Repository",
     "workspace.agentSessions": "Agent sessions",
     "workspace.sessionCount": "{{count}} sessions",
@@ -2138,7 +2525,8 @@ export const translationResources = {
     "diff.commitAndPush": "Commit and push",
     "diff.committing": "Committing…",
     "diff.commitDialogTitle": "Commit task changes",
-    "diff.commitDialogDescription": "All staged, unstaged, and untracked files will be included in this commit.",
+    "diff.commitDialogDescription":
+      "All staged, unstaged, and untracked files will be included in this commit.",
     "diff.commitMessage": "Commit message",
     "diff.commitMessagePlaceholder": "Summarize these changes",
     "diff.commitShortcut": "Ctrl+Enter",
@@ -2148,7 +2536,8 @@ export const translationResources = {
     "diff.push": "Push",
     "diff.pushing": "Pushing…",
     "diff.pushDialogTitle": "Push task branch?",
-    "diff.pushDialogDescription": "The current task branch will be pushed to origin and configured as its upstream.",
+    "diff.pushDialogDescription":
+      "The current task branch will be pushed to origin and configured as its upstream.",
     "diff.pushSucceeded": "Pushed {{branch}} to {{remote}}",
     "diff.refresh": "Refresh changes",
     "diff.refreshing": "Refreshing changes",
@@ -2159,9 +2548,6 @@ export const translationResources = {
     "review.panels": "Workspace review panels",
     "specs.specs": "Specs",
     "specs.refresh": "Refresh Specs",
-    "specs.configure": "Configure Spec sources",
-    "specs.manageSources": "Manage sources",
-    "specs.currentWorkspaceLabel": "Current workspace",
     "specs.filter": "Filter by file name or path…",
     "specs.loading": "Loading Specs…",
     "specs.empty": "No Spec documents are available in this context",
@@ -2169,22 +2555,9 @@ export const translationResources = {
     "specs.preview": "Markdown preview",
     "specs.source": "View source",
     "specs.resizeTree": "Resize Spec tree",
-    "specs.truncated": "The scan limit was reached, so the catalog may be incomplete.",
+    "specs.truncated":
+      "The scan limit was reached, so the catalog may be incomplete.",
     "specs.localImageBlocked": "Local image blocked",
-    "specs.sourcesTitle": "Spec sources",
-    "specs.configuredSources": "Configured directories",
-    "specs.sourcesDescription": "These settings apply to the project root and every worktree. When adding a directory, choose a subfolder inside the current workspace.",
-    "specs.noSources": "No Spec sources are configured.",
-    "specs.addDirectory": "Add directory",
-    "specs.custom": "Custom",
-    "specs.customName": "Custom source name",
-    "specs.toggleSource": "Enable or disable source",
-    "specs.removeSource": "Remove manual source",
-    "specs.origin.default": "Default",
-    "specs.origin.discovered": "Discovered",
-    "specs.origin.manual": "Manual",
-    "specs.availability.available": "Available",
-    "specs.availability.missing": "Missing in this context",
     "files.explorer": "Explorer",
     "files.search": "Search",
     "files.refresh": "Refresh workspace files",
@@ -2197,10 +2570,13 @@ export const translationResources = {
     "files.searching": "Searching…",
     "files.noResults": "No search results",
     "files.resultsTruncated": "Too many results; showing the first 500.",
-    "files.largeFilePlainText": "Large file: syntax highlighting is disabled for smoother viewing.",
+    "files.largeFilePlainText":
+      "Large file: syntax highlighting is disabled for smoother viewing.",
     "files.resizePanel": "Resize file explorer",
-    "files.addLineSelectionToChat": "Add lines {{startLine}}-{{endLine}} to AI chat",
-    "files.lineSelectionAdded": "Added lines {{startLine}}-{{endLine}} to AI chat",
+    "files.addLineSelectionToChat":
+      "Add lines {{startLine}}-{{endLine}} to AI chat",
+    "files.lineSelectionAdded":
+      "Added lines {{startLine}}-{{endLine}} to AI chat",
     "files.selectLine": "Select line {{line}}",
     "diff.fileTree": "Changed file tree",
     "diff.toggleFileTree": "Show or hide changed file tree",
@@ -2222,7 +2598,8 @@ export const translationResources = {
     "diff.noChanges": "No changes",
     "diff.noChangesDetail": "The task worktree matches its fixed base commit.",
     "diff.outdated": "Outdated discussions",
-    "diff.outdatedDetail": "These comments belong to an earlier diff snapshot and are not attached to current lines.",
+    "diff.outdatedDetail":
+      "These comments belong to an earlier diff snapshot and are not attached to current lines.",
     "diff.binary": "Binary file changed",
     "diff.metadataOnly": "Metadata-only or empty file change",
     "diff.expandUnchanged": "Expand {{count}} unchanged lines",
@@ -2256,7 +2633,8 @@ export const translationResources = {
     "locationActions.openFailed": "Couldn't open in {{app}}",
     "locationActions.pathUnavailable": "No directory to open right now",
     "chat.heading": "What do you want to build?",
-    "chat.subheading": "Describe a task. Ora can read code, edit files, and run commands.",
+    "chat.subheading":
+      "Describe a task. Ora can read code, edit files, and run commands.",
     "chat.placeholder": "Describe a task, @ to mention files…",
     "chat.permissionRequired": "The agent is waiting for your approval",
     "chat.permissionFallback": "Sensitive tool call",
@@ -2299,6 +2677,11 @@ export const translationResources = {
     "chat.modelSelector.empty": "This agent offers no model choice",
     "chat.historyDegraded.title": "This session's history stopped recording",
     "chat.historyDegraded.resume": "Resume history",
+    "chat.historyNotice.title": "This session's history is incomplete",
+    "chat.historyNotice.unreadableRecords":
+      "{{count}} history records could not be read; their positions are unknown.",
+    "chat.historyNotice.unrecordedContent":
+      "Part of the conversation was not recorded: {{reason}}",
     "chat.send": "Send message",
     "chat.starting": "Starting…",
     "chat.commands.available": "Available commands",
@@ -2318,12 +2701,16 @@ export const translationResources = {
     "chat.attachments.add": "Add images",
     "chat.attachments.selected": "Selected images",
     "chat.attachments.remove": "Remove image {{name}}",
-    "chat.attachments.unsupported": "Choose PNG, JPEG, WebP, GIF, AVIF, or BMP images.",
-    "chat.attachments.tooLarge": "Images must be at most 5 MB each and 10 MB total.",
-    "chat.attachments.readFailed": "The selected image could not be read. Try again.",
+    "chat.attachments.unsupported":
+      "Choose PNG, JPEG, WebP, GIF, AVIF, or BMP images.",
+    "chat.attachments.tooLarge":
+      "Images must be at most 5 MB each and 10 MB total.",
+    "chat.attachments.readFailed":
+      "The selected image could not be read. Try again.",
     "chat.loadingHistory": "Loading history…",
     "chat.typing": "Assistant is working",
-    "chat.runningWords": "Thinking…|Pondering…|Imagining…|Conjuring…|Percolating…|Noodling…|Tinkering…|Brewing…|Musing…|Summoning…|Cooking…|Computing…|Ruminating…|Scheming…|Mulling…|Sifting…|Untangling…|Crunching…|Puzzling…|Deliberating…|Synthesizing…|Weighing options…",
+    "chat.runningWords":
+      "Thinking…|Pondering…|Imagining…|Conjuring…|Percolating…|Noodling…|Tinkering…|Brewing…|Musing…|Summoning…|Cooking…|Computing…|Ruminating…|Scheming…|Mulling…|Sifting…|Untangling…|Crunching…|Puzzling…|Deliberating…|Synthesizing…|Weighing options…",
     "chat.thinking": "Analyzing",
     "chat.thought": "Reasoning",
     "chat.activity.active.analysis": "Analyzing",
@@ -2389,30 +2776,42 @@ export const translationResources = {
     "chat.toolKind.switchMode": "Switch",
     "chat.toolKind.other": "Tool",
     "chat.toolGroup.exploration.completed_one": "Analyzed {{count}} resource",
-    "chat.toolGroup.exploration.completed_other": "Analyzed {{count}} resources",
+    "chat.toolGroup.exploration.completed_other":
+      "Analyzed {{count}} resources",
     "chat.toolGroup.exploration.active_one": "Analyzing {{count}} resource",
     "chat.toolGroup.exploration.active_other": "Analyzing {{count}} resources",
-    "chat.toolGroup.exploration.failed_one": "Analysis incomplete for {{count}} resource",
-    "chat.toolGroup.exploration.failed_other": "Analysis incomplete for {{count}} resources",
-    "chat.toolGroup.exploration.cancelled_one": "Cancelled analysis of {{count}} resource",
-    "chat.toolGroup.exploration.cancelled_other": "Cancelled analysis of {{count}} resources",
+    "chat.toolGroup.exploration.failed_one":
+      "Analysis incomplete for {{count}} resource",
+    "chat.toolGroup.exploration.failed_other":
+      "Analysis incomplete for {{count}} resources",
+    "chat.toolGroup.exploration.cancelled_one":
+      "Cancelled analysis of {{count}} resource",
+    "chat.toolGroup.exploration.cancelled_other":
+      "Cancelled analysis of {{count}} resources",
     "chat.toolGroup.changes.completed_one": "Changed {{count}} file",
     "chat.toolGroup.changes.completed_other": "Changed {{count}} files",
     "chat.toolGroup.changes.active_one": "Changing {{count}} file",
     "chat.toolGroup.changes.active_other": "Changing {{count}} files",
-    "chat.toolGroup.changes.failed_one": "Changes incomplete for {{count}} file",
-    "chat.toolGroup.changes.failed_other": "Changes incomplete for {{count}} files",
-    "chat.toolGroup.changes.cancelled_one": "Cancelled changes to {{count}} file",
-    "chat.toolGroup.changes.cancelled_other": "Cancelled changes to {{count}} files",
+    "chat.toolGroup.changes.failed_one":
+      "Changes incomplete for {{count}} file",
+    "chat.toolGroup.changes.failed_other":
+      "Changes incomplete for {{count}} files",
+    "chat.toolGroup.changes.cancelled_one":
+      "Cancelled changes to {{count}} file",
+    "chat.toolGroup.changes.cancelled_other":
+      "Cancelled changes to {{count}} files",
     "chat.toolGroup.commands.completed_one": "Ran {{count}} command",
     "chat.toolGroup.commands.completed_other": "Ran {{count}} commands",
     "chat.toolGroup.commands.active_one": "Running {{count}} command",
     "chat.toolGroup.commands.active_other": "Running {{count}} commands",
-    "chat.toolGroup.commands.failed_one": "Command batch failed ({{count}} command)",
-    "chat.toolGroup.commands.failed_other": "Command batch failed ({{count}} commands)",
+    "chat.toolGroup.commands.failed_one":
+      "Command batch failed ({{count}} command)",
+    "chat.toolGroup.commands.failed_other":
+      "Command batch failed ({{count}} commands)",
     "chat.toolGroup.commands.cancelled_one": "Cancelled {{count}} command",
     "chat.toolGroup.commands.cancelled_other": "Cancelled {{count}} commands",
-    "chat.toolGroup.changeStats": "{{additions}} lines added, {{deletions}} removed",
+    "chat.toolGroup.changeStats":
+      "{{additions}} lines added, {{deletions}} removed",
     "chat.terminalSession": "Terminal session {{id}}",
     "chat.rawData": "Raw data",
     "chat.diffExpand": "Show full diff",
@@ -2423,8 +2822,10 @@ export const translationResources = {
     "chat.turnDiff.collapse": "Collapse changed files",
     "chat.turnDiff.expand": "Expand changed files",
     "chat.turnDiff.viewerTitle": "File diff",
-    "chat.turnDiff.viewerDescription": "Review the file changes produced by this response.",
-    "chat.turnDiff.viewerStats": "{{additions}} lines added, {{deletions}} removed",
+    "chat.turnDiff.viewerDescription":
+      "Review the file changes produced by this response.",
+    "chat.turnDiff.viewerStats":
+      "{{additions}} lines added, {{deletions}} removed",
     "chat.unsupportedContent": "Unsupported {{type}} content",
     "chat.content.generatedImage": "Agent-generated image",
     "chat.content.previewImage": "Preview image {{name}}",
@@ -2434,7 +2835,8 @@ export const translationResources = {
     "chat.imagePreview.zoomIn": "Zoom in",
     "chat.imagePreview.zoomLevel": "Current zoom level",
     "chat.imagePreview.close": "Close image preview",
-    "chat.imagePreview.description": "Use the mouse wheel or zoom buttons to enlarge and reduce the image. Hold the primary mouse button to pan. Press Escape to close the preview.",
+    "chat.imagePreview.description":
+      "Use the mouse wheel or zoom buttons to enlarge and reduce the image. Hold the primary mouse button to pan. Press Escape to close the preview.",
     "chat.imagePreview.canvas": "{{name}}, zoom {{zoom}}%",
     "chat.content.audio": "Audio",
     "chat.content.binaryResource": "Binary resource",
@@ -2443,7 +2845,8 @@ export const translationResources = {
     "chat.turnFailed": "This turn failed",
     "chat.turnIncomplete": "The response may be incomplete",
     "chat.turnRefused": "The agent did not perform this request",
-    "chat.agentSessionUnavailable": "This Ora session does not currently have an available Agent session.",
+    "chat.agentSessionUnavailable":
+      "This Ora session does not currently have an available Agent session.",
     "chat.pickProjectAndBranch": "Pick a project and branch to start chatting",
     "chat.pickTask": "Pick or create a task before starting a chat",
     "chat.pickProject": "Pick or create a project before starting a chat",
@@ -2469,7 +2872,8 @@ export const translationResources = {
     "chat.nextMessage": "Next message",
     "chat.scrollToBottom": "Scroll to bottom",
     "chat.firstMessageReached": "This is the first message",
-    "chat.conversationBottomReached": "You're at the bottom of the conversation",
+    "chat.conversationBottomReached":
+      "You're at the bottom of the conversation",
     "chat.suggestion.runtime": "Summarize the agent runtime refactor",
     "chat.suggestion.layout": "Draft a layout for the web client",
     "chat.suggestion.worktree": "Explain how worktree cleanup works",
@@ -2484,10 +2888,12 @@ export const translationResources = {
     "dashboard.tab.dashboard": "Dashboard",
     "dashboard.tab.compare": "Token comparison",
     "dashboard.noSession": "Select a session first.",
-    "dashboard.serverUnreachable": "The Dashboard server is not running. Start streamlit locally on the port configured in Ora.",
+    "dashboard.serverUnreachable":
+      "The Dashboard server is not running. Start streamlit locally on the port configured in Ora.",
     "dashboard.resolving": "Resolving trace…",
     "dashboard.compareResolving": "Opening token comparison…",
-    "dashboard.resolveError": "Could not resolve this session's trace (it may not have been produced yet).",
+    "dashboard.resolveError":
+      "Could not resolve this session's trace (it may not have been produced yet).",
     "dashboard.compareResolveError": "Could not open token comparison.",
   },
 } as const;
@@ -2499,7 +2905,9 @@ const LOCALE_STORAGE_KEY = "ora.locale";
 function readInitialLocale(): Locale {
   if (typeof window === "undefined") return "zh-CN";
   try {
-    return window.localStorage.getItem(LOCALE_STORAGE_KEY) === "en-US" ? "en-US" : "zh-CN";
+    return window.localStorage.getItem(LOCALE_STORAGE_KEY) === "en-US"
+      ? "en-US"
+      : "zh-CN";
   } catch {
     return "zh-CN";
   }
@@ -2522,8 +2930,13 @@ void appI18n.use(initReactI18next).init({
   showSupportNotice: false,
 });
 
-if (typeof document !== "undefined") document.documentElement.lang = initialLocale;
+if (typeof document !== "undefined")
+  document.documentElement.lang = initialLocale;
 
+/** Returns the locale currently applied by the app i18n instance. */
+export function activeLocale(): Locale {
+  return appI18n.resolvedLanguage === "en-US" ? "en-US" : "zh-CN";
+}
 appI18n.on("languageChanged", (language) => {
   const locale: Locale = language === "en-US" ? "en-US" : "zh-CN";
   if (typeof document !== "undefined") document.documentElement.lang = locale;

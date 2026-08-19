@@ -14,12 +14,14 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   {
     id: "filesystem",
     name: "Filesystem",
-    description: "Read and write project files through a sandboxed workspace MCP.",
+    description:
+      "Read and write project files through a sandboxed workspace MCP.",
   },
   {
     id: "github",
     name: "GitHub",
-    description: "Inspect pull requests, issues, and repository metadata via GitHub MCP.",
+    description:
+      "Inspect pull requests, issues, and repository metadata via GitHub MCP.",
   },
   {
     id: "browser",

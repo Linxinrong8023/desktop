@@ -27,6 +27,7 @@ use ora_contracts::{
     ListWorkflowRunsByWorkflowResponse, ListWorkflowRunsRequest, ListWorkflowRunsResponse,
     WorkflowRunStatus as ContractRunStatus,
 };
+use ora_domain::Namespace;
 use ora_domain::{
     AuditFields, CreatedWorkflow, ProjectId, Task, TaskId, Workflow, WorkflowDetail, WorkflowId,
     WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRun, WorkflowRunDetail,
@@ -618,6 +619,7 @@ fn node_fixture(id: &str, run_id: &str) -> WorkflowNodeRun {
 fn workflow_fixture(published_snapshot_id: Option<&str>) -> Workflow {
     Workflow::new(
         WorkflowId::new("workflow-a"),
+        Namespace::local(),
         "Workflow workflow-a",
         published_snapshot_id.map(WorkflowSnapshotId::new),
         AuditFields::new(10, 10, /*is_deleted*/ false),
@@ -669,6 +671,14 @@ impl WorkflowRepository for MockWorkflowRepository {
             .workflow
             .clone()
             .filter(|workflow| &workflow.id == workflow_id))
+    }
+
+    fn find_workflow_by_name(
+        &self,
+        _namespace: &Namespace,
+        _name: &str,
+    ) -> Result<Option<Workflow>, RepositoryError> {
+        unreachable!("create tests never fetch workflows by name")
     }
 
     fn get_workflow_detail(

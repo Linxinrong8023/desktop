@@ -5,19 +5,20 @@ mod error;
 mod skill_marketplace;
 mod spec_commands;
 mod state;
+mod stream_forwarding;
 mod workspace_files;
 
 use crate::config::DesktopConfigStore;
 use crate::error::DesktopBootstrapError;
-use crate::state::{DesktopRuntimeGuard, DesktopState};
+use crate::state::{BundledBinaryPaths, DesktopRuntimeGuard, DesktopState};
 use ora_backend::{Backend, BackendPaths};
 use ora_logging::{
-    FileLoggingConfig, LogLevel, LogOutput, LoggingConfig, RotationPolicy, init_logging, ora_info,
-    ora_warn, register_gitlancer_logger,
+    FileLoggingConfig, LogLevel, LogOutput, LoggingConfig, RotationPolicy, init_logging, ora_error,
+    ora_info, ora_warn, register_gitlancer_logger,
 };
-use ora_plugin_manager::PluginManager;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
@@ -28,6 +29,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let (state, guard) = bootstrap_desktop(app)?;
+            ora_info!(
+                message = "bundled binary paths registered",
+                ripgrep_path = %state.binary_paths.ripgrep_path().display(),
+                deno_path = %state.binary_paths.deno_path().display(),
+            );
             app.manage(state);
             app.manage(guard);
             Ok(())
@@ -66,8 +72,6 @@ pub fn run() {
             commands::search_workspace,
             spec_commands::get_spec_catalog,
             spec_commands::read_spec,
-            spec_commands::resolve_spec_source,
-            spec_commands::update_project_spec_sources,
             // =============================================================================
             // session
             // =============================================================================
@@ -81,6 +85,7 @@ pub fn run() {
             commands::switch_session_agent,
             commands::resume_session_history,
             commands::delete_session,
+            commands::rename_session,
             commands::stream_contract,
             commands::cancel_contract_stream,
             // =============================================================================
@@ -110,6 +115,12 @@ pub fn run() {
             // plugin
             // =============================================================================
             commands::list_installed_plugins,
+            commands::scan_plugins,
+            commands::enable_plugin,
+            commands::disable_plugin,
+            commands::activate_plugin,
+            commands::stop_plugin,
+            commands::uninstall_plugin,
             commands::update_agent,
             commands::delete_agent,
             commands::prepare_agent_import,
@@ -168,7 +179,11 @@ fn bootstrap_desktop(
     app: &mut tauri::App,
 ) -> Result<(DesktopState, DesktopRuntimeGuard), DesktopBootstrapError> {
     let app_data_directory = desktop_data_directory(app)?;
-    let config = DesktopConfigStore::load_or_create(&app_data_directory)?;
+    let home_directory = app
+        .path()
+        .home_dir()
+        .map_err(DesktopBootstrapError::AppDataDirectory)?;
+    let config = DesktopConfigStore::load_or_create(&app_data_directory, &home_directory)?;
     let config_snapshot = config.snapshot()?;
     let resolved_timezone = read_system_timezone();
     let logging = init_logging(desktop_logging_config(
@@ -200,37 +215,36 @@ fn bootstrap_desktop(
         timezone_source = "system_timezone",
     );
     register_gitlancer_logger();
-    let ripgrep_path = resolve_ripgrep_path();
+    let binary_paths = match BundledBinaryPaths::resolve() {
+        Ok(paths) => paths,
+        Err(error) => {
+            ora_error!(
+                message = "required bundled binary is unavailable; stopping Desktop startup",
+                error = %error,
+            );
+            return Err(error.into());
+        }
+    };
+    let ripgrep_path = binary_paths.ripgrep_path().to_path_buf();
     let backend = Backend::open(BackendPaths {
         database_path: app_data_directory.join("ora.sqlite3"),
+        data_directory: app_data_directory.clone(),
+        deno_path: binary_paths.deno_path().to_path_buf(),
         worktree_root: config_snapshot.worktree_root().to_path_buf(),
-        home_directory: app
-            .path()
-            .home_dir()
-            .map_err(DesktopBootstrapError::AppDataDirectory)?,
+        home_directory,
+        relative_path_base: desktop_relative_path_base(&app_data_directory),
         sessions_root: app_data_directory.join("sessions"),
         skills_root: app_data_directory.join("atoms").join("skills"),
         ripgrep_path: ripgrep_path.clone(),
         timezone: resolved_timezone.timezone,
     })?;
     let workspace_files = Arc::new(workspace_files::WorkspaceFileApi::new(ripgrep_path));
-    let plugin_manager = PluginManager::discover(&app_data_directory);
-    for issue in plugin_manager.discovery_issues() {
-        ora_warn!(
-            message = "installed plugin manifest skipped during discovery",
-            path = %issue.path().display(),
-            issue_kind = issue.kind().as_str(),
-            field_path = issue.field_path().unwrap_or(""),
-            reason = issue.message(),
-        );
-    }
-
     Ok((
         DesktopState {
             backend,
-            plugin_manager: Arc::new(plugin_manager),
             config,
             workspace_files,
+            binary_paths,
             app_data_directory: app_data_directory.clone(),
             stream_cancellations: Arc::new(Mutex::new(HashMap::new())),
         },
@@ -256,24 +270,21 @@ fn desktop_data_directory(app: &tauri::App) -> Result<std::path::PathBuf, Deskto
         .map_err(DesktopBootstrapError::AppDataDirectory)
 }
 
-/// Resolves ripgrep from a development override or the executable directory in a release build.
-fn resolve_ripgrep_path() -> std::path::PathBuf {
-    if cfg!(debug_assertions) {
-        return std::env::var_os("ORA_RG_PATH")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from("rg"));
+/// Resolves relative project roots against a stable directory, not process cwd.
+///
+/// `task run:desktop` points `ORA_DATA_DIR` at the repo `.data` directory shared
+/// with the Desktop development environment. Project roots in that database are stored relative to
+/// the repo root (the data directory's parent). Tauri starts in `src-tauri`, so
+/// joining against live `current_dir()` would miss those roots.
+fn desktop_relative_path_base(app_data_directory: &Path) -> PathBuf {
+    if std::env::var_os("ORA_DATA_DIR").is_some() {
+        return app_data_directory
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| app_data_directory.to_path_buf());
     }
-
-    let executable_name = if cfg!(target_os = "windows") {
-        "rg.exe"
-    } else {
-        "rg"
-    };
-    std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(executable_name)
+    std::env::current_dir().unwrap_or_else(|_| app_data_directory.to_path_buf())
 }
 
 /// Carries the startup timezone selected from the operating system and any deferred warning.

@@ -4,7 +4,11 @@ import { cn, Sheet, SheetContent, SheetHeader, SheetTitle } from "@ora/ui";
 import { useUiStore } from "../../state/stores/ui-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
 import { useDashboardEndpoint } from "./use-dashboard-endpoint";
-import type { DashboardCompareResolver, DashboardEndpoint, DashboardResolver } from "./types";
+import type {
+  DashboardCompareResolver,
+  DashboardEndpoint,
+  DashboardResolver,
+} from "./types";
 
 interface TraceDashboardPanelProps {
   /** Injected by the Desktop app via Tauri invoke; null in non-Desktop builds/tests. */
@@ -76,7 +80,11 @@ export function TraceDashboardPanel({
         // too or the data-[side=right]:sm:max-w-sm variant caps the panel at 24rem.
         className="w-auto gap-0 data-[side=right]:sm:max-w-none"
         style={{ width: clamp(width), maxWidth: "none" }}
-        aria-label={mode === "compare" ? t("dashboard.compareTitle") : t("dashboard.title")}
+        aria-label={
+          mode === "compare"
+            ? t("dashboard.compareTitle")
+            : t("dashboard.title")
+        }
       >
         <PanelResizeHandle
           onResize={(delta, startWidth) => setWidth(clamp(startWidth - delta))}
@@ -84,26 +92,26 @@ export function TraceDashboardPanel({
         />
         <SheetHeader className="gap-0.5 pr-10">
           <SheetTitle>
-            {mode === "compare" ? t("dashboard.compareTitle") : t("dashboard.title")}
+            {mode === "compare"
+              ? t("dashboard.compareTitle")
+              : t("dashboard.title")}
           </SheetTitle>
         </SheetHeader>
         <div className="h-full min-h-0 flex-1 px-4 pb-4">
-          {mode === "compare"
-            ? (
-              <CompareTabBody
-                isLoading={compareEndpoint.isLoading}
-                error={compareEndpoint.error}
-                endpoint={compareEndpoint.endpoint}
-              />
-            )
-            : (
-              <DashboardTabBody
-                sessionId={sessionId}
-                isLoading={isLoading}
-                error={error}
-                endpoint={endpoint}
-              />
-            )}
+          {mode === "compare" ? (
+            <CompareTabBody
+              isLoading={compareEndpoint.isLoading}
+              error={compareEndpoint.error}
+              endpoint={compareEndpoint.endpoint}
+            />
+          ) : (
+            <DashboardTabBody
+              sessionId={sessionId}
+              isLoading={isLoading}
+              error={error}
+              endpoint={endpoint}
+            />
+          )}
         </div>
       </SheetContent>
     </Sheet>
@@ -139,7 +147,9 @@ function PanelResizeHandle({
         startRef.current = {
           clientX: event.clientX,
           // The handle's parent (SheetContent) carries the live width; capture it at start.
-          width: event.currentTarget.parentElement?.getBoundingClientRect().width ?? 0,
+          width:
+            event.currentTarget.parentElement?.getBoundingClientRect().width ??
+            0,
         };
       }}
       onPointerMove={(event) => {
@@ -207,7 +217,9 @@ function CompareTabBody({
   if (!endpoint.serverReachable) {
     return <StatusLine>{t("dashboard.serverUnreachable")}</StatusLine>;
   }
-  return <DashboardIframe title={t("dashboard.tab.compare")} src={endpoint.url} />;
+  return (
+    <DashboardIframe title={t("dashboard.tab.compare")} src={endpoint.url} />
+  );
 }
 
 /** Shared iframe shell for Streamlit dashboard modes. */
@@ -260,7 +272,9 @@ function useDashboardCompareEndpoint(
   open: boolean,
 ): DashboardCompareEndpointState {
   const activeResolve = useRef<Promise<DashboardEndpoint> | null>(null);
-  const [resolved, setResolved] = useState<ResolvedCompareState>(INITIAL_COMPARE_RESOLVED);
+  const [resolved, setResolved] = useState<ResolvedCompareState>(
+    INITIAL_COMPARE_RESOLVED,
+  );
   const canResolve = open && resolve !== null;
 
   useEffect(() => {
@@ -279,7 +293,9 @@ function useDashboardCompareEndpoint(
       .catch((error) => {
         if (!superseded && activeResolve.current === promise) {
           const message =
-            error instanceof Error ? error.message : "Failed to resolve dashboard endpoint";
+            error instanceof Error
+              ? error.message
+              : "Failed to resolve dashboard endpoint";
           setResolved({ resolve, endpoint: null, error: message });
         }
       });
@@ -294,7 +310,8 @@ function useDashboardCompareEndpoint(
   const isStale = resolved.resolve !== resolve;
   return {
     endpoint: isStale ? null : resolved.endpoint,
-    isLoading: isStale || (resolved.endpoint === null && resolved.error === null),
+    isLoading:
+      isStale || (resolved.endpoint === null && resolved.error === null),
     error: isStale ? null : resolved.error,
   };
 }

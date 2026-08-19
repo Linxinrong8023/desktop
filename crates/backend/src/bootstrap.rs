@@ -3,6 +3,7 @@ use crate::agent_runtime::{AgentRuntimeManager, SessionEventStream, SessionLocat
 use crate::app_event::AppEventHub;
 use crate::clock::SystemClock;
 use crate::error::{BackendError, ErrorClassification};
+use crate::plugin::PluginApi;
 use crate::project::ProjectApi;
 use crate::session::SessionApi;
 use crate::skill::SkillApi;
@@ -28,8 +29,18 @@ use thiserror::Error;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BackendPaths {
     pub database_path: PathBuf,
+    /// Root containing the installed `plugins` directory.
+    pub data_directory: PathBuf,
+    /// Bundled Deno executable used for plugin activation.
+    pub deno_path: PathBuf,
     pub worktree_root: PathBuf,
     pub home_directory: PathBuf,
+    /// Directory against which persisted relative project roots are resolved.
+    ///
+    /// Relative roots are stored against the directory from which `ORA_DATA_DIR`
+    /// was created. Live process cwd is not used: Desktop `tauri dev` starts in
+    /// `src-tauri`, which is not that directory.
+    pub relative_path_base: PathBuf,
     pub sessions_root: PathBuf,
     /// Root of the formal skill package tree (`<data>/atoms/skills`).
     pub skills_root: PathBuf,
@@ -50,6 +61,8 @@ pub enum BackendBootstrapError {
     },
     #[error("failed to bootstrap backend database")]
     Database(#[source] ora_db::DatabaseError),
+    #[error("failed to initialize plugin lifecycle")]
+    PluginLifecycle(#[source] ora_plugin_lifecycle::PluginLifecycleError),
     #[error("failed to reconcile skill storage")]
     SkillStorage(#[source] ApplicationError),
     #[error("failed to initialize agent runtime")]
@@ -60,7 +73,7 @@ pub enum BackendBootstrapError {
     ),
 }
 
-/// Owns the concrete persisted use-case composition shared by Web and Tauri adapters.
+/// Owns the concrete persisted use-case composition used by the Desktop adapter.
 #[derive(Clone)]
 pub struct Backend {
     pool: RepositoryPool,
@@ -70,6 +83,7 @@ pub struct Backend {
     task_diff: Arc<TaskDiffApi>,
     session: Arc<SessionApi>,
     agent_runtime: Arc<AgentRuntimeManager>,
+    plugin: Arc<PluginApi>,
     skill: Arc<SkillApi>,
     agent: Arc<AgentApi>,
     spec: Arc<SpecApi>,
@@ -78,6 +92,7 @@ pub struct Backend {
     workflow_run_engine: Arc<ConcreteWorkflowRunControl>,
     app_events: Arc<AppEventHub>,
     git_cleanup: crate::git_cleanup::GitCleanupHandle,
+    relative_path_base: PathBuf,
 }
 
 impl Backend {
@@ -100,13 +115,25 @@ impl Backend {
             .map_err(BackendBootstrapError::SkillStorageReconciliation)?;
         let clock = SystemClock;
         let app_events = Arc::new(AppEventHub::new());
+        let plugin = Arc::new(
+            PluginApi::open(
+                pool.clone(),
+                paths.data_directory,
+                paths.deno_path,
+                clock,
+                app_events.publisher(),
+            )
+            .map_err(BackendBootstrapError::PluginLifecycle)?,
+        );
         let scheduler = Scheduler::new(paths.timezone);
         let worktree_root = Arc::new(RwLock::new(paths.worktree_root));
         let sessions_root = paths.sessions_root;
+        let relative_path_base = paths.relative_path_base;
         let agent_runtime = Arc::new(
             AgentRuntimeManager::new(
                 pool.clone(),
                 paths.home_directory,
+                relative_path_base.clone(),
                 sessions_root.clone(),
                 clock,
                 scheduler,
@@ -141,9 +168,15 @@ impl Backend {
                 repository_gates.clone(),
                 clock,
             )),
-            task_diff: Arc::new(TaskDiffApi::new(pool.clone(), clock, git_cleanup.clone())),
+            task_diff: Arc::new(TaskDiffApi::new(
+                pool.clone(),
+                clock,
+                git_cleanup.clone(),
+                relative_path_base.clone(),
+            )),
             session: Arc::new(SessionApi::new(pool.clone())),
             agent_runtime,
+            plugin,
             skill: Arc::new(SkillApi::new(
                 pool.clone(),
                 paths.skills_root.clone(),
@@ -154,6 +187,7 @@ impl Backend {
                 pool.clone(),
                 paths.ripgrep_path,
                 git_cleanup.clone(),
+                relative_path_base.clone(),
             )),
             workflow: Arc::new(WorkflowApi::new(pool.clone(), clock)),
             workflow_run: Arc::new(WorkflowRunApi::new(
@@ -168,7 +202,76 @@ impl Backend {
             git_cleanup,
             pool,
             worktree_root,
+            relative_path_base,
         })
+    }
+
+    /// Returns the cached installed-plugin snapshot without rescanning the filesystem.
+    pub fn list_installed_plugins(
+        &self,
+        request: ListInstalledPluginsRequest,
+    ) -> Result<ListInstalledPluginsResponse, BackendError> {
+        Ok(self.plugin.list(request))
+    }
+
+    /// Explicitly rescans packages and reconciles durable and runtime state.
+    pub async fn scan_plugins(
+        &self,
+        request: ScanPluginsRequest,
+    ) -> Result<ScanPluginsResponse, BackendError> {
+        self.plugin.scan(request).await.map_err(BackendError::from)
+    }
+
+    /// Persists plugin eligibility without starting its process.
+    pub async fn enable_plugin(
+        &self,
+        request: EnablePluginRequest,
+    ) -> Result<EnablePluginResponse, BackendError> {
+        self.plugin
+            .enable(request)
+            .await
+            .map_err(BackendError::from)
+    }
+
+    /// Stops a plugin when necessary before persisting ineligibility.
+    pub async fn disable_plugin(
+        &self,
+        request: DisablePluginRequest,
+    ) -> Result<DisablePluginResponse, BackendError> {
+        self.plugin
+            .disable(request)
+            .await
+            .map_err(BackendError::from)
+    }
+
+    /// Starts one enabled plugin and returns its immediate starting state.
+    pub async fn activate_plugin(
+        &self,
+        request: ActivatePluginRequest,
+    ) -> Result<ActivatePluginResponse, BackendError> {
+        self.plugin
+            .activate(request)
+            .await
+            .map_err(BackendError::from)
+    }
+
+    /// Stops one plugin process without changing durable eligibility.
+    pub async fn stop_plugin(
+        &self,
+        request: StopPluginRequest,
+    ) -> Result<StopPluginResponse, BackendError> {
+        self.plugin.stop(request).await.map_err(BackendError::from)
+    }
+
+    /// Stops and removes one plugin package plus its durable state.
+    pub async fn uninstall_plugin(
+        &self,
+        request: UninstallPluginRequest,
+    ) -> Result<UninstallPluginResponse, BackendError> {
+        self.plugin
+            .uninstall(request)
+            .await
+            .map_err(BackendError::from)
     }
 
     /// Starts a workflow run against its frozen snapshot graph.
@@ -287,7 +390,11 @@ impl Backend {
     /// provider, so the path always matches where the session actually runs. Fails
     /// when the task has no active worktree on disk.
     pub fn resolve_task_cwd(&self, task_id: &str) -> Result<PathBuf, BackendError> {
-        crate::task::resolve_task_cwd(&self.pool, &ora_domain::TaskId::new(task_id))
+        crate::task::resolve_task_cwd(
+            &self.pool,
+            &ora_domain::TaskId::new(task_id),
+            &self.relative_path_base,
+        )
     }
 
     // =============================================================================
@@ -418,7 +525,7 @@ impl Backend {
         &self,
         request: GetTaskWorkspaceRequest,
     ) -> Result<GetTaskWorkspaceResponse, BackendError> {
-        crate::task::get_task_workspace(&self.pool, &request.task_id)
+        crate::task::get_task_workspace(&self.pool, &request.task_id, &self.relative_path_base)
     }
 
     // =============================================================================
@@ -439,22 +546,6 @@ impl Backend {
         request: ReadSpecRequest,
     ) -> Result<ReadSpecResponse, BackendError> {
         self.spec.read(request).await
-    }
-
-    /// Validates one platform-selected source directory.
-    pub fn resolve_spec_source(
-        &self,
-        request: ResolveSpecSourceRequest,
-    ) -> Result<ResolveSpecSourceResponse, BackendError> {
-        self.spec.resolve_source(request)
-    }
-
-    /// Atomically replaces project-wide specification source overrides.
-    pub fn update_project_spec_sources(
-        &self,
-        request: UpdateProjectSpecSourcesRequest,
-    ) -> Result<UpdateProjectSpecSourcesResponse, BackendError> {
-        self.spec.update_project_sources(request)
     }
 
     /// Resolves a specification watch request to its authoritative workspace root.
@@ -565,6 +656,28 @@ impl Backend {
         request: ListSessionsRequest,
     ) -> Result<ListSessionsResponse, BackendError> {
         self.session.list(request).map_err(BackendError::from)
+    }
+
+    /// Renames one session, locks agent title acquisition, then notifies subscribers.
+    pub async fn rename_session(
+        &self,
+        request: RenameSessionRequest,
+    ) -> Result<RenameSessionResponse, BackendError> {
+        let session_id = request.session_id.clone();
+        let response = self.session.rename(request).map_err(BackendError::from)?;
+        if let Some(title) = response.session.title.as_deref()
+            && let Ok(parsed) = ora_domain::SessionTitle::parse(title)
+        {
+            // A missing or busy actor must not fail the rename: the row is already updated.
+            let _ = self
+                .agent_runtime
+                .adopt_user_title(&session_id, parsed)
+                .await;
+        }
+        self.app_events
+            .publisher()
+            .try_publish(AppEvent::SessionTitleUpdated { session_id });
+        Ok(response)
     }
     /// Streams the provider-owned history for one persisted session.
     pub async fn load_session(
@@ -1014,12 +1127,11 @@ mod tests {
     use ora_contracts::{
         CreateAgentRequest, CreateProjectRequest, CreateSkillRequest, DeleteAgentRequest,
         DeleteProjectRequest, DeleteSkillRequest, DeleteTaskRequest, GetProjectRequest,
-        GetTaskRequest, ListAgentsRequest, ListProjectsRequest, ListSkillsRequest, TaskStatus,
+        GetTaskRequest, ListAgentsRequest, ListProjectsRequest, ListSkillsRequest,
         UpdateAgentRequest, UpdateProjectRequest, UpdateSkillRequest,
     };
+    use ora_test_support::GitTestScaffold;
     use std::fs;
-    use std::path::Path;
-    use std::process::Command;
     use tempfile::TempDir;
 
     /// Verifies the shared composition owns storage bootstrap and complete non-Git CRUD flows.
@@ -1030,8 +1142,11 @@ mod tests {
         let worktree_root = temporary.path().join("worktrees");
         let backend = Backend::open(BackendPaths {
             database_path: database_path.clone(),
+            data_directory: temporary.path().to_path_buf(),
+            deno_path: std::path::PathBuf::from("deno"),
             worktree_root: worktree_root.clone(),
             home_directory: temporary.path().to_path_buf(),
+            relative_path_base: temporary.path().to_path_buf(),
             sessions_root: temporary.path().join("sessions"),
             skills_root: temporary.path().join("atoms").join("skills"),
             ripgrep_path: std::path::PathBuf::from("rg"),
@@ -1148,8 +1263,11 @@ mod tests {
         let skills_root = temporary.path().join("atoms").join("skills");
         let backend = Backend::open(BackendPaths {
             database_path: temporary.path().join("ora.sqlite3"),
+            data_directory: temporary.path().to_path_buf(),
+            deno_path: std::path::PathBuf::from("deno"),
             worktree_root: temporary.path().join("worktrees"),
             home_directory: temporary.path().to_path_buf(),
+            relative_path_base: temporary.path().to_path_buf(),
             sessions_root: temporary.path().join("sessions"),
             skills_root: skills_root.clone(),
             ripgrep_path: std::path::PathBuf::from("rg"),
@@ -1190,13 +1308,23 @@ mod tests {
     #[tokio::test]
     async fn deletes_existing_task_after_worktree_root_changes() {
         let temporary = TempDir::new().expect("create temporary backend directory");
-        let repository_root = temporary.path().join("repository");
-        initialize_repository(&repository_root);
+        let scaffold =
+            GitTestScaffold::new("backend-task-deletion").expect("create Git test scaffold");
+        scaffold
+            .write_file(scaffold.repo_path(), "README.md", "ora backend test\n")
+            .expect("write repository seed file");
+        scaffold
+            .stage_all_and_commit("initial")
+            .expect("create repository seed commit");
+        let repository_root = scaffold.repo_path().to_path_buf();
         let original_worktree_root = temporary.path().join("original-worktrees");
         let backend = Backend::open(BackendPaths {
             database_path: temporary.path().join("ora.sqlite3"),
+            data_directory: temporary.path().to_path_buf(),
+            deno_path: std::path::PathBuf::from("deno"),
             worktree_root: original_worktree_root.clone(),
             home_directory: temporary.path().to_path_buf(),
+            relative_path_base: temporary.path().to_path_buf(),
             sessions_root: temporary.path().join("sessions"),
             skills_root: temporary.path().join("atoms").join("skills"),
             ripgrep_path: std::path::PathBuf::from("rg"),
@@ -1214,7 +1342,6 @@ mod tests {
             .create_task(CreateTaskRequest {
                 project_id: project.id,
                 title: "Move configuration".to_string(),
-                status: TaskStatus::Todo,
                 workspace_mode: None,
                 base_branch: Some("main".to_string()),
             })
@@ -1241,31 +1368,5 @@ mod tests {
                 .get_task(GetTaskRequest { task_id: task.id })
                 .is_err()
         );
-    }
-
-    /// Initializes a repository with one commit so linked worktree operations are available.
-    fn initialize_repository(repository_root: &Path) {
-        fs::create_dir_all(repository_root).expect("create repository root");
-        run_git(repository_root, &["init", "--initial-branch=main"]);
-        run_git(repository_root, &["config", "user.name", "Ora Tests"]);
-        run_git(
-            repository_root,
-            &["config", "user.email", "ora-tests@example.com"],
-        );
-        fs::write(repository_root.join("README.md"), "ora backend test\n")
-            .expect("write repository seed file");
-        run_git(repository_root, &["add", "README.md"]);
-        run_git(repository_root, &["commit", "-m", "initial"]);
-    }
-
-    /// Runs a required Git setup command and preserves its exact arguments in failures.
-    fn run_git(repository_root: &Path, arguments: &[&str]) {
-        let status = Command::new("git")
-            .current_dir(repository_root)
-            .args(arguments)
-            .status()
-            .unwrap_or_else(|error| panic!("failed to start git {arguments:?}: {error}"));
-
-        assert!(status.success(), "git {arguments:?} failed with {status}");
     }
 }

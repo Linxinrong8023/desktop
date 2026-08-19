@@ -6,7 +6,7 @@ use ora_contracts::{
     GetAgentRequest, GetAgentResponse, ListAgentsRequest, ListAgentsResponse, UpdateAgentRequest,
     UpdateAgentResponse,
 };
-use ora_domain::{AgentDefinition, AgentDefinitionId, AuditFields};
+use ora_domain::{AgentDefinition, AgentDefinitionId, AuditFields, Namespace};
 
 /// Handles creation of configurable agent types.
 pub struct CreateAgentDefinitionHandler<Repository, IdGenerator, ClockSource> {
@@ -40,11 +40,13 @@ where
         request: CreateAgentRequest,
     ) -> Result<CreateAgentResponse, ApplicationError> {
         let name = request.name.trim().to_string();
-        reject_existing_name(&self.repository, &name)?;
+        let namespace = Namespace::local();
+        reject_existing_name(&self.repository, &namespace, &name)?;
 
         let now = self.clock.now_timestamp_millis();
         let agent_definition = AgentDefinition::new(
             self.id_generator.generate_agent_definition_id(),
+            namespace,
             name,
             request.description,
             request.content.unwrap_or_default(),
@@ -155,10 +157,11 @@ where
                 agent_id: agent_id.to_string(),
             })?;
         let name = request.name.trim().to_string();
-        reject_conflicting_name(&self.repository, &name, &existing.id)?;
+        reject_conflicting_name(&self.repository, &existing.namespace, &name, &existing.id)?;
 
         let agent_definition = AgentDefinition::new(
             agent_id,
+            existing.namespace,
             name,
             request.description,
             request.content.unwrap_or(existing.content),
@@ -221,13 +224,15 @@ where
 /// Rejects a create whose name collides with any visible agent, case-insensitively.
 fn reject_existing_name<Repository: AgentDefinitionRepository>(
     repository: &Repository,
+    namespace: &Namespace,
     name: &str,
 ) -> Result<(), ApplicationError> {
     match repository
-        .find_agent_definition_by_name(name)
+        .find_agent_definition_by_name(namespace, name)
         .map_err(ApplicationError::from_agent_definition_repository_error)?
     {
         Some(_) => Err(ApplicationError::AgentDefinitionNameConflict {
+            namespace: namespace.to_string(),
             name: name.to_string(),
         }),
         None => Ok(()),
@@ -237,14 +242,16 @@ fn reject_existing_name<Repository: AgentDefinitionRepository>(
 /// Rejects a rename that would collide with a different visible agent.
 fn reject_conflicting_name<Repository: AgentDefinitionRepository>(
     repository: &Repository,
+    namespace: &Namespace,
     name: &str,
     own_id: &AgentDefinitionId,
 ) -> Result<(), ApplicationError> {
     match repository
-        .find_agent_definition_by_name(name)
+        .find_agent_definition_by_name(namespace, name)
         .map_err(ApplicationError::from_agent_definition_repository_error)?
     {
         Some(other) if &other.id != own_id => Err(ApplicationError::AgentDefinitionNameConflict {
+            namespace: namespace.to_string(),
             name: name.to_string(),
         }),
         _ => Ok(()),

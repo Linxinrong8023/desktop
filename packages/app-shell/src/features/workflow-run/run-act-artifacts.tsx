@@ -100,8 +100,8 @@ function ActArtifactItem({
       className={cn(
         "overflow-hidden rounded-lg border border-border/50 bg-transparent",
         open && "bg-muted/20",
-        animate
-          && "animate-in fade-in slide-in-from-bottom-1 duration-300 ease-out motion-reduce:animate-none",
+        animate &&
+          "animate-in fade-in slide-in-from-bottom-1 duration-300 ease-out motion-reduce:animate-none",
       )}
       data-reveal={animate ? "" : undefined}
     >
@@ -112,9 +112,11 @@ function ActArtifactItem({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        {open
-          ? <IconChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-          : <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
+        {open ? (
+          <IconChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
         <span className="min-w-0 flex-1 truncate text-xs font-medium">
           {artifact.title}
         </span>

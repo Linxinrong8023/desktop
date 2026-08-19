@@ -28,6 +28,7 @@ pub(crate) struct TaskDiffApi {
     pool: RepositoryPool,
     clock: SystemClock,
     git_cleanup: crate::git_cleanup::GitCleanupHandle,
+    relative_path_base: PathBuf,
 }
 
 impl TaskDiffApi {
@@ -36,11 +37,13 @@ impl TaskDiffApi {
         pool: RepositoryPool,
         clock: SystemClock,
         git_cleanup: crate::git_cleanup::GitCleanupHandle,
+        relative_path_base: PathBuf,
     ) -> Self {
         Self {
             pool,
             clock,
             git_cleanup,
+            relative_path_base,
         }
     }
 
@@ -55,7 +58,7 @@ impl TaskDiffApi {
         let task_id = TaskId::new(request.task_id.clone());
         let task = self.load_task(&task_id)?;
         let project = self.load_project(&task)?;
-        let cwd = resolve_task_cwd(&self.pool, &task_id)?;
+        let cwd = resolve_task_cwd(&self.pool, &task_id, &self.relative_path_base)?;
 
         if let Some(worktree_id) = task.worktree_id.as_ref() {
             let worktree = SqliteWorktreeRepository::new(self.pool.clone())
@@ -265,7 +268,7 @@ impl TaskDiffApi {
             ));
         }
         let project = self.load_project(&task)?;
-        let cwd = resolve_task_cwd(&self.pool, &task_id)?;
+        let cwd = resolve_task_cwd(&self.pool, &task_id, &self.relative_path_base)?;
         Ok((task, project, cwd))
     }
 }
@@ -303,27 +306,33 @@ fn task_diff_internal(source: impl std::error::Error + Send + Sync + 'static) ->
 mod tests {
     use crate::{Backend, BackendPaths};
     use ora_contracts::{
-        CreateProjectRequest, CreateTaskRequest, GetTaskDiffRequest, TaskDiffScope, TaskStatus,
+        CreateProjectRequest, CreateTaskRequest, GetTaskDiffRequest, TaskDiffScope,
         TaskWorkspaceMode,
     };
+    use ora_test_support::GitTestScaffold;
     use std::fs;
     use std::path::Path;
-    use std::process::Command;
     use tempfile::TempDir;
 
     /// Verifies direct-chat edits are read from the same project root used by the agent.
     #[test]
     fn captures_agent_changes_from_project_root_tasks() {
         let temporary = TempDir::new().expect("create temporary backend directory");
-        let repository_root = temporary.path().join("repository");
-        initialize_repository(&repository_root);
+        let scaffold = GitTestScaffold::new("backend-task-diff-project-root")
+            .expect("create Git test scaffold");
+        scaffold
+            .write_file(scaffold.repo_path(), "README.md", "ora backend test\n")
+            .expect("write repository seed file");
+        scaffold
+            .stage_all_and_commit("initial")
+            .expect("create repository seed commit");
+        let repository_root = scaffold.repo_path();
         let backend = open_backend(&temporary);
         let project_id = create_project(&backend, &repository_root);
         let task = backend
             .create_task(CreateTaskRequest {
                 project_id,
                 title: "Direct chat".to_string(),
-                status: TaskStatus::Todo,
                 workspace_mode: Some(TaskWorkspaceMode::ProjectRoot),
                 base_branch: None,
             })
@@ -351,15 +360,21 @@ mod tests {
     #[test]
     fn captures_agent_changes_from_worktree_tasks() {
         let temporary = TempDir::new().expect("create temporary backend directory");
-        let repository_root = temporary.path().join("repository");
-        initialize_repository(&repository_root);
+        let scaffold =
+            GitTestScaffold::new("backend-task-diff-worktree").expect("create Git test scaffold");
+        scaffold
+            .write_file(scaffold.repo_path(), "README.md", "ora backend test\n")
+            .expect("write repository seed file");
+        scaffold
+            .stage_all_and_commit("initial")
+            .expect("create repository seed commit");
+        let repository_root = scaffold.repo_path();
         let backend = open_backend(&temporary);
         let project_id = create_project(&backend, &repository_root);
         let task = backend
             .create_task(CreateTaskRequest {
                 project_id,
                 title: "Isolated task".to_string(),
-                status: TaskStatus::Todo,
                 workspace_mode: Some(TaskWorkspaceMode::Worktree),
                 base_branch: Some("main".to_string()),
             })
@@ -387,8 +402,11 @@ mod tests {
     fn open_backend(temporary: &TempDir) -> Backend {
         Backend::open(BackendPaths {
             database_path: temporary.path().join("ora.sqlite3"),
+            data_directory: temporary.path().to_path_buf(),
+            deno_path: std::path::PathBuf::from("deno"),
             worktree_root: temporary.path().join("worktrees"),
             home_directory: temporary.path().to_path_buf(),
+            relative_path_base: temporary.path().to_path_buf(),
             sessions_root: temporary.path().join("sessions"),
             skills_root: temporary.path().join("atoms").join("skills"),
             ripgrep_path: std::path::PathBuf::from("rg"),
@@ -407,31 +425,5 @@ mod tests {
             .expect("create project")
             .project
             .id
-    }
-
-    /// Initializes a repository with one commit so both workspace modes can produce diffs.
-    fn initialize_repository(repository_root: &Path) {
-        fs::create_dir_all(repository_root).expect("create repository root");
-        run_git(repository_root, &["init", "--initial-branch=main"]);
-        run_git(repository_root, &["config", "user.name", "Ora Tests"]);
-        run_git(
-            repository_root,
-            &["config", "user.email", "ora-tests@example.com"],
-        );
-        fs::write(repository_root.join("README.md"), "ora backend test\n")
-            .expect("write repository seed file");
-        run_git(repository_root, &["add", "README.md"]);
-        run_git(repository_root, &["commit", "-m", "initial"]);
-    }
-
-    /// Runs one required Git setup command for the repository fixture.
-    fn run_git(repository_root: &Path, arguments: &[&str]) {
-        let status = Command::new("git")
-            .current_dir(repository_root)
-            .args(arguments)
-            .status()
-            .unwrap_or_else(|error| panic!("failed to start git {arguments:?}: {error}"));
-
-        assert!(status.success(), "git {arguments:?} failed with {status}");
     }
 }

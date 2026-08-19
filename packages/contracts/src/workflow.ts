@@ -161,6 +161,7 @@ export type UpdateWorkflowResponse = { workflow: Workflow };
  */
 export type Workflow = {
   id: string;
+  namespace: string;
   name: string;
   publishedSnapshotId: string | null;
   createdAt: bigint;
@@ -184,6 +185,7 @@ export type WorkflowSnapshot = {
  */
 export type WorkflowSummary = {
   id: string;
+  namespace: string;
   name: string;
   publishedVersion: string | null;
   createdAt: bigint;

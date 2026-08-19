@@ -43,7 +43,13 @@ describe("task diff file tree", () => {
                 kind: "directory",
                 name: "src",
                 path: "packages/app/src",
-                children: [{ kind: "file", name: "main.ts", path: "packages/app/src/main.ts" }],
+                children: [
+                  {
+                    kind: "file",
+                    name: "main.ts",
+                    path: "packages/app/src/main.ts",
+                  },
+                ],
               },
             ],
           },
@@ -51,7 +57,13 @@ describe("task diff file tree", () => {
             kind: "directory",
             name: "sdk",
             path: "packages/sdk",
-            children: [{ kind: "file", name: "README.md", path: "packages/sdk/README.md" }],
+            children: [
+              {
+                kind: "file",
+                name: "README.md",
+                path: "packages/sdk/README.md",
+              },
+            ],
           },
         ],
       },

@@ -3,13 +3,19 @@
 /**
  * Describes a public configurable-agent payload without persistence audit metadata.
  */
-export type Agent = { id: string; name: string; description: string };
+export type Agent = {
+  id: string;
+  namespace: string;
+  name: string;
+  description: string;
+};
 
 /**
  * Describes one configurable agent together with its imported Markdown content.
  */
 export type AgentDetails = {
   id: string;
+  namespace: string;
   name: string;
   description: string;
   content: string;

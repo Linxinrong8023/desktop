@@ -1,14 +1,12 @@
 import { useTranslation } from "react-i18next";
 import { Button, cn } from "@ora/ui";
-import {
-  IconBan,
-  IconCheck,
-  IconMap,
-  IconX,
-} from "@tabler/icons-react";
+import { IconBan, IconCheck, IconMap, IconX } from "@tabler/icons-react";
 import { RunStatusBadge } from "./run-status-mark";
 import { runStatusTone } from "./run-status-style";
-import type { GraphWorkflowRun, GraphWorkflowRunStatus } from "@ora/workflow-runtime";
+import type {
+  GraphWorkflowRun,
+  GraphWorkflowRunStatus,
+} from "@ora/workflow-runtime";
 
 interface RunResultActProps {
   run: GraphWorkflowRun;
@@ -77,9 +75,7 @@ export function RunResultAct({
             <dt className="text-[10px] text-muted-foreground">
               {t("workflowRun.field.fileChanges")}
             </dt>
-            <dd className="mt-0.5 text-xs tabular-nums">
-              {changedFileCount}
-            </dd>
+            <dd className="mt-0.5 text-xs tabular-nums">{changedFileCount}</dd>
           </div>
         </dl>
 
@@ -125,16 +121,20 @@ function ResultHeroMark({ status }: { status: GraphWorkflowRunStatus }) {
         status === "succeeded" && "bg-emerald-500",
         status === "failed" && "bg-rose-500",
         status === "cancelled" && "bg-zinc-400 dark:bg-zinc-500",
-        (status === "pending"
-          || status === "running"
-          || status === "awaiting_input")
-          && "bg-muted text-muted-foreground",
+        (status === "pending" ||
+          status === "running" ||
+          status === "awaiting_input") &&
+          "bg-muted text-muted-foreground",
       )}
       aria-hidden
     >
-      {status === "succeeded" && <IconCheck className={glyphClass} stroke={2.5} />}
+      {status === "succeeded" && (
+        <IconCheck className={glyphClass} stroke={2.5} />
+      )}
       {status === "failed" && <IconX className={glyphClass} stroke={2.5} />}
-      {status === "cancelled" && <IconBan className={glyphClass} stroke={2.5} />}
+      {status === "cancelled" && (
+        <IconBan className={glyphClass} stroke={2.5} />
+      )}
     </span>
   );
 }

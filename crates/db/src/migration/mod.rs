@@ -8,10 +8,6 @@ mod schema_v0004;
 mod schema_v0005;
 mod schema_v0006;
 mod schema_v0007;
-mod schema_v0008;
-mod schema_v0009;
-mod schema_v0010;
-mod schema_v0011;
 
 pub use catalog::{Migration, MigrationCatalog, default_migration_catalog};
 pub use record::AppliedMigration;

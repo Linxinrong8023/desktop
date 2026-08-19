@@ -22,7 +22,9 @@ function createMockWorkflow(locale: "zh-CN" | "en-US"): WorkflowDefinition {
 }
 
 /** Produces the normalized parallel fixture used by runtime tests. */
-function createParallelMockWorkflow(locale: "zh-CN" | "en-US"): WorkflowDefinition {
+function createParallelMockWorkflow(
+  locale: "zh-CN" | "en-US",
+): WorkflowDefinition {
   return normalizeWorkflowDefinition(createParallelMockWorkflowFixture(locale));
 }
 
@@ -30,7 +32,9 @@ function createParallelMockWorkflow(locale: "zh-CN" | "en-US"): WorkflowDefiniti
 function createStaggeredParallelMockWorkflow(
   locale: "zh-CN" | "en-US",
 ): WorkflowDefinition {
-  return normalizeWorkflowDefinition(createStaggeredParallelMockWorkflowFixture(locale));
+  return normalizeWorkflowDefinition(
+    createStaggeredParallelMockWorkflowFixture(locale),
+  );
 }
 
 /** Builds a valid payload for whatever fields the open gate requires. */
@@ -53,9 +57,7 @@ const HITL_PAYLOAD = { notes: "looks good", scope: "diff" };
 
 function isTerminalRun(status: GraphWorkflowRun["status"]): boolean {
   return (
-    status === "succeeded"
-    || status === "failed"
-    || status === "cancelled"
+    status === "succeeded" || status === "failed" || status === "cancelled"
   );
 }
 
@@ -76,7 +78,11 @@ async function drainRun(
     }
     if (run.openHitls.length > 0) {
       const gate = run.openHitls[0]!;
-      await runtime.runs.submitHitl(run.id, gate.id, hitlPayloadFor(gate.schema.fields));
+      await runtime.runs.submitHitl(
+        run.id,
+        gate.id,
+        hitlPayloadFor(gate.schema.fields),
+      );
       continue;
     }
     await vi.advanceTimersByTimeAsync(stepMs);
@@ -273,7 +279,9 @@ describe("createMemoryWorkflowRuntime", () => {
     );
 
     const library = await runtime.host.getDefinition(definition.id);
-    const libraryNode = library?.nodes.find((node) => node.id === startNode!.id);
+    const libraryNode = library?.nodes.find(
+      (node) => node.id === startNode!.id,
+    );
     expect(libraryNode?.data.description).toBe(startNode!.data.description);
     expect(libraryNode?.data.instruction).toBe(startNode!.data.instruction);
   });
@@ -322,24 +330,32 @@ describe("createMemoryWorkflowRuntime", () => {
       definitionId: definition.id,
     });
     const snapshot = await runtime.runs.getLiveSnapshot(run.id);
-    expect(snapshot).toEqual(expect.objectContaining({ cursor: null, artifacts: [] }));
+    expect(snapshot).toEqual(
+      expect.objectContaining({ cursor: null, artifacts: [] }),
+    );
 
     await runtime.runs.start(run.id);
-    const replayed: Array<{ cursor: string; sequence: number; type: string }> = [];
+    const replayed: Array<{ cursor: string; sequence: number; type: string }> =
+      [];
     runtime.runs.subscribe(
       run.id,
-      (event) => replayed.push({
-        cursor: event.cursor,
-        sequence: event.sequence,
-        type: event.type,
-      }),
+      (event) =>
+        replayed.push({
+          cursor: event.cursor,
+          sequence: event.sequence,
+          type: event.type,
+        }),
       { afterCursor: snapshot!.cursor },
     );
 
     expect(replayed).toEqual([
       { cursor: `${run.id}:1`, sequence: 1, type: "run_started" },
       { cursor: `${run.id}:2`, sequence: 2, type: "node_started" },
-      { cursor: `${run.id}:3`, sequence: 3, type: "node_conversation_item_upserted" },
+      {
+        cursor: `${run.id}:3`,
+        sequence: 3,
+        type: "node_conversation_item_upserted",
+      },
     ]);
     runtime.dispose();
   });
@@ -400,7 +416,9 @@ describe("mock run engine", () => {
     const events: string[] = [];
     const unsubscribe = runtime.runs.subscribe(run.id, (event) => {
       if (event.type === "node_started" || event.type === "node_finished") {
-        events.push(`${event.type}:${event.nodeId}:${event.type === "node_finished" ? event.status : ""}`);
+        events.push(
+          `${event.type}:${event.nodeId}:${event.type === "node_finished" ? event.status : ""}`,
+        );
       } else {
         events.push(event.type);
       }
@@ -510,9 +528,7 @@ describe("mock run engine", () => {
         openHitls: [],
       }),
     );
-    expect(
-      (await runtime.runs.get(run.id))?.nodeStates.quick_scan,
-    ).toEqual(
+    expect((await runtime.runs.get(run.id))?.nodeStates.quick_scan).toEqual(
       expect.objectContaining({
         status: "succeeded",
         input: expect.objectContaining({ summary: expect.any(String) }),
@@ -539,26 +555,31 @@ describe("mock run engine", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     const paused = await runtime.runs.get(run.id);
     const gate = paused?.openHitls.find((item) => item.nodeId === "quick_scan");
-    expect(gate).toEqual(expect.objectContaining({
-      nodeId: "quick_scan",
-      schema: expect.objectContaining({ kind: "approval" }),
-    }));
+    expect(gate).toEqual(
+      expect.objectContaining({
+        nodeId: "quick_scan",
+        schema: expect.objectContaining({ kind: "approval" }),
+      }),
+    );
     await runtime.runs.submitHitl(
       run.id,
       gate!.id,
       hitlPayloadFor(gate!.schema.fields),
     );
-    const conversation = (await runtime.runs.getLiveSnapshot(run.id))?.conversation
-      ?? [];
-    const nodeItems = conversation.filter((item) => item.nodeId === "quick_scan");
-    expect(nodeItems.some((item) => item.kind === "message" && item.role === "user")).toBe(
-      true,
+    const conversation =
+      (await runtime.runs.getLiveSnapshot(run.id))?.conversation ?? [];
+    const nodeItems = conversation.filter(
+      (item) => item.nodeId === "quick_scan",
     );
     expect(
-      nodeItems.some((item) =>
-        item.kind === "message"
-        && item.role === "assistant"
-        && item.markdown.includes("已收到你的确认")
+      nodeItems.some((item) => item.kind === "message" && item.role === "user"),
+    ).toBe(true);
+    expect(
+      nodeItems.some(
+        (item) =>
+          item.kind === "message" &&
+          item.role === "assistant" &&
+          item.markdown.includes("已收到你的确认"),
       ),
     ).toBe(true);
     runtime.dispose();
@@ -587,7 +608,9 @@ describe("mock run engine", () => {
       runtime.runs.submitHitl(run.id, "wrong-id", HITL_PAYLOAD),
     ).rejects.toThrow(/no open hitl request/i);
     await expect(
-      runtime.runs.submitHitl(run.id, paused!.openHitls[0]!.id, { scope: "diff" }),
+      runtime.runs.submitHitl(run.id, paused!.openHitls[0]!.id, {
+        scope: "diff",
+      }),
     ).rejects.toThrow(/missing required field notes/i);
   });
 
@@ -677,7 +700,9 @@ describe("mock run engine", () => {
       kickoffInput: "update README docs only",
     });
     expect(plan.skipped).toContain("tests");
-    expect((await runtime.runs.get(run.id))?.nodeStates.tests?.status).toBe("idle");
+    expect((await runtime.runs.get(run.id))?.nodeStates.tests?.status).toBe(
+      "idle",
+    );
 
     const finished = await drainRun(runtime, run.id, 50);
     expect(finished?.status).toBe("succeeded");
@@ -718,9 +743,7 @@ describe("mock run engine", () => {
     expect(mid?.status).toBe("awaiting_input");
 
     const finished = await drainRun(runtime, run.id, 100);
-    expect(finished).toEqual(
-      expect.objectContaining({ status: "succeeded" }),
-    );
+    expect(finished).toEqual(expect.objectContaining({ status: "succeeded" }));
   });
 
   it("staggers parallel starts and ends via per-node mockStepMs", async () => {
@@ -778,7 +801,9 @@ describe("mock run engine", () => {
     expect(snap?.nodeStates.join?.status).toBe("idle");
 
     // User can resolve docs_pass first while quick_scan is still open.
-    const docsGate = snap!.openHitls.find((item) => item.nodeId === "docs_pass");
+    const docsGate = snap!.openHitls.find(
+      (item) => item.nodeId === "docs_pass",
+    );
     expect(docsGate).toBeDefined();
     await runtime.runs.submitHitl(
       run.id,
@@ -802,9 +827,7 @@ describe("mock run engine", () => {
 
     // Drain deep_security remainder + join + output
     const finished = await drainRun(runtime, run.id, 1_000);
-    expect(finished).toEqual(
-      expect.objectContaining({ status: "succeeded" }),
-    );
+    expect(finished).toEqual(expect.objectContaining({ status: "succeeded" }));
   });
 
   it("ignores start() while a run is already running", async () => {
@@ -852,7 +875,9 @@ describe("mock run engine", () => {
     );
     expect(types.filter((type) => type === "run_finished")).toHaveLength(1);
     expect(types.at(-1)).toBe("run_finished");
-    const finishedCount = types.filter((type) => type === "node_finished").length;
+    const finishedCount = types.filter(
+      (type) => type === "node_finished",
+    ).length;
     expect(finishedCount).toBeLessThan(definition.nodes.length);
   });
 
@@ -876,9 +901,7 @@ describe("mock run engine", () => {
     expect(await runtime.runs.get(first.id)).toEqual(
       expect.objectContaining({ status: "cancelled" }),
     );
-    expect(finished).toEqual(
-      expect.objectContaining({ status: "succeeded" }),
-    );
+    expect(finished).toEqual(expect.objectContaining({ status: "succeeded" }));
   });
 
   /**
@@ -925,13 +948,17 @@ describe("planMockExecution", () => {
     const plan = planMockExecution(workflow);
     expect(plan.order[0]).toBe("start");
     expect(plan.order).toContain("output");
-    expect(plan.order.indexOf("understand")).toBeLessThan(plan.order.indexOf("quality"));
+    expect(plan.order.indexOf("understand")).toBeLessThan(
+      plan.order.indexOf("quality"),
+    );
     expect(plan.skipped).toEqual([]);
   });
 
   it("marks the unused exclusive branch as skipped for doc kickoff", () => {
     const workflow = createMockWorkflow("zh-CN");
-    const plan = planMockExecution(workflow, { kickoffInput: "update README docs only" });
+    const plan = planMockExecution(workflow, {
+      kickoffInput: "update README docs only",
+    });
     expect(plan.skipped).toEqual(["tests"]);
     expect(plan.order).not.toContain("tests");
     expect(plan.order).toContain("review");

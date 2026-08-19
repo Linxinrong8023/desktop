@@ -66,9 +66,11 @@ export function RunActAgentConfig({ config }: RunActAgentConfigProps) {
         </p>
         <RunBriefPopover
           title={roleLabel}
-          body={roleDescription === ""
-            ? t("workflowRun.inspector.catalogNoDescription")
-            : roleDescription}
+          body={
+            roleDescription === ""
+              ? t("workflowRun.inspector.catalogNoDescription")
+              : roleDescription
+          }
           openLabel={t("workflowRun.inspector.roleOpen", { name: roleLabel })}
         >
           <span className="line-clamp-2 text-xs leading-4">{roleLabel}</span>
@@ -80,7 +82,10 @@ export function RunActAgentConfig({ config }: RunActAgentConfigProps) {
           <p className="text-[11px] text-muted-foreground">
             {t("settings.workflow.field.skills")}
           </p>
-          <ul className="space-y-1.5" aria-label={t("settings.workflow.field.skills")}>
+          <ul
+            className="space-y-1.5"
+            aria-label={t("settings.workflow.field.skills")}
+          >
             {enabledSkills.map((binding) => {
               const skill = skillByName.get(binding.skillId);
               const name = skill?.name ?? binding.skillId;
@@ -89,12 +94,16 @@ export function RunActAgentConfig({ config }: RunActAgentConfigProps) {
                 <li key={binding.skillId}>
                   <RunBriefPopover
                     title={name}
-                    body={description === ""
-                      ? t("workflowRun.inspector.catalogNoDescription")
-                      : description}
+                    body={
+                      description === ""
+                        ? t("workflowRun.inspector.catalogNoDescription")
+                        : description
+                    }
                     openLabel={t("workflowRun.inspector.skillOpen", { name })}
                   >
-                    <span className="line-clamp-2 text-xs leading-4">{name}</span>
+                    <span className="line-clamp-2 text-xs leading-4">
+                      {name}
+                    </span>
                   </RunBriefPopover>
                 </li>
               );
@@ -108,15 +117,22 @@ export function RunActAgentConfig({ config }: RunActAgentConfigProps) {
           <p className="text-[11px] text-muted-foreground">
             {t("settings.workflow.field.mcps")}
           </p>
-          <ul className="space-y-1.5" aria-label={t("settings.workflow.field.mcps")}>
+          <ul
+            className="space-y-1.5"
+            aria-label={t("settings.workflow.field.mcps")}
+          >
             {enabledMcps.map((mcp) => (
               <li key={mcp.mcpId}>
                 <RunBriefPopover
                   title={mcp.mcpId}
                   body={t("workflowRun.inspector.catalogNoDescription")}
-                  openLabel={t("workflowRun.inspector.mcpOpen", { name: mcp.mcpId })}
+                  openLabel={t("workflowRun.inspector.mcpOpen", {
+                    name: mcp.mcpId,
+                  })}
                 >
-                  <span className="line-clamp-2 text-xs leading-4">{mcp.mcpId}</span>
+                  <span className="line-clamp-2 text-xs leading-4">
+                    {mcp.mcpId}
+                  </span>
                 </RunBriefPopover>
               </li>
             ))}
@@ -128,23 +144,21 @@ export function RunActAgentConfig({ config }: RunActAgentConfigProps) {
         <p className="text-[11px] text-muted-foreground">
           {t("settings.workflow.field.prompt")}
         </p>
-        {shouldPreviewBrief(prompt)
-          ? (
-            <RunBriefPopover
-              title={t("settings.workflow.field.prompt")}
-              body={prompt}
-              openLabel={t("workflowRun.inspector.textOpen", {
-                field: t("settings.workflow.field.prompt"),
-              })}
-            >
-              <span className="line-clamp-4 whitespace-pre-wrap text-xs leading-5">
-                {prompt}
-              </span>
-            </RunBriefPopover>
-          )
-          : (
-            <StaticValue value={prompt} multiline />
-          )}
+        {shouldPreviewBrief(prompt) ? (
+          <RunBriefPopover
+            title={t("settings.workflow.field.prompt")}
+            body={prompt}
+            openLabel={t("workflowRun.inspector.textOpen", {
+              field: t("settings.workflow.field.prompt"),
+            })}
+          >
+            <span className="line-clamp-4 whitespace-pre-wrap text-xs leading-5">
+              {prompt}
+            </span>
+          </RunBriefPopover>
+        ) : (
+          <StaticValue value={prompt} multiline />
+        )}
       </div>
     </>
   );

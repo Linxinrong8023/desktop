@@ -2,7 +2,8 @@ use super::events::{
     drain_idle_events, drain_queued_prompt_events, settle_abandoned_session_response,
     settle_cancelled_prompt,
 };
-use super::handoff::prompt_for_agent;
+use super::handoff::{AgentPrompt, prompt_for_agent};
+use super::replay::recorded_replay;
 use super::routing::{SessionControl, SessionEvent};
 use super::scheduling::{ActiveInput, ActiveInputState};
 use super::title_acquisition::PollAttempt;
@@ -19,7 +20,6 @@ use agent_client_protocol_schema::v1::{
 use agent_client_protocol_schema::v1::{PromptRequest, PromptResponse, StopReason};
 use agent_client_protocol_schema::v1::{RequestPermissionOutcome, RequestPermissionResponse};
 use ora_acp::AcpClient;
-use ora_history::HistoryRecord;
 use ora_logging::{ora_debug, ora_warn};
 use tokio::process::ChildStdin;
 use tokio::time::{Instant, timeout};
@@ -133,6 +133,10 @@ impl RuntimeActor {
                 }
                 RuntimeCommand::Cancel { .. } => {}
                 RuntimeCommand::PreemptTitlePolling { response } => {
+                    let _ = response.send(());
+                }
+                RuntimeCommand::AdoptUserTitle { title, response } => {
+                    self.adopt_user_title(title);
                     let _ = response.send(());
                 }
                 RuntimeCommand::TitlePoll { attempt } => {
@@ -371,6 +375,10 @@ impl RuntimeActor {
                 ActiveInput::Command(RuntimeCommand::PreemptTitlePolling { response }) => {
                     let _ = response.send(());
                 }
+                ActiveInput::Command(RuntimeCommand::AdoptUserTitle { title, response }) => {
+                    self.adopt_user_title(title);
+                    let _ = response.send(());
+                }
                 ActiveInput::Command(RuntimeCommand::Cancel { .. }) => {}
                 ActiveInput::Command(RuntimeCommand::TitlePoll {
                     attempt: PollAttempt::First,
@@ -440,8 +448,10 @@ impl RuntimeActor {
         let content_count = prompt.len();
         // Built before the prompt is recorded, so the transcript handed to a new
         // agent describes the conversation up to this turn rather than including it.
-        let handoff_carried = self.handoff_pending;
-        let sent = prompt_for_agent(self, &prompt);
+        let AgentPrompt {
+            blocks,
+            settles_handoff,
+        } = prompt_for_agent(self, &prompt);
         let outcome = self.recorder.record_prompt(&prompt);
         let stopped_recording = matches!(outcome, RecordOutcome::JustFailed { .. });
         self.settle_record(outcome);
@@ -450,15 +460,11 @@ impl RuntimeActor {
             // work is real whether or not the file kept it. This one has not
             // started: nothing is lost by refusing it, and running it would put
             // the conversation somewhere the record cannot follow.
-            //
-            // The transcript this prompt would have carried was never delivered
-            // either, so the binding still owes it.
-            self.handoff_pending = handoff_carried;
             let _ = events.try_send(Err(history_degraded()));
             self.channel = Some(channel);
             return;
         }
-        let request = PromptRequest::new(self.session.agent_session_id.clone(), sent);
+        let request = PromptRequest::new(self.session.agent_session_id.clone(), blocks);
         ora_debug!(session_id = %self.session.id, content_count = content_count, "session/prompt sent");
         let pending = match client
             .start_session_request::<_, PromptResponse>(
@@ -470,12 +476,32 @@ impl RuntimeActor {
         {
             Ok(pending) => pending,
             Err(error) => {
+                // The request never reached the agent, so a transcript this prompt
+                // was carrying is still owed and stays owed — in memory and, since
+                // no delivery was recorded, across a restart as well.
                 self.end_turn(StopReason::Cancelled);
                 let _ = events.try_send(Err(map_acp_error(error)));
                 self.isolate_channel(channel).await;
                 return;
             }
         };
+        if settles_handoff {
+            // Accepting the request is the last thing Ora can observe about delivery:
+            // past it the frame is on the agent's stdin and what the agent does with
+            // it is unobservable. Treating that as delivered keeps a connection lost
+            // mid-turn from re-injecting the whole conversation into an agent that
+            // already holds it — the transcript's preamble, which tells its reader
+            // the work belongs to a *different* agent, would be false if it did.
+            //
+            // Recording it can itself fail, which degrades the session and leaves no
+            // delivery line behind. The next actor then reads the binding as still
+            // owing a handoff and sends it again, the harmless direction to be wrong in.
+            self.handoff_pending = false;
+            let outcome = self
+                .recorder
+                .record_handoff_delivered(self.session.agent_session_id.clone());
+            self.settle_record(outcome);
+        }
         let mut permissions = HashMap::new();
         let mut input_state = ActiveInputState::default();
         loop {
@@ -644,6 +670,10 @@ impl RuntimeActor {
                 ActiveInput::Command(RuntimeCommand::PreemptTitlePolling { response }) => {
                     let _ = response.send(());
                 }
+                ActiveInput::Command(RuntimeCommand::AdoptUserTitle { title, response }) => {
+                    self.adopt_user_title(title);
+                    let _ = response.send(());
+                }
                 ActiveInput::Command(RuntimeCommand::Cancel { .. }) => {}
                 ActiveInput::Command(RuntimeCommand::TitlePoll {
                     attempt: PollAttempt::First,
@@ -712,20 +742,7 @@ impl RuntimeActor {
                 return Replay::Unreadable;
             }
         };
-        for line in history.lines {
-            let event = match line.record {
-                HistoryRecord::Update { update } => {
-                    LoadSessionEvent::SessionUpdate { update: *update }
-                }
-                HistoryRecord::TurnEnded { stop_reason } => {
-                    LoadSessionEvent::TurnEnded { stop_reason }
-                }
-                // Bookkeeping the conversation view has no place for. It stays in
-                // the file, where the handoff renderer and a human can still see it.
-                HistoryRecord::Meta(_)
-                | HistoryRecord::AgentSwitched(_)
-                | HistoryRecord::Gap { .. } => continue,
-            };
+        for event in recorded_replay(history) {
             if events.send(Ok(event)).await.is_err() {
                 return Replay::Abandoned;
             }
@@ -891,7 +908,7 @@ mod tests {
     use crate::app_event::AppEventHub;
     use crate::clock::SystemClock;
     use ora_db::{DatabaseLocation, RepositoryPool};
-    use ora_domain::{AgentCli, AuditFields, SessionId, SessionStatus, TaskId};
+    use ora_domain::{AgentCli, AuditFields, SessionId, SessionStatus, SessionTitle, TaskId};
     use ora_scheduler::Scheduler;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -918,6 +935,7 @@ mod tests {
             "session-1",
             0,
             &ora_domain::HistoryState::Writable,
+            super::super::history::LocalHistoryClock,
         )
         .expect("open actor recorder");
         let session = ora_domain::Session::new(
@@ -956,6 +974,66 @@ mod tests {
             .expect("actor should drop after its command channel closes")
             .expect("actor drop probe should remain connected");
         actor_task.await.expect("actor task should exit cleanly");
+        scheduler.shutdown().await;
+    }
+
+    /// Verifies a user-chosen title locks acquisition so a later agent title is ignored.
+    #[tokio::test]
+    async fn user_rename_locks_title_against_later_agent_updates() {
+        let temporary = TempDir::new().expect("create actor test directory");
+        let pool = RepositoryPool::new(&DatabaseLocation::path(
+            temporary.path().join("test.sqlite"),
+        ))
+        .expect("create repository pool");
+        let scheduler = Scheduler::new(chrono_tz::UTC);
+        let connection = ConnectionSupervisor::start(
+            AgentCli::Codex,
+            pool.clone(),
+            temporary.path().to_path_buf(),
+            SystemClock,
+        );
+        let recorder = super::super::history::SessionRecorder::open(
+            &temporary.path().join("sessions"),
+            "session-1",
+            0,
+            &ora_domain::HistoryState::Writable,
+            super::super::history::LocalHistoryClock,
+        )
+        .expect("open actor recorder");
+        let session = ora_domain::Session::new(
+            SessionId::new("session-1"),
+            TaskId::new("task-1"),
+            AgentCli::Codex,
+            "provider-session-1",
+            SessionStatus::Stopped,
+            AuditFields::new(0, 0, false),
+        );
+        let (commands, command_receiver) = mpsc::unbounded_channel();
+        let command_sender = commands.downgrade();
+        let mut actor = RuntimeActor {
+            session,
+            cwd: temporary.path().to_path_buf(),
+            repository: ora_db::SqliteSessionRepository::new(pool),
+            clock: SystemClock,
+            connection,
+            channel: None,
+            commands: command_receiver,
+            recorder,
+            sessions_root: temporary.path().join("sessions"),
+            handoff_pending: false,
+            scheduler: scheduler.clone(),
+            app_events: AppEventHub::new().publisher(),
+            title_acquisition: TitleAcquisition::awaiting_first_prompt(true),
+            command_sender,
+            exit_probe: None,
+        };
+        let user_title = SessionTitle::parse("User title").expect("valid user title");
+        actor.adopt_user_title(user_title.clone());
+        actor.persist_agent_title("Agent title");
+        assert_eq!(actor.session.title.as_ref(), Some(&user_title));
+        assert!(!actor.title_acquisition.accepts_title());
+        drop(commands);
+        drop(actor);
         scheduler.shutdown().await;
     }
 }

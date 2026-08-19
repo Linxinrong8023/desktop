@@ -20,12 +20,15 @@ export function useSessionUnreadSync(chatStore: ChatStore): void {
     // true -> false edge, not to every streamed chunk in between. Seed from the
     // current store so a turn that ended before mount is not flagged in arrears.
     const wasResponding = new Map<string, boolean>();
-    for (const [id, conversation] of Object.entries(chatStore.getState().conversations)) {
+    for (const [id, conversation] of Object.entries(
+      chatStore.getState().conversations,
+    )) {
       wasResponding.set(id, conversation.isResponding);
     }
 
     const unsubscribeChat = chatStore.subscribe((state) => {
-      const selectedId = useWorkspaceSelectionStore.getState().selection.sessionId;
+      const selectedId =
+        useWorkspaceSelectionStore.getState().selection.sessionId;
       for (const [id, conversation] of Object.entries(state.conversations)) {
         const responding = conversation.isResponding;
         const finishedTurn = wasResponding.get(id) === true && !responding;
@@ -35,9 +38,12 @@ export function useSessionUnreadSync(chatStore: ChatStore): void {
       }
     });
 
-    const unsubscribeSelection = useWorkspaceSelectionStore.subscribe((state) => {
-      if (state.selection.sessionId !== null) markRead(state.selection.sessionId);
-    });
+    const unsubscribeSelection = useWorkspaceSelectionStore.subscribe(
+      (state) => {
+        if (state.selection.sessionId !== null)
+          markRead(state.selection.sessionId);
+      },
+    );
 
     return () => {
       unsubscribeChat();

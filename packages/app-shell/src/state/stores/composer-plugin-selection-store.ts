@@ -17,32 +17,38 @@ interface ComposerPluginSelectionState {
   rekey: (fromKey: string, toKey: string) => void;
 }
 
-export const useComposerPluginSelectionStore = create<ComposerPluginSelectionState>((set) => ({
-  selectedIdsByConversation: {},
-  addPlugin: (key, pluginId) =>
-    set((state) => {
-      const current = state.selectedIdsByConversation[key] ?? [];
-      if (current.includes(pluginId)) return state;
-      return { selectedIdsByConversation: { ...state.selectedIdsByConversation, [key]: [...current, pluginId] } };
-    }),
-  removePlugin: (key, pluginId) =>
-    set((state) => {
-      const current = state.selectedIdsByConversation[key];
-      if (current === undefined) return state;
-      return {
-        selectedIdsByConversation: {
-          ...state.selectedIdsByConversation,
-          [key]: current.filter((id) => id !== pluginId),
-        },
-      };
-    }),
-  rekey: (fromKey, toKey) =>
-    set((state) => {
-      const selected = state.selectedIdsByConversation[fromKey];
-      if (selected === undefined || fromKey === toKey) return state;
-      const next = { ...state.selectedIdsByConversation };
-      delete next[fromKey];
-      next[toKey] = selected;
-      return { selectedIdsByConversation: next };
-    }),
-}));
+export const useComposerPluginSelectionStore =
+  create<ComposerPluginSelectionState>((set) => ({
+    selectedIdsByConversation: {},
+    addPlugin: (key, pluginId) =>
+      set((state) => {
+        const current = state.selectedIdsByConversation[key] ?? [];
+        if (current.includes(pluginId)) return state;
+        return {
+          selectedIdsByConversation: {
+            ...state.selectedIdsByConversation,
+            [key]: [...current, pluginId],
+          },
+        };
+      }),
+    removePlugin: (key, pluginId) =>
+      set((state) => {
+        const current = state.selectedIdsByConversation[key];
+        if (current === undefined) return state;
+        return {
+          selectedIdsByConversation: {
+            ...state.selectedIdsByConversation,
+            [key]: current.filter((id) => id !== pluginId),
+          },
+        };
+      }),
+    rekey: (fromKey, toKey) =>
+      set((state) => {
+        const selected = state.selectedIdsByConversation[fromKey];
+        if (selected === undefined || fromKey === toKey) return state;
+        const next = { ...state.selectedIdsByConversation };
+        delete next[fromKey];
+        next[toKey] = selected;
+        return { selectedIdsByConversation: next };
+      }),
+  }));

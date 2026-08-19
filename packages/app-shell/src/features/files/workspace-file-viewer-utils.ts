@@ -1,5 +1,8 @@
 /** Converts ripgrep's one-based UTF-8 byte column into a JavaScript UTF-16 string index. */
-export function utf8ByteColumnToStringIndex(value: string, column: number): number {
+export function utf8ByteColumnToStringIndex(
+  value: string,
+  column: number,
+): number {
   const targetOffset = Math.max(0, column - 1);
   let byteOffset = 0;
   let stringIndex = 0;

@@ -4,11 +4,9 @@ import type {
   Project,
   Session,
   Task,
-  TaskStatus,
   TaskWorkspaceMode,
 } from "@ora/contracts";
 import { useContractsClient } from "../../contracts-client-context";
-import { clientId } from "../client-id";
 import { queryKeys } from "./query-keys";
 import { useWorkspaceSelectionStore } from "../stores/workspace-selection-store";
 import { useUiStore } from "../stores/ui-store";
@@ -21,7 +19,7 @@ function readCache<T>(queryClient: QueryClient, key: readonly string[]): T[] {
   return (queryClient.getQueryData(key) as T[] | undefined) ?? [];
 }
 
-/** Creates a project and selects it once the server confirms the id. */
+/** Creates a project and selects it once the backend confirms the id. */
 export function useCreateProject() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
@@ -41,7 +39,7 @@ export function useCreateProject() {
   });
 }
 
-/** Renames a project and refreshes the project list. */
+/** Renames a project and patches the project list so the sidebar label updates immediately. */
 export function useUpdateProject() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
@@ -50,7 +48,12 @@ export function useUpdateProject() {
       client.project
         .update({ projectId: project.id, name })
         .then((response) => response.project),
-    onSuccess: () => {
+    onSuccess: (project) => {
+      queryClient.setQueryData<Project[]>(queryKeys.projects, (current) =>
+        (current ?? []).map((candidate) =>
+          candidate.id === project.id ? { ...project } : candidate,
+        ),
+      );
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     },
   });
@@ -78,7 +81,7 @@ export function useDeleteProject() {
   });
 }
 
-/** Creates a task under a project and selects it once the server confirms the id. */
+/** Creates a task under a project and selects it once the backend confirms the id. */
 export function useCreateTask() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
@@ -86,18 +89,16 @@ export function useCreateTask() {
     mutationFn: ({
       projectId,
       title,
-      status,
       workspaceMode,
       baseBranch,
     }: {
       projectId: string;
       title: string;
-      status: TaskStatus;
       workspaceMode?: TaskWorkspaceMode;
       baseBranch?: string;
     }) =>
       client.task
-        .create({ projectId, title, status, workspaceMode, baseBranch })
+        .create({ projectId, title, workspaceMode, baseBranch })
         .then((response) => response.task),
     onSuccess: (task) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
@@ -121,24 +122,21 @@ export function useCreateTask() {
   });
 }
 
-/** Replaces a task's fields and refreshes the task list. */
+/** Replaces a task's fields and patches the task list so the sidebar label updates immediately. */
 export function useUpdateTask() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      task,
-      title,
-      status,
-    }: {
-      task: Task;
-      title: string;
-      status: TaskStatus;
-    }) =>
+    mutationFn: ({ task, title }: { task: Task; title: string }) =>
       client.task
-        .update({ taskId: task.id, title, status })
+        .update({ taskId: task.id, title })
         .then((response) => response.task),
-    onSuccess: () => {
+    onSuccess: (task) => {
+      queryClient.setQueryData<Task[]>(queryKeys.tasks, (current) =>
+        (current ?? []).map((candidate) =>
+          candidate.id === task.id ? { ...task } : candidate,
+        ),
+      );
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
     },
   });
@@ -186,7 +184,6 @@ export function useCreateSession() {
       const warmed = await client.session.warm({
         target: { type: "task", taskId },
         agentCli,
-        clientId: clientId(),
       });
       const response = await client.session.attach({
         sessionId: warmed.sessionId,
@@ -195,7 +192,9 @@ export function useCreateSession() {
       queryClient.removeQueries({
         queryKey: queryKeys.warmSession({ type: "task", taskId }, agentCli),
       });
-      chatStore.getState().setConfigOptions(response.session.id, warmed.configOptions);
+      chatStore
+        .getState()
+        .setConfigOptions(response.session.id, warmed.configOptions);
       return response.session;
     },
     onSuccess: (session) => {
@@ -231,7 +230,9 @@ export function useResumeSessionHistory() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
-      client.session.resumeHistory({ sessionId }).then((response) => response.session),
+      client.session
+        .resumeHistory({ sessionId })
+        .then((response) => response.session),
     onSuccess: (session) => {
       queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
         (current ?? []).map((candidate) =>
@@ -256,6 +257,28 @@ export function useDeleteSession() {
       if (selection.sessionId === sessionId) {
         useWorkspaceSelectionStore.getState().clearSessionSelection();
       }
+    },
+  });
+}
+
+/** Persists a user-edited session title and patches the sessions list cache. */
+export function useRenameSession() {
+  const client = useContractsClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) =>
+      client.session
+        .rename({ sessionId, title })
+        .then((response) => response.session),
+    onSuccess: (session) => {
+      // Replace with a new object so React Query cannot structural-share the
+      // previous cache entry when the transport returns the same session reference.
+      queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
+        (current ?? []).map((candidate) =>
+          candidate.id === session.id ? { ...session } : candidate,
+        ),
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
     },
   });
 }

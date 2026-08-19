@@ -2,9 +2,12 @@ use super::ports::{
     CandidateDecision, CandidateResultStatus, ConflictSkillInfo, ImportCandidate, ImportResult,
     ImportSessionState, SkillImportProgressEvent,
 };
-use crate::skill::SkillStorage;
-use crate::{Clock, SkillRepository};
-use ora_domain::{AuditFields, Skill, SkillId};
+use crate::skill::{
+    SkillStorage, commit_existing_package, commit_restored_package, commit_unclaimed_package,
+    has_usable_package, next_updated_at, persist_promoted_package,
+};
+use crate::{ApplicationError, Clock, SkillRepository};
+use ora_domain::{AuditFields, Namespace, Skill, SkillId};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -168,23 +171,45 @@ where
     IdGenerator: super::ports::SkillImportIdGenerator,
     ClockSource: Clock,
 {
-    // A `ready` name must still be free at commit time (optimistic concurrency).
-    match repository.find_skill_by_name(&candidate.name) {
-        Ok(Some(_)) => return CandidateOutcome::StaleConflict,
+    let now = clock.now_timestamp_millis();
+    let namespace = Namespace::local();
+    let existing = match repository.find_skill_by_name(&namespace, &candidate.name) {
+        Ok(Some(existing)) => match has_usable_package(storage, &existing.name) {
+            Ok(true) => return CandidateOutcome::StaleConflict,
+            Ok(false) => Some(existing),
+            Err(_) => {
+                return CandidateOutcome::Failed {
+                    error_code: "skill_storage_error".to_string(),
+                };
+            }
+        },
+        Ok(None) => None,
         Err(_) => {
             return CandidateOutcome::Failed {
                 error_code: "skill_repository_error".to_string(),
             };
         }
-        Ok(None) => {}
-    }
+    };
 
-    let now = clock.now_timestamp_millis();
+    let updated_at = existing.as_ref().map_or(now, |skill| {
+        next_updated_at(skill.audit_fields.updated_at, now)
+    });
     let skill = match Skill::new(
-        SkillId::new(id_generator.generate_import_id()),
+        existing
+            .as_ref()
+            .map(|skill| skill.id.clone())
+            .unwrap_or_else(|| SkillId::new(id_generator.generate_import_id())),
+        namespace,
         candidate.name.clone(),
         candidate.description.clone(),
-        AuditFields::new(now, now, false),
+        AuditFields::new(
+            existing
+                .as_ref()
+                .map(|skill| skill.audit_fields.created_at)
+                .unwrap_or(now),
+            updated_at,
+            /*is_deleted*/ false,
+        ),
     ) {
         Ok(skill) => skill,
         Err(_) => {
@@ -202,24 +227,47 @@ where
             };
         }
     };
+    if let Some(existing) = &existing
+        && storage.formal_exists(&existing.name)
+        && storage.stage_existing(&existing.name, &staging).is_err()
+    {
+        return CandidateOutcome::Failed {
+            error_code: "skill_storage_error".to_string(),
+        };
+    }
     if let Err(error_code) = stage_boundary(storage, &staging, snapshot, candidate) {
+        let _ = storage.remove_temp(&staging);
         return CandidateOutcome::Failed { error_code };
     }
-    let handle = match storage.commit_create(&skill.name, &staging) {
-        Ok(handle) => handle,
-        Err(_) => {
-            return CandidateOutcome::Failed {
-                error_code: "skill_storage_error".to_string(),
-            };
+    let promoted = if let Some(existing) = &existing {
+        match commit_restored_package(
+            storage,
+            &skill.namespace,
+            &skill.id,
+            existing.audit_fields.updated_at,
+            &skill.name,
+            &existing.name,
+            &staging,
+        ) {
+            Ok(promoted) => promoted,
+            Err(error) => return promote_failure(storage, &staging, error),
+        }
+    } else {
+        match commit_unclaimed_package(storage, &skill.id, &skill.name, &staging) {
+            Ok(promoted) => promoted,
+            Err(error) => return promote_failure(storage, &staging, error),
         }
     };
-    if repository.create_skill(skill).is_err() {
-        let _ = storage.rollback_create(&handle);
+    let persisted = if existing.is_some() {
+        persist_promoted_package(storage, &promoted, || repository.update_skill(skill))
+    } else {
+        persist_promoted_package(storage, &promoted, || repository.create_skill(skill))
+    };
+    if persisted.is_err() {
         return CandidateOutcome::Failed {
             error_code: "skill_repository_error".to_string(),
         };
     }
-    let _ = storage.finish_create(&handle);
     CandidateOutcome::Imported
 }
 
@@ -251,9 +299,14 @@ where
     let now = clock.now_timestamp_millis();
     let skill = match Skill::new(
         frozen.id.clone(),
+        frozen.namespace.clone(),
         candidate.name.clone(),
         candidate.description.clone(),
-        AuditFields::new(frozen.created_at, now, false),
+        AuditFields::new(
+            frozen.created_at,
+            next_updated_at(frozen.updated_at, now),
+            /*is_deleted*/ false,
+        ),
     ) {
         Ok(skill) => skill,
         Err(_) => {
@@ -272,23 +325,25 @@ where
         }
     };
     if let Err(error_code) = stage_boundary(storage, &staging, snapshot, candidate) {
+        let _ = storage.remove_temp(&staging);
         return CandidateOutcome::Failed { error_code };
     }
-    let handle = match storage.commit_swap(&candidate.name, &existing.name, &staging) {
-        Ok(handle) => handle,
-        Err(_) => {
-            return CandidateOutcome::Failed {
-                error_code: "skill_storage_error".to_string(),
-            };
-        }
+    let promoted = match commit_existing_package(
+        storage,
+        &skill.id,
+        frozen.updated_at,
+        &candidate.name,
+        &existing.name,
+        &staging,
+    ) {
+        Ok(promoted) => promoted,
+        Err(error) => return promote_failure(storage, &staging, error),
     };
-    if repository.update_skill(skill).is_err() {
-        let _ = storage.rollback_swap(&handle);
+    if persist_promoted_package(storage, &promoted, || repository.update_skill(skill)).is_err() {
         return CandidateOutcome::Failed {
             error_code: "skill_repository_error".to_string(),
         };
     }
-    let _ = storage.finish_swap(&handle);
     CandidateOutcome::Overwritten
 }
 
@@ -309,21 +364,44 @@ where
         return None;
     }
     // The name must not have been claimed by a different visible skill since preview.
-    if let Ok(Some(other)) = repository.find_skill_by_name(&candidate.name)
+    if let Ok(Some(other)) = repository.find_skill_by_name(&current.namespace, &candidate.name)
         && other.id != existing.skill_id
     {
         return None;
     }
     Some(SkillSnapshot {
         id: current.id,
+        namespace: current.namespace,
         created_at: current.audit_fields.created_at,
+        updated_at: current.audit_fields.updated_at,
     })
 }
 
 /// The revalidated identity snapshot needed to overwrite one skill.
 struct SkillSnapshot {
     id: SkillId,
+    namespace: Namespace,
     created_at: i64,
+    updated_at: i64,
+}
+
+/// Maps a promotion failure onto the candidate result and drops leftover staging.
+///
+/// Both application conflict variants represent a permanent name claim discovered after preview;
+/// other promotion failures remain retryable storage failures.
+fn promote_failure<Storage: SkillStorage>(
+    storage: &Storage,
+    staging: &Path,
+    error: ApplicationError,
+) -> CandidateOutcome {
+    let _ = storage.remove_temp(staging);
+    match error {
+        ApplicationError::SkillFolderConflict { .. }
+        | ApplicationError::SkillNameConflict { .. } => CandidateOutcome::StaleConflict,
+        _ => CandidateOutcome::Failed {
+            error_code: "skill_storage_error".to_string(),
+        },
+    }
 }
 
 /// Copies every boundary file from the snapshot into a staging directory.

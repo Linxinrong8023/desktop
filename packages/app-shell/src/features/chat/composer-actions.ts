@@ -1,16 +1,46 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type { Skill } from "@ora/contracts";
 import type { PluginEntry } from "../settings/plugin-catalog";
+import { availableSkills } from "../../state/hooks/use-skills";
 
 export type ComposerActionGroup = "skills" | "commands" | "plugins" | "actions";
 
 export type ComposerAction =
-  | { id: string; group: "skills"; label: string; description: string; skill: Skill }
-  | { id: string; group: "commands"; label: string; description: string; hint?: string; command: acp.AvailableCommand }
-  | { id: string; group: "plugins"; label: string; description: string; plugin: PluginEntry }
-  | { id: "action:add-images"; group: "actions"; label: string; description: string };
+  | {
+      id: string;
+      group: "skills";
+      label: string;
+      description: string;
+      skill: Skill;
+    }
+  | {
+      id: string;
+      group: "commands";
+      label: string;
+      description: string;
+      hint?: string;
+      command: acp.AvailableCommand;
+    }
+  | {
+      id: string;
+      group: "plugins";
+      label: string;
+      description: string;
+      plugin: PluginEntry;
+    }
+  | {
+      id: "action:add-images";
+      group: "actions";
+      label: string;
+      description: string;
+    };
 
-export const COMPOSER_ACTION_GROUPS: readonly ComposerActionGroup[] = ["skills", "commands", "plugins", "actions"];
+export const COMPOSER_ACTION_GROUPS: readonly ComposerActionGroup[] = [
+  "skills",
+  "commands",
+  "plugins",
+  "actions",
+];
 export const COLLAPSED_ACTION_GROUP_SIZE = 5;
 
 /** Builds searchable actions from provider capabilities, Ora's configured skills, and the plugin catalog. */
@@ -32,7 +62,7 @@ export function buildComposerActions({
   attachmentDescription: string;
 }): ComposerAction[] {
   return [
-    ...skills.map((skill): ComposerAction => ({
+    ...availableSkills(skills).map((skill): ComposerAction => ({
       id: `skill:${skill.id}`,
       group: "skills",
       label: skill.name,
@@ -54,22 +84,30 @@ export function buildComposerActions({
       description: translatePluginSummary(plugin.summaryKey),
       plugin,
     })),
-    ...(includeAttachments ? [{
-      id: "action:add-images" as const,
-      group: "actions" as const,
-      label: attachmentLabel,
-      description: attachmentDescription,
-    }] : []),
+    ...(includeAttachments
+      ? [
+          {
+            id: "action:add-images" as const,
+            group: "actions" as const,
+            label: attachmentLabel,
+            description: attachmentDescription,
+          },
+        ]
+      : []),
   ];
 }
 
 /** Filters actions with one predictable name-and-description search rule. */
-export function filterComposerActions(actions: ComposerAction[], query: string): ComposerAction[] {
+export function filterComposerActions(
+  actions: ComposerAction[],
+  query: string,
+): ComposerAction[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   if (normalizedQuery === "") return actions;
-  return actions.filter((action) =>
-    action.label.toLocaleLowerCase().includes(normalizedQuery)
-    || action.description.toLocaleLowerCase().includes(normalizedQuery),
+  return actions.filter(
+    (action) =>
+      action.label.toLocaleLowerCase().includes(normalizedQuery) ||
+      action.description.toLocaleLowerCase().includes(normalizedQuery),
   );
 }
 

@@ -1,8 +1,6 @@
 import {
   endpoints,
   type EndpointOperation,
-  type EndpointPathParam,
-  type EndpointQueryParam,
   type RequestByOperation,
   type ResponseByOperation,
 } from "./endpoints.js";
@@ -11,8 +9,6 @@ import type {
   ContractTransport,
   ContractTransportRequest,
 } from "./transport.js";
-
-type ClientRequestShape = object;
 
 type ClientOperation<Operation extends EndpointOperation> = (
   request: RequestByOperation[Operation],
@@ -41,9 +37,11 @@ type EndpointNamespace = (typeof endpoints)[EndpointOperation]["namespace"];
  */
 export type ContractsClient = {
   [Namespace in EndpointNamespace]: {
-    [Operation in EndpointOperation as (typeof endpoints)[Operation]["namespace"] extends Namespace
-      ? (typeof endpoints)[Operation]["memberName"]
-      : never]: ClientOperation<Operation>;
+    [
+      Operation in EndpointOperation as (typeof endpoints)[Operation]["namespace"] extends Namespace
+        ? (typeof endpoints)[Operation]["memberName"]
+        : never
+    ]: ClientOperation<Operation>;
   };
 };
 
@@ -54,8 +52,10 @@ export function createContractsClient(
     project: {
       create: (request, options) =>
         executeOperation("createProject", request, transport, options),
-      get: (request, options) => executeOperation("getProject", request, transport, options),
-      list: (request, options) => executeOperation("listProjects", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getProject", request, transport, options),
+      list: (request, options) =>
+        executeOperation("listProjects", request, transport, options),
       listBranches: (request, options) =>
         executeOperation("listProjectBranches", request, transport, options),
       update: (request, options) =>
@@ -64,14 +64,20 @@ export function createContractsClient(
         executeOperation("deleteProject", request, transport, options),
     },
     task: {
-      create: (request, options) => executeOperation("createTask", request, transport, options),
-      get: (request, options) => executeOperation("getTask", request, transport, options),
+      create: (request, options) =>
+        executeOperation("createTask", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getTask", request, transport, options),
       getWorkspace: (request, options) =>
         executeOperation("getTaskWorkspace", request, transport, options),
-      list: (request, options) => executeOperation("listTasks", request, transport, options),
-      update: (request, options) => executeOperation("updateTask", request, transport, options),
-      delete: (request, options) => executeOperation("deleteTask", request, transport, options),
-      getDiff: (request, options) => executeOperation("getTaskDiff", request, transport, options),
+      list: (request, options) =>
+        executeOperation("listTasks", request, transport, options),
+      update: (request, options) =>
+        executeOperation("updateTask", request, transport, options),
+      delete: (request, options) =>
+        executeOperation("deleteTask", request, transport, options),
+      getDiff: (request, options) =>
+        executeOperation("getTaskDiff", request, transport, options),
       commitChanges: (request, options) =>
         executeOperation("commitTaskChanges", request, transport, options),
       pushBranch: (request, options) =>
@@ -83,26 +89,45 @@ export function createContractsClient(
       replyDiffComment: (request, options) =>
         executeOperation("replyTaskDiffComment", request, transport, options),
       setDiffCommentStatus: (request, options) =>
-        executeOperation("setTaskDiffCommentStatus", request, transport, options),
+        executeOperation(
+          "setTaskDiffCommentStatus",
+          request,
+          transport,
+          options,
+        ),
     },
     session: {
-      warm: (request, options) => executeOperation("warmSession", request, transport, options),
+      warm: (request, options) =>
+        executeOperation("warmSession", request, transport, options),
       setConfig: (request, options) =>
         executeOperation("setSessionConfig", request, transport, options),
       attach: (request, options) =>
         executeOperation("attachSession", request, transport, options),
-      get: (request, options) => executeOperation("getSession", request, transport, options),
-      list: (request, options) => executeOperation("listSessions", request, transport, options),
-      load: (request, options) => executeStreamOperation("loadSession", request, transport, options),
-      prompt: (request, options) => executeStreamOperation("promptSession", request, transport, options),
-      respondToPermission: (request, options) => executeOperation("respondToSessionPermission", request, transport, options),
-      stop: (request, options) => executeOperation("stopSession", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getSession", request, transport, options),
+      list: (request, options) =>
+        executeOperation("listSessions", request, transport, options),
+      load: (request, options) =>
+        executeStreamOperation("loadSession", request, transport, options),
+      prompt: (request, options) =>
+        executeStreamOperation("promptSession", request, transport, options),
+      respondToPermission: (request, options) =>
+        executeOperation(
+          "respondToSessionPermission",
+          request,
+          transport,
+          options,
+        ),
+      stop: (request, options) =>
+        executeOperation("stopSession", request, transport, options),
       switchAgent: (request, options) =>
         executeOperation("switchSessionAgent", request, transport, options),
       resumeHistory: (request, options) =>
         executeOperation("resumeSessionHistory", request, transport, options),
       delete: (request, options) =>
         executeOperation("deleteSession", request, transport, options),
+      rename: (request, options) =>
+        executeOperation("renameSession", request, transport, options),
     },
     appEvents: {
       watch: (request, options) =>
@@ -113,27 +138,38 @@ export function createContractsClient(
         executeOperation("getAgentRuntimeStatus", request, transport, options),
     },
     skill: {
-      create: (request, options) => executeOperation("createSkill", request, transport, options),
-      get: (request, options) => executeOperation("getSkill", request, transport, options),
-      list: (request, options) => executeOperation("listSkills", request, transport, options),
-      update: (request, options) => executeOperation("updateSkill", request, transport, options),
-      delete: (request, options) => executeOperation("deleteSkill", request, transport, options),
+      create: (request, options) =>
+        executeOperation("createSkill", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getSkill", request, transport, options),
+      list: (request, options) =>
+        executeOperation("listSkills", request, transport, options),
+      update: (request, options) =>
+        executeOperation("updateSkill", request, transport, options),
+      delete: (request, options) =>
+        executeOperation("deleteSkill", request, transport, options),
     },
     skillImport: {
       prepare: (request, options) =>
         executeOperation("prepareSkillImport", request, transport, options),
-      get: (request, options) => executeOperation("getSkillImport", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getSkillImport", request, transport, options),
       commit: (request, options) =>
         executeOperation("commitSkillImport", request, transport, options),
       cancel: (request, options) =>
         executeOperation("cancelSkillImport", request, transport, options),
     },
     agent: {
-      create: (request, options) => executeOperation("createAgent", request, transport, options),
-      get: (request, options) => executeOperation("getAgent", request, transport, options),
-      list: (request, options) => executeOperation("listAgents", request, transport, options),
-      update: (request, options) => executeOperation("updateAgent", request, transport, options),
-      delete: (request, options) => executeOperation("deleteAgent", request, transport, options),
+      create: (request, options) =>
+        executeOperation("createAgent", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getAgent", request, transport, options),
+      list: (request, options) =>
+        executeOperation("listAgents", request, transport, options),
+      update: (request, options) =>
+        executeOperation("updateAgent", request, transport, options),
+      delete: (request, options) =>
+        executeOperation("deleteAgent", request, transport, options),
     },
     agentImport: {
       prepare: (request, options) =>
@@ -146,8 +182,6 @@ export function createContractsClient(
         executeOperation("listInstalledPlugins", request, transport, options),
     },
     fileSystem: {
-      listDirectory: (request, options) =>
-        executeOperation("listDirectory", request, transport, options),
       listWorkspaceDirectory: (request, options) =>
         executeOperation("listWorkspaceDirectory", request, transport, options),
       readWorkspaceFile: (request, options) =>
@@ -162,10 +196,6 @@ export function createContractsClient(
         executeOperation("getSpecCatalog", request, transport, options),
       read: (request, options) =>
         executeOperation("readSpec", request, transport, options),
-      resolveSource: (request, options) =>
-        executeOperation("resolveSpecSource", request, transport, options),
-      updateProjectSources: (request, options) =>
-        executeOperation("updateProjectSpecSources", request, transport, options),
       watch: (request, options) =>
         executeStreamOperation("watchSpecs", request, transport, options),
     },
@@ -176,14 +206,16 @@ export function createContractsClient(
     workflow: {
       create: (request, options) =>
         executeOperation("createWorkflow", request, transport, options),
-      get: (request, options) => executeOperation("getWorkflow", request, transport, options),
+      get: (request, options) =>
+        executeOperation("getWorkflow", request, transport, options),
       list: (request, options) =>
         executeOperation("listWorkflows", request, transport, options),
       update: (request, options) =>
         executeOperation("updateWorkflow", request, transport, options),
       delete: (request, options) =>
         executeOperation("deleteWorkflow", request, transport, options),
-      getDraft: (request, options) => executeOperation("getDraft", request, transport, options),
+      getDraft: (request, options) =>
+        executeOperation("getDraft", request, transport, options),
       updateDraft: (request, options) =>
         executeOperation("updateDraft", request, transport, options),
       publish: (request, options) =>
@@ -209,7 +241,12 @@ export function createContractsClient(
       list: (request, options) =>
         executeOperation("listWorkflowRuns", request, transport, options),
       listByWorkflow: (request, options) =>
-        executeOperation("listWorkflowRunsByWorkflow", request, transport, options),
+        executeOperation(
+          "listWorkflowRunsByWorkflow",
+          request,
+          transport,
+          options,
+        ),
       listNodeRuns: (request, options) =>
         executeOperation("listWorkflowNodeRuns", request, transport, options),
       delete: (request, options) =>
@@ -233,28 +270,15 @@ async function executeOperation<Operation extends EndpointOperation>(
   options?: ContractCallOptions,
 ): Promise<ResponseByOperation[Operation]> {
   const endpoint = endpoints[operation];
-  const path = buildPath(
-    endpoint.pathTemplate,
-    endpoint.pathParams,
-    endpoint.queryParams,
-    request as ClientRequestShape,
-  );
-  const body = buildJsonBody(
-    endpoint.pathParams,
-    endpoint.queryParams,
-    endpoint.hasJsonBody,
-    request as ClientRequestShape,
-  );
   const transportRequest: ContractTransportRequest = {
     operationName: endpoint.operationName,
     request,
-    method: endpoint.method,
-    path,
-    body,
-    headers: buildHeaders(endpoint.hasJsonBody),
   };
 
-  return transport.send<ResponseByOperation[Operation]>(transportRequest, options);
+  return transport.send<ResponseByOperation[Operation]>(
+    transportRequest,
+    options,
+  );
 }
 
 /** Builds one typed request and delegates stream lifecycle to the selected transport. */
@@ -265,86 +289,11 @@ function executeStreamOperation<Operation extends EndpointOperation>(
   options?: ContractCallOptions,
 ): AsyncIterable<ResponseByOperation[Operation]> {
   const endpoint = endpoints[operation];
-  const requestShape = request as ClientRequestShape;
-  return transport.stream<ResponseByOperation[Operation]>({
-    operationName: endpoint.operationName,
-    request,
-    method: endpoint.method,
-    path: buildPath(endpoint.pathTemplate, endpoint.pathParams, endpoint.queryParams, requestShape),
-    body: buildJsonBody(endpoint.pathParams, endpoint.queryParams, endpoint.hasJsonBody, requestShape),
-    headers: buildHeaders(endpoint.hasJsonBody),
-  }, options);
-}
-
-function buildPath(
-  pathTemplate: string,
-  pathParams: readonly EndpointPathParam[],
-  queryParams: readonly EndpointQueryParam[],
-  request: ClientRequestShape,
-): string {
-  const requestRecord = request as Record<string, unknown>;
-  let path = pathTemplate;
-
-  for (const pathParam of pathParams) {
-    const value = requestRecord[pathParam.wireName];
-
-    if (value === undefined || value === null) {
-      throw new Error(`missing path parameter ${pathParam.wireName}`);
-    }
-
-    path = path.replace(
-      `{${pathParam.wireName}}`,
-      encodeURIComponent(String(value)),
-    );
-  }
-
-  const query = new URLSearchParams();
-
-  for (const queryParam of queryParams) {
-    const value = requestRecord[queryParam.wireName];
-
-    if (value !== undefined && value !== null) {
-      query.append(queryParam.wireName, String(value));
-    }
-  }
-
-  const queryString = query.toString();
-  return queryString === "" ? path : `${path}?${queryString}`;
-}
-
-function buildJsonBody(
-  pathParams: readonly EndpointPathParam[],
-  queryParams: readonly EndpointQueryParam[],
-  hasJsonBody: boolean,
-  request: ClientRequestShape,
-): Record<string, unknown> | undefined {
-  if (!hasJsonBody) {
-    return undefined;
-  }
-
-  const requestRecord = request as Record<string, unknown>;
-  const pathParamNames = new Set(
-    pathParams.map((pathParam) => pathParam.wireName),
+  return transport.stream<ResponseByOperation[Operation]>(
+    {
+      operationName: endpoint.operationName,
+      request,
+    },
+    options,
   );
-
-  const queryParamNames = new Set(
-    queryParams.map((queryParam) => queryParam.wireName),
-  );
-
-  return Object.fromEntries(
-    Object.entries(requestRecord).filter(
-      ([fieldName]) =>
-        !pathParamNames.has(fieldName) && !queryParamNames.has(fieldName),
-    ),
-  );
-}
-
-function buildHeaders(hasJsonBody: boolean): Record<string, string> {
-  if (!hasJsonBody) {
-    return {};
-  }
-
-  return {
-    "content-type": "application/json",
-  };
 }

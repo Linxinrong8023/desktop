@@ -33,9 +33,9 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
         lease_id: &WorktreeProvisioningLeaseId,
     ) -> Result<WorkflowRunCreateOutcome, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 // Same atomic-finish contract as ordinary task creation: a run
                 // must not become visible under a project a cascade already
                 // removed, and its provisioning lease dies with this commit.
@@ -73,13 +73,12 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
                     ],
                 )?;
                 transaction.execute(
-                    "INSERT INTO tasks (id, project_id, title, status, type, workflow_run_id, worktree_id, created_at, updated_at, is_deleted)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    "INSERT INTO tasks (id, project_id, title, type, workflow_run_id, worktree_id, created_at, updated_at, is_deleted)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         task.id.as_ref(),
                         task.project_id.as_ref(),
                         &task.title,
-                        task.status.database_value(),
                         task.task_type.database_value(),
                         task.workflow_run_id.as_ref().map(AsRef::as_ref),
                         task.worktree_id.as_ref().map(AsRef::as_ref),
@@ -268,9 +267,8 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
         deleted_at: i64,
     ) -> Result<DeleteWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
-                let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+            .with_connection_mut(|connection| {
+                let transaction = Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let run_exists = transaction
                     .query_row(
                         "SELECT 1 FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",

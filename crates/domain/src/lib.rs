@@ -1,18 +1,16 @@
 mod agent_definition;
-mod artifact;
 mod audit_fields;
 mod error;
 mod git_cleanup;
 mod ids;
+mod namespace;
+mod plugin;
 mod project;
 mod session;
 mod session_title;
 mod skill;
-mod spec;
 mod task;
 mod task_diff_comment;
-mod virtual_entry;
-mod virtual_folder;
 mod workflow;
 mod workflow_run;
 mod worktree;
@@ -21,7 +19,6 @@ mod worktree;
 mod tests;
 
 pub use agent_definition::AgentDefinition;
-pub use artifact::Artifact;
 pub use audit_fields::AuditFields;
 pub use error::DomainModelError;
 pub use git_cleanup::{
@@ -29,23 +26,23 @@ pub use git_cleanup::{
     truncate_cleanup_error,
 };
 pub use ids::{
-    AgentDefinitionId, ArtifactId, GitCleanupJobId, ProjectId, ProjectSpecSourceOverrideId,
-    SessionId, SkillId, TaskDiffCommentId, TaskId, VirtualEntryId, VirtualFolderId, WorkflowId,
-    WorkflowNodeRunId, WorkflowRunId, WorkflowSnapshotId, WorktreeId, WorktreeProvisioningLeaseId,
+    AgentDefinitionId, GitCleanupJobId, PluginId, ProjectId, SessionId, SkillId, TaskDiffCommentId,
+    TaskId, WorkflowId, WorkflowNodeRunId, WorkflowRunId, WorkflowSnapshotId, WorktreeId,
+    WorktreeProvisioningLeaseId,
 };
+pub use namespace::Namespace;
+pub use plugin::{PluginEnabledState, PluginState};
 pub use project::Project;
 pub use session::{AgentCli, HistoryState, Session, SessionStatus};
 pub use session_title::{MAX_SESSION_TITLE_CHARS, SessionTitle, SessionTitleError};
 pub use skill::{
-    Skill, SkillDescriptionError, SkillNameError, validate_skill_description, validate_skill_name,
+    BACKUP_DIR_NAME, JOURNAL_DIR_NAME, STAGING_DIR_NAME, Skill, SkillDescriptionError,
+    SkillNameError, validate_skill_description, validate_skill_name,
 };
-pub use spec::{ProjectSpecSourceOverride, SpecSourceVisibility, SpecWorkflow};
-pub use task::{Task, TaskStatus, TaskType};
+pub use task::{Task, TaskType};
 pub use task_diff_comment::{
     TaskDiffAnchor, TaskDiffComment, TaskDiffCommentKind, TaskDiffSide, TaskDiffThreadStatus,
 };
-pub use virtual_entry::{VirtualEntry, VirtualEntryKind};
-pub use virtual_folder::VirtualFolder;
 pub use workflow::{
     CreatedWorkflow, Workflow, WorkflowDetail, WorkflowSnapshot, WorkflowSummary, WorkflowVersion,
 };

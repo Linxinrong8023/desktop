@@ -54,12 +54,12 @@ export function RunBriefPopover({
               className,
             )}
             aria-label={openLabel}
-            onClick={stopPropagation
-              ? (event) => event.stopPropagation()
-              : undefined}
-            onPointerDown={stopPropagation
-              ? (event) => event.stopPropagation()
-              : undefined}
+            onClick={
+              stopPropagation ? (event) => event.stopPropagation() : undefined
+            }
+            onPointerDown={
+              stopPropagation ? (event) => event.stopPropagation() : undefined
+            }
           />
         }
       >
@@ -77,7 +77,9 @@ export function RunBriefPopover({
         side={side}
         sideOffset={8}
         className="w-72 max-w-[min(18rem,calc(100vw-2rem))] gap-1.5 p-3"
-        onClick={stopPropagation ? (event) => event.stopPropagation() : undefined}
+        onClick={
+          stopPropagation ? (event) => event.stopPropagation() : undefined
+        }
       >
         <PopoverHeader className="gap-1">
           <PopoverTitle className="text-xs font-medium leading-4">

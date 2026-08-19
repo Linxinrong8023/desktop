@@ -37,7 +37,10 @@ import { AGENT_CLI_LABELS, AGENT_CLI_ORDER } from "../chat/model-catalog";
 import { ProviderLogo } from "../chat/provider-logos";
 import type { WorkflowAgentCliStatus } from "../../state/hooks/use-workflow-agent-models";
 import { getNodeMetadata } from "./workflow-node-metadata";
-import { InspectorField, WorkflowNodeDetailsLayout } from "./workflow-node-details";
+import {
+  InspectorField,
+  WorkflowNodeDetailsLayout,
+} from "./workflow-node-details";
 
 /** Soft card copy limit so node descriptions stay glanceable on the canvas. */
 const NODE_DESCRIPTION_MAX_LENGTH = 30;
@@ -88,14 +91,20 @@ function WorkflowInspectorEmpty() {
   return (
     <aside className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden border-l border-border bg-background">
       <div className="border-b border-border px-4 py-3">
-        <h3 className="text-xs font-semibold">{t("settings.workflow.configuration")}</h3>
-        <p className="mt-1 text-[11px] text-muted-foreground">{t("settings.workflow.selectNodeHint")}</p>
+        <h3 className="text-xs font-semibold">
+          {t("settings.workflow.configuration")}
+        </h3>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {t("settings.workflow.selectNodeHint")}
+        </p>
       </div>
       <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
         <span className="mb-3 flex size-10 items-center justify-center rounded-xl bg-muted">
           <IconSettings className="size-5 text-muted-foreground" />
         </span>
-        <p className="text-xs font-medium">{t("settings.workflow.noSelection")}</p>
+        <p className="text-xs font-medium">
+          {t("settings.workflow.noSelection")}
+        </p>
         <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
           {t("settings.workflow.noSelectionHint")}
         </p>
@@ -136,15 +145,20 @@ function WorkflowNodeInspector({
 }) {
   const { t } = useTranslation();
   const metadata = getNodeMetadata(node.data.kind);
-  const nodeType = capabilities.nodeTypes.find((candidate) => candidate.kind === node.data.kind);
+  const nodeType = capabilities.nodeTypes.find(
+    (candidate) => candidate.kind === node.data.kind,
+  );
   if (nodeType === undefined) {
-    throw new Error(`Missing workflow capability for node kind "${node.data.kind}"`);
+    throw new Error(
+      `Missing workflow capability for node kind "${node.data.kind}"`,
+    );
   }
   const Icon = metadata.icon;
   const agentConfig = node.data.agentConfig;
   // Agent and output keep their dedicated flat editors; the remaining kinds
   // use the Dify-style grouped layout so their details read as sections.
-  const usesFlatLayout = node.data.kind === "agent" || node.data.kind === "output";
+  const usesFlatLayout =
+    node.data.kind === "agent" || node.data.kind === "output";
   return (
     <aside
       data-workflow-inspector=""
@@ -153,11 +167,15 @@ function WorkflowNodeInspector({
       {usesFlatLayout ? (
         <>
           <div className="flex min-w-0 items-center gap-2.5 border-b border-border px-4 py-3">
-            <span className={`flex size-8 items-center justify-center rounded-lg ${metadata.tone}`}>
+            <span
+              className={`flex size-8 items-center justify-center rounded-lg ${metadata.tone}`}
+            >
               <Icon className="size-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <h3 className="truncate text-xs font-semibold">{node.data.title}</h3>
+              <h3 className="truncate text-xs font-semibold">
+                {node.data.title}
+              </h3>
               <p className="text-[10px] text-muted-foreground">
                 {t("settings.workflow.nodeSuffix", { type: nodeType.label })}
               </p>
@@ -173,31 +191,47 @@ function WorkflowNodeInspector({
             </Button>
           </div>
           <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto p-4">
-            <InspectorField label={t("settings.workflow.field.name")} htmlFor="workflow-node-title">
+            <InspectorField
+              label={t("settings.workflow.field.name")}
+              htmlFor="workflow-node-title"
+            >
               <Input
                 id="workflow-node-title"
                 value={node.data.title}
-                onChange={(event) => onUpdate({
-                  ...node,
-                  data: { ...node.data, title: event.target.value },
-                })}
+                onChange={(event) =>
+                  onUpdate({
+                    ...node,
+                    data: { ...node.data, title: event.target.value },
+                  })
+                }
               />
             </InspectorField>
-            <InspectorField label={t("settings.workflow.field.description")} htmlFor="workflow-node-description">
+            <InspectorField
+              label={t("settings.workflow.field.description")}
+              htmlFor="workflow-node-description"
+            >
               <>
                 <Input
                   id="workflow-node-description"
                   value={node.data.description}
                   maxLength={NODE_DESCRIPTION_MAX_LENGTH}
-                  onChange={(event) => onUpdate({
-                    ...node,
-                    data: {
-                      ...node.data,
-                      description: event.target.value.slice(0, NODE_DESCRIPTION_MAX_LENGTH),
-                    },
-                  })}
+                  onChange={(event) =>
+                    onUpdate({
+                      ...node,
+                      data: {
+                        ...node.data,
+                        description: event.target.value.slice(
+                          0,
+                          NODE_DESCRIPTION_MAX_LENGTH,
+                        ),
+                      },
+                    })
+                  }
                 />
-                <p className="text-right text-[10px] text-muted-foreground" aria-live="polite">
+                <p
+                  className="text-right text-[10px] text-muted-foreground"
+                  aria-live="polite"
+                >
                   {t("settings.workflow.characterCount", {
                     count: node.data.description.length,
                     max: NODE_DESCRIPTION_MAX_LENGTH,
@@ -205,26 +239,32 @@ function WorkflowNodeInspector({
                 </p>
               </>
             </InspectorField>
-            {nodeType.configFields.includes("agent") && agentConfig !== undefined && (
-              <AgentConfigurationFields
-                config={agentConfig}
-                capabilities={capabilities}
-                modelsLoading={agentModelsLoading}
-                modelsError={agentModelsError}
-                onRetryModels={onRetryAgentModels}
-                modelsByCli={modelsByCli}
-                cliStatus={cliStatus}
-                catalogsLoading={agentCatalogsLoading}
-                catalogsError={agentCatalogsError}
-                onRetryCatalogs={onRetryAgentCatalogs}
-                onChange={(config) => onUpdate({
-                  ...node,
-                  data: { ...node.data, agentConfig: config },
-                })}
-              />
-            )}
+            {nodeType.configFields.includes("agent") &&
+              agentConfig !== undefined && (
+                <AgentConfigurationFields
+                  config={agentConfig}
+                  capabilities={capabilities}
+                  modelsLoading={agentModelsLoading}
+                  modelsError={agentModelsError}
+                  onRetryModels={onRetryAgentModels}
+                  modelsByCli={modelsByCli}
+                  cliStatus={cliStatus}
+                  catalogsLoading={agentCatalogsLoading}
+                  catalogsError={agentCatalogsError}
+                  onRetryCatalogs={onRetryAgentCatalogs}
+                  onChange={(config) =>
+                    onUpdate({
+                      ...node,
+                      data: { ...node.data, agentConfig: config },
+                    })
+                  }
+                />
+              )}
             {nodeType.configFields.includes("instruction") && (
-              <InspectorField label={t("settings.workflow.field.instruction")} htmlFor="workflow-node-instruction">
+              <InspectorField
+                label={t("settings.workflow.field.instruction")}
+                htmlFor="workflow-node-instruction"
+              >
                 <Textarea
                   id="workflow-node-instruction"
                   className="min-h-32 resize-none text-xs leading-5"
@@ -299,44 +339,60 @@ function AgentConfigurationFields({
   const config = normalizeWorkflowAgentConfig(rawConfig);
   const currentAgentCli = config.executor.agentCli as AgentCli;
   const configuredModel = capabilities.agentModels.find(
-    (model) => model.agentCli === config.executor.agentCli
-      && model.modelId === config.executor.modelId,
+    (model) =>
+      model.agentCli === config.executor.agentCli &&
+      model.modelId === config.executor.modelId,
   );
   const selectedModel = configuredModel ?? {
     agentCli: config.executor.agentCli,
     modelId: config.executor.modelId,
     label: `${AGENT_CLI_LABELS[config.executor.agentCli as AgentCli]} · ${config.executor.modelId}`,
   };
-  const modelsForSelectedCli = modelsByCli?.get(currentAgentCli)
-    ?? capabilities.agentModels.filter((model) => model.agentCli === currentAgentCli);
+  const modelsForSelectedCli =
+    modelsByCli?.get(currentAgentCli) ??
+    capabilities.agentModels.filter(
+      (model) => model.agentCli === currentAgentCli,
+    );
   const selectedCliStatus = cliStatus?.[currentAgentCli];
   // Model discovery is per-CLI: the selected CLI is loading, so the model
   // group below is still on its way rather than genuinely empty.
-  const selectedCliLoading = modelsLoading || selectedCliStatus?.isLoading === true;
+  const selectedCliLoading =
+    modelsLoading || selectedCliStatus?.isLoading === true;
   // A node always shows its model name; when the executor is not backed by a
   // discovered model (e.g. a CLI that failed to report one) the full
   // `CLI · model` pair is shown instead so the agent pick stays legible.
-  const selectedModelName = configuredModel === undefined
-    ? selectedModel.label
-    : workflowModelDisplayName(selectedModel);
-  const configuredSkillIds = new Set(config.skills.map((skill) => skill.skillId));
-  const availableSkills = capabilities.skills.filter((skill) =>
-    !configuredSkillIds.has(skill.value),
+  const selectedModelName =
+    configuredModel === undefined
+      ? selectedModel.label
+      : workflowModelDisplayName(selectedModel);
+  const configuredSkillIds = new Set(
+    config.skills.map((skill) => skill.skillId),
   );
-  const enabledSkillCount = config.skills.filter((skill) => skill.enabled).length;
+  const availableSkills = capabilities.skills.filter(
+    (skill) => !configuredSkillIds.has(skill.value),
+  );
+  const enabledSkillCount = config.skills.filter(
+    (skill) => skill.enabled,
+  ).length;
   const configuredMcpIds = new Set(config.mcps.map((mcp) => mcp.mcpId));
-  const availableMcps = (capabilities.mcps ?? []).filter((mcp) =>
-    !configuredMcpIds.has(mcp.value),
+  const availableMcps = (capabilities.mcps ?? []).filter(
+    (mcp) => !configuredMcpIds.has(mcp.value),
   );
   const enabledMcpCount = config.mcps.filter((mcp) => mcp.enabled).length;
-  const configuredRole = capabilities.roles.find((role) => role.value === config.roleId);
+  const configuredRole = capabilities.roles.find(
+    (role) => role.value === config.roleId,
+  );
   const noRoleOption = { value: "", label: t("settings.workflow.noRole") };
-  const selectedRole = configuredRole
-    ?? (config.roleId === "" ? noRoleOption : { value: config.roleId, label: config.roleId });
+  const selectedRole =
+    configuredRole ??
+    (config.roleId === ""
+      ? noRoleOption
+      : { value: config.roleId, label: config.roleId });
   // The empty option is always selectable; an out-of-catalog role stays visible so it can be re-picked.
-  const selectableRoles = configuredRole === undefined && config.roleId !== ""
-    ? [noRoleOption, selectedRole, ...capabilities.roles]
-    : [noRoleOption, ...capabilities.roles];
+  const selectableRoles =
+    configuredRole === undefined && config.roleId !== ""
+      ? [noRoleOption, selectedRole, ...capabilities.roles]
+      : [noRoleOption, ...capabilities.roles];
 
   /** Adds a new Skill in its enabled state, preserving configuration order. */
   function addSkill(skillId: string): void {
@@ -352,7 +408,8 @@ function AgentConfigurationFields({
     onChange({
       ...config,
       skills: config.skills.map((skill) =>
-        skill.skillId === skillId ? { ...skill, enabled } : skill),
+        skill.skillId === skillId ? { ...skill, enabled } : skill,
+      ),
     });
   }
 
@@ -378,7 +435,8 @@ function AgentConfigurationFields({
     onChange({
       ...config,
       mcps: config.mcps.map((mcp) =>
-        mcp.mcpId === mcpId ? { ...mcp, enabled } : mcp),
+        mcp.mcpId === mcpId ? { ...mcp, enabled } : mcp,
+      ),
     });
   }
 
@@ -401,9 +459,12 @@ function AgentConfigurationFields({
     if (agentCli === config.executor.agentCli) {
       return;
     }
-    const models = modelsByCli?.get(agentCli)
-      ?? capabilities.agentModels.filter((model) => model.agentCli === agentCli);
-    const kept = models.find((model) => model.modelId === config.executor.modelId);
+    const models =
+      modelsByCli?.get(agentCli) ??
+      capabilities.agentModels.filter((model) => model.agentCli === agentCli);
+    const kept = models.find(
+      (model) => model.modelId === config.executor.modelId,
+    );
     onChange({
       ...config,
       executor: {
@@ -415,7 +476,10 @@ function AgentConfigurationFields({
 
   return (
     <>
-      <InspectorField label={t("settings.workflow.field.agentModel")} htmlFor="workflow-agent-model">
+      <InspectorField
+        label={t("settings.workflow.field.agentModel")}
+        htmlFor="workflow-agent-model"
+      >
         <Popover open={modelPickerOpen} onOpenChange={setModelPickerOpen}>
           <PopoverTrigger
             render={
@@ -424,7 +488,9 @@ function AgentConfigurationFields({
                 type="button"
                 variant="outline"
                 className="h-9 w-full min-w-0 shrink justify-between overflow-hidden px-3 font-normal"
-                disabled={capabilities.agentModels.length === 0 && !selectedCliLoading}
+                disabled={
+                  capabilities.agentModels.length === 0 && !selectedCliLoading
+                }
                 aria-label={t("settings.workflow.field.agentModel")}
               />
             }
@@ -483,7 +549,8 @@ function AgentConfigurationFields({
                   className="**:[[cmdk-group-heading]]:font-normal"
                 >
                   {AGENT_CLI_ORDER.map((agentCli) => {
-                    const cliLoading = cliStatus?.[agentCli]?.isLoading === true;
+                    const cliLoading =
+                      cliStatus?.[agentCli]?.isLoading === true;
                     return (
                       <CommandItem
                         key={agentCli}
@@ -491,7 +558,10 @@ function AgentConfigurationFields({
                         className="gap-1.5 rounded-sm px-2 py-1.5 text-xs"
                         onSelect={() => selectAgentCli(agentCli)}
                       >
-                        <ProviderLogo agentCli={agentCli} className="size-3.5" />
+                        <ProviderLogo
+                          agentCli={agentCli}
+                          className="size-3.5"
+                        />
                         {AGENT_CLI_LABELS[agentCli]}
                         {cliLoading ? (
                           <IconLoader2 className="ml-auto size-3.5 shrink-0 animate-spin opacity-50" />
@@ -547,7 +617,10 @@ function AgentConfigurationFields({
           </PopoverContent>
         </Popover>
       </InspectorField>
-      <InspectorField label={t("settings.workflow.field.role")} htmlFor="workflow-agent-role">
+      <InspectorField
+        label={t("settings.workflow.field.role")}
+        htmlFor="workflow-agent-role"
+      >
         <Popover open={rolePickerOpen} onOpenChange={setRolePickerOpen}>
           <PopoverTrigger
             render={
@@ -562,7 +635,9 @@ function AgentConfigurationFields({
             }
           >
             <span className="flex w-full min-w-0 items-center justify-between gap-2">
-              <span className="min-w-0 flex-1 truncate text-left">{selectedRole.label}</span>
+              <span className="min-w-0 flex-1 truncate text-left">
+                {selectedRole.label}
+              </span>
               <IconChevronDown
                 data-testid="workflow-agent-role-chevron"
                 className="size-3.5 shrink-0 opacity-50"
@@ -635,7 +710,9 @@ function AgentConfigurationFields({
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    disabled={catalogsLoading && capabilities.skills.length === 0}
+                    disabled={
+                      catalogsLoading && capabilities.skills.length === 0
+                    }
                     aria-label={t("settings.workflow.addSkill")}
                   />
                 }
@@ -690,7 +767,10 @@ function AgentConfigurationFields({
           {config.skills.map((configuredSkill) => {
             const skill = capabilities.skills.find(
               (candidate) => candidate.value === configuredSkill.skillId,
-            ) ?? { value: configuredSkill.skillId, label: configuredSkill.skillId };
+            ) ?? {
+              value: configuredSkill.skillId,
+              label: configuredSkill.skillId,
+            };
             return (
               <div
                 key={configuredSkill.skillId}
@@ -701,15 +781,21 @@ function AgentConfigurationFields({
                   size="sm"
                   className="shrink-0 data-checked:bg-blue-600 hover:data-checked:bg-blue-700"
                   checked={configuredSkill.enabled}
-                  aria-label={t("settings.workflow.toggleSkill", { name: skill.label })}
-                  onCheckedChange={(enabled) => setSkillEnabled(configuredSkill.skillId, enabled)}
+                  aria-label={t("settings.workflow.toggleSkill", {
+                    name: skill.label,
+                  })}
+                  onCheckedChange={(enabled) =>
+                    setSkillEnabled(configuredSkill.skillId, enabled)
+                  }
                 />
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
                   className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  aria-label={t("settings.workflow.removeSkill", { name: skill.label })}
+                  aria-label={t("settings.workflow.removeSkill", {
+                    name: skill.label,
+                  })}
                   onClick={() => removeSkill(configuredSkill.skillId)}
                 >
                   <IconTrash />
@@ -794,15 +880,21 @@ function AgentConfigurationFields({
                   size="sm"
                   className="shrink-0 data-checked:bg-blue-600 hover:data-checked:bg-blue-700"
                   checked={configuredMcp.enabled}
-                  aria-label={t("settings.workflow.toggleMcp", { name: mcp.label })}
-                  onCheckedChange={(enabled) => setMcpEnabled(configuredMcp.mcpId, enabled)}
+                  aria-label={t("settings.workflow.toggleMcp", {
+                    name: mcp.label,
+                  })}
+                  onCheckedChange={(enabled) =>
+                    setMcpEnabled(configuredMcp.mcpId, enabled)
+                  }
                 />
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
                   className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                  aria-label={t("settings.workflow.removeMcp", { name: mcp.label })}
+                  aria-label={t("settings.workflow.removeMcp", {
+                    name: mcp.label,
+                  })}
                   onClick={() => removeMcp(configuredMcp.mcpId)}
                 >
                   <IconTrash />
@@ -817,12 +909,17 @@ function AgentConfigurationFields({
           )}
         </div>
       </fieldset>
-      <InspectorField label={t("settings.workflow.field.prompt")} htmlFor="workflow-agent-prompt">
+      <InspectorField
+        label={t("settings.workflow.field.prompt")}
+        htmlFor="workflow-agent-prompt"
+      >
         <Textarea
           id="workflow-agent-prompt"
           className="min-h-32 resize-none text-xs leading-5"
           value={config.prompt}
-          onChange={(event) => onChange({ ...config, prompt: event.target.value })}
+          onChange={(event) =>
+            onChange({ ...config, prompt: event.target.value })
+          }
         />
       </InspectorField>
     </>
@@ -835,5 +932,7 @@ function AgentConfigurationFields({
  */
 function workflowModelDisplayName(model: WorkflowAgentModel): string {
   const prefix = `${AGENT_CLI_LABELS[model.agentCli as AgentCli]} · `;
-  return model.label.startsWith(prefix) ? model.label.slice(prefix.length) : model.label;
+  return model.label.startsWith(prefix)
+    ? model.label.slice(prefix.length)
+    : model.label;
 }

@@ -31,7 +31,9 @@ export function serializeWorkflowGraph(input: {
     nodes: input.nodes,
     edges: input.edges,
     viewport: input.viewport,
-    ...(input.description === undefined ? {} : { description: input.description }),
+    ...(input.description === undefined
+      ? {}
+      : { description: input.description }),
   });
 }
 
@@ -62,7 +64,9 @@ export function parseWorkflowGraph(graph: string): WorkflowGraphEnvelope {
     edges: Array.isArray(record.edges)
       ? (record.edges as WorkflowDefinitionEdge[])
       : [],
-    viewport: isWorkflowViewport(record.viewport) ? record.viewport : DEFAULT_VIEWPORT,
+    viewport: isWorkflowViewport(record.viewport)
+      ? record.viewport
+      : DEFAULT_VIEWPORT,
   };
   if (typeof record.description === "string") {
     envelope.description = record.description;
@@ -76,7 +80,9 @@ export function parseWorkflowGraph(graph: string): WorkflowGraphEnvelope {
  * which already carries model configuration, so persisted graphs keep loading
  * unchanged as Agent steps.
  */
-function upgradeLegacyNodeKind(node: WorkflowDefinitionNode): WorkflowDefinitionNode {
+function upgradeLegacyNodeKind(
+  node: WorkflowDefinitionNode,
+): WorkflowDefinitionNode {
   const kind = (node.data as { kind?: unknown }).kind;
   if (kind === "prompt" || kind === "model") {
     return { ...node, data: { ...node.data, kind: "agent" } };
@@ -101,8 +107,8 @@ function isWorkflowViewport(value: unknown): value is WorkflowViewport {
   }
   const record = value as Record<string, unknown>;
   return (
-    typeof record.x === "number"
-    && typeof record.y === "number"
-    && typeof record.zoom === "number"
+    typeof record.x === "number" &&
+    typeof record.y === "number" &&
+    typeof record.zoom === "number"
   );
 }

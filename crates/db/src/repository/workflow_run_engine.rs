@@ -55,7 +55,7 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
                 // snapshot; any of them missing is corruption, not a legitimate absence.
                 let task = {
                     let mut statement = connection.prepare(
-                        "SELECT id, project_id, title, status, type, workflow_run_id, worktree_id, created_at, updated_at, is_deleted
+                        "SELECT id, project_id, title, type, workflow_run_id, worktree_id, created_at, updated_at, is_deleted
                          FROM tasks WHERE workflow_run_id = ?1 AND is_deleted = 0",
                     )?;
                     require_row(&mut statement.query(params![run_id.as_ref()])?, map_task_row)?
@@ -120,9 +120,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<StartWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let Some((status, state)) = transaction
                     .query_row(
                         "SELECT run_status, state FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",
@@ -163,9 +163,8 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError> {
         self.pool
-            .with_connection(|connection| {
-                let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+            .with_connection_mut(|connection| {
+                let transaction = Transaction::new(connection, TransactionBehavior::Immediate)?;
                 for node_run in node_runs {
                     insert_node_run(&transaction, run_id, node_run, now)?;
                 }
@@ -187,9 +186,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<AdvanceWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let Some((run_id, node_id, status)) = transaction
                     .query_row(
                         "SELECT run_id, node_id, status FROM workflow_node_runs WHERE id = ?1 AND is_deleted = 0",
@@ -239,9 +238,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<AdvanceWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let Some((run_id, node_id, status)) = transaction
                     .query_row(
                         "SELECT run_id, node_id, status FROM workflow_node_runs WHERE id = ?1 AND is_deleted = 0",
@@ -300,9 +299,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let state = current_nodes_to_state(&[])?;
                 transaction.execute(
                     "UPDATE workflow_runs SET run_status = ?2, output = ?3, finished_at = ?4, updated_at = ?4, state = ?5
@@ -327,9 +326,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<CancelWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let status = transaction
                     .query_row(
                         "SELECT run_status FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",
@@ -371,9 +370,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<RestartWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let status = transaction
                     .query_row(
                         "SELECT run_status FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",
@@ -418,9 +417,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<UpdateWorkflowRunInputResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let Some((status, state)) = transaction
                     .query_row(
                         "SELECT run_status, state FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",
@@ -482,9 +481,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 for run_id in run_ids {
                     transaction.execute(
                         "UPDATE workflow_node_runs SET status = ?2, error = ?3, finished_at = ?4, updated_at = ?4

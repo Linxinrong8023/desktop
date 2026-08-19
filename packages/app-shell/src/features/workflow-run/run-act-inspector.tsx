@@ -90,7 +90,9 @@ export function RunActInspector({
           <span className="mb-3 flex size-10 items-center justify-center rounded-xl bg-muted">
             <IconSparkles className="size-5 text-muted-foreground" />
           </span>
-          <p className="text-xs font-medium">{t("workflowRun.inspector.empty")}</p>
+          <p className="text-xs font-medium">
+            {t("workflowRun.inspector.empty")}
+          </p>
           <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
             {t("workflowRun.inspector.emptyHint")}
           </p>
@@ -151,22 +153,24 @@ function RunActInspectorPanel({
   onClose: () => void;
 }) {
   const { i18n, t } = useTranslation();
-  const locale = i18n.resolvedLanguage === "en-US" ? "en-US" as const : "zh-CN" as const;
+  const locale =
+    i18n.resolvedLanguage === "en-US" ? ("en-US" as const) : ("zh-CN" as const);
   const nodeType = createMockWorkflowNodeType(data.kind, locale);
   const metadata = getNodeMetadata(data.kind);
   const Icon = metadata.icon;
   const summaryLabels = createWorkflowSummaryLabels(locale);
   const toolParameters = data.toolParameters ?? [];
-  const timingRange = state.startedAt !== undefined || state.finishedAt !== undefined
-    ? [
-      state.startedAt !== undefined
-        ? formatRunClock(state.startedAt, locale)
-        : "—",
-      state.finishedAt !== undefined
-        ? formatRunClock(state.finishedAt, locale)
-        : "—",
-    ].join(" — ")
-    : null;
+  const timingRange =
+    state.startedAt !== undefined || state.finishedAt !== undefined
+      ? [
+          state.startedAt !== undefined
+            ? formatRunClock(state.startedAt, locale)
+            : "—",
+          state.finishedAt !== undefined
+            ? formatRunClock(state.finishedAt, locale)
+            : "—",
+        ].join(" — ")
+      : null;
   const agentConfig = data.agentConfig;
   const canEdit = editable && onPatchNode !== undefined;
 
@@ -205,20 +209,27 @@ function RunActInspectorPanel({
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
         <InspectorSection title={t("workflowRun.inspector.config")}>
-          <ReadOnlyField label={t("settings.workflow.field.name")} value={data.title} />
+          <ReadOnlyField
+            label={t("settings.workflow.field.name")}
+            value={data.title}
+          />
           <ReadOnlyField
             label={t("settings.workflow.field.description")}
             value={data.description}
           />
-          {data.inputVariables !== undefined && data.inputVariables.length > 0 && (
-            <ReadOnlyField
-              label={t("settings.workflow.section.inputVariables")}
-              value={data.inputVariables
-                .map((variable) => `${variable.name} = ${variable.defaultValue ?? ""}`)
-                .join(", ")}
-              mono
-            />
-          )}
+          {data.inputVariables !== undefined &&
+            data.inputVariables.length > 0 && (
+              <ReadOnlyField
+                label={t("settings.workflow.section.inputVariables")}
+                value={data.inputVariables
+                  .map(
+                    (variable) =>
+                      `${variable.name} = ${variable.defaultValue ?? ""}`,
+                  )
+                  .join(", ")}
+                mono
+              />
+            )}
           {nodeType.configFields.includes("tool") && (
             <>
               <ReadOnlyField
@@ -247,61 +258,67 @@ function RunActInspectorPanel({
           {nodeType.configFields.includes("condition") && (
             <ReadOnlyField
               label={t("settings.workflow.field.condition")}
-              value={conditionBranchesSummary(data, summaryLabels, locale) ?? "—"}
+              value={
+                conditionBranchesSummary(data, summaryLabels, locale) ?? "—"
+              }
               mono
             />
           )}
-          {nodeType.configFields.includes("waitStrategy") && data.waitStrategy !== undefined && (
-            <ReadOnlyField
-              label={t("settings.workflow.field.waitStrategy")}
-              value={junctionWaitStrategyLabel(data.waitStrategy, t)}
-              mono
-            />
-          )}
-          {nodeType.configFields.includes("failureStrategy") && data.failureStrategy !== undefined && (
-            <ReadOnlyField
-              label={t("settings.workflow.field.failureStrategy")}
-              value={junctionFailureStrategyLabel(data.failureStrategy, t)}
-              mono
-            />
-          )}
-          {nodeType.configFields.includes("maxAttempts") && data.maxAttempts !== undefined && (
-            <ReadOnlyField
-              label={t("settings.workflow.field.maxAttempts")}
-              value={String(data.maxAttempts)}
-              mono
-            />
-          )}
-          {nodeType.configFields.includes("exitCondition")
-            && data.exitCondition !== undefined
-            && data.exitCondition !== "" && (
+          {nodeType.configFields.includes("waitStrategy") &&
+            data.waitStrategy !== undefined && (
+              <ReadOnlyField
+                label={t("settings.workflow.field.waitStrategy")}
+                value={junctionWaitStrategyLabel(data.waitStrategy, t)}
+                mono
+              />
+            )}
+          {nodeType.configFields.includes("failureStrategy") &&
+            data.failureStrategy !== undefined && (
+              <ReadOnlyField
+                label={t("settings.workflow.field.failureStrategy")}
+                value={junctionFailureStrategyLabel(data.failureStrategy, t)}
+                mono
+              />
+            )}
+          {nodeType.configFields.includes("maxAttempts") &&
+            data.maxAttempts !== undefined && (
+              <ReadOnlyField
+                label={t("settings.workflow.field.maxAttempts")}
+                value={String(data.maxAttempts)}
+                mono
+              />
+            )}
+          {nodeType.configFields.includes("exitCondition") &&
+            data.exitCondition !== undefined &&
+            data.exitCondition !== "" && (
               <ReadOnlyField
                 label={t("settings.workflow.field.exitCondition")}
                 value={data.exitCondition}
                 mono
               />
             )}
-          {nodeType.configFields.includes("agent") && agentConfig !== undefined && (
-            <RunActAgentConfig config={agentConfig} />
-          )}
-          {nodeType.configFields.includes("instruction") && (
-            canEdit
-              ? (
-                <div className="space-y-1.5">
-                  <EditableField
-                    id={`run-node-instruction-${nodeId}`}
-                    label={t("settings.workflow.field.instruction")}
-                    value={instructionDraft ?? data.instruction ?? ""}
-                    multiline
-                    onChange={(value) => {
-                      if (onSaveInstruction !== undefined) {
-                        onInstructionDraftChange?.(value);
-                      } else {
-                        onPatchNode({ instruction: value });
-                      }
-                    }}
-                  />
-                  {instructionDraft !== null && instructionDraft !== undefined && (
+          {nodeType.configFields.includes("agent") &&
+            agentConfig !== undefined && (
+              <RunActAgentConfig config={agentConfig} />
+            )}
+          {nodeType.configFields.includes("instruction") &&
+            (canEdit ? (
+              <div className="space-y-1.5">
+                <EditableField
+                  id={`run-node-instruction-${nodeId}`}
+                  label={t("settings.workflow.field.instruction")}
+                  value={instructionDraft ?? data.instruction ?? ""}
+                  multiline
+                  onChange={(value) => {
+                    if (onSaveInstruction !== undefined) {
+                      onInstructionDraftChange?.(value);
+                    } else {
+                      onPatchNode({ instruction: value });
+                    }
+                  }}
+                />
+                {instructionDraft !== null &&
+                  instructionDraft !== undefined && (
                     <div className="flex items-center justify-end gap-2">
                       <Button
                         type="button"
@@ -325,16 +342,14 @@ function RunActInspectorPanel({
                       </Button>
                     </div>
                   )}
-                </div>
-              )
-              : (
-                <ReadOnlyField
-                  label={t("settings.workflow.field.instruction")}
-                  value={data.instruction ?? ""}
-                  multiline
-                />
-              )
-          )}
+              </div>
+            ) : (
+              <ReadOnlyField
+                label={t("settings.workflow.field.instruction")}
+                value={data.instruction ?? ""}
+                multiline
+              />
+            ))}
         </InspectorSection>
 
         <InspectorSection title={t("workflowRun.inspector.execution")}>
@@ -354,23 +369,19 @@ function RunActInspectorPanel({
         </InspectorSection>
 
         <InspectorSection title={t("workflowRun.artifacts.title")}>
-          {fileChanges.length > 0
-            ? (
-              <RunActFileChanges files={fileChanges} />
-            )
-            : artifacts.length > 0
-            ? (
-              <RunActArtifacts
-                artifacts={artifacts}
-                revealedId={revealedArtifactId}
-                embedded
-              />
-            )
-            : (
-              <p className="text-[11px] leading-5 text-muted-foreground">
-                {t("workflowRun.artifacts.empty")}
-              </p>
-            )}
+          {fileChanges.length > 0 ? (
+            <RunActFileChanges files={fileChanges} />
+          ) : artifacts.length > 0 ? (
+            <RunActArtifacts
+              artifacts={artifacts}
+              revealedId={revealedArtifactId}
+              embedded
+            />
+          ) : (
+            <p className="text-[11px] leading-5 text-muted-foreground">
+              {t("workflowRun.artifacts.empty")}
+            </p>
+          )}
         </InspectorSection>
       </div>
     </aside>
@@ -442,24 +453,22 @@ function EditableField({
       <label htmlFor={id} className="text-[11px] text-muted-foreground">
         {label}
       </label>
-      {multiline
-        ? (
-          <Textarea
-            id={id}
-            value={value}
-            rows={4}
-            className="min-h-24 resize-y text-xs leading-5"
-            onChange={(event) => onChange(event.target.value)}
-          />
-        )
-        : (
-          <Input
-            id={id}
-            value={value}
-            className="h-9 text-xs"
-            onChange={(event) => onChange(event.target.value)}
-          />
-        )}
+      {multiline ? (
+        <Textarea
+          id={id}
+          value={value}
+          rows={4}
+          className="min-h-24 resize-y text-xs leading-5"
+          onChange={(event) => onChange(event.target.value)}
+        />
+      ) : (
+        <Input
+          id={id}
+          value={value}
+          className="h-9 text-xs"
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
     </div>
   );
 }
@@ -482,36 +491,34 @@ function ReadOnlyField({
   return (
     <div className="space-y-1">
       <p className="text-[11px] text-muted-foreground">{label}</p>
-      {previewable
-        ? (
-          <RunBriefPopover
-            title={label}
-            body={trimmed}
-            openLabel={t("workflowRun.inspector.textOpen", { field: label })}
-          >
-            <span
-              className={cn(
-                "line-clamp-4 whitespace-pre-wrap text-xs leading-5",
-                mono && "font-mono text-[11px]",
-              )}
-            >
-              {trimmed}
-            </span>
-          </RunBriefPopover>
-        )
-        : (
-          <div
-            data-selectable
+      {previewable ? (
+        <RunBriefPopover
+          title={label}
+          body={trimmed}
+          openLabel={t("workflowRun.inspector.textOpen", { field: label })}
+        >
+          <span
             className={cn(
-              "rounded-lg border border-border/70 bg-muted/25 px-3 py-2 text-xs text-foreground/90",
+              "line-clamp-4 whitespace-pre-wrap text-xs leading-5",
               mono && "font-mono text-[11px]",
-              multiline && "max-h-40 overflow-y-auto whitespace-pre-wrap leading-5",
             )}
           >
-            {trimmed === "" ? "—" : trimmed}
-          </div>
-        )}
+            {trimmed}
+          </span>
+        </RunBriefPopover>
+      ) : (
+        <div
+          data-selectable
+          className={cn(
+            "rounded-lg border border-border/70 bg-muted/25 px-3 py-2 text-xs text-foreground/90",
+            mono && "font-mono text-[11px]",
+            multiline &&
+              "max-h-40 overflow-y-auto whitespace-pre-wrap leading-5",
+          )}
+        >
+          {trimmed === "" ? "—" : trimmed}
+        </div>
+      )}
     </div>
   );
 }
-

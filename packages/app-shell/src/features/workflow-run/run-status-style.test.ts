@@ -14,9 +14,13 @@ describe("isTerminalRunStatus", () => {
 
 describe("runStatusTone", () => {
   it("maps terminal outcomes to distinct label keys", () => {
-    expect(runStatusTone("succeeded").labelKey).toBe("workflowRun.status.succeeded");
+    expect(runStatusTone("succeeded").labelKey).toBe(
+      "workflowRun.status.succeeded",
+    );
     expect(runStatusTone("failed").labelKey).toBe("workflowRun.status.failed");
-    expect(runStatusTone("cancelled").labelKey).toBe("workflowRun.status.cancelled");
+    expect(runStatusTone("cancelled").labelKey).toBe(
+      "workflowRun.status.cancelled",
+    );
   });
 
   it("keeps awaiting_input in the amber HITL family", () => {

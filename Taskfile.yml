@@ -18,8 +18,7 @@ tasks:
     desc: Install all dependencies for the project
     cmds:
       - task: install:frontend
-      - task: install:backend
-      - task: install:desktop
+      - task: install:crates
       - task: build
 
   install:frontend:
@@ -27,20 +26,31 @@ tasks:
     cmds:
       - pnpm install
 
-  install:backend:
-    desc: Install dependencies for the Rust backend
-    cmds:
-      - cargo fetch
-
-  install:desktop:
-    desc: Install dependencies for the desktop Tauri app (excluded from workspace)
-    dir: apps/desktop/src-tauri
+  install:crates:
+    desc: Install dependencies for all Rust workspace packages
     cmds:
       - cargo fetch
 
   ###################################################
   ############## Clean and Build Tasks ##############
   ###################################################
+
+  export-contracts:
+    desc: Regenerate TypeScript contracts and the frontend SDK package
+    cmds:
+      - cargo xtask export-contracts
+      - pnpm --filter @ora/contracts generate:error-schema
+
+  build:
+    desc: Build all Rust workspace packages
+    cmds:
+      - cargo build --workspace
+
+  build:desktop:
+    desc: Build and bundle the Tauri desktop app installers
+    cmds:
+      - task: export-contracts
+      - pnpm --filter @ora/desktop tauri build
 
   clean:
     desc: Clean build artifacts
@@ -55,111 +65,108 @@ tasks:
       - pnpm store prune
       - cargo clean
 
-  lint:
-    desc: Run linters for the frontend, backend, and Desktop app
+  format:
+    desc: Format files changed in the working tree or staging area
     cmds:
-      - task: lint:frontend
-      - task: lint:backend
-      - task: lint:desktop
+      - pnpm exec node scripts/format-changed.mjs
 
-  lint:backend:
-    desc: Run linters on all Rust crates
+  format:all:
+    desc: Format all frontend and Rust workspace packages
+    cmds:
+      - task: format:frontend
+      - task: format:crates
+
+  format:frontend:
+    desc: Format all frontend packages covered by lint
+    silent: true
+    cmds:
+      - pnpm --filter @ora/desktop format
+      - pnpm --filter @ora/chat format
+      - pnpm --filter @ora/workflow-runtime format
+      - pnpm --filter @ora/app-shell format
+      - pnpm --filter @ora-space/plugin-sdk format
+
+  format:crates:
+    desc: Format all Rust workspace packages
     silent: true
     cmds:
       - cargo fmt --all
-      - cargo clippy --workspace -- -D warnings
+
+  lint:
+    desc: Run linters for the frontend and Rust workspace packages
+    cmds:
+      - task: lint:frontend
+      - task: lint:crates
 
   lint:frontend:
     desc: Run linters on all frontend packages
     silent: true
     cmds:
+      - pnpm --filter @ora/desktop format:check
+      - pnpm --filter @ora/desktop lint
       - pnpm --filter @ora/contracts lint
-      - pnpm --filter @ora/web-client lint
+      - pnpm --filter @ora/chat format:check
       - pnpm --filter @ora/chat lint
-      - pnpm --filter @ora/platform lint
+      - pnpm --filter @ora/workflow-runtime format:check
       - pnpm --filter @ora/workflow-runtime lint
+      - pnpm --filter @ora/app-shell format:check
       - pnpm --filter @ora/app-shell lint
+      - pnpm --filter @ora-space/plugin-sdk format:check
+      - pnpm --filter @ora-space/plugin-sdk lint
 
-  lint:desktop:
-    desc: Run linters for the Desktop TypeScript package and Tauri Rust workspace
+  lint:crates:
+    desc: Run linters on all Rust workspace packages
     silent: true
     cmds:
-      - pnpm --filter @ora/desktop lint
-      - cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all
-      - cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
-
-  export-contracts:
-    desc: Regenerate TypeScript contracts and the frontend SDK package
-    cmds:
-      - cargo xtask export-contracts
-      - pnpm --filter @ora/contracts generate:error-schema
-
-  build:
-    desc: Build all crates
-    cmds:
-      - cargo build --workspace
-
-  test:frontend:
-    desc: Run TypeScript package test suites (contracts, chat, platform, workflow-runtime, app-shell)
-    cmds:
-      - task: export-contracts
-      - task: lint:frontend
-      - pnpm --filter @ora/contracts test
-      - pnpm --filter @ora/chat test
-      - pnpm --filter @ora/platform test
-      - pnpm --filter @ora/workflow-runtime test
-      - pnpm --filter @ora/app-shell test
-
-  test:backend:
-    desc: Run Rust crate test suites
-    cmds:
-      - task: lint:backend
-      - cargo test --workspace
-
-  test:desktop:
-    desc: Run the Desktop transport and independent Tauri Rust workspace tests
-    cmds:
-      - task: lint:desktop
-      - pnpm --filter @ora/desktop test
-      - cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - cargo fmt --all -- --check
+      - cargo clippy --workspace -- -D warnings
 
   test:
-    desc: Run all frontend, backend, and Desktop checks (may take a long time)
+    desc: Run all frontend and Rust workspace checks (may take a long time)
     silent: true
     cmds:
       - task: test:frontend
-      - task: test:backend
-      - task: test:desktop
+      - task: test:crates
+
+  test:frontend:
+    desc: Run all frontend TypeScript package test suites
+    cmds:
+      - task: export-contracts
+      - task: lint:frontend
+      - pnpm --filter @ora/desktop test
+      - pnpm --filter @ora/contracts test
+      - pnpm --filter @ora/chat test
+      - pnpm --filter @ora/workflow-runtime test
+      - pnpm --filter @ora/app-shell test
+      - pnpm --filter @ora-space/plugin-sdk test
+
+  test:crates:
+    desc: Run all Rust workspace package test suites
+    preconditions:
+      - sh: command -v rg >/dev/null 2>&1
+        msg: "Ripgrep (rg) is not available on PATH. Install it before running Rust tests."
+      - sh: command -v deno >/dev/null 2>&1
+        msg: "Deno is not available on PATH. Install it before running Rust tests."
+    cmds:
+      - task: lint:crates
+      - cargo test --workspace
 
   ###################################################
   ############# Run Development Servers #############
   ###################################################
 
-  run:frontend:
-    desc: Run the web frontend against the real HTTP backend
-    cmds:
-      - pnpm --filter @ora/web-client dev
-
-  run:ui-showcase:
-    desc: Run the UI component showcase in development mode
-    cmds:
-      - pnpm --filter @ora/ui-showcase dev
-
   run:desktop:
     desc: Run the desktop Tauri app in development mode
+    preconditions:
+      - sh: command -v rg >/dev/null 2>&1
+        msg: "Ripgrep (rg) is not available on PATH. Install it before running Desktop."
+      - sh: command -v deno >/dev/null 2>&1
+        msg: "Deno is not available on PATH. Install it before running Desktop."
     env:
       ORA_DATA_DIR: "{{.ROOT_DIR}}/.data"
+      VSLANG: "1033"
     cmds:
       - pnpm --filter @ora/desktop tauri dev
-
-  run:backend:
-    desc: Run the web server backend in development mode
-    env:
-      ORA_DATA_DIR: .data
-      ORA_LOG_LEVEL: '{{.LOG_LEVEL | default "debug"}}'
-      ORA_LOG_MODE: '{{.LOG_MODE | default "file"}}'
-    cmds:
-      - cargo run --bin ora_web_server
 
   logdy:
     desc: Follow Ora backend's daily logs in the local Logdy UI
@@ -169,7 +176,7 @@ tasks:
       - sh: '{{if eq OS "windows"}}command -v pwsh >/dev/null 2>&1{{else}}true{{end}}'
         msg: "PowerShell 7 is required to follow log files reliably on Windows. Install pwsh and ensure it is available on PATH."
       - sh: ls .data/logs/ora.log.* >/dev/null 2>&1
-        msg: "No Ora daily log files found in .data/logs (expected ora.log.YYYY-MM-DD). Start the file-backed backend first."
+        msg: "No Ora daily log files found in .data/logs (expected ora.log.YYYY-MM-DD). Start the Desktop app first."
     cmds:
       - |
         {{if eq OS "windows"}}

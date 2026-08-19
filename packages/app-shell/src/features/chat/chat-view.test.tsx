@@ -1,16 +1,32 @@
 import { createElement, type ReactNode } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ChatContent, ChatMessage, ChatThought, ChatToolCall, ChatTurn, ChatTurnItem } from "@ora/chat";
+import type {
+  ChatContent,
+  ChatMessage,
+  ChatThought,
+  ChatToolCall,
+  ChatTurn,
+  ChatTurnItem,
+} from "@ora/chat";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@ora/ui";
 import { AppI18nProvider } from "../../i18n/i18n";
 import { ContractsClientContext } from "../../contracts-client-context";
 import { ChatStoreContext } from "../../chat-store-context";
 import { createChatStore } from "@ora/chat";
-import { createMockClient, createMockClientState } from "../../test/mock-client";
+import {
+  createMockClient,
+  createMockClientState,
+} from "../../test/mock-client";
 import { ChatView } from "./chat-view";
 import { Composer } from "./composer";
 import { ConversationNavigator } from "./conversation-navigator";
@@ -70,7 +86,13 @@ function turn(
 ): ChatTurn {
   return {
     id,
-    userMessage: { kind: "message", id: `${id}-user`, role: "user", content, createdAt },
+    userMessage: {
+      kind: "message",
+      id: `${id}-user`,
+      role: "user",
+      content,
+      createdAt,
+    },
     items,
     status,
     stopReason: null,
@@ -80,7 +102,11 @@ function turn(
 }
 
 /** Builds one assistant text item that lives inside a response turn. */
-function assistantItem(id: string, content: string, createdAt: number): ChatMessage {
+function assistantItem(
+  id: string,
+  content: string,
+  createdAt: number,
+): ChatMessage {
   return { kind: "message", id, role: "assistant", content, createdAt };
 }
 
@@ -99,7 +125,11 @@ function toolCallItem(id: string, createdAt: number): ChatToolCall {
 }
 
 /** Builds one completed file read with a structured path for activity summaries. */
-function completedReadItem(id: string, path: string, createdAt: number): ChatToolCall {
+function completedReadItem(
+  id: string,
+  path: string,
+  createdAt: number,
+): ChatToolCall {
   return {
     kind: "toolCall",
     id,
@@ -114,7 +144,11 @@ function completedReadItem(id: string, path: string, createdAt: number): ChatToo
 }
 
 /** Builds one live file read so the header can expose its current structured target. */
-function activeReadItem(id: string, path: string, createdAt: number): ChatToolCall {
+function activeReadItem(
+  id: string,
+  path: string,
+  createdAt: number,
+): ChatToolCall {
   return {
     ...completedReadItem(id, path, createdAt),
     status: "in_progress",
@@ -122,7 +156,11 @@ function activeReadItem(id: string, path: string, createdAt: number): ChatToolCa
 }
 
 /** Builds one completed edit with a path for change-group coverage. */
-function completedEditItem(id: string, path: string, createdAt: number): ChatToolCall {
+function completedEditItem(
+  id: string,
+  path: string,
+  createdAt: number,
+): ChatToolCall {
   return {
     kind: "toolCall",
     id,
@@ -137,7 +175,11 @@ function completedEditItem(id: string, path: string, createdAt: number): ChatToo
 }
 
 /** Builds one completed command for command-group coverage. */
-function completedCommandItem(id: string, title: string, createdAt: number): ChatToolCall {
+function completedCommandItem(
+  id: string,
+  title: string,
+  createdAt: number,
+): ChatToolCall {
   return {
     kind: "toolCall",
     id,
@@ -152,7 +194,11 @@ function completedCommandItem(id: string, title: string, createdAt: number): Cha
 }
 
 /** Builds one reasoning update for activity timeline coverage. */
-function thoughtItem(id: string, content: string, createdAt: number): ChatThought {
+function thoughtItem(
+  id: string,
+  content: string,
+  createdAt: number,
+): ChatThought {
   return { kind: "thought", id, content, createdAt };
 }
 
@@ -206,7 +252,11 @@ describe("Composer", () => {
         isResponding={false}
         availableCommands={[
           { name: "review", description: "Review current changes" },
-          { name: "test", description: "Run the test suite", input: { hint: "package" } },
+          {
+            name: "test",
+            description: "Run the test suite",
+            input: { hint: "package" },
+          },
         ]}
       />,
     );
@@ -246,9 +296,14 @@ describe("Composer", () => {
 
     await user.type(screen.getByRole("textbox"), "/");
     await user.click(screen.getByRole("button", { name: "显示另外 7 项" }));
-    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}");
+    await user.keyboard(
+      "{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}",
+    );
 
-    expect(screen.getAllByRole("option")[8]).toHaveAttribute("aria-selected", "true");
+    expect(screen.getAllByRole("option")[8]).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
 
     await user.click(screen.getByRole("button", { name: "收起" }));
@@ -263,7 +318,15 @@ describe("Composer", () => {
       <Composer
         onSend={() => {}}
         isResponding={false}
-        skills={[{ id: "skill-1", name: "code-review", description: "Review the current diff" }]}
+        skills={[
+          {
+            id: "skill-1",
+            namespace: "local",
+            name: "code-review",
+            description: "Review the current diff",
+            availability: "available",
+          },
+        ]}
         availableCommands={[{ name: "test", description: "Run tests" }]}
       />,
     );
@@ -278,60 +341,155 @@ describe("Composer", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
+  it("hides unavailable skills from the composer palette", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(
+      <Composer
+        onSend={() => {}}
+        isResponding={false}
+        skills={[
+          {
+            id: "skill-1",
+            namespace: "local",
+            name: "code-review",
+            description: "Review the current diff",
+            availability: "available",
+          },
+          {
+            id: "skill-2",
+            namespace: "local",
+            name: "missing-skill",
+            description: "Lost package",
+            availability: "unavailable",
+          },
+        ]}
+        availableCommands={[]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "打开快捷操作" }));
+
+    expect(screen.getByRole("option", { name: "code-review" })).toBeVisible();
+    expect(
+      screen.queryByRole("option", { name: "missing-skill" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("previews a selected image and sends it as ACP image content", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();
-    const view = renderWithI18n(<Composer onSend={onSend} isResponding={false} />);
-    const fileInput = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    const view = renderWithI18n(
+      <Composer onSend={onSend} isResponding={false} />,
+    );
+    const fileInput = view.container.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
 
-    await user.upload(fileInput, new File(["hello"], "diagram.png", { type: "image/png" }));
-    expect(await screen.findByRole("img", { name: "diagram.png" })).toBeVisible();
+    await user.upload(
+      fileInput,
+      new File(["hello"], "diagram.png", { type: "image/png" }),
+    );
+    expect(
+      await screen.findByRole("img", { name: "diagram.png" }),
+    ).toBeVisible();
 
     await user.type(screen.getByRole("textbox"), "inspect this{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("inspect this", [{
-      data: "aGVsbG8=",
-      mimeType: "image/png",
-      uri: "diagram.png",
-    }]);
+    expect(onSend).toHaveBeenCalledWith("inspect this", [
+      {
+        data: "aGVsbG8=",
+        mimeType: "image/png",
+        uri: "diagram.png",
+      },
+    ]);
   });
 
   it("pastes a clipboard image into the attachment list", async () => {
     const onSend = vi.fn();
     renderWithI18n(<Composer onSend={onSend} isResponding={false} />);
     const textarea = screen.getByRole("textbox");
-    const image = new File(["clipboard"], "clipboard.png", { type: "image/png" });
+    const image = new File(["clipboard"], "clipboard.png", {
+      type: "image/png",
+    });
 
     fireEvent.paste(textarea, { clipboardData: { files: [image] } });
 
-    expect(await screen.findByRole("img", { name: "clipboard.png" })).toBeVisible();
+    expect(
+      await screen.findByRole("img", { name: "clipboard.png" }),
+    ).toBeVisible();
     expect(textarea).toHaveValue("");
     expect(onSend).not.toHaveBeenCalled();
   });
-
 });
 
 describe("Structured ACP content", () => {
   it("renders structured resources and previews images with wheel zoom", async () => {
     const user = userEvent.setup();
-    const image = { type: "image" as const, data: "aGVsbG8=", mimeType: "image/png", uri: "file:///preview.png" };
+    const image = {
+      type: "image" as const,
+      data: "aGVsbG8=",
+      mimeType: "image/png",
+      uri: "file:///preview.png",
+    };
     const items: ChatContent[] = [
-      { kind: "content", id: "audio", source: "message", content: { type: "audio", data: "aGVsbG8=", mimeType: "audio/mpeg" }, createdAt: 2 },
-      { kind: "content", id: "link", source: "message", content: { type: "resource_link", name: "docs", title: "ACP docs", description: "Protocol reference", uri: "https://example.com/acp", size: 2048 }, createdAt: 3 },
-      { kind: "content", id: "resource", source: "message", content: { type: "resource", resource: { uri: "file:///notes.txt", mimeType: "text/plain", text: "embedded notes" } }, createdAt: 4 },
+      {
+        kind: "content",
+        id: "audio",
+        source: "message",
+        content: { type: "audio", data: "aGVsbG8=", mimeType: "audio/mpeg" },
+        createdAt: 2,
+      },
+      {
+        kind: "content",
+        id: "link",
+        source: "message",
+        content: {
+          type: "resource_link",
+          name: "docs",
+          title: "ACP docs",
+          description: "Protocol reference",
+          uri: "https://example.com/acp",
+          size: 2048,
+        },
+        createdAt: 3,
+      },
+      {
+        kind: "content",
+        id: "resource",
+        source: "message",
+        content: {
+          type: "resource",
+          resource: {
+            uri: "file:///notes.txt",
+            mimeType: "text/plain",
+            text: "embedded notes",
+          },
+        },
+        createdAt: 4,
+      },
     ];
     const mediaTurn = turn("media", "show files", 1, items);
     mediaTurn.userMessage.structuredContent = [image];
-    const view = renderWithI18n(<MessageList turns={[mediaTurn]} userName="Eric" isResponding={false} />);
+    const view = renderWithI18n(
+      <MessageList turns={[mediaTurn]} userName="Eric" isResponding={false} />,
+    );
 
     const inlineImage = screen.getByRole("img", { name: "preview.png" });
     expect(inlineImage).toHaveAttribute("loading", "lazy");
     expect(inlineImage.closest("a")).toBeNull();
     expect(inlineImage.closest("button")).toBeNull();
-    const expandButton = screen.getByRole("button", { name: "展开图片 preview.png" });
+    const expandButton = screen.getByRole("button", {
+      name: "展开图片 preview.png",
+    });
     expect(expandButton).toHaveClass("cursor-pointer");
-    expect(view.container.querySelector("audio[controls]")).toHaveAttribute("src", "data:audio/mpeg;base64,aGVsbG8=");
-    expect(screen.getByRole("link", { name: /ACP docs/ })).toHaveAttribute("href", "https://example.com/acp");
+    expect(view.container.querySelector("audio[controls]")).toHaveAttribute(
+      "src",
+      "data:audio/mpeg;base64,aGVsbG8=",
+    );
+    expect(screen.getByRole("link", { name: /ACP docs/ })).toHaveAttribute(
+      "href",
+      "https://example.com/acp",
+    );
     expect(screen.getByText("embedded notes")).toBeVisible();
 
     await user.click(expandButton);
@@ -345,18 +503,31 @@ describe("Structured ACP content", () => {
     expect(previewImage).not.toBeNull();
     canvas.scrollLeft = 12;
     canvas.scrollTop = 18;
-    const wheel = new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true });
+    const wheel = new WheelEvent("wheel", {
+      deltaY: -100,
+      bubbles: true,
+      cancelable: true,
+    });
     act(() => expect(canvas.dispatchEvent(wheel)).toBe(false));
     expect(screen.getByLabelText("preview.png，缩放 110%")).toBeVisible();
-    expect(previewImage).toHaveStyle({ transform: "translate(-50%, -50%) translate(0px, 0px) scale(1.1)" });
+    expect(previewImage).toHaveStyle({
+      transform: "translate(-50%, -50%) translate(0px, 0px) scale(1.1)",
+    });
     expect(canvas).toHaveProperty("scrollLeft", 12);
     expect(canvas).toHaveProperty("scrollTop", 18);
     canvas.scrollLeft = 0;
     canvas.scrollTop = 0;
-    fireEvent.pointerDown(canvas, { button: 0, pointerId: 7, clientX: 100, clientY: 100 });
+    fireEvent.pointerDown(canvas, {
+      button: 0,
+      pointerId: 7,
+      clientX: 100,
+      clientY: 100,
+    });
     expect(canvas).toHaveClass("cursor-grabbing");
     fireEvent.pointerMove(canvas, { pointerId: 7, clientX: 60, clientY: 70 });
-    expect(previewImage).toHaveStyle({ transform: "translate(-50%, -50%) translate(-40px, -30px) scale(1.1)" });
+    expect(previewImage).toHaveStyle({
+      transform: "translate(-50%, -50%) translate(-40px, -30px) scale(1.1)",
+    });
     fireEvent.pointerUp(canvas, { pointerId: 7, clientX: 60, clientY: 70 });
     expect(canvas).toHaveClass("cursor-grab");
     expect(screen.getByRole("button", { name: "关闭图片预览" })).toBeVisible();
@@ -376,7 +547,9 @@ describe("ChatView", () => {
       />,
     );
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Agent session unavailable");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Agent session unavailable",
+    );
     expect(screen.getByRole("textbox")).toBeDisabled();
     expect(screen.getAllByRole("button")).toEqual(
       expect.arrayContaining([expect.objectContaining({ disabled: true })]),
@@ -386,7 +559,13 @@ describe("ChatView", () => {
   it("keeps the disabled hint shut when the pointer never left the enabled composer", async () => {
     const user = userEvent.setup();
     const view = renderWithI18n(
-      <ChatView turns={[]} userName="Eric" isResponding={false} error={null} onSend={() => {}} />,
+      <ChatView
+        turns={[]}
+        userName="Eric"
+        isResponding={false}
+        error={null}
+        onSend={() => {}}
+      />,
     );
 
     // Hover the composer while it has no hint. The real app then slides the
@@ -394,15 +573,15 @@ describe("ChatView", () => {
     await user.hover(screen.getByRole("textbox"));
 
     view.rerender(
-        <ChatView
-          turns={[]}
-          userName="Eric"
-          isResponding={false}
-          error={null}
-          disabled
-          disabledHint="pick a project"
-          onSend={() => {}}
-        />
+      <ChatView
+        turns={[]}
+        userName="Eric"
+        isResponding={false}
+        error={null}
+        disabled
+        disabledHint="pick a project"
+        onSend={() => {}}
+      />,
     );
 
     expect(screen.queryByText("pick a project")).toBeNull();
@@ -420,22 +599,37 @@ describe("ChatView", () => {
       />,
     );
 
-    const composer = screen.getByRole("textbox").closest('[data-slot="composer"]');
-    const context = screen.getByText("Ora / frontend").closest('[data-slot="composer-context"]');
+    const composer = screen
+      .getByRole("textbox")
+      .closest('[data-slot="composer"]');
+    const context = screen
+      .getByText("Ora / frontend")
+      .closest('[data-slot="composer-context"]');
     expect(composer).not.toBeNull();
     expect(context).not.toBeNull();
     expect(composer?.contains(context)).toBe(false);
-    expect(context?.nextElementSibling?.querySelector('[data-slot="composer"]')).toBe(composer);
+    expect(
+      context?.nextElementSibling?.querySelector('[data-slot="composer"]'),
+    ).toBe(composer);
   });
 
   it("shows the history loading indicator without the landing copy while a session loads", () => {
     renderWithI18n(
-      <ChatView turns={[]} userName="Eric" isResponding={false} isLoading error={null} onSend={() => {}} />,
+      <ChatView
+        turns={[]}
+        userName="Eric"
+        isResponding={false}
+        isLoading
+        error={null}
+        onSend={() => {}}
+      />,
     );
 
     // Thread layout: the loading status stands in for the yet-to-arrive turns and
     // the landing heading/suggestions are gone, so the composer has slid down.
-    expect(screen.getByRole("status", { name: /加载历史|Loading history/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: /加载历史|Loading history/ }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("heading")).toBeNull();
     expect(screen.queryByRole("textbox")).toBeInTheDocument();
   });
@@ -455,27 +649,40 @@ describe("ChatView", () => {
 
     // Landing state: nothing selected, composer centered.
     const view = renderWithI18n(
-      <ChatView turns={[]} userName="Eric" isResponding={false} error={null} onSend={() => {}} />,
+      <ChatView
+        turns={[]}
+        userName="Eric"
+        isResponding={false}
+        error={null}
+        onSend={() => {}}
+      />,
     );
 
     // Selecting a session flips it into the loading thread layout: the composer
     // slides down here, before any turn exists.
     top = 800;
     view.rerender(
-        <ChatView turns={[]} userName="Eric" isResponding={false} isLoading error={null} onSend={() => {}} />
+      <ChatView
+        turns={[]}
+        userName="Eric"
+        isResponding={false}
+        isLoading
+        error={null}
+        onSend={() => {}}
+      />,
     );
     expect(animate).toHaveBeenCalledTimes(1);
 
     // History arriving is not a landing→thread transition, so it must not replay
     // the slide — otherwise the composer animates twice for one selection.
     view.rerender(
-        <ChatView
-          turns={[turn("turn-1", "hello", 100)]}
-          userName="Eric"
-          isResponding={false}
-          error={null}
-          onSend={() => {}}
-        />
+      <ChatView
+        turns={[turn("turn-1", "hello", 100)]}
+        userName="Eric"
+        isResponding={false}
+        error={null}
+        onSend={() => {}}
+      />,
     );
     expect(animate).toHaveBeenCalledTimes(1);
 
@@ -498,19 +705,25 @@ describe("ChatView", () => {
     });
 
     const view = renderWithI18n(
-      <ChatView turns={[]} userName="Eric" isResponding={false} error={null} onSend={() => {}} />,
+      <ChatView
+        turns={[]}
+        userName="Eric"
+        isResponding={false}
+        error={null}
+        onSend={() => {}}
+      />,
     );
     const landingComposer = screen.getByRole("textbox");
 
     top = 800;
     view.rerender(
-        <ChatView
-          turns={[turn("turn-1", "hello", 100)]}
-          userName="Eric"
-          isResponding={false}
-          error={null}
-          onSend={() => {}}
-        />
+      <ChatView
+        turns={[turn("turn-1", "hello", 100)]}
+        userName="Eric"
+        isResponding={false}
+        error={null}
+        onSend={() => {}}
+      />,
     );
 
     // Identity is the whole point: a remounted composer cannot be animated and
@@ -532,19 +745,30 @@ describe("MessageList", () => {
       <MessageList
         turns={[turn("turn-1", "First", 100), turn("turn-2", "Second", 200)]}
         modelChanges={[
-          { id: "change-1", afterTurnCount: 1, modelName: "Smart", createdAt: 150 },
+          {
+            id: "change-1",
+            afterTurnCount: 1,
+            modelName: "Smart",
+            createdAt: 150,
+          },
         ]}
         userName="Eric"
         isResponding={false}
       />,
     );
 
-    const divider = screen.getByRole("separator", { name: /已切换到 Smart|Switched to Smart/ });
+    const divider = screen.getByRole("separator", {
+      name: /已切换到 Smart|Switched to Smart/,
+    });
     const [first, second] = screen.getAllByText(/First|Second/);
     // The divider separates the turns it was recorded between, rather than
     // landing at either end of the thread.
-    expect(first!.compareDocumentPosition(divider)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(second!.compareDocumentPosition(divider)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+    expect(first!.compareDocumentPosition(divider)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(second!.compareDocumentPosition(divider)).toBe(
+      Node.DOCUMENT_POSITION_PRECEDING,
+    );
   });
 
   it("compresses consecutive reads into a second-level disclosure", async () => {
@@ -564,13 +788,25 @@ describe("MessageList", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /文件读取完成|File reading complete/ }));
-    const readBatch = screen.getByRole("button", { name: /读取 4 个文件|Read 4 files/ });
-    expect(screen.queryByRole("button", { name: /读取\s*a\.md|Read\s*a\.md/ })).toBeNull();
+    await user.click(
+      screen.getByRole("button", {
+        name: /文件读取完成|File reading complete/,
+      }),
+    );
+    const readBatch = screen.getByRole("button", {
+      name: /读取 4 个文件|Read 4 files/,
+    });
+    expect(
+      screen.queryByRole("button", { name: /读取\s*a\.md|Read\s*a\.md/ }),
+    ).toBeNull();
 
     await user.click(readBatch);
-    expect(screen.getByRole("button", { name: /读取\s*a\.md|Read\s*a\.md/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /读取\s*d\.md|Read\s*d\.md/ })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /读取\s*a\.md|Read\s*a\.md/ }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /读取\s*d\.md|Read\s*d\.md/ }),
+    ).toBeVisible();
   });
 
   it("folds reads, edits, and commands into one collapsed phase, each still distinct once expanded", async () => {
@@ -591,78 +827,134 @@ describe("MessageList", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: /文件读取完成|File reading complete/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /已修改 2 个文件|Changed 2 files/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /已执行 2 条命令|Ran 2 commands/ })).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: /文件读取完成|File reading complete/,
+      }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /已修改 2 个文件|Changed 2 files/ }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /已执行 2 条命令|Ran 2 commands/ }),
+    ).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: /已完成的操作|Completed activity/ }));
+    await user.click(
+      screen.getByRole("button", { name: /已完成的操作|Completed activity/ }),
+    );
 
-    expect(screen.getByRole("button", { name: /文件读取完成|File reading complete/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /已修改 2 个文件|Changed 2 files/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /已执行 2 条命令|Ran 2 commands/ })).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: /文件读取完成|File reading complete/,
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /已修改 2 个文件|Changed 2 files/ }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /已执行 2 条命令|Ran 2 commands/ }),
+    ).toBeVisible();
   });
 
   it("surfaces a domain-neutral current file while exploration is streaming", () => {
     renderWithI18n(
       <MessageList
         turns={[
-          turn("turn-1", "Inspect the entry point", 100, [
-            thoughtItem("thought-1", "Locating the application entry point", 200),
-            activeReadItem("read-1", "reports/q2.pdf", 300),
-          ], "streaming"),
+          turn(
+            "turn-1",
+            "Inspect the entry point",
+            100,
+            [
+              thoughtItem(
+                "thought-1",
+                "Locating the application entry point",
+                200,
+              ),
+              activeReadItem("read-1", "reports/q2.pdf", 300),
+            ],
+            "streaming",
+          ),
         ]}
         userName="Eric"
         isResponding
       />,
     );
 
-    const activity = screen.getByRole("button", { name: /正在读取 q2\.pdf|Reading q2\.pdf/ });
-    expect(activity).toHaveTextContent(/1 个文件 · 1 次分析|1 file · 1 analysis step/);
+    const activity = screen.getByRole("button", {
+      name: /正在读取 q2\.pdf|Reading q2\.pdf/,
+    });
+    expect(activity).toHaveTextContent(
+      /1 个文件 · 1 次分析|1 file · 1 analysis step/,
+    );
   });
 
   it("reveals only the live thought suffix and settles it before the next activity", () => {
     const view = renderWithI18n(
       <MessageList
-        turns={[turn("turn-1", "Inspect", 100, [
-          thoughtItem("thought-1", "Checking", 200),
-        ], "streaming")]}
+        turns={[
+          turn(
+            "turn-1",
+            "Inspect",
+            100,
+            [thoughtItem("thought-1", "Checking", 200)],
+            "streaming",
+          ),
+        ]}
         userName="Eric"
         isResponding
       />,
     );
 
     expect(
-      Array.from(view.container.querySelectorAll("[data-stream-thought-reveal]"))
-        .map((node) => node.textContent),
+      Array.from(
+        view.container.querySelectorAll("[data-stream-thought-reveal]"),
+      ).map((node) => node.textContent),
     ).toEqual(["Checking"]);
 
     view.rerender(
       <MessageList
-        turns={[turn("turn-1", "Inspect", 100, [
-          thoughtItem("thought-1", "Checking files", 200),
-        ], "streaming")]}
+        turns={[
+          turn(
+            "turn-1",
+            "Inspect",
+            100,
+            [thoughtItem("thought-1", "Checking files", 200)],
+            "streaming",
+          ),
+        ]}
         userName="Eric"
         isResponding
       />,
     );
 
     expect(
-      Array.from(view.container.querySelectorAll("[data-stream-thought-reveal]"))
-        .map((node) => node.textContent),
+      Array.from(
+        view.container.querySelectorAll("[data-stream-thought-reveal]"),
+      ).map((node) => node.textContent),
     ).toEqual([" files"]);
 
     view.rerender(
       <MessageList
-        turns={[turn("turn-1", "Inspect", 100, [
-          thoughtItem("thought-1", "Checking files", 200),
-          toolCallItem("tool-1", 300),
-        ], "streaming")]}
+        turns={[
+          turn(
+            "turn-1",
+            "Inspect",
+            100,
+            [
+              thoughtItem("thought-1", "Checking files", 200),
+              toolCallItem("tool-1", 300),
+            ],
+            "streaming",
+          ),
+        ]}
         userName="Eric"
         isResponding
       />,
     );
 
-    expect(view.container.querySelector("[data-stream-thought-reveal]")).toBeNull();
+    expect(
+      view.container.querySelector("[data-stream-thought-reveal]"),
+    ).toBeNull();
   });
 
   it("condenses interleaved analysis and file reads into one expandable activity timeline", async () => {
@@ -683,84 +975,151 @@ describe("MessageList", () => {
       />,
     );
 
-    const activity = screen.getByRole("button", { name: /文件读取完成|File reading complete/ });
-    expect(activity).toHaveTextContent(/2 个文件 · 2 次分析|2 files · 2 analysis steps/);
+    const activity = screen.getByRole("button", {
+      name: /文件读取完成|File reading complete/,
+    });
+    expect(activity).toHaveTextContent(
+      /2 个文件 · 2 次分析|2 files · 2 analysis steps/,
+    );
     expect(screen.queryByText("Checking project configuration")).toBeNull();
 
     await user.click(activity);
     expect(screen.getByText("Cargo.toml")).toBeVisible();
     expect(screen.getByText("main.rs")).toBeVisible();
-    const firstThought = screen.getByRole("button", { name: /Checking project configuration/ });
-    const secondThought = screen.getByRole("button", { name: /Finding the relevant source/ });
+    const firstThought = screen.getByRole("button", {
+      name: /Checking project configuration/,
+    });
+    const secondThought = screen.getByRole("button", {
+      name: /Finding the relevant source/,
+    });
     await user.click(firstThought);
-    expect(screen.getAllByText("Checking project configuration")).toHaveLength(2);
+    expect(screen.getAllByText("Checking project configuration")).toHaveLength(
+      2,
+    );
 
     await user.click(secondThought);
-    expect(screen.getAllByText("Checking project configuration")).toHaveLength(1);
+    expect(screen.getAllByText("Checking project configuration")).toHaveLength(
+      1,
+    );
     expect(screen.getAllByText("Finding the relevant source")).toHaveLength(2);
   });
 
   it("shows the running indicator while working but hides it as the answer streams", () => {
     const view = renderWithI18n(
-      <MessageList turns={[turn("turn-1", "hello", 100, [], "streaming")]} userName="Eric" isResponding />,
+      <MessageList
+        turns={[turn("turn-1", "hello", 100, [], "streaming")]}
+        userName="Eric"
+        isResponding
+      />,
     );
     // Waiting for the first output: the indicator stands in for the empty turn.
     expect(screen.getByLabelText(/正在运行|is working/)).toBeInTheDocument();
 
     // Answer body streaming in: the growing text is signal enough, so it hides.
     view.rerender(
-        <MessageList
-          turns={[turn("turn-1", "hello", 100, [assistantItem("assistant-1", "Mock", 200)], "streaming")]}
-          userName="Eric"
-          isResponding
-        />
+      <MessageList
+        turns={[
+          turn(
+            "turn-1",
+            "hello",
+            100,
+            [assistantItem("assistant-1", "Mock", 200)],
+            "streaming",
+          ),
+        ]}
+        userName="Eric"
+        isResponding
+      />,
     );
-    expect(screen.queryByLabelText(/正在运行|is working/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/正在运行|is working/),
+    ).not.toBeInTheDocument();
 
     // Back to working — a tool call trails the text — so the indicator returns.
     view.rerender(
-        <MessageList
-          turns={[turn("turn-1", "hello", 100, [assistantItem("assistant-1", "Mock", 200), toolCallItem("tool-1", 300)], "streaming")]}
-          userName="Eric"
-          isResponding
-        />
+      <MessageList
+        turns={[
+          turn(
+            "turn-1",
+            "hello",
+            100,
+            [
+              assistantItem("assistant-1", "Mock", 200),
+              toolCallItem("tool-1", 300),
+            ],
+            "streaming",
+          ),
+        ]}
+        userName="Eric"
+        isResponding
+      />,
     );
     expect(screen.getByLabelText(/正在运行|is working/)).toBeInTheDocument();
 
     // Clears once the turn settles and the agent is no longer responding.
     view.rerender(
-        <MessageList
-          turns={[turn("turn-1", "hello", 100, [assistantItem("assistant-1", "Mock", 200)], "completed")]}
-          userName="Eric"
-          isResponding={false}
-        />
+      <MessageList
+        turns={[
+          turn(
+            "turn-1",
+            "hello",
+            100,
+            [assistantItem("assistant-1", "Mock", 200)],
+            "completed",
+          ),
+        ]}
+        userName="Eric"
+        isResponding={false}
+      />,
     );
-    expect(screen.queryByLabelText(/正在运行|is working/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/正在运行|is working/),
+    ).not.toBeInTheDocument();
   });
 
   it("renders streamed assistant text as markdown while keeping the thread responsive", () => {
     renderWithI18n(
       <MessageList
         turns={[
-          turn("turn-1", "hello", 100, [assistantItem("assistant-1", "# Live heading\n\nStill streaming.", 200)], "streaming"),
+          turn(
+            "turn-1",
+            "hello",
+            100,
+            [
+              assistantItem(
+                "assistant-1",
+                "# Live heading\n\nStill streaming.",
+                200,
+              ),
+            ],
+            "streaming",
+          ),
         ]}
         userName="Eric"
         isResponding
       />,
     );
 
-      expect(screen.getByRole("heading", { level: 1, name: "Live heading" })).toBeInTheDocument();
-      expect(screen.getByText("Still streaming.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Live heading" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Still streaming.")).toBeInTheDocument();
   });
 
   it("flushes a previous text item's literal marker while the turn continues with a tool", () => {
     renderWithI18n(
       <MessageList
         turns={[
-          turn("turn-1", "hello", 100, [
-            assistantItem("assistant-1", "Use literal *", 200),
-            toolCallItem("tool-1", 300),
-          ], "streaming"),
+          turn(
+            "turn-1",
+            "hello",
+            100,
+            [
+              assistantItem("assistant-1", "Use literal *", 200),
+              toolCallItem("tool-1", 300),
+            ],
+            "streaming",
+          ),
         ]}
         userName="Eric"
         isResponding
@@ -795,23 +1154,45 @@ describe("MessageList", () => {
 
     const view = renderWithI18n(
       <MessageList
-        turns={[turn("turn-1", "hello", 100, [assistantItem("assistant-1", "Mock", 200)], "streaming")]}
+        turns={[
+          turn(
+            "turn-1",
+            "hello",
+            100,
+            [assistantItem("assistant-1", "Mock", 200)],
+            "streaming",
+          ),
+        ]}
         userName="Eric"
         isResponding
       />,
     );
     const list = screen.getByTestId("message-list");
-    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 480 });
+    Object.defineProperty(list, "scrollHeight", {
+      configurable: true,
+      value: 480,
+    });
     list.scrollTop = 0;
 
     act(() => resizeCallback?.([], {} as ResizeObserver));
 
     expect(list.scrollTop).toBe(480);
 
-    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 560 });
+    Object.defineProperty(list, "scrollHeight", {
+      configurable: true,
+      value: 560,
+    });
     view.rerender(
       <MessageList
-        turns={[turn("turn-1", "hello", 100, [assistantItem("assistant-1", "Mock final code", 200)], "completed")]}
+        turns={[
+          turn(
+            "turn-1",
+            "hello",
+            100,
+            [assistantItem("assistant-1", "Mock final code", 200)],
+            "completed",
+          ),
+        ]}
         userName="Eric"
         isResponding={false}
       />,
@@ -823,15 +1204,24 @@ describe("MessageList", () => {
 
     // A programmatic scroll event can arrive after another fast content growth.
     // It must not look like a reader abandoning the live tail.
-    Object.defineProperty(list, "clientHeight", { configurable: true, value: 100 });
-    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 720 });
+    Object.defineProperty(list, "clientHeight", {
+      configurable: true,
+      value: 100,
+    });
+    Object.defineProperty(list, "scrollHeight", {
+      configurable: true,
+      value: 720,
+    });
     list.scrollTop = 460;
     fireEvent.scroll(list);
     act(() => resizeCallback?.([], {} as ResizeObserver));
 
     expect(list.scrollTop).toBe(720);
 
-    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 800 });
+    Object.defineProperty(list, "scrollHeight", {
+      configurable: true,
+      value: 800,
+    });
     list.scrollTop = 0;
     fireEvent.wheel(list, { deltaY: -120 });
     fireEvent.scroll(list);
@@ -843,14 +1233,28 @@ describe("MessageList", () => {
   it("stops chasing the tail once the reader scrolls up mid-stream", () => {
     const view = renderWithI18n(
       <MessageList
-        turns={[turn("turn-1", "hello", 100, [assistantItem("assistant-1", "Mock", 200)], "streaming")]}
+        turns={[
+          turn(
+            "turn-1",
+            "hello",
+            100,
+            [assistantItem("assistant-1", "Mock", 200)],
+            "streaming",
+          ),
+        ]}
         userName="Eric"
         isResponding
       />,
     );
     const list = screen.getByTestId("message-list");
-    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 240 });
-    Object.defineProperty(list, "clientHeight", { configurable: true, value: 100 });
+    Object.defineProperty(list, "scrollHeight", {
+      configurable: true,
+      value: 240,
+    });
+    Object.defineProperty(list, "clientHeight", {
+      configurable: true,
+      value: 100,
+    });
 
     // An upward wheel gesture is the user intent; scroll events alone can also
     // come from the component's own tail correction.
@@ -859,34 +1263,50 @@ describe("MessageList", () => {
     fireEvent.scroll(list);
 
     view.rerender(
-        <MessageList
-          turns={[turn("turn-1", "hello", 100, [assistantItem("assistant-1", "Mock response", 200)], "streaming")]}
-          userName="Eric"
-          isResponding
-        />
+      <MessageList
+        turns={[
+          turn(
+            "turn-1",
+            "hello",
+            100,
+            [assistantItem("assistant-1", "Mock response", 200)],
+            "streaming",
+          ),
+        ]}
+        userName="Eric"
+        isResponding
+      />,
     );
 
     expect(list.scrollTop).toBe(0);
   });
 
   it("re-pins to the newest message when the user sends while scrolled up", () => {
-    const first = turn("turn-1", "hello", 100, [assistantItem("assistant-1", "Mock response", 200)]);
+    const first = turn("turn-1", "hello", 100, [
+      assistantItem("assistant-1", "Mock response", 200),
+    ]);
     const view = renderWithI18n(
       <MessageList turns={[first]} userName="Eric" isResponding={false} />,
     );
     const list = screen.getByTestId("message-list");
-    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 240 });
-    Object.defineProperty(list, "clientHeight", { configurable: true, value: 100 });
+    Object.defineProperty(list, "scrollHeight", {
+      configurable: true,
+      value: 240,
+    });
+    Object.defineProperty(list, "clientHeight", {
+      configurable: true,
+      value: 100,
+    });
     fireEvent.wheel(list, { deltaY: -120 });
     list.scrollTop = 0;
     fireEvent.scroll(list);
 
     view.rerender(
-        <MessageList
-          turns={[first, turn("turn-2", "Follow-up", 300, [], "streaming")]}
-          userName="Eric"
-          isResponding={false}
-        />
+      <MessageList
+        turns={[first, turn("turn-2", "Follow-up", 300, [], "streaming")]}
+        userName="Eric"
+        isResponding={false}
+      />,
     );
 
     expect(list.scrollTop).toBe(240);
@@ -895,9 +1315,19 @@ describe("MessageList", () => {
 
 describe("ConversationNavigator", () => {
   const turns = [
-    turn("turn-1", "**First** question", 100, [assistantItem("assistant-1", "```markdown\n# First answer\n\nWith `code` and [docs](https://example.com)\n```", 200)]),
-    turn("turn-2", "Second question", 300, [assistantItem("assistant-2", "Second answer", 400)]),
-    turn("turn-3", "Third question", 500, [assistantItem("assistant-3", "Third answer", 600)]),
+    turn("turn-1", "**First** question", 100, [
+      assistantItem(
+        "assistant-1",
+        "```markdown\n# First answer\n\nWith `code` and [docs](https://example.com)\n```",
+        200,
+      ),
+    ]),
+    turn("turn-2", "Second question", 300, [
+      assistantItem("assistant-2", "Second answer", 400),
+    ]),
+    turn("turn-3", "Third question", 500, [
+      assistantItem("assistant-3", "Third answer", 600),
+    ]),
   ];
 
   /** Keeps navigation state local so repeated clicks exercise the real hover-to-boundary transition. */
@@ -929,48 +1359,63 @@ describe("ConversationNavigator", () => {
       </TooltipProvider>,
     );
 
-    const previousButton = screen.getByRole("button", { name: /上一条消息|Previous message/ });
-    const nextButton = screen.getByRole("button", { name: /下一条消息|Next message/ });
+    const previousButton = screen.getByRole("button", {
+      name: /上一条消息|Previous message/,
+    });
+    const nextButton = screen.getByRole("button", {
+      name: /下一条消息|Next message/,
+    });
     await user.click(previousButton);
     await user.click(nextButton);
 
-    expect(onNavigate.mock.calls).toEqual([["turn-1:response"], ["turn-2:response"]]);
+    expect(onNavigate.mock.calls).toEqual([
+      ["turn-1:response"],
+      ["turn-2:response"],
+    ]);
 
     view.rerender(
-        <TooltipProvider>
-          <ConversationNavigator
-            turns={turns}
-            activeAnchorId="turn-1:user"
-            isAtTail
-            onNavigate={onNavigate}
-            onNavigateToTail={() => {}}
-          />
-        </TooltipProvider>
+      <TooltipProvider>
+        <ConversationNavigator
+          turns={turns}
+          activeAnchorId="turn-1:user"
+          isAtTail
+          onNavigate={onNavigate}
+          onNavigateToTail={() => {}}
+        />
+      </TooltipProvider>,
     );
     expect(previousButton).toBeDisabled();
     expect(previousButton).toBeVisible();
-    expect(previousButton).toHaveAccessibleName(/这是第一条消息|This is the first message/);
+    expect(previousButton).toHaveAccessibleName(
+      /这是第一条消息|This is the first message/,
+    );
     expect(nextButton).toBeEnabled();
     await user.hover(previousButton.parentElement!);
-    expect(await screen.findByText(/这是第一条消息|This is the first message/)).toBeVisible();
+    expect(
+      await screen.findByText(/这是第一条消息|This is the first message/),
+    ).toBeVisible();
 
     view.rerender(
-        <TooltipProvider>
-          <ConversationNavigator
-            turns={turns}
-            activeAnchorId="turn-3:response"
-            isAtTail
-            onNavigate={onNavigate}
-            onNavigateToTail={() => {}}
-          />
-        </TooltipProvider>
+      <TooltipProvider>
+        <ConversationNavigator
+          turns={turns}
+          activeAnchorId="turn-3:response"
+          isAtTail
+          onNavigate={onNavigate}
+          onNavigateToTail={() => {}}
+        />
+      </TooltipProvider>,
     );
     expect(previousButton).toBeEnabled();
     expect(nextButton).toBeDisabled();
     expect(nextButton).toBeVisible();
-    expect(nextButton).toHaveAccessibleName(/已到达对话底部|You're at the bottom of the conversation/);
+    expect(nextButton).toHaveAccessibleName(
+      /已到达对话底部|You're at the bottom of the conversation/,
+    );
     await user.hover(nextButton.parentElement!);
-    expect(await screen.findByTestId("conversation-navigation-end-hint")).toHaveTextContent(
+    expect(
+      await screen.findByTestId("conversation-navigation-end-hint"),
+    ).toHaveTextContent(
       /已到达对话底部|You're at the bottom of the conversation/,
     );
   });
@@ -983,16 +1428,24 @@ describe("ConversationNavigator", () => {
       </TooltipProvider>,
     );
 
-    const previousButton = screen.getByRole("button", { name: /上一条消息|Previous message/ });
+    const previousButton = screen.getByRole("button", {
+      name: /上一条消息|Previous message/,
+    });
     await user.click(previousButton);
     await user.click(previousButton);
     expect(previousButton).toBeDisabled();
-    expect(await screen.findByText(/这是第一条消息|This is the first message/)).toBeVisible();
+    expect(
+      await screen.findByText(/这是第一条消息|This is the first message/),
+    ).toBeVisible();
 
-    const nextButton = screen.getByRole("button", { name: /下一条消息|Next message/ });
+    const nextButton = screen.getByRole("button", {
+      name: /下一条消息|Next message/,
+    });
     for (let index = 0; index < 5; index += 1) await user.click(nextButton);
     expect(nextButton).toBeDisabled();
-    expect(await screen.findByTestId("conversation-navigation-end-hint")).toHaveTextContent(
+    expect(
+      await screen.findByTestId("conversation-navigation-end-hint"),
+    ).toHaveTextContent(
       /已到达对话底部|You're at the bottom of the conversation/,
     );
   });
@@ -1013,18 +1466,20 @@ describe("ConversationNavigator", () => {
       </TooltipProvider>,
     );
 
-    const nextButton = screen.getByRole("button", { name: /滚动到底部|Scroll to bottom/ });
+    const nextButton = screen.getByRole("button", {
+      name: /滚动到底部|Scroll to bottom/,
+    });
     expect(nextButton).toBeEnabled();
     await user.hover(nextButton.parentElement!);
-    expect(await screen.findByTestId("conversation-navigation-end-hint")).toHaveTextContent(
-      /滚动到底部|Scroll to bottom/,
-    );
+    expect(
+      await screen.findByTestId("conversation-navigation-end-hint"),
+    ).toHaveTextContent(/滚动到底部|Scroll to bottom/);
     await user.click(nextButton);
     expect(onNavigate).not.toHaveBeenCalled();
     expect(onNavigateToTail).toHaveBeenCalledOnce();
-    expect(screen.getByTestId("conversation-navigation-end-hint")).toHaveTextContent(
-      /滚动到底部|Scroll to bottom/,
-    );
+    expect(
+      screen.getByTestId("conversation-navigation-end-hint"),
+    ).toHaveTextContent(/滚动到底部|Scroll to bottom/);
 
     view.rerender(
       <TooltipProvider>
@@ -1038,8 +1493,12 @@ describe("ConversationNavigator", () => {
       </TooltipProvider>,
     );
     expect(nextButton).toBeDisabled();
-    expect(nextButton).toHaveAccessibleName(/已到达对话底部|You're at the bottom of the conversation/);
-    expect(screen.getByTestId("conversation-navigation-end-hint")).toHaveTextContent(
+    expect(nextButton).toHaveAccessibleName(
+      /已到达对话底部|You're at the bottom of the conversation/,
+    );
+    expect(
+      screen.getByTestId("conversation-navigation-end-hint"),
+    ).toHaveTextContent(
       /已到达对话底部|You're at the bottom of the conversation/,
     );
     expect(screen.getByTestId("conversation-navigation-end-hint")).toHaveClass(
@@ -1060,16 +1519,26 @@ describe("ConversationNavigator", () => {
       />,
     );
 
-    fireEvent.mouseEnter(screen.getByRole("button", { name: /问题 1|Question 1/ }), { clientY: 10 });
+    fireEvent.mouseEnter(
+      screen.getByRole("button", { name: /问题 1|Question 1/ }),
+      { clientY: 10 },
+    );
     const questionPreview = screen.getByTestId("conversation-anchor-preview");
     expect(questionPreview).toHaveTextContent("First question");
     expect(questionPreview.querySelector("strong")).toHaveTextContent("First");
     expect(questionPreview).not.toHaveTextContent(/问题 1|Question 1/);
 
-    fireEvent.mouseEnter(screen.getByRole("button", { name: /回复 1|Response 1/ }), { clientY: 10 });
+    fireEvent.mouseEnter(
+      screen.getByRole("button", { name: /回复 1|Response 1/ }),
+      { clientY: 10 },
+    );
     const responsePreview = screen.getByTestId("conversation-anchor-preview");
-    expect(responsePreview).toHaveTextContent("OraFirst answer With code and docs");
-    expect(responsePreview.querySelector("p.font-semibold")).toHaveTextContent("First answer");
+    expect(responsePreview).toHaveTextContent(
+      "OraFirst answer With code and docs",
+    );
+    expect(responsePreview.querySelector("p.font-semibold")).toHaveTextContent(
+      "First answer",
+    );
     expect(responsePreview.querySelector("code")).toHaveTextContent("code");
     expect(responsePreview.querySelector("a")).toBeNull();
     expect(responsePreview.querySelector("pre")).toBeNull();
@@ -1079,7 +1548,9 @@ describe("ConversationNavigator", () => {
   it("parses complete Markdown before visually clipping long previews", () => {
     const longMarkdown = `${"prefix ".repeat(20)}**complete marker**`;
     const longTurns = [
-      turn("long-1", "Question", 100, [assistantItem("long-answer", longMarkdown, 200)]),
+      turn("long-1", "Question", 100, [
+        assistantItem("long-answer", longMarkdown, 200),
+      ]),
       turns[1],
       turns[2],
     ];
@@ -1093,13 +1564,24 @@ describe("ConversationNavigator", () => {
       />,
     );
 
-    fireEvent.mouseEnter(screen.getByRole("button", { name: /回复 1|Response 1/ }), { clientY: 10 });
-    expect(screen.getByTestId("conversation-anchor-preview").querySelector("strong")).toHaveTextContent("complete marker");
+    fireEvent.mouseEnter(
+      screen.getByRole("button", { name: /回复 1|Response 1/ }),
+      { clientY: 10 },
+    );
+    expect(
+      screen.getByTestId("conversation-anchor-preview").querySelector("strong"),
+    ).toHaveTextContent("complete marker");
   });
 
   it("renders fenced code as an unframed compact excerpt", () => {
     const codeTurns = [
-      turn("code-1", "Question", 100, [assistantItem("code-answer", "```python\n# Python example\ndef fibonacci(n):\n    return n\n```", 200)]),
+      turn("code-1", "Question", 100, [
+        assistantItem(
+          "code-answer",
+          "```python\n# Python example\ndef fibonacci(n):\n    return n\n```",
+          200,
+        ),
+      ]),
       turns[1],
       turns[2],
     ];
@@ -1113,9 +1595,16 @@ describe("ConversationNavigator", () => {
       />,
     );
 
-    fireEvent.mouseEnter(screen.getByRole("button", { name: /回复 1|Response 1/ }), { clientY: 10 });
-    const codeBlock = screen.getByTestId("conversation-anchor-preview").querySelector("[data-preview-code-block]");
-    expect(codeBlock).toHaveTextContent("# Python example def fibonacci(n): return n");
+    fireEvent.mouseEnter(
+      screen.getByRole("button", { name: /回复 1|Response 1/ }),
+      { clientY: 10 },
+    );
+    const codeBlock = screen
+      .getByTestId("conversation-anchor-preview")
+      .querySelector("[data-preview-code-block]");
+    expect(codeBlock).toHaveTextContent(
+      "# Python example def fibonacci(n): return n",
+    );
     expect(codeBlock).toHaveClass("border-l-2", "pl-2");
     expect(codeBlock).not.toHaveClass("bg-muted", "rounded-sm");
   });

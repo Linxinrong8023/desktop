@@ -7,7 +7,7 @@ use ora_contracts::{
     AgentImportResultStatus, CommitAgentImportRequest, CommitAgentImportResponse,
     PrepareAgentImportRequest, PrepareAgentImportResponse,
 };
-use ora_domain::{AgentDefinition, AuditFields};
+use ora_domain::{AgentDefinition, AuditFields, Namespace};
 use serde::Deserialize;
 
 const MAX_AGENT_MARKDOWN_BYTES: usize = 1024 * 1024;
@@ -103,7 +103,7 @@ where
 
     fn find_by_name(&self, name: &str) -> Result<Option<AgentDefinition>, ApplicationError> {
         self.repository
-            .find_agent_definition_by_name(name)
+            .find_agent_definition_by_name(&Namespace::local(), name)
             .map_err(ApplicationError::from_agent_definition_repository_error)
     }
 
@@ -114,6 +114,7 @@ where
         let now = self.clock.now_timestamp_millis();
         let agent = AgentDefinition::new(
             self.id_generator.generate_agent_definition_id(),
+            Namespace::local(),
             parsed.name,
             parsed.description,
             parsed.content,
@@ -137,6 +138,7 @@ where
     ) -> Result<CommitAgentImportResponse, ApplicationError> {
         let agent = AgentDefinition::new(
             existing.id,
+            existing.namespace,
             parsed.name,
             parsed.description,
             parsed.content,

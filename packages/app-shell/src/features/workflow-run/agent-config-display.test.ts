@@ -8,10 +8,12 @@ import type { WorkflowNodeData } from "@ora/workflow-runtime";
 
 describe("agent-config-display", () => {
   it("formats known Agent CLI labels for the mono summary line", () => {
-    expect(formatAgentExecutorLabel({
-      agentCli: "open_code",
-      modelId: "deepseek/deepseek-v4-pro",
-    })).toBe("OpenCode · deepseek/deepseek-v4-pro");
+    expect(
+      formatAgentExecutorLabel({
+        agentCli: "open_code",
+        modelId: "deepseek/deepseek-v4-pro",
+      }),
+    ).toBe("OpenCode · deepseek/deepseek-v4-pro");
   });
 
   it("falls back to agent executor when flat detail fields are empty", () => {
@@ -21,14 +23,19 @@ describe("agent-config-display", () => {
       description: "只读探索",
       agentConfig: {
         schemaVersion: 3,
-        executor: { agentCli: "open_code", modelId: "deepseek/deepseek-v4-flash" },
+        executor: {
+          agentCli: "open_code",
+          modelId: "deepseek/deepseek-v4-flash",
+        },
         roleId: "researcher",
         skills: [],
         mcps: [],
         prompt: "梳理现状与风险。",
       },
     };
-    expect(resolveTheaterActDetail(data)).toBe("OpenCode · deepseek/deepseek-v4-flash");
+    expect(resolveTheaterActDetail(data)).toBe(
+      "OpenCode · deepseek/deepseek-v4-flash",
+    );
     expect(resolveTheaterActInstruction(data)).toBe("梳理现状与风险。");
   });
 

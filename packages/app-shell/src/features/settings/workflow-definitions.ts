@@ -1,10 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { WorkflowSnapshot, WorkflowSummary, WorkflowVersion } from "@ora/contracts";
+import type {
+  WorkflowSnapshot,
+  WorkflowSummary,
+  WorkflowVersion,
+} from "@ora/contracts";
 import { useContractsClient } from "../../contracts-client-context";
 
 const workflowLibraryKey = ["workflow", "library"] as const;
-const workflowDraftKey = (workflowId: string) => ["workflow", "draft", workflowId] as const;
-const workflowVersionsKey = (workflowId: string) => ["workflow", "versions", workflowId] as const;
+const workflowDraftKey = (workflowId: string) =>
+  ["workflow", "draft", workflowId] as const;
+const workflowVersionsKey = (workflowId: string) =>
+  ["workflow", "versions", workflowId] as const;
 
 /**
  * Loads the persisted workflow library summaries shown by the settings manager.
@@ -33,7 +39,9 @@ export function useWorkflowVersions(workflowId: string | null | undefined) {
   const client = useContractsClient();
   return useQuery({
     queryKey: workflowVersionsKey(workflowId ?? ""),
-    queryFn: async () => (await client.workflow.listVersions({ workflowId: workflowId! })).versions,
+    queryFn: async () =>
+      (await client.workflow.listVersions({ workflowId: workflowId! }))
+        .versions,
     enabled: workflowId != null && workflowId !== "",
   });
 }
@@ -56,7 +64,8 @@ export function useRenameWorkflow() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { workflowId: string; name: string }) => client.workflow.update(input),
+    mutationFn: (input: { workflowId: string; name: string }) =>
+      client.workflow.update(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: workflowLibraryKey });
     },
@@ -95,8 +104,13 @@ export function useUpdateWorkflowDraft() {
       // or flash the library list on every quiet-period write.
       queryClient.setQueryData(
         workflowDraftKey(variables.workflowId),
-        (current: Awaited<ReturnType<typeof client.workflow.get>> | undefined) => {
-          if (current === undefined || current.workflow.id !== variables.workflowId) {
+        (
+          current: Awaited<ReturnType<typeof client.workflow.get>> | undefined,
+        ) => {
+          if (
+            current === undefined ||
+            current.workflow.id !== variables.workflowId
+          ) {
             return current;
           }
           return {
@@ -115,11 +129,11 @@ export function useUpdateWorkflowDraft() {
           if (current === undefined) {
             return current;
           }
-          return current.map((item) => (
+          return current.map((item) =>
             item.id === variables.workflowId
               ? { ...item, updatedAt: result.snapshot.updatedAt }
-              : item
-          ));
+              : item,
+          );
         },
       );
     },
@@ -132,12 +146,20 @@ export function usePublishWorkflow() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: { workflowId: string; version?: string | null }) =>
-      client.workflow.publish({ workflowId: input.workflowId, version: input.version ?? null }),
+      client.workflow.publish({
+        workflowId: input.workflowId,
+        version: input.version ?? null,
+      }),
     onSuccess: (result, variables) => {
       queryClient.setQueryData(
         workflowDraftKey(variables.workflowId),
-        (current: Awaited<ReturnType<typeof client.workflow.get>> | undefined) => {
-          if (current === undefined || current.workflow.id !== variables.workflowId) {
+        (
+          current: Awaited<ReturnType<typeof client.workflow.get>> | undefined,
+        ) => {
+          if (
+            current === undefined ||
+            current.workflow.id !== variables.workflowId
+          ) {
             return current;
           }
           return {
@@ -151,7 +173,9 @@ export function usePublishWorkflow() {
           };
         },
       );
-      void queryClient.invalidateQueries({ queryKey: workflowVersionsKey(variables.workflowId) });
+      void queryClient.invalidateQueries({
+        queryKey: workflowVersionsKey(variables.workflowId),
+      });
       void queryClient.invalidateQueries({ queryKey: workflowLibraryKey });
     },
   });
@@ -167,8 +191,13 @@ export function useRollbackWorkflow() {
     onSuccess: (result, variables) => {
       queryClient.setQueryData(
         workflowDraftKey(variables.workflowId),
-        (current: Awaited<ReturnType<typeof client.workflow.get>> | undefined) => {
-          if (current === undefined || current.workflow.id !== variables.workflowId) {
+        (
+          current: Awaited<ReturnType<typeof client.workflow.get>> | undefined,
+        ) => {
+          if (
+            current === undefined ||
+            current.workflow.id !== variables.workflowId
+          ) {
             return current;
           }
           return {
@@ -193,7 +222,9 @@ export function useDeleteWorkflowSnapshot() {
     mutationFn: (input: { workflowId: string; version: string }) =>
       client.workflow.deleteSnapshot(input),
     onSuccess: (_result, variables) => {
-      void queryClient.invalidateQueries({ queryKey: workflowVersionsKey(variables.workflowId) });
+      void queryClient.invalidateQueries({
+        queryKey: workflowVersionsKey(variables.workflowId),
+      });
     },
   });
 }
@@ -208,31 +239,41 @@ export function useActivateWorkflow() {
     onSuccess: (result, variables) => {
       queryClient.setQueryData(
         workflowDraftKey(variables.workflowId),
-        (current: Awaited<ReturnType<typeof client.workflow.get>> | undefined) => {
-          if (current === undefined || current.workflow.id !== variables.workflowId) {
+        (
+          current: Awaited<ReturnType<typeof client.workflow.get>> | undefined,
+        ) => {
+          if (
+            current === undefined ||
+            current.workflow.id !== variables.workflowId
+          ) {
             return current;
           }
-          const versions = queryClient.getQueryData<WorkflowVersion[]>(
-            workflowVersionsKey(variables.workflowId),
-          ) ?? [];
-          const meta = versions.find((version) => version.id === variables.snapshotId);
-          const published = meta !== undefined
-            ? {
-                id: meta.id,
-                workflowId: variables.workflowId,
-                version: meta.version,
-                graph: result.snapshot.graph,
-                createdAt: meta.createdAt,
-                updatedAt: null,
-              }
-            : current.published?.id === variables.snapshotId
-              ? { ...current.published, graph: result.snapshot.graph }
-              : current.published;
+          const versions =
+            queryClient.getQueryData<WorkflowVersion[]>(
+              workflowVersionsKey(variables.workflowId),
+            ) ?? [];
+          const meta = versions.find(
+            (version) => version.id === variables.snapshotId,
+          );
+          const published =
+            meta !== undefined
+              ? {
+                  id: meta.id,
+                  workflowId: variables.workflowId,
+                  version: meta.version,
+                  graph: result.snapshot.graph,
+                  createdAt: meta.createdAt,
+                  updatedAt: null,
+                }
+              : current.published?.id === variables.snapshotId
+                ? { ...current.published, graph: result.snapshot.graph }
+                : current.published;
           return {
             workflow: {
               ...current.workflow,
               publishedSnapshotId: variables.snapshotId,
-              updatedAt: result.snapshot.updatedAt ?? current.workflow.updatedAt,
+              updatedAt:
+                result.snapshot.updatedAt ?? current.workflow.updatedAt,
             },
             draft: result.snapshot,
             published,

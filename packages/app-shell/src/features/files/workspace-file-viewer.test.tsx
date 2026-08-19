@@ -24,7 +24,9 @@ describe("WorkspaceFileViewer", () => {
 
     await waitFor(() => expect(screen.getByText("main")).toBeInTheDocument());
     expect(screen.getByText("main").tagName).toBe("MARK");
-    expect(screen.getByText("main").closest("[aria-current=location]")).not.toBeNull();
+    expect(
+      screen.getByText("main").closest("[aria-current=location]"),
+    ).not.toBeNull();
     expect(scrollIntoView).toHaveBeenCalledWith({
       block: "center",
       inline: "nearest",
@@ -40,9 +42,13 @@ describe("WorkspaceFileViewer", () => {
       />,
     );
 
-    await waitFor(() => expect(container.querySelector(
-      '[data-slot="scroll-area"][data-scrollbars="both"]',
-    )).not.toBeNull());
+    await waitFor(() =>
+      expect(
+        container.querySelector(
+          '[data-slot="scroll-area"][data-scrollbars="both"]',
+        ),
+      ).not.toBeNull(),
+    );
   });
 
   it("switches large files to plain text mode", async () => {
@@ -54,7 +60,11 @@ describe("WorkspaceFileViewer", () => {
       />,
     );
 
-    await waitFor(() => expect(container.querySelector("[data-large-file-notice]")).not.toBeNull());
+    await waitFor(() =>
+      expect(
+        container.querySelector("[data-large-file-notice]"),
+      ).not.toBeNull(),
+    );
   });
 
   it("selects a line range with a line click followed by shift-click", async () => {
@@ -66,9 +76,19 @@ describe("WorkspaceFileViewer", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByRole("button", { name: appI18n.t("files.selectLine", { line: 2 }) })).toBeInTheDocument());
-    const start = screen.getByRole("button", { name: appI18n.t("files.selectLine", { line: 2 }) });
-    const end = screen.getByRole("button", { name: appI18n.t("files.selectLine", { line: 4 }) });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", {
+          name: appI18n.t("files.selectLine", { line: 2 }),
+        }),
+      ).toBeInTheDocument(),
+    );
+    const start = screen.getByRole("button", {
+      name: appI18n.t("files.selectLine", { line: 2 }),
+    });
+    const end = screen.getByRole("button", {
+      name: appI18n.t("files.selectLine", { line: 4 }),
+    });
     fireEvent.click(start);
     fireEvent.click(end, { shiftKey: true });
 
@@ -88,9 +108,19 @@ describe("WorkspaceFileViewer", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByRole("button", { name: appI18n.t("files.selectLine", { line: 2 }) })).toBeInTheDocument());
-    const start = screen.getByRole("button", { name: appI18n.t("files.selectLine", { line: 2 }) });
-    const end = screen.getByRole("button", { name: appI18n.t("files.selectLine", { line: 4 }) });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", {
+          name: appI18n.t("files.selectLine", { line: 2 }),
+        }),
+      ).toBeInTheDocument(),
+    );
+    const start = screen.getByRole("button", {
+      name: appI18n.t("files.selectLine", { line: 2 }),
+    });
+    const end = screen.getByRole("button", {
+      name: appI18n.t("files.selectLine", { line: 4 }),
+    });
     fireEvent.mouseDown(start, { button: 0 });
     fireEvent.mouseEnter(end, { buttons: 1 });
     fireEvent.mouseUp(end, { button: 0 });

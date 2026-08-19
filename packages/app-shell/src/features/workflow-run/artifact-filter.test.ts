@@ -22,21 +22,23 @@ describe("filterArtifacts", () => {
   ];
 
   it("returns newest-first for the full run", () => {
-    expect(filterArtifacts(items, { type: "all" }).map((item) => item.id)).toEqual([
-      "b",
-      "c",
-      "a",
-    ]);
+    expect(
+      filterArtifacts(items, { type: "all" }).map((item) => item.id),
+    ).toEqual(["b", "c", "a"]);
   });
 
   it("scopes to one node and keeps newest-first", () => {
     expect(
-      filterArtifacts(items, { type: "node", nodeId: "n1" }).map((item) => item.id),
+      filterArtifacts(items, { type: "node", nodeId: "n1" }).map(
+        (item) => item.id,
+      ),
     ).toEqual(["c", "a"]);
   });
 
   it("returns an empty list when the node has no artifacts", () => {
-    expect(filterArtifacts(items, { type: "node", nodeId: "missing" })).toEqual([]);
+    expect(filterArtifacts(items, { type: "node", nodeId: "missing" })).toEqual(
+      [],
+    );
   });
 });
 
@@ -48,12 +50,22 @@ describe("latestArtifact", () => {
   it("returns the newest artifact", () => {
     expect(
       latestArtifact([
-        artifact({ id: "a", nodeId: "n1", createdAt: "2026-08-01T12:00:01+08:00" }),
-        artifact({ id: "b", nodeId: "n2", createdAt: "2026-08-01T12:00:03+08:00" }),
-        artifact({ id: "c", nodeId: "n1", createdAt: "2026-08-01T12:00:02+08:00" }),
+        artifact({
+          id: "a",
+          nodeId: "n1",
+          createdAt: "2026-08-01T12:00:01+08:00",
+        }),
+        artifact({
+          id: "b",
+          nodeId: "n2",
+          createdAt: "2026-08-01T12:00:03+08:00",
+        }),
+        artifact({
+          id: "c",
+          nodeId: "n1",
+          createdAt: "2026-08-01T12:00:02+08:00",
+        }),
       ]),
-    ).toEqual(
-      expect.objectContaining({ id: "b", nodeId: "n2" }),
-    );
+    ).toEqual(expect.objectContaining({ id: "b", nodeId: "n2" }));
   });
 });
