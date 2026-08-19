@@ -24,10 +24,12 @@ serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 tauri = { version = "2.11.5", features = [] }
 tauri-plugin-dialog = "2"
+ora-application = { path = "../../../crates/application" }
 ora-backend = { path = "../../../crates/backend" }
 ora-contracts = { path = "../../../crates/contracts" }
 ora-fs = { path = "../../../crates/fs" }
 ora-logging = { path = "../../../crates/logging" }
+ora-runtime-settings = { path = "../../../crates/runtime-settings" }
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "sync", "net"] }
@@ -37,6 +39,7 @@ urlencoding = "2"
 
 [dev-dependencies]
 pretty_assertions = "1"
+rusqlite = { version = "0.37", features = ["bundled"] }
 tauri = { version = "2.11.5", features = ["test"] }
 tokio = { version = "1", features = ["rt"] }
 tracing-subscriber = "0.3"

@@ -203,6 +203,18 @@ export function createContractsClient(
       get: (request, options) =>
         executeOperation("getGitIdentity", request, transport, options),
     },
+    developerMode: {
+      get: (request, options) =>
+        executeOperation("getDeveloperMode", request, transport, options),
+      set: (request, options) =>
+        executeOperation("setDeveloperMode", request, transport, options),
+    },
+    runtimeLogLevel: {
+      get: (request, options) =>
+        executeOperation("getRuntimeLogLevel", request, transport, options),
+      set: (request, options) =>
+        executeOperation("setRuntimeLogLevel", request, transport, options),
+    },
     workflow: {
       create: (request, options) =>
         executeOperation("createWorkflow", request, transport, options),

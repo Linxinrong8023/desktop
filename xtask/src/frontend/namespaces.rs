@@ -4,10 +4,12 @@ mod agent;
 mod agent_import;
 mod agent_runtime;
 mod app_events;
+mod developer_mode;
 mod file_system;
 mod git;
 mod plugin;
 mod project;
+mod runtime_log_level;
 mod session;
 mod skill;
 mod skill_import;
@@ -25,6 +27,8 @@ use super::FrontendEndpoint;
 pub(super) fn frontend_endpoints() -> Vec<FrontendEndpoint> {
     [
         project::ENDPOINTS,
+        developer_mode::ENDPOINTS,
+        runtime_log_level::ENDPOINTS,
         task::ENDPOINTS,
         session::ENDPOINTS,
         agent_runtime::ENDPOINTS,

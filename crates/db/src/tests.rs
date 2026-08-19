@@ -51,6 +51,7 @@ fn bootstraps_empty_database_with_default_catalog() {
             "skills".to_string(),
             "task_diff_comments".to_string(),
             "tasks".to_string(),
+            "user_config".to_string(),
             "workflow_node_runs".to_string(),
             "workflow_runs".to_string(),
             "workflow_snapshots".to_string(),
@@ -69,8 +70,59 @@ fn bootstraps_empty_database_with_default_catalog() {
             AppliedMigration::new("0005", 1_700_000_000_000),
             AppliedMigration::new("0006", 1_700_000_000_000),
             AppliedMigration::new("0007", 1_700_000_000_000),
+            AppliedMigration::new("0008", 1_700_000_000_000),
         ]
     );
+}
+
+/// Verifies user configuration has the Issue-specified schema and rolls back independently.
+#[test]
+fn manages_user_config_schema_lifecycle() {
+    let temp_dir = TempDir::new().unwrap();
+    let database_path = temp_dir.path().join("user-config.sqlite3");
+    let catalog = default_migration_catalog().unwrap();
+    let migrations = catalog
+        .target_versions()
+        .iter()
+        .map(|version| catalog.migration(version).cloned().unwrap())
+        .collect::<Vec<_>>();
+
+    bootstrap_file_database(&database_path, catalog, 100);
+    let connection = Connection::open(&database_path).unwrap();
+    let columns = connection
+        .prepare("PRAGMA table_info(user_config)")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>("name")?,
+                row.get::<_, String>("type")?,
+                row.get::<_, i64>("notnull")? != 0,
+                row.get::<_, i64>("pk")? != 0,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        columns,
+        vec![
+            ("key".to_string(), "TEXT".to_string(), false, true),
+            ("value".to_string(), "TEXT".to_string(), true, false),
+        ]
+    );
+    assert_eq!(table_exists(&connection, "projects"), true);
+    drop(connection);
+
+    let rolled_back = MigrationCatalog::with_target_versions(
+        migrations,
+        vec!["0001", "0002", "0003", "0004", "0005"],
+    )
+    .unwrap();
+    bootstrap_file_database(&database_path, rolled_back, 200);
+    let connection = Connection::open(&database_path).unwrap();
+
+    assert_eq!(table_exists(&connection, "user_config"), false);
+    assert_eq!(table_exists(&connection, "projects"), true);
 }
 
 /// Verifies every namespaced catalog table assigns local ownership when callers omit it.
@@ -149,7 +201,10 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
     let temp_dir = TempDir::new().unwrap();
     let database_path = temp_dir.path().join("skill-agent.sqlite3");
     let catalog = default_migration_catalog().unwrap();
-    let migrations = ["0001", "0002", "0003", "0004", "0005", "0006", "0007"].map(|version| {
+    let migrations = [
+        "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008",
+    ]
+    .map(|version| {
         catalog
             .migration(version)
             .cloned()

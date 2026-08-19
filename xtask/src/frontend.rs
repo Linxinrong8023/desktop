@@ -111,4 +111,66 @@ mod tests {
         assert!(operations.contains("updateSkill"));
         assert!(operations.contains("updateAgent"));
     }
+
+    /// Verifies runtime log-level reads and writes use the generated Desktop namespace.
+    #[test]
+    fn exports_runtime_log_level_endpoints() {
+        let endpoints = frontend_endpoints();
+        let runtime_endpoints = endpoints
+            .iter()
+            .filter(|endpoint| endpoint.namespace == "runtimeLogLevel")
+            .copied()
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            runtime_endpoints,
+            vec![
+                FrontendEndpoint {
+                    operation_name: "getRuntimeLogLevel",
+                    namespace: "runtimeLogLevel",
+                    member_name: "get",
+                    request_type: "GetRuntimeLogLevelRequest",
+                    response_type: "RuntimeLogLevelStateResponse",
+                },
+                FrontendEndpoint {
+                    operation_name: "setRuntimeLogLevel",
+                    namespace: "runtimeLogLevel",
+                    member_name: "set",
+                    request_type: "SetRuntimeLogLevelRequest",
+                    response_type: "RuntimeLogLevelStateResponse",
+                },
+            ]
+        );
+    }
+
+    /// Verifies developer-mode reads and writes use the generated Desktop namespace.
+    #[test]
+    fn exports_developer_mode_endpoints() {
+        let endpoints = frontend_endpoints();
+        let developer_mode_endpoints = endpoints
+            .iter()
+            .filter(|endpoint| endpoint.namespace == "developerMode")
+            .copied()
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            developer_mode_endpoints,
+            vec![
+                FrontendEndpoint {
+                    operation_name: "getDeveloperMode",
+                    namespace: "developerMode",
+                    member_name: "get",
+                    request_type: "GetDeveloperModeRequest",
+                    response_type: "DeveloperModeResponse",
+                },
+                FrontendEndpoint {
+                    operation_name: "setDeveloperMode",
+                    namespace: "developerMode",
+                    member_name: "set",
+                    request_type: "SetDeveloperModeRequest",
+                    response_type: "DeveloperModeResponse",
+                },
+            ]
+        );
+    }
 }

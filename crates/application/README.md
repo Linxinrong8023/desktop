@@ -12,6 +12,7 @@
 - [skill_import](src/skill_import/README.md) owns the two-phase batch import sessions over folder and archive sources.
 - [task](src/task/README.md) coordinates task persistence and optional Git worktree creation.
 - [task_diff](src/task_diff/README.md) coordinates task-scoped diff review, Git writes, and anchored discussions.
+- `user_config` defines typed developer-mode and runtime-log-level preferences over an injected persistence port.
 - [worktree](src/worktree/README.md) defines persistence and identity ports for task-owned worktrees.
 - [workflow](src/workflow/README.md) manages workflow definitions and versioned snapshots.
 - [workflow_run](src/workflow_run/README.md) manages run CRUD; execution lives in [workflow_run/engine](src/workflow_run/engine/README.md).

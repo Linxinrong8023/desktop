@@ -15,12 +15,18 @@ pub enum DesktopBootstrapError {
     AppDataDirectory(#[source] tauri::Error),
     #[error(transparent)]
     Config(#[from] DesktopConfigError),
+    #[error("invalid ORA_LOG_LEVEL value `{value}`")]
+    InvalidLogLevel { value: String },
     #[error(transparent)]
     Logging(#[from] ora_logging::LoggingInitError),
+    #[error("failed to apply the persisted Desktop log level")]
+    LoggingReload(#[from] ora_logging::LogLevelReloadError),
     #[error(transparent)]
     Binaries(#[from] BinaryResolutionError),
     #[error(transparent)]
     Backend(#[from] BackendBootstrapError),
+    #[error("failed to load the persisted Desktop runtime preference")]
+    RuntimePreference(#[source] BackendError),
 }
 
 /// Serializes the transport-neutral contract directly across the Tauri command seam.

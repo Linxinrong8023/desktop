@@ -22,8 +22,8 @@ pub use repository::{
     CascadeDeleteOutcome, RepositoryPool, SqliteAgentDefinitionRepository, SqliteCascadeRepository,
     SqliteGitCleanupJobRepository, SqlitePluginStateRepository, SqliteProjectRepository,
     SqliteSessionRepository, SqliteSkillRepository, SqliteTaskDiffCommentRepository,
-    SqliteTaskRepository, SqliteTaskWorkspaceRepository, SqliteWorkflowRepository,
-    SqliteWorkflowRunEngineRepository, SqliteWorkflowRunRepository,
+    SqliteTaskRepository, SqliteTaskWorkspaceRepository, SqliteUserConfigRepository,
+    SqliteWorkflowRepository, SqliteWorkflowRunEngineRepository, SqliteWorkflowRunRepository,
     SqliteWorktreeProvisioningLeaseRepository, SqliteWorktreeRepository,
 };
 pub use time::{SystemTimestampSource, TimestampSource};

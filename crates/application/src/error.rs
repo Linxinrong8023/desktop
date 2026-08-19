@@ -156,6 +156,11 @@ pub enum ApplicationError {
         #[source]
         source: RepositoryError,
     },
+    #[error("user configuration repository operation failed")]
+    UserConfigRepository {
+        #[source]
+        source: RepositoryError,
+    },
     #[error("workflow name must not be blank")]
     WorkflowNameBlank,
     #[error("workflow name already exists: {namespace}/{name}")]
@@ -370,6 +375,11 @@ impl ApplicationError {
         }
     }
 
+    /// Maps user-configuration persistence failures into stable application errors.
+    pub(crate) fn from_user_config_repository_error(error: RepositoryError) -> Self {
+        Self::UserConfigRepository { source: error }
+    }
+
     /// Converts workflow-construction validation failures into application errors.
     pub(crate) fn from_workflow_domain_error(error: DomainModelError) -> Self {
         match error {
@@ -459,6 +469,7 @@ impl PartialEq for ApplicationError {
             | (TaskDiffCommitMessageBlank, TaskDiffCommitMessageBlank)
             | (WorktreeRepository { .. }, WorktreeRepository { .. })
             | (SessionRepository { .. }, SessionRepository { .. })
+            | (UserConfigRepository { .. }, UserConfigRepository { .. })
             | (WorkflowRepository { .. }, WorkflowRepository { .. })
             | (TaskFilesystem { .. }, TaskFilesystem { .. }) => true,
             (SkillNotFound { skill_id: left }, SkillNotFound { skill_id: right }) => left == right,

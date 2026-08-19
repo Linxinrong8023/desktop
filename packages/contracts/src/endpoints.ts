@@ -2,10 +2,12 @@
 import type { CreateAgentRequest, CreateAgentResponse, DeleteAgentRequest, DeleteAgentResponse, GetAgentRequest, GetAgentResponse, ListAgentsRequest, ListAgentsResponse, UpdateAgentRequest, UpdateAgentResponse } from "./agent.js";
 import type { CommitAgentImportRequest, CommitAgentImportResponse, PrepareAgentImportRequest, PrepareAgentImportResponse } from "./agent-import.js";
 import type { AppEvent, WatchAppEventsRequest } from "./app_event.js";
+import type { DeveloperModeResponse, GetDeveloperModeRequest, SetDeveloperModeRequest } from "./developerMode.js";
 import type { ListWorkspaceDirectoryRequest, ListWorkspaceDirectoryResponse, ReadWorkspaceFileRequest, ReadWorkspaceFileResponse, SearchWorkspaceRequest, SearchWorkspaceResponse, WatchWorkspaceRequest, WorkspaceFileEventBatch } from "./file-system.js";
 import type { GetGitIdentityRequest, GitIdentityResponse } from "./git.js";
 import type { ListInstalledPluginsRequest, ListInstalledPluginsResponse } from "./plugin.js";
 import type { CreateProjectRequest, CreateProjectResponse, DeleteProjectRequest, DeleteProjectResponse, GetProjectRequest, GetProjectResponse, ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse, UpdateProjectRequest, UpdateProjectResponse } from "./project.js";
+import type { GetRuntimeLogLevelRequest, RuntimeLogLevelStateResponse, SetRuntimeLogLevelRequest } from "./runtimeLogLevel.js";
 import type { AttachSessionRequest, AttachSessionResponse, DeleteSessionRequest, DeleteSessionResponse, GetAgentRuntimeStatusRequest, GetAgentRuntimeStatusResponse, GetSessionRequest, GetSessionResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionEvent, LoadSessionRequest, PromptSessionEvent, PromptSessionRequest, RenameSessionRequest, RenameSessionResponse, RespondToPermissionRequest, RespondToPermissionResponse, ResumeSessionHistoryRequest, ResumeSessionHistoryResponse, SetSessionConfigRequest, SetSessionConfigResponse, StopSessionRequest, StopSessionResponse, SwitchSessionAgentRequest, SwitchSessionAgentResponse, WarmSessionRequest, WarmSessionResponse } from "./session.js";
 import type { CreateSkillRequest, CreateSkillResponse, DeleteSkillRequest, DeleteSkillResponse, GetSkillRequest, GetSkillResponse, ListSkillsRequest, ListSkillsResponse, UpdateSkillRequest, UpdateSkillResponse } from "./skill.js";
 import type { CancelSkillImportRequest, CancelSkillImportResponse, CommitSkillImportRequest, CommitSkillImportResponse, GetSkillImportSessionRequest, GetSkillImportSessionResponse, PrepareSkillImportRequest, PrepareSkillImportResponse } from "./skill-import.js";
@@ -30,6 +32,10 @@ export type RequestByOperation = {
   listProjectBranches: ListProjectBranchesRequest;
   updateProject: UpdateProjectRequest;
   deleteProject: DeleteProjectRequest;
+  getDeveloperMode: GetDeveloperModeRequest;
+  setDeveloperMode: SetDeveloperModeRequest;
+  getRuntimeLogLevel: GetRuntimeLogLevelRequest;
+  setRuntimeLogLevel: SetRuntimeLogLevelRequest;
   createTask: CreateTaskRequest;
   getTask: GetTaskRequest;
   listTasks: ListTasksRequest;
@@ -116,6 +122,10 @@ export type ResponseByOperation = {
   listProjectBranches: ListProjectBranchesResponse;
   updateProject: UpdateProjectResponse;
   deleteProject: DeleteProjectResponse;
+  getDeveloperMode: DeveloperModeResponse;
+  setDeveloperMode: DeveloperModeResponse;
+  getRuntimeLogLevel: RuntimeLogLevelStateResponse;
+  setRuntimeLogLevel: RuntimeLogLevelStateResponse;
   createTask: CreateTaskResponse;
   getTask: GetTaskResponse;
   listTasks: ListTasksResponse;
@@ -244,6 +254,38 @@ export const endpoints = {
     memberName: "delete",
     requestType: "DeleteProjectRequest",
     responseType: "DeleteProjectResponse",
+    responseMode: "unary",
+  },
+  getDeveloperMode: {
+    operationName: "getDeveloperMode",
+    namespace: "developerMode",
+    memberName: "get",
+    requestType: "GetDeveloperModeRequest",
+    responseType: "DeveloperModeResponse",
+    responseMode: "unary",
+  },
+  setDeveloperMode: {
+    operationName: "setDeveloperMode",
+    namespace: "developerMode",
+    memberName: "set",
+    requestType: "SetDeveloperModeRequest",
+    responseType: "DeveloperModeResponse",
+    responseMode: "unary",
+  },
+  getRuntimeLogLevel: {
+    operationName: "getRuntimeLogLevel",
+    namespace: "runtimeLogLevel",
+    memberName: "get",
+    requestType: "GetRuntimeLogLevelRequest",
+    responseType: "RuntimeLogLevelStateResponse",
+    responseMode: "unary",
+  },
+  setRuntimeLogLevel: {
+    operationName: "setRuntimeLogLevel",
+    namespace: "runtimeLogLevel",
+    memberName: "set",
+    requestType: "SetRuntimeLogLevelRequest",
+    responseType: "RuntimeLogLevelStateResponse",
     responseMode: "unary",
   },
   createTask: {

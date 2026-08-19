@@ -4,7 +4,7 @@ use tracing_appender::non_blocking::WorkerGuard;
 ///
 /// Owns worker guards for every active non-blocking sink (stdout and/or file). Dropping the
 /// guard early shuts those workers down and can lose buffered output that has not yet drained.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LoggingGuard {
     guards: Vec<WorkerGuard>,
 }

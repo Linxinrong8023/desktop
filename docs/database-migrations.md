@@ -19,6 +19,8 @@ Ora keeps SQLite migration definitions in Rust code inside `ora-db` rather than 
 | `0004`  | Workflow definitions, snapshots, runs, node runs, and the task type/workflow-run association.                                                                                              |
 | `0005`  | Durable Git cleanup jobs, their dispatch index, and worktree provisioning leases.                                                                                                          |
 | `0006`  | Drops unused `tasks.status`.                                                                                                                                                               |
+| `0007`  | Durable plugin eligibility keyed by filesystem-derived plugin id.                                                                                                                          |
+| `0008`  | Typed user preferences in `user_config`, keyed by configuration name.                                                                                                                      |
 
 `default_migration_catalog()` returns all migrations with every version as the active target.
 

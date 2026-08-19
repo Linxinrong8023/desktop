@@ -28,6 +28,7 @@ import {
 } from "@ora/ui";
 import {
   IconAdjustments,
+  IconBug,
   IconCheck,
   IconDatabase,
   IconDeviceDesktop,
@@ -48,6 +49,9 @@ import { RolesSettings, SkillsSettings } from "./atoms-settings";
 import { PluginsSettings } from "./plugins-settings";
 import { SettingsHeading } from "./settings-heading";
 import { WorkflowSettings } from "./workflow-settings";
+import { RuntimeLogLevelSettings } from "./runtime-log-level-settings";
+import { DeveloperModeSettings } from "./developer-mode-settings";
+import { useDeveloperMode } from "../../state/hooks/use-developer-mode";
 import { useUiStore } from "../../state/stores/ui-store";
 import {
   useSettingsStore,
@@ -69,7 +73,8 @@ type SettingsCategory =
   | "plugins"
   | "workflow"
   | "permissions"
-  | "privacy";
+  | "privacy"
+  | "developer";
 
 /** Presents shared Ora preferences in a dense IDE-style settings surface. */
 export function SettingsDialog() {
@@ -81,6 +86,8 @@ export function SettingsDialog() {
   const chatStore = useChatStore();
   const clearConversations = useStore(chatStore, (state) => state.clearAll);
   const [category, setCategory] = useState<SettingsCategory>("appearance");
+  const developerMode = useDeveloperMode();
+  const developerModeEnabled = developerMode.state?.enabled === true;
 
   const categories: Array<{
     id: SettingsCategory;
@@ -102,6 +109,11 @@ export function SettingsDialog() {
       label: t("settings.nav.permissions"),
     },
     { id: "privacy", icon: IconDatabase, label: t("settings.nav.privacy") },
+    {
+      id: "developer",
+      icon: IconBug,
+      label: t("settings.nav.developer"),
+    },
   ];
 
   return (
@@ -214,6 +226,12 @@ export function SettingsDialog() {
                     settings={settings}
                     onUpdate={updateSettings}
                     onClearHistory={clearConversations}
+                  />
+                )}
+                {category === "developer" && (
+                  <DeveloperSettings
+                    developerMode={developerMode}
+                    developerModeEnabled={developerModeEnabled}
                   />
                 )}
               </div>
@@ -645,6 +663,27 @@ function PrivacySettings({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+/** Groups settings intended for diagnosis and development without treating them as authorization. */
+function DeveloperSettings({
+  developerMode,
+  developerModeEnabled,
+}: {
+  developerMode: ReturnType<typeof useDeveloperMode>;
+  developerModeEnabled: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-7">
+      <SettingsHeading
+        title={t("settings.developer.title")}
+        description={t("settings.developer.description")}
+      />
+      <DeveloperModeSettings controller={developerMode} />
+      {developerModeEnabled && <RuntimeLogLevelSettings />}
     </div>
   );
 }

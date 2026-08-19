@@ -153,6 +153,18 @@ const tauriCommands = {
   cancelWorkflowRun: "cancel_workflow_run",
   restartWorkflowRun: "restart_workflow_run",
   updateWorkflowRunInput: "update_workflow_run_input",
+
+  // =============================================================================
+  // developerMode
+  // =============================================================================
+  getDeveloperMode: "get_developer_mode",
+  setDeveloperMode: "set_developer_mode",
+
+  // =============================================================================
+  // runtimeLogLevel
+  // =============================================================================
+  getRuntimeLogLevel: "get_runtime_log_level",
+  setRuntimeLogLevel: "set_runtime_log_level",
 } as const satisfies Record<SupportedTauriOperation, string>;
 
 /** Creates the Desktop contracts transport backed by unary commands and Tauri IPC channels. */

@@ -5,6 +5,7 @@ import type {
   ContractsClient,
   InstalledPlugin,
   Project,
+  RuntimeLogLevelStateResponse,
   Session,
   Skill,
   Task,
@@ -62,6 +63,8 @@ export interface MockClientState {
   agents: Agent[];
   skills: Skill[];
   installedPlugins: InstalledPlugin[];
+  developerMode: { enabled: boolean };
+  runtimeLogLevel: RuntimeLogLevelStateResponse;
   workflows: MockWorkflowRecord[];
   workflowRuns: MockWorkflowRunRecord[];
   /** Warm sessions handed out but not yet attached, keyed by session id. */
@@ -85,6 +88,12 @@ export function createMockClientState(): MockClientState {
     agents: [],
     skills: [],
     installedPlugins: [],
+    developerMode: { enabled: false },
+    runtimeLogLevel: {
+      configuredLevel: "info",
+      effectiveLevel: "info",
+      startupOverride: null,
+    },
     workflows: [],
     workflowRuns: [],
     warmSessions: new Map(),
@@ -461,6 +470,24 @@ export function createMockClient(state: MockClientState): ContractsClient {
     },
     gitIdentity: {
       get: async () => ({ name: "Test User", email: "test@ora.local" }),
+    },
+    developerMode: {
+      get: async () => ({ ...state.developerMode }),
+      set: async (request) => {
+        state.developerMode = { enabled: request.enabled };
+        return { ...state.developerMode };
+      },
+    },
+    runtimeLogLevel: {
+      get: async () => ({ ...state.runtimeLogLevel }),
+      set: async (request) => {
+        state.runtimeLogLevel = {
+          configuredLevel: request.level,
+          effectiveLevel: request.level,
+          startupOverride: state.runtimeLogLevel.startupOverride,
+        };
+        return { ...state.runtimeLogLevel };
+      },
     },
     workflow: {
       create: async (req) => {

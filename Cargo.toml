@@ -17,6 +17,7 @@ members = [
     "crates/plugin-runtime",
     "crates/process",
     "crates/pty",
+    "crates/runtime-settings",
     "crates/scheduler",
     "crates/skill-package",
     "crates/test-support",
@@ -74,6 +75,7 @@ ora-plugin-manager = { path = "crates/plugin-manager" }
 ora-plugin-runtime = { path = "crates/plugin-runtime" }
 ora-process = { path = "crates/process" }
 ora-pty = { path = "crates/pty" }
+ora-runtime-settings = { path = "crates/runtime-settings" }
 ora-scheduler = { path = "crates/scheduler" }
 ora-skill-package = { path = "crates/skill-package" }
 ora-test-support = { path = "crates/test-support" }

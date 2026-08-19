@@ -19,6 +19,8 @@ export const queryKeys = {
   agents: ["agents"] as const,
   skills: ["skills"] as const,
   installedPlugins: ["installed-plugins"] as const,
+  developerMode: ["developer-mode"] as const,
+  runtimeLogLevel: ["runtime-log-level"] as const,
   gitIdentity: ["gitIdentity"] as const,
   /** Project → mounted graph workflow definitions (mock host). */
   workflowMounts: (projectId: string) => ["workflowMounts", projectId] as const,

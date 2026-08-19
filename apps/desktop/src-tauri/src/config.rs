@@ -316,6 +316,7 @@ fn persist_config(config_path: &Path, config: &DesktopConfig) -> Result<(), Desk
 #[cfg(test)]
 mod tests {
     use super::{DesktopConfigError, DesktopConfigStore};
+    use pretty_assertions::assert_eq;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -343,6 +344,7 @@ mod tests {
         assert!(persisted.contains("\"worktreeRoot\""));
         assert!(persisted.contains("\"dashboardHost\""));
         assert!(persisted.contains("\"dashboardPort\""));
+        assert!(!persisted.contains("logLevel"));
     }
 
     /// Verifies a valid user-selected directory is persisted and restored on the next launch.

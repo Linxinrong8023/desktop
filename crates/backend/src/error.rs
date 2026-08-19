@@ -467,6 +467,7 @@ impl From<ApplicationError> for BackendError {
             | ApplicationError::TaskDiffCommentRepository { .. }
             | ApplicationError::WorktreeRepository { .. }
             | ApplicationError::SessionRepository { .. }
+            | ApplicationError::UserConfigRepository { .. }
             | ApplicationError::WorkflowRepository { .. }
             | ApplicationError::WorkflowRunRepository { .. } => (
                 ErrorClassification::Internal,

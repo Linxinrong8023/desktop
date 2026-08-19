@@ -3,6 +3,14 @@ use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::prelude::*;
 
+use crate::{LogLevel, LogLevelControl};
+
+/// Creates an isolated reload control for higher-level state and adapter tests.
+#[doc(hidden)]
+pub fn test_log_level_control(level: LogLevel) -> LogLevelControl {
+    LogLevelControl::scoped_for_tests(level)
+}
+
 /// Runs one test body under a TRACE-enabled subscriber so shared callsites stay observable.
 pub fn with_trace_logging<R>(action: impl FnOnce() -> R) -> R {
     let subscriber = tracing_subscriber::registry().with(LevelFilter::TRACE);

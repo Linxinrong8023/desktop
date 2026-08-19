@@ -10,6 +10,7 @@
 - `Backend::open` exposes the event hub through transport adapters as a best-effort invalidation stream and injects only its internal publisher into stateful components; the hub does not depend on Axum or Tauri.
 - The shared `ora-scheduler::Scheduler` owns actor-facing delayed work. Scheduler tasks enqueue internal commands, while actors remain the only code that calls ACP or writes session state.
 - Project, task, skill CRUD, atomic skill-folder import, and agent operations delegate to `ora-application`; aggregate deletion uses transactional database cascades.
+- Shared developer-mode and preferred-log-level operations delegate to typed `ora-application` use cases; raw SQLite keys and values remain inside `ora-db`, and request-time repository work runs on the blocking pool.
 - `TaskDiffApi` composes the task-diff handlers with SQLite and Gitlancer. It resolves the agent's live task cwd, uses `HEAD` as the moving baseline for project-root tasks, and uses the persisted creation commit for isolated worktrees.
 - `SpecApi` composes target resolution, automatic bounded ripgrep discovery, safe Markdown reads, and watcher-root resolution. Tauri remains a transport-only adapter.
 - Task diff reads, commits, pushes, and comments preserve the same public error projection as the rest of the backend. Git and SQLite sources remain internal diagnostics and are rendered once by the adapter-owned request lifecycle.

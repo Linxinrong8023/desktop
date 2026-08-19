@@ -141,6 +141,62 @@ describe("createTauriTransport", () => {
     });
   });
 
+  it("maps runtime log-level reads and updates to Desktop commands", async () => {
+    const response = {
+      configuredLevel: "debug",
+      effectiveLevel: "debug",
+      startupOverride: null,
+    };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "getRuntimeLogLevel",
+        request: {},
+      }),
+    ).resolves.toEqual(response);
+    await expect(
+      transport.send({
+        operationName: "setRuntimeLogLevel",
+        request: { level: "debug" },
+      }),
+    ).resolves.toEqual(response);
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "get_runtime_log_level", {
+      request: {},
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "set_runtime_log_level", {
+      request: { level: "debug" },
+    });
+  });
+
+  it("maps developer-mode reads and updates to Desktop commands", async () => {
+    const response = { enabled: true };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "getDeveloperMode",
+        request: {},
+      }),
+    ).resolves.toEqual(response);
+    await expect(
+      transport.send({
+        operationName: "setDeveloperMode",
+        request: { enabled: true },
+      }),
+    ).resolves.toEqual(response);
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "get_developer_mode", {
+      request: {},
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "set_developer_mode", {
+      request: { enabled: true },
+    });
+  });
+
   it("streams spec watcher events through the shared channel lifecycle", async () => {
     const invoke = vi
       .fn()

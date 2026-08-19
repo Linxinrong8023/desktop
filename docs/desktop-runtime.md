@@ -14,6 +14,8 @@ The frontend injects `createTauriTransport()` into `createContractsClient`. The 
 
 Task workspace lookup and Spec review are part of that shared contract surface. `get_task_workspace` returns the authoritative task root with an optional branch, while `get_spec_catalog` and `read_spec` delegate unary work to the shared backend. `watch_specs` and `watchAppEvents` use the same channel framing, cancellation, and exactly-once completion lifecycle as other Desktop streams.
 
+Developer preferences use four unary commands in a separate settings command module: `get_developer_mode`, `set_developer_mode`, `get_runtime_log_level`, and `set_runtime_log_level`. They use the same lifecycle and error projection as other Desktop commands; no HTTP endpoint is involved.
+
 Backend construction immediately attempts supervised `opencode acp`, `nga acp`, `codeagentcli acp`, `claude-agent-acp`, and `codex-acp` children in the user's home directory. Sessions share the connection selected by their current `agentCli` while retaining their own ACP session id and Task worktree `cwd`. `switch_session_agent` moves a live conversation to another CLI and `resume_session_history` recovers one whose history writes failed. Each CLI retries independently; failures leave the Desktop shell and healthy CLIs available, while operations targeting an unavailable CLI report `agent_runtime_unavailable`. Executable lookup is platform-specific — see [ACP Agent Runtime](agent-runtime.md).
 
 The Desktop App Shell waits for the `Ready` frame before mounting normal queries and watchers. The application stream is a multi-subscriber, best-effort session-title invalidation broadcast rather than a persisted event log.
@@ -38,6 +40,7 @@ The configured root is only a creation target. Existing worktree locations are r
 
 The Tauri identifier is `space.ora.desktop`. Tauri's system `app_data_dir` owns all default runtime state:
 
+- User preferences: `app_data_dir/ora.sqlite3`, table `user_config`
 - SQLite: `app_data_dir/ora.sqlite3`
 - Configuration: `app_data_dir/config.json`
 - Logs: `app_data_dir/logs/ora.log`
@@ -55,7 +58,7 @@ The configured root is only a creation target. Existing worktree locations are r
 
 ## Logging
 
-Desktop initializes `ora-logging` before opening the backend and registers the Gitlancer logger bridge. Logs rotate daily and retain three files. Debug builds write to stdout and the file; release builds write to the file only. The logging guard remains managed for the application lifetime.
+Desktop initializes `ora-logging` before opening the backend and registers the Gitlancer logger bridge. It accepts `ORA_LOG_LEVEL` as a process-only startup override; otherwise it restores the SQLite `log_level` preference, defaulting to `info`. The reload control and persistence adapter are composed through `ora-runtime-settings`, which serializes updates and compensates the live filter when persistence fails. Logs rotate daily and retain three files. Debug builds write to stdout and the file; release builds write to the file only. The logging guard remains managed for the application lifetime.
 
 Each unary command or stream emits at most one request-completion event using the same request id as
 its public failure payload or error frame. Cancellation is completed at `DEBUG` and is not projected

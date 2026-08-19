@@ -17,6 +17,7 @@
 | `SqliteWorkflowRunRepository`               | `WorkflowRunRepository`                         |
 | `SqliteCascadeRepository`                   | aggregate deletion used by `ora-backend`        |
 | `SqliteTaskWorkspaceRepository`             | `TaskWorkspaceCommit`                           |
+| `SqliteUserConfigRepository`                | `UserConfigRepository`                          |
 | `SqliteWorktreeProvisioningLeaseRepository` | `WorktreeProvisioningLeaseStore`                |
 | `SqliteGitCleanupJobRepository`             | durable Git cleanup queue used by `ora-backend` |
 
@@ -54,6 +55,8 @@ Repositories map SQLite columns onto the current `ora-domain` shapes, including 
 - `task_diff_comments` maps root-thread columns and reply columns into the mutually exclusive `TaskDiffCommentKind` enum. Visible comments are returned in `(created_at, id)` order; malformed rows fail rather than being coerced.
 
 An unrecognized persisted category value is a mapping failure, not a silently coerced default.
+
+The `user_config` adapter keeps raw SQLite text behind typed application accessors. Missing `developer_mode` and `log_level` rows resolve to `false` and `info`; malformed persisted values fail explicitly instead of being coerced. Writes use canonical lowercase values and update only the requested key.
 
 ## Aggregate deletion
 
