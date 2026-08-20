@@ -1330,6 +1330,8 @@ export const translationResources = {
     "chat.turnDiff.viewerTitle": "文件差异",
     "chat.turnDiff.viewerDescription": "查看本次回答产生的文件变更。",
     "chat.turnDiff.viewerStats": "增加 {{additions}} 行，删除 {{deletions}} 行",
+    "chat.fileLink.previewInFiles": "在文件中预览",
+    "chat.fileLink.aria": "打开文件 {{path}}",
     "chat.unsupportedContent": "暂不支持显示 {{type}} 内容",
     "chat.content.generatedImage": "Agent 生成的图片",
     "chat.content.previewImage": "预览图片 {{name}}",
@@ -2885,6 +2887,8 @@ export const translationResources = {
       "Review the file changes produced by this response.",
     "chat.turnDiff.viewerStats":
       "{{additions}} lines added, {{deletions}} removed",
+    "chat.fileLink.previewInFiles": "Preview in Files",
+    "chat.fileLink.aria": "Open file {{path}}",
     "chat.unsupportedContent": "Unsupported {{type}} content",
     "chat.content.generatedImage": "Agent-generated image",
     "chat.content.previewImage": "Preview image {{name}}",

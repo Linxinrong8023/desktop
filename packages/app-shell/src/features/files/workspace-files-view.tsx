@@ -26,8 +26,15 @@ import {
   IconSearch,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { localizeContractError } from "../../i18n/contract-error";
 import { useContractsClient } from "../../contracts-client-context";
 import { queryKeys } from "../../state/hooks/query-keys";
+import { displayPath } from "../chat/turn-diff-files";
+import {
+  normalizeDiffPath,
+  stripTaskCwdPrefix,
+} from "../../lib/workspace-path";
+import { useTaskWorkspace } from "../../state/hooks/use-task-workspace";
 import { useComposerFileContextStore } from "../../state/stores/composer-file-context-store";
 import {
   WorkspaceFileViewer,
@@ -46,6 +53,15 @@ interface WorkspaceFilesViewProps {
   hideHeader?: boolean;
   surface?: "explorer" | "search";
   onSurfaceChange?: (surface: "explorer" | "search") => void;
+  fileRequest?: WorkspaceFileRequest;
+}
+
+/** External Files-panel open request. requestId must change to re-apply the same path. */
+export interface WorkspaceFileRequest {
+  path: string;
+  requestId: number;
+  line?: number;
+  column?: number;
 }
 
 interface DirectoryTreeProps {
@@ -67,10 +83,13 @@ export function WorkspaceFilesView({
   hideHeader = false,
   surface: controlledSurface,
   onSurfaceChange,
+  fileRequest,
 }: WorkspaceFilesViewProps) {
   const { t } = useTranslation();
   const client = useContractsClient();
   const queryClient = useQueryClient();
+  const workspaceQuery = useTaskWorkspace(taskId);
+  const cwd = workspaceQuery.data?.rootPath;
   const [internalSurface, setInternalSurface] = useState<"explorer" | "search">(
     "explorer",
   );
@@ -83,11 +102,49 @@ export function WorkspaceFilesView({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedTarget, setSelectedTarget] =
     useState<WorkspaceFileMatchTarget | null>(null);
+  const [appliedFileRequestId, setAppliedFileRequestId] = useState<
+    number | null
+  >(null);
   const [searchKind, setSearchKind] = useState<WorkspaceSearchKind>("files");
   const [searchText, setSearchText] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [fileFilterText, setFileFilterText] = useState("");
   const [debouncedFileFilter, setDebouncedFileFilter] = useState("");
+
+  if (
+    fileRequest !== undefined &&
+    fileRequest.requestId !== appliedFileRequestId
+  ) {
+    setAppliedFileRequestId(fileRequest.requestId);
+    const rawPath = fileRequest.path;
+    const stripped = cwd
+      ? (stripTaskCwdPrefix(rawPath, cwd) ??
+        stripTaskCwdPrefix(normalizeDiffPath(rawPath), cwd))
+      : null;
+    const targetPath = stripped ?? normalizeDiffPath(displayPath(rawPath));
+    setSelectedPath(targetPath);
+    const parts = targetPath.split("/");
+    if (parts.length > 1) {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        let current = "";
+        for (let i = 0; i < parts.length - 1; i++) {
+          current = current === "" ? parts[i]! : `${current}/${parts[i]!}`;
+          next.add(current);
+        }
+        return next;
+      });
+    }
+    setSelectedTarget(
+      fileRequest.line === undefined
+        ? null
+        : {
+            line: fileRequest.line,
+            column: fileRequest.column ?? 1,
+            matchedText: "",
+          },
+    );
+  }
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchText.trim()), 200);
@@ -101,6 +158,16 @@ export function WorkspaceFilesView({
     );
     return () => clearTimeout(timer);
   }, [fileFilterText]);
+
+  // A new chat requestId must re-read even when the path is unchanged. Otherwise
+  // a file the user deleted after an earlier preview stays on screen from cache.
+  const fileRequestId = fileRequest?.requestId;
+  useEffect(() => {
+    if (fileRequestId === undefined || selectedPath === null) return;
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.workspaceFile(taskId, selectedPath),
+    });
+  }, [fileRequestId, queryClient, selectedPath, taskId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -216,7 +283,7 @@ export function WorkspaceFilesView({
                     <ViewerMessage>{t("files.loading")}</ViewerMessage>
                   ) : fileQuery.error ? (
                     <ViewerMessage>
-                      {errorMessage(fileQuery.error)}
+                      {localizeContractError(fileQuery.error, t)}
                     </ViewerMessage>
                   ) : (
                     <WorkspaceFileViewer
@@ -470,7 +537,7 @@ function DirectoryTree({
   if (directoryQuery.error) {
     return (
       <p className="px-3 py-2 text-xs text-destructive">
-        {errorMessage(directoryQuery.error)}
+        {localizeContractError(directoryQuery.error, t)}
       </p>
     );
   }
@@ -562,7 +629,8 @@ function SearchResults({
 }) {
   const { t } = useTranslation();
   if (loading) return <ViewerMessage>{t("files.searching")}</ViewerMessage>;
-  if (error) return <ViewerMessage>{errorMessage(error)}</ViewerMessage>;
+  if (error)
+    return <ViewerMessage>{localizeContractError(error, t)}</ViewerMessage>;
   if (results.length === 0)
     return <ViewerMessage>{t("files.noResults")}</ViewerMessage>;
   return results.map((result, index) => (
@@ -599,9 +667,4 @@ function SearchResults({
 /** Centers lightweight loading, empty, and error copy inside a viewer surface. */
 function ViewerMessage({ children }: { children: ReactNode }) {
   return <p className="p-4 text-xs text-muted-foreground">{children}</p>;
-}
-
-/** Converts unknown query failures to useful read-only viewer copy. */
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

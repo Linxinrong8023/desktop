@@ -22,6 +22,19 @@ The layers remain narrow:
 - `packages/app-shell/src/features/files` owns the file tree, viewer, search UI,
   cache invalidation, and line-selection handoff to the composer. The same
   Files panel hosts the Specs sub-view; see [Specification management](spec-management.md).
+  Chat inline artifact links open this panel through `openWorkspaceFile` and a
+  `WorkspaceFileRequest` (`path` + `requestId` + optional line/column) so a
+  second click on the same file still applies. The view strips a task-cwd
+  prefix from absolute ACP paths, expands ancestor directories so the tree
+  shows the file, and selects the optional line so the viewer can highlight
+  and scroll to it. A hit outside the task cwd is not opened as a
+  worktree-relative path (chat leaves those mentions unlinked). Missing files,
+  including a path the user deleted after the agent read it, show the
+  localized missing-path copy rather than the raw transport error. A new
+  chat `requestId` invalidates the Files query for that path so a second
+  open re-reads disk instead of keeping cached content. The backend still
+  rejects rooted paths. Desktop File Manager reveals the OS-absolute path
+  in the system file manager instead of launching Cursor.
 
 ## Desktop operations
 

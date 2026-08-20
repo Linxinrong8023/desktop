@@ -1,4 +1,4 @@
-﻿import {
+import {
   useCallback,
   useEffect,
   useRef,
@@ -29,6 +29,7 @@ import {
 } from "../diff/task-diff-view";
 import { TaskChangesNavigationProvider } from "../diff/task-changes-navigation";
 import { WorkspaceReviewFilesPanel } from "../files/workspace-review-files-panel";
+import type { WorkspaceFileRequest } from "../files/workspace-files-view";
 import {
   animatePanelWidth,
   cancelPanelWidthAnimation,
@@ -76,9 +77,13 @@ export function WorkspaceReviewLayout({
   const [fileRequest, setFileRequest] = useState<
     TaskDiffFileRequest | undefined
   >();
+  const [workspaceFileRequest, setWorkspaceFileRequest] = useState<
+    WorkspaceFileRequest | undefined
+  >();
   const [previousContextKind, setPreviousContextKind] = useState(context.kind);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRequestSequence = useRef(0);
+  const workspaceFileRequestSequence = useRef(0);
   const onOpenChangeRef = useRef(onOpenChange);
   const skipOpenNotifyRef = useRef(true);
   const panelRef = useRef<ResizablePanelHandle | null>(null);
@@ -98,6 +103,7 @@ export function WorkspaceReviewLayout({
       : context.kind === "project"
         ? `project:${context.projectId}`
         : `task:${context.taskId}`;
+  const [previousContextKey, setPreviousContextKey] = useState(contextKey);
 
   // Keep the latest open-change listener for effect notifications.
   useEffect(() => {
@@ -187,15 +193,43 @@ export function WorkspaceReviewLayout({
       setViewType("unified");
     }
   }
+  if (contextKey !== previousContextKey) {
+    setPreviousContextKey(contextKey);
+    // Chat links and Files previews are task-scoped; keep them from opening a
+    // path that only existed in the previous worktree.
+    setFileRequest(undefined);
+    setWorkspaceFileRequest(undefined);
+  }
 
-  const openFile = useCallback(
-    (path: string) => {
+  const openDiff = useCallback(
+    (path: string, line?: number) => {
       if (taskId === undefined) return;
       fileRequestSequence.current += 1;
-      setFileRequest({ path, requestId: fileRequestSequence.current });
+      setFileRequest({
+        path,
+        requestId: fileRequestSequence.current,
+        line,
+      });
       setPanel("changes");
       setReviewOpen(true);
       // A close slide may still be in flight; switch it back to opening.
+      if (panelAnimationRef.current !== null) slidePanelOpen();
+    },
+    [setReviewOpen, slidePanelOpen, taskId],
+  );
+
+  const openWorkspaceFile = useCallback(
+    (path: string, line?: number, column?: number) => {
+      if (taskId === undefined) return;
+      workspaceFileRequestSequence.current += 1;
+      setWorkspaceFileRequest({
+        path,
+        requestId: workspaceFileRequestSequence.current,
+        line,
+        column,
+      });
+      setPanel("files");
+      setReviewOpen(true);
       if (panelAnimationRef.current !== null) slidePanelOpen();
     },
     [setReviewOpen, slidePanelOpen, taskId],
@@ -345,12 +379,14 @@ export function WorkspaceReviewLayout({
     context.kind === "none" ? null : panel === "changes" &&
       context.kind === "task" ? (
       <TaskDiffView
+        key={context.taskId}
         taskId={context.taskId}
         viewType={viewType}
         fileTreeOpen={fileTreeOpen}
         fileRequest={fileRequest}
         toolbar={controls}
         onFileTreeOpenChange={setFileTreeOpen}
+        onFileNotFound={openWorkspaceFile}
       />
     ) : (
       <WorkspaceReviewFilesPanel
@@ -358,6 +394,7 @@ export function WorkspaceReviewLayout({
         projectId={context.projectId}
         taskId={context.kind === "task" ? context.taskId : undefined}
         toolbar={controls}
+        fileRequest={workspaceFileRequest}
       />
     );
 
@@ -414,7 +451,10 @@ export function WorkspaceReviewLayout({
     );
 
   return (
-    <TaskChangesNavigationProvider onOpenFile={openFile}>
+    <TaskChangesNavigationProvider
+      onOpenDiff={openDiff}
+      onOpenWorkspaceFile={openWorkspaceFile}
+    >
       <div className="relative flex min-h-0 min-w-0 flex-1">
         {context.kind !== "none" && !open && (
           <div className="absolute right-4 top-2 z-30">{controls}</div>
