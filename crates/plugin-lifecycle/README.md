@@ -20,7 +20,9 @@ Only explicit scans rebuild the installed snapshot. Per-plugin actions operate o
 serialize changes for the same plugin, and allow unrelated plugins to progress independently.
 Missing durable state means disabled, and only the first enable creates a durable row. Uninstall
 publishes a stopped runtime before durable or filesystem cleanup so later cleanup failures never
-leave a process reported as running.
+leave a process reported as running. Filesystem cleanup removes the complete
+`plugins/installed/<namespace>/<name>` tree so no older version can reappear after the selected
+version is uninstalled, then prunes the namespace directory when it is empty.
 Each scan reapplies durable eligibility to every retained package, stops runtimes that durable state
 no longer permits, and removes durable rows for packages missing from disk. To return one coherent
 snapshot, a scan acquires cached plugin operation locks in stable identifier order and may therefore

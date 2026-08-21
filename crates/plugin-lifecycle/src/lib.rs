@@ -19,7 +19,7 @@ use ora_logging::ora_warn;
 use ora_plugin_manager::{InstalledPlugin as DiscoveredPlugin, PluginContribution, PluginManager};
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thiserror::Error;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
@@ -648,15 +648,8 @@ where
             .repository
             .delete_plugin_state(&plugin_id)
             .map_err(PluginLifecycleError::Repository)?;
-        if let Some(plugin) = &plugin
-            && plugin.package_root.exists()
-        {
-            std::fs::remove_dir_all(&plugin.package_root).map_err(|source| {
-                PluginLifecycleError::PackageRemoval {
-                    path: plugin.package_root.clone(),
-                    source,
-                }
-            })?;
+        if let Some(plugin) = &plugin {
+            remove_plugin_installation(&plugin.package_root)?;
         }
         {
             let mut state = self.write_state();
@@ -716,6 +709,47 @@ where
             .state
             .write()
             .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Removes every installed version for one discovered package and prunes its empty namespace.
+fn remove_plugin_installation(package_root: &Path) -> Result<(), PluginLifecycleError> {
+    let package_name_root =
+        package_root
+            .parent()
+            .ok_or_else(|| PluginLifecycleError::PackageRemoval {
+                path: package_root.to_path_buf(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "installed package root does not contain a version directory",
+                ),
+            })?;
+    if package_name_root.exists() {
+        std::fs::remove_dir_all(package_name_root).map_err(|source| {
+            PluginLifecycleError::PackageRemoval {
+                path: package_name_root.to_path_buf(),
+                source,
+            }
+        })?;
+    }
+
+    let Some(namespace_root) = package_name_root.parent() else {
+        return Ok(());
+    };
+    match std::fs::remove_dir(namespace_root) {
+        Ok(()) => Ok(()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+            ) =>
+        {
+            Ok(())
+        }
+        Err(source) => Err(PluginLifecycleError::PackageRemoval {
+            path: namespace_root.to_path_buf(),
+            source,
+        }),
     }
 }
 

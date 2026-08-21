@@ -56,7 +56,8 @@ where
     }
 
     /// Downloads `manifest`'s release from `source` into the cache, verifies its digest, and
-    /// extracts it into `<data-dir>/plugins/installed/<name>`, returning that package directory.
+    /// extracts it into `<data-dir>/plugins/installed/<namespace>/<name>/<version>`, returning that
+    /// package directory.
     ///
     /// Callers pass `DownloadSource::Url(manifest.url().as_url().clone())` for online installs,
     /// or a `Local` path for offline and test installs; either way the manifest's `sha256` is
@@ -71,7 +72,9 @@ where
         let package_dir = data_dir
             .join("plugins")
             .join(INSTALLED_ROOT)
-            .join(manifest.name().as_str());
+            .join(manifest.namespace().as_str())
+            .join(manifest.name().as_str())
+            .join(manifest.version().to_string());
         extract_archive(
             ArchiveFormat::Zip,
             &archive_path,
@@ -204,7 +207,9 @@ mod tests {
             .path()
             .join("plugins")
             .join("installed")
-            .join("weather");
+            .join("official")
+            .join("weather")
+            .join("1.0.0");
         assert_eq!(package_dir, expected_package);
         assert!(expected_package.join("orax.toml").exists());
         assert!(expected_package.join("main.js").exists());
@@ -245,7 +250,9 @@ mod tests {
                 .path()
                 .join("plugins")
                 .join("installed")
+                .join("official")
                 .join("weather")
+                .join("1.0.0")
                 .exists()
         );
     }

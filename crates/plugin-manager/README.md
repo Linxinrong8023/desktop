@@ -5,8 +5,10 @@ orax package shape, and orchestrates installing new plugin releases.
 
 ## Responsibilities
 
-- Scan direct child directories under `<data-dir>/plugins/installed`.
-- Read each child package's `orax.toml` and parse it through `ora-plugin-manifest`.
+- Scan `<data-dir>/plugins/installed/<namespace>/<name>/<version>`.
+- Parse version directory names as SemVer and select only the highest version for each
+  namespace/name pair without falling back when that selected package is invalid.
+- Read the selected package's `orax.toml` and parse it through `ora-plugin-manifest`.
 - Resolve the fixed `main.js` entrypoint as an existing regular file whose canonical target remains
   inside its package, then retain its normalized portable relative path.
 - Normalize plugin identity to `namespace/name` and retain the validated orax metadata needed by the
@@ -18,7 +20,7 @@ orax package shape, and orchestrates installing new plugin releases.
 - Isolate malformed or unsupported packages as structured discovery issues.
 - Install a plugin release: download the `.orax` package (through an injected `ora-utils::http`
   `HttpDownload`), verify its SHA-256 while downloading, and safely extract it into
-  `<data-dir>/plugins/installed/<name>` with `ora-utils::archive`.
+  `<data-dir>/plugins/installed/<namespace>/<name>/<version>` with `ora-utils::archive`.
 
 ## Non-responsibilities
 
@@ -39,8 +41,9 @@ Build an `Installer::new(downloader)` with any `HttpDownload` implementation and
 `install(&manifest, source, data_dir)`, passing a `DownloadSource::Url(...)` for online installs or
 a `Local` path for offline and test installs.
 
-Discovery never follows symlinked package directories, never recurses below one package directory,
-and never reads more than 1 MiB from one manifest. Entrypoint containment rejects the current target
-of a package-escaping symlink, but path-based validation cannot prevent a concurrent symlink
-replacement between discovery and later loading. A missing installed-plugins directory represents an
-empty installation and is not an error.
+Discovery never follows symlinked package directories and never reads more than 1 MiB from one
+manifest. The manifest version must match the selected version directory. Entrypoint containment
+rejects the current target of a package-escaping symlink, but path-based validation cannot prevent a
+concurrent symlink replacement between discovery and later loading. A missing installed-plugins
+directory represents an empty installation and is not an error. The legacy
+`<data-dir>/plugins/<package>` layout is not discovered or migrated.

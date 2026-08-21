@@ -429,11 +429,16 @@ fn rejects_duplicate_plugin_ids() {
 #[test]
 fn reports_invalid_filesystem_shapes_and_ignores_root_files() {
     let temp_dir = TempDir::new().unwrap();
-    fs::create_dir_all(temp_dir.path().join("plugins/installed/missing")).unwrap();
     fs::create_dir_all(
         temp_dir
             .path()
-            .join("plugins/installed/directory/orax.toml"),
+            .join("plugins/installed/official/missing/1.0.0"),
+    )
+    .unwrap();
+    fs::create_dir_all(
+        temp_dir
+            .path()
+            .join("plugins/installed/official/directory/1.0.0/orax.toml"),
     )
     .unwrap();
     fs::write(
@@ -453,6 +458,98 @@ fn reports_invalid_filesystem_shapes_and_ignores_root_files() {
             PluginDiscoveryIssueKind::MissingManifest,
         ]
     );
+}
+
+#[test]
+fn ignores_legacy_install_layout() {
+    let temp_dir = TempDir::new().unwrap();
+    let legacy_root = temp_dir.path().join("plugins").join("legacy");
+    fs::create_dir_all(&legacy_root).unwrap();
+    fs::write(legacy_root.join("main.js"), "export {};\n").unwrap();
+    fs::write(legacy_root.join("orax.toml"), VALID_ORAX).unwrap();
+
+    let manager = PluginManager::discover(temp_dir.path());
+
+    assert_eq!(manager.installed_plugins(), &[]);
+    assert_eq!(manager.discovery_issues(), &[]);
+}
+
+#[test]
+fn selects_highest_installed_version() {
+    let temp_dir = TempDir::new().unwrap();
+    write_orax_package(
+        temp_dir.path(),
+        "demo",
+        &manifest_for("demo", "official", "agent", "1.0.0", "Old", ""),
+    );
+    let expected_root = write_orax_package(
+        temp_dir.path(),
+        "demo",
+        &manifest_for("demo", "official", "agent", "1.1.0", "New", ""),
+    );
+
+    let manager = PluginManager::discover(temp_dir.path());
+
+    assert_eq!(manager.discovery_issues(), &[]);
+    assert_eq!(manager.installed_plugins().len(), 1);
+    assert_eq!(manager.installed_plugins()[0].version.to_string(), "1.1.0");
+    assert_eq!(manager.installed_plugins()[0].package_root, expected_root);
+}
+
+#[test]
+fn does_not_fall_back_when_highest_version_is_broken() {
+    let temp_dir = TempDir::new().unwrap();
+    write_orax_package(temp_dir.path(), "demo", VALID_ORAX);
+    write_raw_orax_version(temp_dir.path(), "demo", "1.1.0", b"{ invalid");
+
+    let manager = PluginManager::discover(temp_dir.path());
+
+    assert_eq!(manager.installed_plugins(), &[]);
+    assert_eq!(manager.discovery_issues().len(), 1);
+    assert_eq!(
+        manager.discovery_issues()[0].kind(),
+        PluginDiscoveryIssueKind::InvalidToml
+    );
+}
+
+#[test]
+fn reports_non_semver_version_directories() {
+    let temp_dir = TempDir::new().unwrap();
+    write_raw_orax_version(temp_dir.path(), "demo", "latest", VALID_ORAX.as_bytes());
+
+    let manager = PluginManager::discover(temp_dir.path());
+
+    assert_eq!(manager.installed_plugins(), &[]);
+    assert_eq!(manager.discovery_issues().len(), 1);
+    assert_eq!(
+        manager.discovery_issues()[0].kind(),
+        PluginDiscoveryIssueKind::InvalidInstallPath
+    );
+}
+
+#[test]
+fn rejects_manifest_version_that_differs_from_directory() {
+    let temp_dir = TempDir::new().unwrap();
+    let package_root = temp_dir
+        .path()
+        .join("plugins")
+        .join("installed")
+        .join("official")
+        .join("demo")
+        .join("1.1.0");
+    fs::create_dir_all(&package_root).unwrap();
+    fs::write(package_root.join("main.js"), "export {};\n").unwrap();
+    fs::write(package_root.join("orax.toml"), VALID_ORAX).unwrap();
+
+    let manager = PluginManager::discover(temp_dir.path());
+
+    assert_eq!(manager.installed_plugins(), &[]);
+    assert_eq!(manager.discovery_issues().len(), 1);
+    assert_eq!(
+        manager.discovery_issues()[0].kind(),
+        PluginDiscoveryIssueKind::InvalidManifest
+    );
+    assert_eq!(manager.discovery_issues()[0].field_path(), Some("version"));
 }
 
 /// Renders one installed `orax.toml` with optional homepage for a single-package fixture.
@@ -476,11 +573,33 @@ fn manifest_for(
 
 /// Writes one installed package below `<data>/plugins/installed` with a fixed `main.js` entrypoint.
 fn write_orax_package(data_dir: &Path, directory: &str, toml: &str) -> std::path::PathBuf {
-    let package_root = data_dir.join("plugins").join("installed").join(directory);
+    let namespace = manifest_string(toml, "namespace")
+        .filter(|namespace| !namespace.trim().is_empty())
+        .unwrap_or("official");
+    let version = manifest_string(toml, "version")
+        .filter(|version| semver::Version::parse(version).is_ok())
+        .unwrap_or("1.0.0");
+    let package_root = data_dir
+        .join("plugins")
+        .join("installed")
+        .join(namespace)
+        .join(directory)
+        .join(version);
     fs::create_dir_all(&package_root).unwrap();
     fs::write(package_root.join("main.js"), "export {};\n").unwrap();
     fs::write(package_root.join("orax.toml"), toml).unwrap();
     package_root
+}
+
+fn manifest_string<'a>(toml: &'a str, field: &str) -> Option<&'a str> {
+    toml.lines().find_map(|line| {
+        let value = line
+            .strip_prefix(field)?
+            .trim_start()
+            .strip_prefix('=')?
+            .trim();
+        value.strip_prefix('"')?.strip_suffix('"')
+    })
 }
 
 /// Verifies a package's `logo.svg` is discovered as trusted icon source text.
@@ -529,7 +648,16 @@ fn reports_an_unsafe_logo_without_hiding_the_plugin() {
 
 /// Writes arbitrary bytes as one installed package manifest.
 fn write_raw_orax(data_dir: &Path, directory: &str, bytes: &[u8]) {
-    let package_root = data_dir.join("plugins").join("installed").join(directory);
+    write_raw_orax_version(data_dir, directory, "1.0.0", bytes);
+}
+
+fn write_raw_orax_version(data_dir: &Path, directory: &str, version: &str, bytes: &[u8]) {
+    let package_root = data_dir
+        .join("plugins")
+        .join("installed")
+        .join("official")
+        .join(directory)
+        .join(version);
     fs::create_dir_all(&package_root).unwrap();
     fs::write(package_root.join("orax.toml"), bytes).unwrap();
 }

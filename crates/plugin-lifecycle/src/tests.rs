@@ -381,14 +381,8 @@ async fn scan_reconciliation_deletes_orphaned_plugin_state() {
         .expect("persist enabled plugin");
     let lifecycle = open_without_runtime(temp_dir.path(), repository);
 
-    fs::remove_dir_all(
-        temp_dir
-            .path()
-            .join("plugins")
-            .join("installed")
-            .join("example"),
-    )
-    .expect("remove plugin outside Ora");
+    fs::remove_dir_all(plugin_name_root(temp_dir.path(), "example"))
+        .expect("remove plugin outside Ora");
     lifecycle
         .scan_plugins(ScanPluginsRequest {})
         .await
@@ -456,14 +450,9 @@ async fn scan_stops_runtime_for_package_deleted_outside_ora() {
             ),
         },
     );
-    fs::remove_dir_all(
-        temp_dir
-            .path()
-            .join("plugins")
-            .join("installed")
-            .join("example"),
-    )
-    .expect("remove plugin outside Ora");
+    tokio::task::yield_now().await;
+    fs::remove_dir_all(plugin_name_root(temp_dir.path(), "example"))
+        .expect("remove plugin outside Ora");
 
     let scan_lifecycle = lifecycle.clone();
     let scan_task =
@@ -643,12 +632,7 @@ async fn enabling_launches_the_plugin_and_publishes_each_transition() {
         Some(PluginLaunchRequest {
             plugin_id: PluginId::new("official/example"),
             deno_path: PathBuf::from("deno"),
-            entrypoint: temp_dir
-                .path()
-                .join("plugins")
-                .join("installed")
-                .join("example")
-                .join("main.js"),
+            entrypoint: plugin_version_root(temp_dir.path(), "example", "1.0.0").join("main.js"),
             permissions: vec![
                 "--allow-run".to_string(),
                 "--allow-read".to_string(),
@@ -883,12 +867,10 @@ async fn queues_disable_behind_the_launch_enabling_started() {
 async fn uninstalls_running_plugin_after_stopping_it() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
+    write_plugin_package_version(temp_dir.path(), "example", "0.9.0");
     write_plugin_package(temp_dir.path(), "example");
-    let package_root = temp_dir
-        .path()
-        .join("plugins")
-        .join("installed")
-        .join("example");
+    let package_root = plugin_name_root(temp_dir.path(), "example");
+    let namespace_root = package_root.parent().unwrap().to_path_buf();
     let pool = DatabaseBootstrapper::system()
         .bootstrap_repository_pool(
             &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
@@ -938,12 +920,14 @@ async fn uninstalls_running_plugin_after_stopping_it() {
         (
             response,
             package_root.exists(),
+            namespace_root.exists(),
             lifecycle.list_installed_plugins(),
         ),
         (
             UninstallPluginResponse {
                 plugin_id: "official/example".to_string(),
             },
+            false,
             false,
             ListInstalledPluginsResponse {
                 plugins: Vec::new(),
@@ -958,11 +942,7 @@ async fn uninstall_records_stopped_state_before_package_removal() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
     write_plugin_package(temp_dir.path(), "example");
-    let package_root = temp_dir
-        .path()
-        .join("plugins")
-        .join("installed")
-        .join("example");
+    let package_root = plugin_name_root(temp_dir.path(), "example");
     let pool = DatabaseBootstrapper::system()
         .bootstrap_repository_pool(
             &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
@@ -1423,14 +1403,30 @@ const PACKAGE_LOGO: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect widt
 
 /// Writes one complete installed package in the shared orax manifest schema.
 fn write_plugin_package(data_dir: &std::path::Path, directory: &str) {
-    let package_root = data_dir.join("plugins").join("installed").join(directory);
+    write_plugin_package_version(data_dir, directory, "1.0.0");
+}
+
+fn plugin_name_root(data_dir: &std::path::Path, directory: &str) -> PathBuf {
+    data_dir
+        .join("plugins")
+        .join("installed")
+        .join("official")
+        .join(directory)
+}
+
+fn plugin_version_root(data_dir: &std::path::Path, directory: &str, version: &str) -> PathBuf {
+    plugin_name_root(data_dir, directory).join(version)
+}
+
+fn write_plugin_package_version(data_dir: &std::path::Path, directory: &str, version: &str) {
+    let package_root = plugin_version_root(data_dir, directory, version);
     fs::create_dir_all(&package_root).expect("create plugin package");
     fs::write(package_root.join("logo.svg"), PACKAGE_LOGO).expect("write plugin logo");
     fs::write(package_root.join("main.js"), "export {};\n").expect("write plugin entrypoint");
     fs::write(
         package_root.join("orax.toml"),
         format!(
-            "resolver = 1\nname = {directory:?}\nnamespace = \"official\"\nkind = \"agent\"\nversion = \"1.0.0\"\ndescription = \"Example\"\n"
+            "resolver = 1\nname = {directory:?}\nnamespace = \"official\"\nkind = \"agent\"\nversion = {version:?}\ndescription = \"Example\"\n"
         ),
     )
     .expect("write plugin manifest");

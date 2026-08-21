@@ -28,7 +28,7 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
-    /// Discovers direct child plugin packages below `<data_dir>/plugins`.
+    /// Discovers the selected plugin versions below `<data_dir>/plugins/installed`.
     pub fn discover(data_dir: impl AsRef<Path>) -> Self {
         let discovery::PluginDiscovery {
             installed_plugins,
