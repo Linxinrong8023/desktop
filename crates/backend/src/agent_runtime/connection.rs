@@ -1154,7 +1154,9 @@ mod tests {
         let package_root = data_directory
             .join("plugins")
             .join("installed")
+            .join("official")
             .join(package_name);
+        let package_root = package_root.join("1.0.0");
         fs::create_dir_all(&package_root).expect("create plugin package");
         fs::write(package_root.join("main.js"), "export {};\n").expect("write plugin entrypoint");
         fs::write(
