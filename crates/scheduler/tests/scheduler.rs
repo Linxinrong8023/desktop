@@ -423,7 +423,14 @@ async fn completed_delay_handle_reports_already_done() {
         })
         .expect("scheduler remains active");
     assert!(wait_for(|| completed.load(Ordering::SeqCst), 500).await);
-    // The future has finished; cancelling reports `AlreadyDone`.
-    assert_eq!(handle.cancel(), CancelOutcome::AlreadyDone);
+    // The worker may still hold RUNNING briefly after the future body returns;
+    // poll cancel until control settles on the terminal state.
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+    let mut outcome = handle.cancel();
+    while outcome == CancelOutcome::AlreadyRunning && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        outcome = handle.cancel();
+    }
+    assert_eq!(outcome, CancelOutcome::AlreadyDone);
     scheduler.shutdown().await;
 }

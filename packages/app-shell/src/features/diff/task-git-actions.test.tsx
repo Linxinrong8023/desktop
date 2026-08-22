@@ -35,14 +35,19 @@ describe("task Git actions", () => {
     const user = userEvent.setup();
     const callbacks = renderGitActions();
 
-    expect(screen.getByRole("textbox", { name: "提交说明" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "提交说明" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "提交" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "提交并推送" })).toBeDisabled();
     expect(screen.getByText("包含所有未提交的更改")).toBeInTheDocument();
     expect(screen.getByText("+12")).toBeInTheDocument();
     expect(screen.getByText("-3")).toBeInTheDocument();
 
-    await user.type(screen.getByRole("textbox", { name: "提交说明" }), "fix diff layout");
+    await user.type(
+      screen.getByRole("textbox", { name: "提交说明" }),
+      "fix diff layout",
+    );
     expect(callbacks.onMessageChange).toHaveBeenCalled();
   });
 

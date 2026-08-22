@@ -4,7 +4,7 @@
 
 ## Responsibilities
 
-- `init_logging` installs the subscriber from an explicit `LoggingConfig`, initializes the immutable process timezone, and returns a `LoggingGuard` that keeps non-blocking writers (stdout and/or file) alive.
+- `init_logging` installs the subscriber from an explicit `LoggingConfig`, initializes the immutable process timezone, and returns `InitializedLogging`. Its `LoggingGuard` keeps non-blocking writers alive while its cloneable `LogLevelControl` reads or replaces the process-wide filter.
 - Stdout and file sinks use a non-blocking, non-lossy writer: routine IO runs on a background worker, and a full channel exerts backpressure on callers instead of dropping lines, so log integrity wins under extreme sink stalls.
 - Output modes support stdout, daily rotating files, or both, with retention cleanup for matching file series.
 - Events are formatted as one JSON object per line with stable top-level timestamp, level, target, message, method, span, trace, and request fields; business and error fields are grouped consistently.
@@ -20,7 +20,7 @@
 
 ## Boundaries
 
-Initialization is process-wide and the timezone can be set only once. Runtime composition roots must parse environment configuration, call initialization before clock access, and retain `LoggingGuard` for the process lifetime.
+Initialization is process-wide and the timezone can be set only once. Runtime composition roots must parse environment configuration, call initialization before clock access, retain `LoggingGuard` for the process lifetime, and inject only cloned `LogLevelControl` values into runtime state that needs hot reload. Reloading changes eligibility for future events without rebuilding sinks or recovering events that were already filtered.
 
 This crate does not decide business log messages, public error classification, field allowlists, or
 read environment variables. Callers remain responsible for excluding sensitive structured fields

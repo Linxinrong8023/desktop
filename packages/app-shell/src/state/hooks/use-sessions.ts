@@ -7,6 +7,7 @@ export function useSessions() {
   const client = useContractsClient();
   return useQuery({
     queryKey: queryKeys.sessions,
-    queryFn: () => client.session.list({}).then((response) => response.sessions),
+    queryFn: () =>
+      client.session.list({}).then((response) => response.sessions),
   });
 }

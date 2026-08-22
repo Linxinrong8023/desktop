@@ -13,7 +13,10 @@ import { RunTheaterPathRail } from "./run-theater-path-rail";
 
 /** Builds a finished mock run for path-rail Result chip coverage. */
 function terminalRun(
-  status: Extract<GraphWorkflowRun["status"], "succeeded" | "failed" | "cancelled">,
+  status: Extract<
+    GraphWorkflowRun["status"],
+    "succeeded" | "failed" | "cancelled"
+  >,
 ): GraphWorkflowRun {
   const definition = normalizeWorkflowDefinition(createMockWorkflow("zh-CN"));
   return {
@@ -48,7 +51,9 @@ function waitingRun(): { run: GraphWorkflowRun; request: HitlRequest } {
     schema: {
       kind: "clarify",
       title: "Clarify",
-      fields: [{ name: "answer", type: "text", label: "Answer", required: true }],
+      fields: [
+        { name: "answer", type: "text", label: "Answer", required: true },
+      ],
     },
     blocking: true,
     policy: "wait",
@@ -68,9 +73,10 @@ function waitingRun(): { run: GraphWorkflowRun; request: HitlRequest } {
         definition.nodes.map((node) => [
           node.id,
           {
-            status: node.id === "understand"
-              ? "awaiting_input" as const
-              : "idle" as const,
+            status:
+              node.id === "understand"
+                ? ("awaiting_input" as const)
+                : ("idle" as const),
           },
         ]),
       ),
@@ -180,7 +186,11 @@ describe("RunTheaterPathRail", () => {
           openHitls={[]}
           artifactCountByNode={{}}
           showResultAct={false}
-          progress={{ done: 1, total: failed.definitionSnapshot.nodes.length, percent: 20 }}
+          progress={{
+            done: 1,
+            total: failed.definitionSnapshot.nodes.length,
+            percent: 20,
+          }}
           pathRailRef={createRef()}
           onFocusNode={vi.fn()}
           onExpandHitl={vi.fn()}
@@ -202,7 +212,11 @@ describe("RunTheaterPathRail", () => {
           openHitls={live.openHitls}
           artifactCountByNode={{}}
           showResultAct={false}
-          progress={{ done: 0, total: live.definitionSnapshot.nodes.length, percent: 0 }}
+          progress={{
+            done: 0,
+            total: live.definitionSnapshot.nodes.length,
+            percent: 0,
+          }}
           pathRailRef={createRef()}
           onFocusNode={vi.fn()}
           onExpandHitl={vi.fn()}
@@ -210,7 +224,9 @@ describe("RunTheaterPathRail", () => {
       </AppI18nProvider>,
     );
 
-    expect(screen.queryByRole("button", { name: /结果/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /结果/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("expands HITL from a waiting path chip and focuses other chips", async () => {
@@ -228,7 +244,11 @@ describe("RunTheaterPathRail", () => {
           openHitls={[request]}
           artifactCountByNode={{ understand: 2 }}
           showResultAct={false}
-          progress={{ done: 0, total: run.definitionSnapshot.nodes.length, percent: 0 }}
+          progress={{
+            done: 0,
+            total: run.definitionSnapshot.nodes.length,
+            percent: 0,
+          }}
           pathRailRef={createRef()}
           onFocusNode={onFocusNode}
           onExpandHitl={onExpandHitl}

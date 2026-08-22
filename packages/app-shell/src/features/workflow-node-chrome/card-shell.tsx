@@ -6,8 +6,10 @@ import { getNodeMetadata } from "./metadata";
 /** Visual density shared by editor cards and run overlays. */
 export type WorkflowNodeCardDensity = "editor" | "run" | "stage" | "compact";
 
-export interface WorkflowNodeCardShellProps
-  extends Omit<HTMLAttributes<HTMLElement>, "title" | "children"> {
+export interface WorkflowNodeCardShellProps extends Omit<
+  HTMLAttributes<HTMLElement>,
+  "title" | "children"
+> {
   kind: WorkflowNodeKind;
   title: string;
   description: string;
@@ -21,6 +23,8 @@ export interface WorkflowNodeCardShellProps
   style?: CSSProperties;
   /** Overlay on the kind icon (status dot, etc.). */
   iconAccessory?: ReactNode;
+  /** Compact marker rendered immediately after the node title. */
+  titleAccessory?: ReactNode;
   /** Trailing chips in the title row (status badge, etc.). */
   headerAccessory?: ReactNode;
   /** Far-right header control (delete in editor). */
@@ -31,6 +35,8 @@ export interface WorkflowNodeCardShellProps
   body?: ReactNode;
   /** Read-only details rendered at the full card width beneath the header. */
   details?: ReactNode;
+  /** Layout classes for the full-width details slot. */
+  detailsClassName?: string;
   targetHandle?: ReactNode;
   sourceHandle?: ReactNode;
 }
@@ -52,7 +58,8 @@ const DENSITY: Record<
     iconBox: "size-8 rounded-lg",
     iconSize: "size-4",
     title: "text-xs font-semibold",
-    description: "mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground",
+    description:
+      "mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground",
     headerPad: "px-3 py-3",
     gap: "gap-2.5",
   },
@@ -61,7 +68,8 @@ const DENSITY: Record<
     iconBox: "size-8 rounded-lg",
     iconSize: "size-4",
     title: "text-xs font-semibold",
-    description: "mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground",
+    description:
+      "mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground",
     headerPad: "px-3 py-3",
     gap: "gap-2.5",
   },
@@ -79,7 +87,8 @@ const DENSITY: Record<
     iconBox: "size-8 rounded-lg",
     iconSize: "size-3.5",
     title: "text-sm font-semibold",
-    description: "mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground",
+    description:
+      "mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground",
     headerPad: "px-3.5 py-3",
     gap: "gap-2.5",
   },
@@ -102,11 +111,13 @@ export function WorkflowNodeCardShell({
   frameClassName,
   style,
   iconAccessory,
+  titleAccessory,
   headerAccessory,
   headerEnd,
   footer,
   body,
   details,
+  detailsClassName,
   targetHandle,
   sourceHandle,
   ...articleProps
@@ -114,8 +125,11 @@ export function WorkflowNodeCardShell({
   const metadata = getNodeMetadata(kind);
   const Icon = metadata.icon;
   const tokens = DENSITY[density];
-  const resolvedWidth = width
-    ?? (density === "editor" || density === "run" ? WORKFLOW_NODE_WIDTH : undefined);
+  const resolvedWidth =
+    width ??
+    (density === "editor" || density === "run"
+      ? WORKFLOW_NODE_WIDTH
+      : undefined);
 
   return (
     <article
@@ -127,7 +141,9 @@ export function WorkflowNodeCardShell({
         selected
           ? "border-foreground/45 shadow-md ring-2 ring-ring/25"
           : "border-border",
-        density === "editor" && !selected && "hover:border-foreground/25 hover:shadow-md",
+        density === "editor" &&
+          !selected &&
+          "hover:border-foreground/25 hover:shadow-md",
         frameClassName,
         className,
       )}
@@ -152,6 +168,7 @@ export function WorkflowNodeCardShell({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <h4 className={cn("min-w-0 truncate", tokens.title)}>{title}</h4>
+            {titleAccessory}
             <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
               {kindLabel}
             </span>
@@ -163,8 +180,10 @@ export function WorkflowNodeCardShell({
       </div>
       {details !== undefined && details !== null && (
         <>
-          {density === "editor" && <div className="mx-auto w-4/5 border-t border-border" />}
-          <div className="px-3 pb-3 pt-2">
+          {density === "editor" && (
+            <div className="mx-auto w-4/5 border-t border-border" />
+          )}
+          <div className={cn("px-3 pb-3 pt-2", detailsClassName)}>
             {details}
           </div>
         </>
@@ -175,8 +194,8 @@ export function WorkflowNodeCardShell({
             density === "editor"
               ? "flex items-center justify-between px-3 py-2 text-[10px] text-muted-foreground"
               : density === "stage"
-              ? "px-6 pb-6 pt-5"
-              : "border-t border-border/70 px-3 py-2 text-[10px] text-muted-foreground",
+                ? "px-6 pb-6 pt-5"
+                : "border-t border-border/70 px-3 py-2 text-[10px] text-muted-foreground",
           )}
         >
           {footer}

@@ -1,9 +1,9 @@
 use crate::record::HistoryRecord;
-use ora_contracts::acp::content::{ContentBlock, TextContent};
-use ora_contracts::acp::plan::Plan;
-use ora_contracts::acp::prompt::StopReason;
-use ora_contracts::acp::session::{ContentChunk, MessageId, SessionUpdate};
-use ora_contracts::acp::tool_call::{ToolCall, ToolCallId, ToolCallStatus, ToolCallUpdate};
+use agent_client_protocol_schema::v1::Plan;
+use agent_client_protocol_schema::v1::StopReason;
+use agent_client_protocol_schema::v1::{ContentBlock, TextContent};
+use agent_client_protocol_schema::v1::{ContentChunk, MessageId, SessionUpdate};
+use agent_client_protocol_schema::v1::{ToolCall, ToolCallId, ToolCallStatus, ToolCallUpdate};
 
 /// One assembled record together with the position it occupies in the conversation.
 #[derive(Debug, Clone, PartialEq)]
@@ -96,7 +96,9 @@ impl HistoryAssembler {
                 AssembledRecord {
                     seq,
                     record: HistoryRecord::Update {
-                        update: SessionUpdate::UserMessageChunk(ContentChunk::new(block.clone())),
+                        update: Box::new(SessionUpdate::UserMessageChunk(ContentChunk::new(
+                            block.clone(),
+                        ))),
                     },
                 }
             })
@@ -121,6 +123,9 @@ impl HistoryAssembler {
             | SessionUpdate::ConfigOptionUpdate(_)
             | SessionUpdate::SessionInfoUpdate(_)
             | SessionUpdate::UsageUpdate(_) => Vec::new(),
+            // The official schema is non-exhaustive so a newer additive update does not
+            // prevent Ora from preserving the rest of the session history.
+            _ => Vec::new(),
         }
     }
 
@@ -141,7 +146,7 @@ impl HistoryAssembler {
             .chain(self.plan.take().map(|(seq, plan)| AssembledRecord {
                 seq,
                 record: HistoryRecord::Update {
-                    update: SessionUpdate::Plan(plan),
+                    update: Box::new(SessionUpdate::Plan(plan)),
                 },
             }))
             .collect();
@@ -292,6 +297,37 @@ impl HistoryAssembler {
         self.next_seq = self.next_seq.saturating_add(1);
         seq
     }
+
+    /// Snapshots the records still open in the assembler, each carrying its assigned position.
+    ///
+    /// A load replays these alongside the durable history so the merged stream is gap-free and
+    /// correctly ordered: records are appended out of position, and these are the ones not yet
+    /// written to disk.
+    pub fn pending_records(&self) -> Vec<AssembledRecord> {
+        let mut records: Vec<AssembledRecord> = self
+            .texts
+            .iter()
+            .map(PendingText::to_record)
+            .chain(
+                self.tools
+                    .iter()
+                    // A tool that has already been written is durable, not pending; snapshotting
+                    // it again would duplicate it in the merged replay prefix.
+                    .filter(|tool| !tool.written)
+                    .map(|tool| tool_record(tool.seq, &tool.call)),
+            )
+            .collect();
+        if let Some((seq, plan)) = &self.plan {
+            records.push(AssembledRecord {
+                seq: *seq,
+                record: HistoryRecord::Update {
+                    update: Box::new(SessionUpdate::Plan(plan.clone())),
+                },
+            });
+        }
+        records.sort_by_key(|record| record.seq);
+        records
+    }
 }
 
 impl PendingTool {
@@ -352,6 +388,19 @@ impl PendingText {
             ),
         }
     }
+
+    /// Borrows one accumulated message or thought as a record without consuming it, for snapshotting
+    /// the open items a load must replay before switching to live events.
+    fn to_record(&self) -> AssembledRecord {
+        AssembledRecord {
+            seq: self.seq,
+            record: chunk_record(
+                self.kind,
+                self.message_id.clone(),
+                ContentBlock::Text(TextContent::new(self.text.clone())),
+            ),
+        }
+    }
 }
 
 /// Builds the record that carries one tool call's current snapshot.
@@ -359,7 +408,7 @@ fn tool_record(seq: u32, call: &ToolCall) -> AssembledRecord {
     AssembledRecord {
         seq,
         record: HistoryRecord::Update {
-            update: SessionUpdate::ToolCall(call.clone()),
+            update: Box::new(SessionUpdate::ToolCall(call.clone())),
         },
     }
 }
@@ -373,9 +422,9 @@ fn chunk_record(
     let mut chunk = ContentChunk::new(content);
     chunk.message_id = message_id;
     HistoryRecord::Update {
-        update: match kind {
+        update: Box::new(match kind {
             TextKind::Message => SessionUpdate::AgentMessageChunk(chunk),
             TextKind::Thought => SessionUpdate::AgentThoughtChunk(chunk),
-        },
+        }),
     }
 }

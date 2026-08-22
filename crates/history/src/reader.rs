@@ -2,7 +2,19 @@ use crate::error::HistoryError;
 use crate::path::history_path;
 use crate::record::HistoryLine;
 use std::collections::HashSet;
+use std::fs::File;
+use std::io::Read;
+use std::num::NonZeroUsize;
 use std::path::Path;
+
+/// Describes whether every durable record could be restored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryIntegrity {
+    /// Every complete line was decoded successfully.
+    Complete,
+    /// Complete lines were unreadable and their timeline positions are unknown.
+    Damaged { unreadable_lines: NonZeroUsize },
+}
 
 /// One session's complete history, restored to conversation order.
 pub struct SessionHistory {
@@ -10,12 +22,12 @@ pub struct SessionHistory {
     pub lines: Vec<HistoryLine>,
     /// The position the next appended record should claim.
     pub next_seq: u32,
-    /// Lines that could not be parsed and were not an interrupted final write.
+    /// Whether complete lines had to be omitted while reading the record.
     ///
     /// A torn last line is normal after a crash and is not counted here. Anything
     /// else means the file lost content that no longer has a place in the
     /// timeline, which callers are expected to surface rather than absorb.
-    pub dropped_lines: usize,
+    pub integrity: HistoryIntegrity,
 }
 
 impl SessionHistory {
@@ -35,18 +47,55 @@ impl SessionHistory {
 /// the position counter — needs all of it, so a reverse scan would buy nothing.
 pub fn read_session_history(root: &Path, session_id: &str) -> Result<SessionHistory, HistoryError> {
     let path = history_path(root, session_id)?;
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
+    let bytes = read_history_bytes(&path)?;
+    Ok(parse_history(&bytes))
+}
+
+/// Reads only the first `max_bytes` bytes of a session's history, for replaying the durable prefix
+/// that existed at a given cutoff. `max_bytes` is supplied by the writer's `durable_bytes`, so it
+/// always falls on a record boundary and every line parses whole.
+pub fn read_session_history_up_to(
+    root: &Path,
+    session_id: &str,
+    max_bytes: u64,
+) -> Result<SessionHistory, HistoryError> {
+    let path = history_path(root, session_id)?;
+    let file = match File::open(&path) {
+        Ok(file) => file,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(SessionHistory {
-                lines: Vec::new(),
-                next_seq: 0,
-                dropped_lines: 0,
-            });
+            return Ok(empty_history());
         }
         Err(source) => return Err(HistoryError::Read { path, source }),
     };
+    let mut bytes = Vec::with_capacity(max_bytes as usize);
+    file.take(max_bytes)
+        .read_to_end(&mut bytes)
+        .map_err(|source| HistoryError::Read { path, source })?;
+    Ok(parse_history(&bytes))
+}
 
+/// Reads the whole history file, treating a missing file as an empty history.
+fn read_history_bytes(path: &Path) -> Result<Vec<u8>, HistoryError> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(bytes),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(source) => Err(HistoryError::Read {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn empty_history() -> SessionHistory {
+    SessionHistory {
+        lines: Vec::new(),
+        next_seq: 0,
+        integrity: HistoryIntegrity::Complete,
+    }
+}
+
+/// Splits and decodes history bytes, tolerating a write interrupted mid-line.
+fn parse_history(bytes: &[u8]) -> SessionHistory {
     // Split on bytes rather than decoding first: a write cut short can leave a
     // partial UTF-8 sequence at the tail, which would otherwise fail the whole
     // file instead of only its unfinished last line.
@@ -77,11 +126,15 @@ pub fn read_session_history(root: &Path, session_id: &str) -> Result<SessionHist
         .map(|line| line.seq)
         .max()
         .map_or(0, |seq| seq.saturating_add(1));
-    Ok(SessionHistory {
+    let integrity = match NonZeroUsize::new(dropped_lines) {
+        Some(unreadable_lines) => HistoryIntegrity::Damaged { unreadable_lines },
+        None => HistoryIntegrity::Complete,
+    };
+    SessionHistory {
         lines: order_lines(parsed),
         next_seq,
-        dropped_lines,
-    })
+        integrity,
+    }
 }
 
 /// Restores conversation order and resolves positions written more than once.

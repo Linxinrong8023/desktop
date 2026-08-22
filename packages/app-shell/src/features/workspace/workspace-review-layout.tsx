@@ -1,4 +1,10 @@
-﻿import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Button,
   ResizableHandle,
@@ -16,10 +22,18 @@ import {
   IconLayoutSidebarRightExpand,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { TaskDiffView, type TaskDiffFileRequest, type TaskDiffViewType } from "../diff/task-diff-view";
+import {
+  TaskDiffView,
+  type TaskDiffFileRequest,
+  type TaskDiffViewType,
+} from "../diff/task-diff-view";
 import { TaskChangesNavigationProvider } from "../diff/task-changes-navigation";
 import { WorkspaceReviewFilesPanel } from "../files/workspace-review-files-panel";
-import { animatePanelWidth, cancelPanelWidthAnimation } from "../../lib/panel-motion";
+import type { WorkspaceFileRequest } from "../files/workspace-files-view";
+import {
+  animatePanelWidth,
+  cancelPanelWidthAnimation,
+} from "../../lib/panel-motion";
 import {
   DEFAULT_REVIEW_WIDTH,
   MAX_REVIEW_WIDTH,
@@ -35,14 +49,16 @@ const REVIEW_PANEL_COLLAPSE_THRESHOLD = MIN_REVIEW_WIDTH / 2;
 
 export type WorkspaceReviewContext =
   | { kind: "none" }
-  | { kind: "project"; projectId: string; projectRootPath: string }
-  | { kind: "task"; taskId: string; projectId: string; projectRootPath: string };
+  | { kind: "project"; projectId: string }
+  | { kind: "task"; taskId: string; projectId: string };
 
 interface WorkspaceReviewLayoutProps {
   context: WorkspaceReviewContext;
   children: ReactNode;
   /** Fires when the side/expanded review panel opens or closes (not on expand-only). */
   onOpenChange?: (open: boolean) => void;
+  /** Keeps stateful workspace children mounted while the review panel opens. */
+  preserveWorkspaceOnReviewOpen?: boolean;
 }
 
 type ReviewPanel = "changes" | "files";
@@ -52,6 +68,7 @@ export function WorkspaceReviewLayout({
   context,
   children,
   onOpenChange,
+  preserveWorkspaceOnReviewOpen = false,
 }: WorkspaceReviewLayoutProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -60,10 +77,16 @@ export function WorkspaceReviewLayout({
   const [viewType, setViewType] = useState<TaskDiffViewType>("unified");
   const [fileTreeOpen, setFileTreeOpen] = useState(true);
   const [panel, setPanel] = useState<ReviewPanel>("files");
-  const [fileRequest, setFileRequest] = useState<TaskDiffFileRequest | undefined>();
+  const [fileRequest, setFileRequest] = useState<
+    TaskDiffFileRequest | undefined
+  >();
+  const [workspaceFileRequest, setWorkspaceFileRequest] = useState<
+    WorkspaceFileRequest | undefined
+  >();
   const [previousContextKind, setPreviousContextKind] = useState(context.kind);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRequestSequence = useRef(0);
+  const workspaceFileRequestSequence = useRef(0);
   const onOpenChangeRef = useRef(onOpenChange);
   const skipOpenNotifyRef = useRef(true);
   const panelRef = useRef<ResizablePanelHandle | null>(null);
@@ -77,7 +100,13 @@ export function WorkspaceReviewLayout({
   /** Host whose width drives the responsive opening width. */
   const contentRef = useRef<HTMLDivElement | null>(null);
   const taskId = context.kind === "task" ? context.taskId : undefined;
-  const contextKey = context.kind === "none" ? "none" : context.kind === "project" ? `project:${context.projectId}` : `task:${context.taskId}`;
+  const contextKey =
+    context.kind === "none"
+      ? "none"
+      : context.kind === "project"
+        ? `project:${context.projectId}`
+        : `task:${context.taskId}`;
+  const [previousContextKey, setPreviousContextKey] = useState(contextKey);
 
   // Keep the latest open-change listener for effect notifications.
   useEffect(() => {
@@ -106,7 +135,7 @@ export function WorkspaceReviewLayout({
     setExpanded(false);
     setClosing(false);
     setViewType("unified");
-  }, []);
+  }, [setReviewOpen]);
 
   const close = useCallback(() => {
     cancelPanelWidthAnimation(panelAnimationRef);
@@ -146,7 +175,8 @@ export function WorkspaceReviewLayout({
       animationRef: panelAnimationRef,
       duration: REVIEW_PANEL_SLIDE_MS,
       panel: panelRef.current,
-      targetWidth: width < REVIEW_PANEL_COLLAPSE_THRESHOLD ? 0 : MIN_REVIEW_WIDTH,
+      targetWidth:
+        width < REVIEW_PANEL_COLLAPSE_THRESHOLD ? 0 : MIN_REVIEW_WIDTH,
       onComplete: () => {
         if (width < REVIEW_PANEL_COLLAPSE_THRESHOLD) finalizeClose();
       },
@@ -166,16 +196,53 @@ export function WorkspaceReviewLayout({
       setViewType("unified");
     }
   }
+  if (contextKey !== previousContextKey) {
+    setPreviousContextKey(contextKey);
+    // Chat links and Files previews are checkout-scoped; clear them when the
+    // selected project or task changes so paths from the previous root vanish.
+    setFileRequest(undefined);
+    setWorkspaceFileRequest(undefined);
+    // Project review has no Changes surface; coerce so Files chrome matches content.
+    if (context.kind === "project") setPanel("files");
+  }
 
-  const openFile = useCallback((path: string) => {
-    if (taskId === undefined) return;
-    fileRequestSequence.current += 1;
-    setFileRequest({ path, requestId: fileRequestSequence.current });
-    setPanel("changes");
-    setReviewOpen(true);
-    // A close slide may still be in flight; switch it back to opening.
-    if (panelAnimationRef.current !== null) slidePanelOpen();
-  }, [setReviewOpen, slidePanelOpen, taskId]);
+  const openWorkspaceFile = useCallback(
+    (path: string, line?: number, column?: number) => {
+      if (context.kind === "none") return;
+      workspaceFileRequestSequence.current += 1;
+      setWorkspaceFileRequest({
+        path,
+        requestId: workspaceFileRequestSequence.current,
+        line,
+        column,
+      });
+      setPanel("files");
+      setReviewOpen(true);
+      if (panelAnimationRef.current !== null) slidePanelOpen();
+    },
+    [context.kind, setReviewOpen, slidePanelOpen],
+  );
+
+  const openDiff = useCallback(
+    (path: string, line?: number) => {
+      // Project drafts (and any context without a task) have no Changes surface.
+      if (taskId === undefined) {
+        openWorkspaceFile(path, line);
+        return;
+      }
+      fileRequestSequence.current += 1;
+      setFileRequest({
+        path,
+        requestId: fileRequestSequence.current,
+        line,
+      });
+      setPanel("changes");
+      setReviewOpen(true);
+      // A close slide may still be in flight; switch it back to opening.
+      if (panelAnimationRef.current !== null) slidePanelOpen();
+    },
+    [openWorkspaceFile, setReviewOpen, slidePanelOpen, taskId],
+  );
 
   // The panel mounts collapsed, so opening (or re-opening after a context switch)
   // slides it out to the last settled width instead of snapping the conversation.
@@ -237,18 +304,54 @@ export function WorkspaceReviewLayout({
   };
 
   const controls = (
-    <div role="group" aria-label={t("review.panels")} className="ora-diff-toolbar__view-group flex h-8 shrink-0 items-center gap-0.5 rounded-lg border border-border/70 bg-background/95 p-0.5 shadow-sm backdrop-blur">
+    <div
+      role="group"
+      aria-label={t("review.panels")}
+      className="ora-diff-toolbar__view-group flex h-8 shrink-0 items-center gap-0.5 rounded-lg border border-border/70 bg-background/95 p-0.5 shadow-sm backdrop-blur"
+    >
       {open && (
         <>
           {panel === "changes" && expanded && (
-            <Button size="icon-sm" variant={viewType === "split" ? "secondary" : "ghost"} className="size-7" aria-label={t(viewType === "split" ? "diff.useUnifiedView" : "diff.useSplitView")} onClick={() => setViewType((value) => value === "unified" ? "split" : "unified")}><IconColumns2 /></Button>
-          )}
-          {panel === "changes" && (
-            <Button size="icon-sm" variant={fileTreeOpen ? "secondary" : "ghost"} className="size-7" aria-label={t("diff.toggleFileTree")} onClick={() => setFileTreeOpen((value) => !value)}>
-              {fileTreeOpen ? <IconLayoutSidebarRightCollapse /> : <IconLayoutSidebarRightExpand />}
+            <Button
+              size="icon-sm"
+              variant={viewType === "split" ? "secondary" : "ghost"}
+              className="size-7"
+              aria-label={t(
+                viewType === "split"
+                  ? "diff.useUnifiedView"
+                  : "diff.useSplitView",
+              )}
+              onClick={() =>
+                setViewType((value) =>
+                  value === "unified" ? "split" : "unified",
+                )
+              }
+            >
+              <IconColumns2 />
             </Button>
           )}
-          <Button size="icon-sm" variant={expanded ? "secondary" : "ghost"} className="size-7" aria-label={t(expanded ? "diff.restorePanel" : "diff.expandPanel")} onClick={toggleExpanded}>
+          {panel === "changes" && (
+            <Button
+              size="icon-sm"
+              variant={fileTreeOpen ? "secondary" : "ghost"}
+              className="size-7"
+              aria-label={t("diff.toggleFileTree")}
+              onClick={() => setFileTreeOpen((value) => !value)}
+            >
+              {fileTreeOpen ? (
+                <IconLayoutSidebarRightCollapse />
+              ) : (
+                <IconLayoutSidebarRightExpand />
+              )}
+            </Button>
+          )}
+          <Button
+            size="icon-sm"
+            variant={expanded ? "secondary" : "ghost"}
+            className="size-7"
+            aria-label={t(expanded ? "diff.restorePanel" : "diff.expandPanel")}
+            onClick={toggleExpanded}
+          >
             {expanded ? <IconArrowsMinimize /> : <IconArrowsMaximize />}
           </Button>
           <span className="mx-0.5 h-4 w-px bg-border/70" aria-hidden="true" />
@@ -256,85 +359,139 @@ export function WorkspaceReviewLayout({
       )}
       {context.kind === "task" && (
         <>
-          <PanelButton active={open && panel === "changes"} icon={<IconGitBranch />} label={t("diff.changes")} onClick={() => selectPanel("changes")} />
-          <PanelButton active={open && panel === "files"} icon={<IconFolderOpen />} label={t("files.files")} onClick={() => selectPanel("files")} />
+          <PanelButton
+            active={open && panel === "changes"}
+            icon={<IconGitBranch />}
+            label={t("diff.changes")}
+            onClick={() => selectPanel("changes")}
+          />
+          <PanelButton
+            active={open && panel === "files"}
+            icon={<IconFolderOpen />}
+            label={t("files.files")}
+            onClick={() => selectPanel("files")}
+          />
         </>
       )}
       {context.kind === "project" && (
-        <PanelButton active={open && panel === "files"} icon={<IconFolderOpen />} label={t("files.files")} onClick={() => selectPanel("files")} />
+        <PanelButton
+          active={open && panel === "files"}
+          icon={<IconFolderOpen />}
+          label={t("files.files")}
+          onClick={() => selectPanel("files")}
+        />
       )}
     </div>
   );
 
-  const panelContent = context.kind === "none" ? null : panel === "changes" && context.kind === "task" ? (
-    <TaskDiffView taskId={context.taskId} viewType={viewType} fileTreeOpen={fileTreeOpen} fileRequest={fileRequest} toolbar={controls} onFileTreeOpenChange={setFileTreeOpen} />
-  ) : (
-    <WorkspaceReviewFilesPanel
-      key={contextKey}
-      projectId={context.projectId}
-      projectRootPath={context.projectRootPath}
-      taskId={context.kind === "task" ? context.taskId : undefined}
-      toolbar={controls}
-    />
-  );
-
-  // The group stays mounted while open (even under the expanded overlay) so the
-  // review panel keeps its settled width; only its content yields to the overlay
-  // to avoid mounting the same diff/file surface twice.
-  const workspaceContent = context.kind === "none" || !open ? children : (
-    <ResizablePanelGroup
-      orientation="horizontal"
-      className="min-h-0 min-w-0 flex-1"
-      onLayoutChanged={(_layout, meta) => {
-        if (meta.isUserInteraction) settleReviewAfterResize();
-      }}
-    >
-      <ResizablePanel id="workspace-primary" minSize={360}>{children}</ResizablePanel>
-      <ResizableHandle
-        withHandle
-        aria-label={t("diff.resizePanel")}
-        title={t("diff.resizePanel")}
-        className="z-10 transition-colors hover:bg-ring focus-visible:bg-ring"
-        onPointerDown={() => cancelPanelWidthAnimation(panelAnimationRef)}
+  const panelContent =
+    context.kind === "none" ? null : panel === "changes" &&
+      context.kind === "task" ? (
+      <TaskDiffView
+        key={context.taskId}
+        taskId={context.taskId}
+        viewType={viewType}
+        fileTreeOpen={fileTreeOpen}
+        fileRequest={fileRequest}
+        toolbar={controls}
+        onFileTreeOpenChange={setFileTreeOpen}
+        onFileNotFound={openWorkspaceFile}
       />
-      <ResizablePanel
-        id="workspace-review"
-        panelRef={panelRef}
-        className="ora-review-side-panel"
-        defaultSize={0}
-        // A pixel min would snap scripted slides onto it; the settle callback
-        // restores the effective minimum after the user lets go (workflow pattern).
-        minSize={1}
-        maxSize={MAX_REVIEW_WIDTH}
-        collapsible
-        collapsedSize={0}
-        groupResizeBehavior="preserve-pixel-size"
-        onResize={(size) => {
-          // Scripted slides report intermediate sizes; only settle on stable ones.
-          if (panelAnimationRef.current !== null) return;
-          panelCurrentWidthRef.current = size.inPixels;
-          if (size.inPixels === 0) close();
-          else if (size.inPixels >= MIN_REVIEW_WIDTH) {
-            panelWidthTouchedRef.current = true;
-            panelWidthRef.current = size.inPixels;
-          }
+    ) : (
+      <WorkspaceReviewFilesPanel
+        key={contextKey}
+        projectId={context.projectId}
+        taskId={context.kind === "task" ? context.taskId : undefined}
+        toolbar={controls}
+        fileRequest={workspaceFileRequest}
+      />
+    );
+
+  // Keep the primary workspace under the same panel for the lifetime of a review
+  // context. Switching from a bare child to this group would remount the workspace
+  // when Changes opens and discard local UI state such as the workflow inspector.
+  const workspaceContent =
+    context.kind === "none" || (!open && !preserveWorkspaceOnReviewOpen) ? (
+      children
+    ) : (
+      <ResizablePanelGroup
+        orientation="horizontal"
+        className="min-h-0 min-w-0 flex-1"
+        onLayoutChanged={(_layout, meta) => {
+          if (meta.isUserInteraction) settleReviewAfterResize();
         }}
       >
-        {expanded ? null : panelContent}
-      </ResizablePanel>
-    </ResizablePanelGroup>
-  );
+        <ResizablePanel id="workspace-primary" minSize={360}>
+          {children}
+        </ResizablePanel>
+        <ResizableHandle
+          withHandle
+          aria-label={t("diff.resizePanel")}
+          title={t("diff.resizePanel")}
+          aria-hidden={!open || undefined}
+          className={`z-10 transition-colors hover:bg-ring focus-visible:bg-ring ${open ? "" : "pointer-events-none invisible"}`}
+          onPointerDown={() => cancelPanelWidthAnimation(panelAnimationRef)}
+        />
+        <ResizablePanel
+          id="workspace-review"
+          panelRef={panelRef}
+          className="ora-review-side-panel"
+          defaultSize={0}
+          // A pixel min would snap scripted slides onto it; the settle callback
+          // restores the effective minimum after the user lets go (workflow pattern).
+          minSize={1}
+          maxSize={MAX_REVIEW_WIDTH}
+          collapsible
+          collapsedSize={0}
+          groupResizeBehavior="preserve-pixel-size"
+          onResize={(size) => {
+            // Scripted slides report intermediate sizes; only settle on stable ones.
+            if (panelAnimationRef.current !== null) return;
+            panelCurrentWidthRef.current = size.inPixels;
+            if (size.inPixels === 0 && open) close();
+            else if (size.inPixels >= MIN_REVIEW_WIDTH) {
+              panelWidthTouchedRef.current = true;
+              panelWidthRef.current = size.inPixels;
+            }
+          }}
+        >
+          {open && !expanded ? panelContent : null}
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    );
 
   return (
-    <TaskChangesNavigationProvider onOpenFile={openFile}>
+    <TaskChangesNavigationProvider
+      onOpenDiff={openDiff}
+      onOpenWorkspaceFile={openWorkspaceFile}
+    >
       <div className="relative flex min-h-0 min-w-0 flex-1">
-        {context.kind !== "none" && !open && <div className="absolute right-4 top-2 z-30">{controls}</div>}
+        {context.kind !== "none" && !open && (
+          <div className="absolute right-4 top-2 z-30">{controls}</div>
+        )}
         <div className="relative flex min-h-0 min-w-0 flex-1">
-          <div ref={contentRef} className="flex min-h-0 min-w-0 flex-1" aria-hidden={expanded || undefined} inert={expanded || undefined}>{workspaceContent}</div>
+          <div
+            ref={contentRef}
+            className="flex min-h-0 min-w-0 flex-1"
+            aria-hidden={expanded || undefined}
+            inert={expanded || undefined}
+          >
+            {workspaceContent}
+          </div>
           {context.kind !== "none" && open && expanded && (
             <>
-              <button type="button" aria-label={t("diff.closeExpandedPanel")} className={`ora-review-backdrop absolute inset-0 z-40 bg-background/45 backdrop-blur-[1.5px] ${closing ? "is-closing" : ""}`} onClick={toggleExpanded} />
-              <section aria-label={t("diff.expandedPanel")} className={`ora-review-overlay absolute inset-2 z-50 overflow-hidden rounded-xl border border-border/80 bg-background shadow-[0_24px_90px_rgba(0,0,0,0.32),0_2px_12px_rgba(0,0,0,0.16)] ring-1 ring-foreground/5 dark:shadow-[0_28px_100px_rgba(0,0,0,0.62),0_2px_16px_rgba(0,0,0,0.32)] ${closing ? "is-closing" : ""}`}>{panelContent}</section>
+              <button
+                type="button"
+                aria-label={t("diff.closeExpandedPanel")}
+                className={`ora-review-backdrop absolute inset-0 z-40 bg-background/45 backdrop-blur-[1.5px] ${closing ? "is-closing" : ""}`}
+                onClick={toggleExpanded}
+              />
+              <section
+                aria-label={t("diff.expandedPanel")}
+                className={`ora-review-overlay absolute inset-2 z-50 overflow-hidden rounded-xl border border-border/80 bg-background shadow-[0_24px_90px_rgba(0,0,0,0.32),0_2px_12px_rgba(0,0,0,0.16)] ring-1 ring-foreground/5 dark:shadow-[0_28px_100px_rgba(0,0,0,0.62),0_2px_16px_rgba(0,0,0,0.32)] ${closing ? "is-closing" : ""}`}
+              >
+                {panelContent}
+              </section>
             </>
           )}
         </div>
@@ -343,10 +500,27 @@ export function WorkspaceReviewLayout({
   );
 }
 
-function PanelButton({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) {
+function PanelButton({
+  active,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
   return (
-    <Button size="sm" variant={active ? "secondary" : "ghost"} className="h-7 px-2.5 shadow-none" aria-pressed={active} onClick={onClick}>
-      {icon}<span className="ora-diff-toolbar__view-label">{label}</span>
+    <Button
+      size="sm"
+      variant={active ? "secondary" : "ghost"}
+      className="h-7 px-2.5 shadow-none"
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      {icon}
+      <span className="ora-diff-toolbar__view-label">{label}</span>
     </Button>
   );
 }

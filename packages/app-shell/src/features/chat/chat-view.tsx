@@ -1,15 +1,18 @@
+import type * as acp from "@agentclientprotocol/sdk";
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Composer } from "./composer";
 import { LandingHeading, LandingSuggestions } from "./empty-state";
 import { MessageList } from "./message-list";
+import type { ConversationNavigationPresentation } from "./conversation-navigator";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@ora/ui";
 import type { ChatModelChange, ChatTurn } from "@ora/chat";
-import type { acp, SessionPermissionRequest, Skill } from "@ora/contracts";
+import type { SessionPermissionRequest, Skill } from "@ora/contracts";
 import { useTranslation } from "react-i18next";
 
 interface ChatViewProps {
   taskId?: string;
+  projectId?: string;
   turns: ChatTurn[];
   /** Model switches to draw between the turns they happened after. */
   modelChanges?: ChatModelChange[];
@@ -21,18 +24,23 @@ interface ChatViewProps {
    * A selected session's history is still streaming in. This moves the composer to
    * the thread layout right away — so clicking a session slides it down immediately
    * instead of after the load — and shows a loading indicator where the thread will
-   * be. Kept separate from `turns` because history stages off-store until it is
-   * complete, so `turns` stays empty for the whole load.
+   * be. Kept separate from `turns` because an ordinary replay can begin with no
+   * visible events, while an already-running prompt publishes partial turns as they arrive.
    */
   isLoading?: boolean;
   error: string | null;
   pendingPermissions?: SessionPermissionRequest[];
   disabled?: boolean;
+  /** Hides message composition while retaining the ordinary transcript and trailing actions. */
+  composerVisible?: boolean;
   onSend: (text: string, images?: acp.ImageContent[]) => void;
   /** Fired on Enter with an empty input; used in Spec mode to run the highlighted stage. */
   onEmptySubmit?: () => void;
   onStop?: () => void;
-  onRespondToPermission?: (permissionRequestId: string, optionId: string) => void;
+  onRespondToPermission?: (
+    permissionRequestId: string,
+    optionId: string,
+  ) => void;
   /**
    * Optional strip rendered directly above the composer. Passed in rather than
    * built here so the chat pane stays unaware of workspace entities.
@@ -44,6 +52,10 @@ interface ChatViewProps {
    * workflow state, mirroring `contextBar`.
    */
   workflowBar?: ReactNode;
+  /** Actions overlaid at the lower-right of the composer slot so the composer stays centered. */
+  composerActions?: ReactNode;
+  /** Optional placement and visibility threshold for the shared conversation navigator. */
+  conversationNavigation?: ConversationNavigationPresentation;
   /**
    * Why the composer is disabled, surfaced on hover. Preferred over an inline
    * message for a state the user can fix from the context bar directly above it.
@@ -62,15 +74,42 @@ const SLIDE_EASING = "cubic-bezier(0.32, 0.72, 0, 1)";
  * The right pane. The composer keeps a single DOM node across the empty and
  * thread layouts so sending the first message slides it down to the bottom
  * instead of tearing it down and rebuilding it in the new position.
+ * MessageList is keyed by `taskId` (falling back to `projectId`) so the
+ * per-turn artifact cache cannot leak when the list would otherwise stay
+ * mounted across checkout switches.
  */
-export function ChatView({ taskId, turns, modelChanges, userName, isResponding, isStreaming = false, isLoading = false, error, pendingPermissions = [], disabled = false, onSend, onEmptySubmit, onStop, onRespondToPermission, contextBar, workflowBar, disabledHint, skills = [], availableCommands = [] }: ChatViewProps) {
+export function ChatView({
+  taskId,
+  projectId,
+  turns,
+  modelChanges,
+  userName,
+  isResponding,
+  isStreaming = false,
+  isLoading = false,
+  error,
+  pendingPermissions = [],
+  disabled = false,
+  composerVisible = true,
+  onSend,
+  onEmptySubmit,
+  onStop,
+  onRespondToPermission,
+  contextBar,
+  workflowBar,
+  composerActions,
+  conversationNavigation,
+  disabledHint,
+  skills = [],
+  availableCommands = [],
+}: ChatViewProps) {
   const { t } = useTranslation();
   // A loading session takes the thread layout even before its turns arrive, so the
   // landing (centered) layout is reserved for the genuinely-empty new-task compose
   // state. This is what makes selecting a session slide the composer down at once;
   // because `isEmpty` then flips true→false a single time and stays false through
   // load completion, the FLIP effect below fires exactly once.
-  const isEmpty = turns.length === 0 && !isLoading;
+  const isEmpty = composerVisible && turns.length === 0 && !isLoading;
   const composerSlotRef = useRef<HTMLDivElement>(null);
   // Where the composer sat at the last commit, used as the FLIP origin. Only the
   // landing layout records it, because that is the only position it moves from.
@@ -103,13 +142,18 @@ export function ChatView({ taskId, turns, modelChanges, userName, isResponding, 
     const deltaY = origin - slot.getBoundingClientRect().top;
     if (deltaY === 0) return;
     slot.animate(
-      [{ transform: `translateY(${deltaY}px)` }, { transform: "translateY(0)" }],
+      [
+        { transform: `translateY(${deltaY}px)` },
+        { transform: "translateY(0)" },
+      ],
       { duration: SLIDE_DURATION_MS, easing: SLIDE_EASING },
     );
   });
 
   return (
-    <main className={`flex min-h-0 flex-1 flex-col bg-background ${isEmpty ? "overflow-y-auto" : ""}`}>
+    <main
+      className={`flex min-h-0 flex-1 flex-col bg-background ${isEmpty ? "overflow-y-auto" : ""}`}
+    >
       {isEmpty ? (
         // `mt-auto` here and `mb-auto` on the composer slot split the free space
         // evenly, centring the pair. Auto margins collapse to 0 once the content
@@ -119,30 +163,63 @@ export function ChatView({ taskId, turns, modelChanges, userName, isResponding, 
             <LandingHeading />
           </div>
         </div>
-      ) : turns.length === 0 ? (
+      ) : turns.length === 0 && isLoading ? (
         // Thread layout with no turns yet: history is still loading. The composer
         // has already slid down, so this fills the space above it until turns land.
         <HistoryLoading />
+      ) : turns.length === 0 ? (
+        <HistoryEmpty />
       ) : (
-        <MessageList turns={turns} modelChanges={modelChanges} userName={userName} isResponding={isResponding} />
+        <MessageList
+          key={taskId ?? projectId ?? "draft"}
+          turns={turns}
+          modelChanges={modelChanges}
+          userName={userName}
+          isResponding={isResponding}
+          taskId={taskId}
+          projectId={projectId}
+          conversationNavigation={conversationNavigation}
+        />
       )}
 
       <div
         ref={composerSlotRef}
         className={
           isEmpty
-            ? "mb-auto w-full px-3 pb-10 sm:px-6"
-            // Gradient fade so the thread dissolves under the composer instead of hard-clipping.
-            : "shrink-0 bg-gradient-to-t from-background via-background to-transparent px-3 pb-4 pt-6 sm:px-5"
+            ? "relative mb-auto w-full px-3 pb-10 sm:px-6"
+            : // Gradient fade so the thread dissolves under the composer instead of hard-clipping.
+              "relative shrink-0 bg-gradient-to-t from-background via-background to-transparent px-3 pb-4 pt-6 sm:px-5"
         }
       >
-        <div className="mx-auto w-full max-w-[760px]">
-          {error && <p role="alert" data-selectable className="mb-2 px-1 text-xs text-destructive">{error}</p>}
+        {/* Keep the composer centred at its normal 760px cap. Below the width where the trailing
+            actions would overlap it, reserve the same clearance on both sides: the input narrows
+            without either shifting off-centre or sharing space with the action buttons. */}
+        <div
+          className={`mx-auto max-w-[760px] ${
+            composerActions ? "w-[calc(100%_-_13rem)]" : "w-full"
+          }`}
+        >
+          {error && (
+            <p
+              role="alert"
+              data-selectable
+              className="mb-2 px-1 text-xs text-destructive"
+            >
+              {error}
+            </p>
+          )}
           {pendingPermissions.map((request) => (
-            <section key={request.permissionRequestId} className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-              <p className="text-xs font-medium">{t("chat.permissionRequired")}</p>
+            <section
+              key={request.permissionRequestId}
+              className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3"
+            >
+              <p className="text-xs font-medium">
+                {t("chat.permissionRequired")}
+              </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {request.toolCall.title ?? request.toolCall.kind ?? t("chat.permissionFallback")}
+                {request.toolCall.title ??
+                  request.toolCall.kind ??
+                  t("chat.permissionFallback")}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {request.options.map((option) => (
@@ -150,8 +227,15 @@ export function ChatView({ taskId, turns, modelChanges, userName, isResponding, 
                     key={option.optionId}
                     type="button"
                     size="sm"
-                    variant={option.kind.startsWith("reject") ? "outline" : "default"}
-                    onClick={() => onRespondToPermission?.(request.permissionRequestId, option.optionId)}
+                    variant={
+                      option.kind.startsWith("reject") ? "outline" : "default"
+                    }
+                    onClick={() =>
+                      onRespondToPermission?.(
+                        request.permissionRequestId,
+                        option.optionId,
+                      )
+                    }
                   >
                     {option.name}
                   </Button>
@@ -160,12 +244,15 @@ export function ChatView({ taskId, turns, modelChanges, userName, isResponding, 
             </section>
           ))}
           {contextBar && (
-            <div data-slot="composer-context" className="mb-1 flex h-6 items-center px-1">
+            <div
+              data-slot="composer-context"
+              className="mb-1 flex h-6 items-center px-1"
+            >
               {contextBar}
             </div>
           )}
           {workflowBar}
-          {/* The hint hangs off a wrapper because a disabled textarea swallows the
+          {/* The hint hangs off a wrapper because a disabled composer swallows the
               pointer events a trigger needs. The wrapper stays mounted whether or not
               there is a hint: swapping it out would remount the composer and throw
               away whatever the user had already typed. Tracking the cursor keeps the
@@ -175,16 +262,45 @@ export function ChatView({ taskId, turns, modelChanges, userName, isResponding, 
               under the pointer when a thread opens, which leaves no pointerleave
               behind, so an enabled tooltip would still believe it is hovered and pop
               open the moment a hint reappears. */}
-          <Tooltip trackCursorAxis="both" disabled={disabledHint === undefined}>
-            <TooltipTrigger render={<div />}>
-              <Composer taskId={taskId} autoFocus onSend={onSend} onEmptySubmit={onEmptySubmit} onStop={onStop} isResponding={isResponding} isStreaming={isStreaming} disabled={disabled} skills={skills} availableCommands={availableCommands} />
-            </TooltipTrigger>
-            <TooltipContent sideOffset={12}>{disabledHint}</TooltipContent>
-          </Tooltip>
-          {isEmpty && (
-            <LandingSuggestions onSend={onSend} isResponding={isResponding} disabled={disabled} />
+          {composerVisible && (
+            <Tooltip
+              trackCursorAxis="both"
+              disabled={disabledHint === undefined}
+            >
+              <TooltipTrigger render={<div />}>
+                <Composer
+                  taskId={taskId}
+                  projectId={projectId}
+                  autoFocus
+                  onSend={onSend}
+                  onEmptySubmit={onEmptySubmit}
+                  onStop={onStop}
+                  isResponding={isResponding}
+                  isStreaming={isStreaming}
+                  disabled={disabled}
+                  skills={skills}
+                  availableCommands={availableCommands}
+                />
+              </TooltipTrigger>
+              <TooltipContent sideOffset={12}>{disabledHint}</TooltipContent>
+            </Tooltip>
+          )}
+          {composerVisible && isEmpty && (
+            <LandingSuggestions
+              onSend={onSend}
+              isResponding={isResponding}
+              disabled={disabled}
+            />
           )}
         </div>
+        {composerActions && (
+          <div
+            data-slot="composer-actions"
+            className={`absolute z-10 flex items-center gap-2 ${isEmpty ? "bottom-10 right-3 sm:right-6" : "bottom-4 right-3 sm:right-5"}`}
+          >
+            {composerActions}
+          </div>
+        )}
       </div>
     </main>
   );
@@ -203,6 +319,16 @@ function HistoryLoading() {
         <IconLoader2 className="size-4 animate-spin" />
         <span className="text-sm">{t("chat.loadingHistory")}</span>
       </div>
+    </div>
+  );
+}
+
+/** Keeps a read-only loaded session in the thread layout when it has no recorded turns. */
+function HistoryEmpty() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
+      {t("chat.emptyHistory")}
     </div>
   );
 }

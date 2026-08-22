@@ -2,12 +2,12 @@ use crate::assembler::AssembledRecord;
 use crate::clock::FixedHistoryClock;
 use crate::error::HistoryError;
 use crate::path::history_path;
-use crate::reader::read_session_history;
+use crate::reader::{HistoryIntegrity, read_session_history, read_session_history_up_to};
 use crate::record::{HistoryLine, HistoryRecord, SCHEMA_VERSION, SessionMeta};
 use crate::writer::{HistoryWriter, remove_session_history};
-use ora_contracts::acp::content::{ContentBlock, TextContent};
-use ora_contracts::acp::prompt::StopReason;
-use ora_contracts::acp::session::{ContentChunk, SessionUpdate};
+use agent_client_protocol_schema::v1::StopReason;
+use agent_client_protocol_schema::v1::{ContentBlock, TextContent};
+use agent_client_protocol_schema::v1::{ContentChunk, SessionUpdate};
 use ora_domain::AgentCli;
 use pretty_assertions::assert_eq;
 use std::path::{Path, PathBuf};
@@ -30,8 +30,8 @@ fn writer(root: &Path) -> HistoryWriter<FixedHistoryClock> {
 
 fn message(text: &str) -> HistoryRecord {
     HistoryRecord::Update {
-        update: SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
-            TextContent::new(text),
+        update: Box::new(SessionUpdate::AgentMessageChunk(ContentChunk::new(
+            ContentBlock::Text(TextContent::new(text)),
         ))),
     }
 }
@@ -64,7 +64,30 @@ fn reports_an_empty_history_for_a_session_that_was_never_written() {
 
     assert_eq!(history.lines, vec![]);
     assert_eq!(history.next_seq, 0);
-    assert_eq!(history.dropped_lines, 0);
+    assert_eq!(history.integrity, HistoryIntegrity::Complete);
+}
+
+#[test]
+fn reads_only_the_durable_prefix_up_to_a_byte_cutoff() {
+    let root = tempfile::tempdir().expect("create history root");
+    let writer = writer(root.path());
+    writer
+        .append_record(0, message("first"))
+        .expect("append first");
+    let cutoff = writer.durable_bytes();
+    writer
+        .append_record(1, message("second"))
+        .expect("append second");
+
+    // Reading up to the cutoff returns only the first record, not the later append.
+    let prefix = read_session_history_up_to(root.path(), SESSION_ID, cutoff).expect("read prefix");
+    assert_eq!(prefix.lines.len(), 1);
+    assert_eq!(prefix.next_seq, 1);
+
+    // Reading the whole file returns both.
+    let full = read_session_history(root.path(), SESSION_ID).expect("read full");
+    assert_eq!(full.lines.len(), 2);
+    assert_eq!(full.next_seq, 2);
 }
 
 #[test]
@@ -75,7 +98,7 @@ fn round_trips_appended_records_in_conversation_order() {
         schema_version: SCHEMA_VERSION,
         session_id: SESSION_ID.to_string(),
         task_id: "task-1".to_string(),
-        agent_cli: AgentCli::OpenCode,
+        agent_ref: AgentCli::Nga.agent_ref(),
         agent_session_id: "provider-1".to_string(),
         cwd: PathBuf::from("/repo"),
     });
@@ -181,7 +204,7 @@ fn discards_a_final_line_left_unfinished_by_an_interrupted_write() {
             message("complete"),
         )],
     );
-    assert_eq!(history.dropped_lines, 0);
+    assert_eq!(history.integrity, HistoryIntegrity::Complete);
 }
 
 #[test]
@@ -203,7 +226,12 @@ fn counts_a_damaged_line_that_is_not_the_interrupted_tail() {
             HistoryLine::new(expected_timestamp(), 1, message("after")),
         ],
     );
-    assert_eq!(history.dropped_lines, 1);
+    assert_eq!(
+        history.integrity,
+        HistoryIntegrity::Damaged {
+            unreadable_lines: std::num::NonZeroUsize::new(1).expect("one is non-zero"),
+        },
+    );
 }
 
 #[test]

@@ -11,26 +11,38 @@ import {
 } from "@ora/workflow-runtime";
 import { useContractsClient } from "../../contracts-client-context";
 import { isTerminalRunStatus } from "../../features/workflow-run/run-status-style";
+import { useWorkspaceSelectionStore } from "../stores/workspace-selection-store";
 import type { WorkflowRunSummary } from "@ora/contracts";
+import { activeLocale } from "../../i18n/i18n-instance";
 
-const runsByWorkflowKey = (workflowId: string) => ["workflowRun", "byWorkflow", workflowId] as const;
-const runsByProjectKey = (projectId: string) => ["workflowRun", "byProject", projectId] as const;
-const runDetailKey = (runId: string) => ["workflowRun", "detail", runId] as const;
+const runsByWorkflowKey = (workflowId: string) =>
+  ["workflowRun", "byWorkflow", workflowId] as const;
+const runsByProjectKey = (projectId: string) =>
+  ["workflowRun", "byProject", projectId] as const;
+const runDetailKey = (runId: string) =>
+  ["workflowRun", "detail", runId] as const;
 
 /** True while any run in the list is still pending or executing, so list views can poll. */
 function hasActiveRun(runs: WorkflowRunSummary[] | undefined): boolean {
-  return runs?.some((run) => run.status === "pending" || run.status === "running") ?? false;
+  return (
+    runs?.some((run) => run.status === "pending" || run.status === "running") ??
+    false
+  );
 }
 
 /**
  * Lists the runs of one workflow so the deploy dialog can derive the projects the
  * workflow already runs in (a run-task's project is the deploy target).
  */
-export function useWorkflowRunsByWorkflow(workflowId: string | null | undefined) {
+export function useWorkflowRunsByWorkflow(
+  workflowId: string | null | undefined,
+) {
   const client = useContractsClient();
   return useQuery({
     queryKey: runsByWorkflowKey(workflowId ?? ""),
-    queryFn: async () => (await client.workflowRun.listByWorkflow({ workflowId: workflowId! })).runs,
+    queryFn: async () =>
+      (await client.workflowRun.listByWorkflow({ workflowId: workflowId! }))
+        .runs,
     enabled: workflowId != null && workflowId !== "",
     // Completion is backend-driven with no frontend event, so poll while any run is active.
     refetchInterval: (query) => (hasActiveRun(query.state.data) ? 4000 : false),
@@ -42,7 +54,8 @@ export function useWorkflowRunsByProject(projectId: string | null | undefined) {
   const client = useContractsClient();
   return useQuery({
     queryKey: runsByProjectKey(projectId ?? ""),
-    queryFn: async () => (await client.workflowRun.list({ projectId: projectId! })).runs,
+    queryFn: async () =>
+      (await client.workflowRun.list({ projectId: projectId! })).runs,
     enabled: projectId != null && projectId !== "",
     // Completion is backend-driven with no frontend event, so poll while any run is active.
     refetchInterval: (query) => (hasActiveRun(query.state.data) ? 4000 : false),
@@ -59,15 +72,27 @@ export function useCreateWorkflowRun() {
       workflowId: string;
       name: string;
       baseBranch?: string;
-    }) => client.workflowRun.create(input),
+    }) => client.workflowRun.create({ ...input, locale: activeLocale() }),
     onSuccess: (_result, variables) => {
-      void queryClient.invalidateQueries({ queryKey: runsByProjectKey(variables.projectId) });
-      void queryClient.invalidateQueries({ queryKey: runsByWorkflowKey(variables.workflowId) });
+      void queryClient.invalidateQueries({
+        queryKey: runsByProjectKey(variables.projectId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: runsByWorkflowKey(variables.workflowId),
+      });
     },
   });
 }
 
-/** Soft-deletes one non-active workflow run and refreshes its project's run list. */
+/**
+ * Soft-deletes one non-active workflow run and refreshes its project's run list.
+ *
+ * If the deleted run is the one open in the workspace, its selection must be
+ * retired too: `WorkspaceView` renders the run view for any non-null
+ * `workflowRunId`, and without a clear the graph would linger over the project
+ * after the sidebar row is gone. Mirrors the mock-engine delete, which clears
+ * the same selection leg.
+ */
 export function useDeleteWorkflowRun() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
@@ -76,7 +101,18 @@ export function useDeleteWorkflowRun() {
       client.workflowRun.delete({ runId: input.runId }),
     onSuccess: (_result, variables) => {
       if (variables.projectId != null) {
-        void queryClient.invalidateQueries({ queryKey: runsByProjectKey(variables.projectId) });
+        void queryClient.invalidateQueries({
+          queryKey: runsByProjectKey(variables.projectId),
+        });
+      }
+      // The run no longer exists; drop its detail cache so nothing can resurrect
+      // a stale graph after the selection clear unmounts the run workspace.
+      queryClient.removeQueries({ queryKey: runDetailKey(variables.runId) });
+      const selection = useWorkspaceSelectionStore.getState().selection;
+      if (selection.workflowRunId === variables.runId) {
+        useWorkspaceSelectionStore
+          .getState()
+          .clearWorkflowRunSelection(selection.projectId ?? "");
       }
     },
   });
@@ -89,7 +125,9 @@ export function useStartWorkflowRun() {
   return useMutation({
     mutationFn: (input: { runId: string }) => client.workflowRun.start(input),
     onSuccess: (_result, variables) => {
-      void queryClient.invalidateQueries({ queryKey: runDetailKey(variables.runId) });
+      void queryClient.invalidateQueries({
+        queryKey: runDetailKey(variables.runId),
+      });
     },
   });
 }
@@ -101,7 +139,9 @@ export function useCancelWorkflowRun() {
   return useMutation({
     mutationFn: (input: { runId: string }) => client.workflowRun.cancel(input),
     onSuccess: (_result, variables) => {
-      void queryClient.invalidateQueries({ queryKey: runDetailKey(variables.runId) });
+      void queryClient.invalidateQueries({
+        queryKey: runDetailKey(variables.runId),
+      });
     },
   });
 }
@@ -113,7 +153,9 @@ export function useRestartWorkflowRun() {
   return useMutation({
     mutationFn: (input: { runId: string }) => client.workflowRun.restart(input),
     onSuccess: (_result, variables) => {
-      void queryClient.invalidateQueries({ queryKey: runDetailKey(variables.runId) });
+      void queryClient.invalidateQueries({
+        queryKey: runDetailKey(variables.runId),
+      });
     },
   });
 }
@@ -124,10 +166,32 @@ export function useUpdateWorkflowRunInput() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: { runId: string; input: string }) =>
-      client.workflowRun.updateInput({ runId: input.runId, input: input.input }),
+      client.workflowRun.updateInput({
+        runId: input.runId,
+        input: input.input,
+      }),
     onSuccess: (_result, variables) => {
-      void queryClient.invalidateQueries({ queryKey: runDetailKey(variables.runId) });
+      void queryClient.invalidateQueries({
+        queryKey: runDetailKey(variables.runId),
+      });
     },
+  });
+}
+
+/** Completes one awaiting interactive node so the workflow advances. */
+export function useCompleteWorkflowNode() {
+  const client = useContractsClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { runId: string; nodeId: string }) =>
+      client.workflowRun.completeNode({
+        runId: input.runId,
+        nodeId: input.nodeId,
+      }),
+    onSuccess: (_result, variables) =>
+      queryClient.invalidateQueries({
+        queryKey: runDetailKey(variables.runId),
+      }),
   });
 }
 
@@ -135,22 +199,45 @@ export function useUpdateWorkflowRunInput() {
  * Renames one persisted workflow run through its run-task title.
  *
  * The run's display name is the run-task title, so the adapter resolves the run-task id
- * from the run detail and updates the task while preserving its status.
+ * from the run detail and updates that task.
  */
 export function useRenameWorkflowRun() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { runId: string; name: string }) => {
+    mutationFn: async (input: {
+      runId: string;
+      name: string;
+      projectId?: string;
+    }) => {
       const detail = await client.workflowRun.get({ runId: input.runId });
-      const task = await client.task.get({ taskId: detail.taskId });
       await client.task.update({
         taskId: detail.taskId,
         title: input.name,
-        status: task.task.status,
       });
-      void queryClient.invalidateQueries({ queryKey: runDetailKey(input.runId) });
-      return input.name;
+      return input;
+    },
+    onSuccess: (_result, variables) => {
+      if (variables.projectId) {
+        queryClient.setQueryData<WorkflowRunSummary[]>(
+          runsByProjectKey(variables.projectId),
+          (current) =>
+            current?.map((run) =>
+              run.id === variables.runId
+                ? { ...run, name: variables.name }
+                : run,
+            ),
+        );
+      }
+      void queryClient.invalidateQueries({
+        queryKey: runDetailKey(variables.runId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["workflowRun", "byProject"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["workflowRun", "byWorkflow"],
+      });
     },
   });
 }
@@ -179,7 +266,9 @@ export function useRealWorkflowRun(runId: string | null | undefined) {
     enabled: runId != null && runId !== "",
     // Poll while the run is still executing so status, node states, and reasons stay live.
     refetchInterval: (query) =>
-      isTerminalRunStatus(query.state.data?.run?.status ?? "pending") ? false : 1500,
+      isTerminalRunStatus(query.state.data?.run?.status ?? "pending")
+        ? false
+        : 1500,
   });
 }
 
@@ -192,8 +281,19 @@ export type RealWorkflowRunDetail = {
 /** Projects a persisted run detail onto the Theater/Overview display model. */
 export function buildDisplayRun(
   detail: {
-    run: { id: string; workflowId: string; status: string; state: string | null; input: string | null; startedAt: bigint | null; finishedAt: bigint | null; createdAt: bigint; updatedAt: bigint };
+    run: {
+      id: string;
+      workflowId: string;
+      status: string;
+      state: string | null;
+      input: string | null;
+      startedAt: bigint | null;
+      finishedAt: bigint | null;
+      createdAt: bigint;
+      updatedAt: bigint;
+    };
     name: string;
+    projectId: string;
     nodes: Array<{
       nodeId: string;
       status: string;
@@ -213,13 +313,14 @@ export function buildDisplayRun(
   // the value on the run, not on the frozen snapshot, so overlay the committed run input on the
   // start node (falling back to the snapshot instruction until an input has been saved).
   const kickoffInput = detail.run.input;
-  const nodes = kickoffInput != null
-    ? envelope.nodes.map((node) => (
-      node.data.kind === "start"
-        ? { ...node, data: { ...node.data, instruction: kickoffInput } }
-        : node
-    ))
-    : envelope.nodes;
+  const nodes =
+    kickoffInput != null
+      ? envelope.nodes.map((node) =>
+          node.data.kind === "start"
+            ? { ...node, data: { ...node.data, instruction: kickoffInput } }
+            : node,
+        )
+      : envelope.nodes;
   const definitionSnapshot: WorkflowDefinition = {
     id: detail.run.workflowId,
     name: detail.name,
@@ -229,51 +330,78 @@ export function buildDisplayRun(
     nodes,
     edges: envelope.edges,
   };
-  const nodeRunByNodeId = new Map(detail.nodes.map((node) => [node.nodeId, node]));
+  const nodeRunByNodeId = new Map(
+    detail.nodes.map((node) => [node.nodeId, node]),
+  );
   const nodeStates: Record<string, GraphWorkflowNodeState> = {};
   for (const node of definitionSnapshot.nodes) {
     const nodeRun = nodeRunByNodeId.get(node.id) ?? null;
-    const payload = nodeRun?.payload != null ? parseNodePayload(nodeRun.payload) : null;
-    const conversation = nodeRun?.output != null
-      ? conversationFromNodeOutput(
-        nodeRun.output,
-        detail.run.id,
-        node.id,
-        nodeRun.sessionId ?? undefined,
-        nodeRun.startedAt != null ? Number(nodeRun.startedAt) : undefined,
-      )
-      : undefined;
+    const payload =
+      nodeRun?.payload != null ? parseNodePayload(nodeRun.payload) : null;
+    const conversation =
+      nodeRun?.output != null
+        ? conversationFromNodeOutput(
+            nodeRun.output,
+            detail.run.id,
+            node.id,
+            nodeRun.sessionId ?? undefined,
+            nodeRun.startedAt != null ? Number(nodeRun.startedAt) : undefined,
+          )
+        : undefined;
     nodeStates[node.id] = {
       status: projectNodeStatus(
-        nodeRun as { status: "pending" | "running" | "succeeded" | "failed" | "cancelled" } | null,
+        nodeRun as {
+          status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+        } | null,
       ),
       ...(nodeRun?.sessionId != null && nodeRun.sessionId !== ""
         ? { sessionId: nodeRun.sessionId }
         : {}),
-      ...(nodeRun?.startedAt != null ? { startedAt: toIso(nodeRun.startedAt) } : {}),
-      ...(nodeRun?.finishedAt != null ? { finishedAt: toIso(nodeRun.finishedAt) } : {}),
+      ...(nodeRun?.startedAt != null
+        ? { startedAt: toIso(nodeRun.startedAt) }
+        : {}),
+      ...(nodeRun?.finishedAt != null
+        ? { finishedAt: toIso(nodeRun.finishedAt) }
+        : {}),
       ...(nodeRun?.error != null ? { errorMessage: nodeRun.error } : {}),
-      ...(payload?.stop_reason != null ? { stopReason: payload.stop_reason } : {}),
+      ...(payload?.stop_reason != null
+        ? { stopReason: payload.stop_reason }
+        : {}),
       ...(payload?.file_changes != null && payload.file_changes.length > 0
         ? { fileChanges: payload.file_changes }
         : {}),
-      ...(nodeRun?.output != null ? { output: { summary: nodeRun.output } } : {}),
-      ...(conversation != null && conversation.length > 0 ? { conversation } : {}),
+      ...(nodeRun?.output != null
+        ? { output: { summary: nodeRun.output } }
+        : {}),
+      ...(conversation != null && conversation.length > 0
+        ? { conversation }
+        : {}),
     };
   }
   return {
     id: detail.run.id,
-    projectId: "",
+    projectId: detail.projectId,
     definitionId: detail.run.workflowId,
     definitionSnapshot,
     name: detail.name,
-    status: projectRunStatus(detail.run.status as "pending" | "running" | "succeeded" | "failed" | "cancelled", currentNodes),
+    status: projectRunStatus(
+      detail.run.status as
+        | "pending"
+        | "running"
+        | "succeeded"
+        | "failed"
+        | "cancelled"
+        | "awaitingInput",
+      currentNodes,
+    ),
     kickoffInput: kickoffInput ?? undefined,
     nodeStates,
     openHitls: [],
     createdAt: toIso(detail.run.createdAt),
     updatedAt: toIso(detail.run.updatedAt),
-    ...(detail.run.finishedAt != null ? { finishedAt: toIso(detail.run.finishedAt) } : {}),
+    ...(detail.run.finishedAt != null
+      ? { finishedAt: toIso(detail.run.finishedAt) }
+      : {}),
   };
 }
 
@@ -292,15 +420,18 @@ function conversationFromNodeOutput(
   baseMs: number | undefined,
 ): WorkflowNodeConversationItem[] {
   try {
-    const entries = JSON.parse(output) as Array<{ role?: unknown; text?: unknown }>;
+    const entries = JSON.parse(output) as Array<{
+      role?: unknown;
+      text?: unknown;
+    }>;
     const startMs = baseMs ?? 0;
     let index = 0;
     const items: WorkflowNodeConversationItem[] = [];
     for (const entry of entries) {
       if (
-        (entry.role !== "user" && entry.role !== "assistant")
-        || typeof entry.text !== "string"
-        || entry.text.trim() === ""
+        (entry.role !== "user" && entry.role !== "assistant") ||
+        typeof entry.text !== "string" ||
+        entry.text.trim() === ""
       ) {
         continue;
       }
@@ -327,33 +458,39 @@ function conversationFromNodeOutput(
 
 /** Reads the ACP stop reason and file changes from a node run's `payload` JSON,
  * tolerating malformed payloads. */
-function parseNodePayload(
-  payload: string,
-): {
+function parseNodePayload(payload: string): {
   stop_reason?: string;
   file_changes?: WorkflowNodeFileChange[];
 } | null {
   try {
     const value = JSON.parse(payload) as {
       stop_reason?: unknown;
-      file_changes?: Array<{ path?: unknown; additions?: unknown; deletions?: unknown }>;
+      file_changes?: Array<{
+        path?: unknown;
+        additions?: unknown;
+        deletions?: unknown;
+      }>;
     };
     return {
-      ...(typeof value.stop_reason === "string" ? { stop_reason: value.stop_reason } : {}),
+      ...(typeof value.stop_reason === "string"
+        ? { stop_reason: value.stop_reason }
+        : {}),
       ...(Array.isArray(value.file_changes)
         ? {
-          file_changes: value.file_changes.flatMap((change) => (
-            typeof change.path === "string"
-            && typeof change.additions === "number"
-            && typeof change.deletions === "number"
-              ? [{
-                path: change.path,
-                additions: change.additions,
-                deletions: change.deletions,
-              }]
-              : []
-          )),
-        }
+            file_changes: value.file_changes.flatMap((change) =>
+              typeof change.path === "string" &&
+              typeof change.additions === "number" &&
+              typeof change.deletions === "number"
+                ? [
+                    {
+                      path: change.path,
+                      additions: change.additions,
+                      deletions: change.deletions,
+                    },
+                  ]
+                : [],
+            ),
+          }
         : {}),
     };
   } catch {
@@ -369,7 +506,9 @@ function parseCurrentNodes(state: string | null): string[] {
   try {
     const parsed: unknown = JSON.parse(state);
     const nodes = (parsed as { current_nodes?: unknown })?.current_nodes;
-    return Array.isArray(nodes) ? nodes.filter((node): node is string => typeof node === "string") : [];
+    return Array.isArray(nodes)
+      ? nodes.filter((node): node is string => typeof node === "string")
+      : [];
   } catch {
     return [];
   }

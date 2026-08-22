@@ -7,6 +7,7 @@ use ts_rs::TS;
 #[ts(export_to = "workflow.ts")]
 pub struct Workflow {
     pub id: String,
+    pub namespace: String,
     pub name: String,
     pub published_snapshot_id: Option<String>,
     pub created_at: i64,
@@ -32,6 +33,7 @@ pub struct WorkflowSnapshot {
 #[ts(export_to = "workflow.ts")]
 pub struct WorkflowSummary {
     pub id: String,
+    pub namespace: String,
     pub name: String,
     pub published_version: Option<String>,
     pub created_at: i64,

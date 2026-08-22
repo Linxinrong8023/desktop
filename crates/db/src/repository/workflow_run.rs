@@ -1,8 +1,11 @@
-use ora_application::{DeleteWorkflowRunResult, RepositoryError, WorkflowRunRepository};
+use ora_application::{
+    DeleteWorkflowRunResult, RepositoryError, WorkflowRunCreateOutcome, WorkflowRunRepository,
+};
 use ora_domain::{
     AuditFields, ProjectId, SessionId, SessionStatus, Task, TaskId, WorkflowId, WorkflowNodeRun,
     WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRun, WorkflowRunDetail, WorkflowRunId,
     WorkflowRunStatus, WorkflowRunSummary, WorkflowSnapshotId, Worktree, WorktreeBaseline,
+    WorktreeProvisioningLeaseId,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, TransactionBehavior, params};
 
@@ -27,11 +30,26 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
         run: WorkflowRun,
         task: Task,
         worktree: Worktree,
-    ) -> Result<WorkflowRun, RepositoryError> {
+        lease_id: &WorktreeProvisioningLeaseId,
+    ) -> Result<WorkflowRunCreateOutcome, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
+                // Same atomic-finish contract as ordinary task creation: a run
+                // must not become visible under a project a cascade already
+                // removed, and its provisioning lease dies with this commit.
+                let project_visible = transaction
+                    .query_row(
+                        "SELECT 1 FROM projects WHERE id = ?1 AND is_deleted = 0",
+                        params![task.project_id.as_ref()],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if !project_visible {
+                    return Ok(WorkflowRunCreateOutcome::ProjectNotVisible);
+                }
                 // The run row must precede the task row: `tasks.workflow_run_id` is an immediate
                 // foreign key on `workflow_runs`, so the parent row has to exist first.
                 transaction.execute(
@@ -55,13 +73,12 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
                     ],
                 )?;
                 transaction.execute(
-                    "INSERT INTO tasks (id, project_id, title, status, type, workflow_run_id, worktree_id, created_at, updated_at, is_deleted)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    "INSERT INTO tasks (id, project_id, title, type, workflow_run_id, worktree_id, created_at, updated_at, is_deleted)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         task.id.as_ref(),
                         task.project_id.as_ref(),
                         &task.title,
-                        task.status.database_value(),
                         task.task_type.database_value(),
                         task.workflow_run_id.as_ref().map(AsRef::as_ref),
                         task.worktree_id.as_ref().map(AsRef::as_ref),
@@ -71,12 +88,13 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
                     ],
                 )?;
                 transaction.execute(
-                    "INSERT INTO worktrees (id, task_id, branch_name, base_commit_id, is_active, created_at, updated_at, is_deleted)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    "INSERT INTO worktrees (id, task_id, branch_name, checkout_root, base_commit_id, is_active, created_at, updated_at, is_deleted)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         worktree.id.as_ref(),
                         worktree.task_id.as_ref(),
                         worktree.branch_name.as_deref(),
+                        worktree.checkout_root.as_deref(),
                         baseline_value(&worktree.baseline),
                         worktree.activity.database_value(),
                         worktree.audit_fields.created_at,
@@ -84,8 +102,12 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
                         bool_to_sqlite(worktree.audit_fields.is_deleted),
                     ],
                 )?;
+                transaction.execute(
+                    "DELETE FROM worktree_provisioning_leases WHERE id = ?1",
+                    params![lease_id.as_ref()],
+                )?;
                 transaction.commit()?;
-                Ok(run)
+                Ok(WorkflowRunCreateOutcome::Created(Box::new(run)))
             })
             .map_err(workflow_run_repository_error_from_database)
     }
@@ -122,14 +144,20 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
                         None => return Ok(None),
                     }
                 };
-                // The display name and task id live on the run-task; a run created through
-                // create_run always has one, so an absent row degrades to empty values rather
-                // than corruption.
-                let (task_id, name) = connection
+                // The display name, task id, and owning project live on the run-task; a run
+                // created through create_run always has one, so an absent row degrades to empty
+                // values rather than corruption.
+                let (task_id, name, project_id) = connection
                     .query_row(
-                        "SELECT id, title FROM tasks WHERE workflow_run_id = ?1 AND is_deleted = 0",
+                        "SELECT id, title, project_id FROM tasks WHERE workflow_run_id = ?1 AND is_deleted = 0",
                         params![run_id.as_ref()],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                            ))
+                        },
                     )
                     .optional()?
                     .unwrap_or_default();
@@ -137,6 +165,7 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
                 Ok(Some(WorkflowRunDetail {
                     run,
                     name,
+                    project_id: ProjectId::new(project_id),
                     task_id: TaskId::new(task_id),
                     nodes,
                 }))
@@ -151,13 +180,15 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
-                    "SELECT wr.id, t.title AS name, t.project_id, wr.workflow_id, wr.run_status, wr.started_at, wr.finished_at, wr.created_at
+                    "SELECT wr.id, t.title AS name, t.project_id, wr.workflow_id, wr.run_status, wr.started_at, wr.finished_at, wr.created_at,
+                       EXISTS(SELECT 1 FROM workflow_node_runs n WHERE n.run_id = wr.id AND n.status = ?2 AND n.is_deleted = 0) AS has_awaiting_node
                      FROM workflow_runs wr
                      JOIN tasks t ON t.workflow_run_id = wr.id AND t.is_deleted = 0
                      WHERE t.project_id = ?1 AND wr.is_deleted = 0
                      ORDER BY wr.created_at ASC, wr.id ASC",
                 )?;
-                let mut rows = statement.query(params![project_id.as_ref()])?;
+                let mut rows = statement
+                    .query(params![project_id.as_ref(), WorkflowNodeStatus::Pending.database_value()])?;
                 let mut summaries = Vec::new();
                 while let Some(row) = rows.next()? {
                     summaries.push(WorkflowRunSummary {
@@ -166,6 +197,7 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
                         project_id: ProjectId::new(row.get::<_, String>("project_id")?),
                         workflow_id: WorkflowId::new(row.get::<_, String>("workflow_id")?),
                         status: WorkflowRunStatus::from_database_value(row.get("run_status")?)?,
+                        has_awaiting_node: row.get("has_awaiting_node")?,
                         started_at: row.get("started_at")?,
                         finished_at: row.get("finished_at")?,
                         created_at: row.get("created_at")?,
@@ -183,13 +215,17 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
-                    "SELECT wr.id, t.title AS name, t.project_id, wr.workflow_id, wr.run_status, wr.started_at, wr.finished_at, wr.created_at
+                    "SELECT wr.id, t.title AS name, t.project_id, wr.workflow_id, wr.run_status, wr.started_at, wr.finished_at, wr.created_at,
+                       EXISTS(SELECT 1 FROM workflow_node_runs n WHERE n.run_id = wr.id AND n.status = ?2 AND n.is_deleted = 0) AS has_awaiting_node
                      FROM workflow_runs wr
                      JOIN tasks t ON t.workflow_run_id = wr.id AND t.is_deleted = 0
                      WHERE wr.workflow_id = ?1 AND wr.is_deleted = 0
                      ORDER BY wr.created_at ASC, wr.id ASC",
                 )?;
-                let mut rows = statement.query(params![workflow_id.as_ref()])?;
+                let mut rows = statement.query(params![
+                    workflow_id.as_ref(),
+                    WorkflowNodeStatus::Pending.database_value()
+                ])?;
                 let mut summaries = Vec::new();
                 while let Some(row) = rows.next()? {
                     summaries.push(WorkflowRunSummary {
@@ -198,6 +234,7 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
                         project_id: ProjectId::new(row.get::<_, String>("project_id")?),
                         workflow_id: WorkflowId::new(row.get::<_, String>("workflow_id")?),
                         status: WorkflowRunStatus::from_database_value(row.get("run_status")?)?,
+                        has_awaiting_node: row.get("has_awaiting_node")?,
                         started_at: row.get("started_at")?,
                         finished_at: row.get("finished_at")?,
                         created_at: row.get("created_at")?,
@@ -238,9 +275,8 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
         deleted_at: i64,
     ) -> Result<DeleteWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
-                let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+            .with_connection_mut(|connection| {
+                let transaction = Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let run_exists = transaction
                     .query_row(
                         "SELECT 1 FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",
@@ -292,6 +328,19 @@ impl WorkflowRunRepository for SqliteWorkflowRunRepository {
                 };
                 if running_run || pending_node || running_session {
                     return Ok(DeleteWorkflowRunResult::ActiveRun);
+                }
+
+                // Register the run-task's Git cleanup job in the same transaction
+                // as the cascade: physical removal is asynchronous but its intent
+                // must not be losable once this delete commits.
+                if let Some(task_id) = &task_id {
+                    let cleanup_jobs = crate::repository::cascade::collect_task_cleanup_jobs(
+                        &transaction,
+                        "t.id = ?1",
+                        task_id,
+                        deleted_at,
+                    )?;
+                    crate::repository::git_cleanup_job::insert_jobs(&transaction, &cleanup_jobs)?;
                 }
 
                 transaction.execute(

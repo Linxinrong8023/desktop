@@ -1,7 +1,8 @@
 use crate::RepositoryError;
 use crate::workflow_run::engine::graph::WorkflowGraph;
 use ora_domain::{
-    SessionId, Task, WorkflowNodeRun, WorkflowNodeRunId, WorkflowRun, WorkflowRunId, Worktree,
+    SessionId, Task, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRun,
+    WorkflowRunId, Worktree,
 };
 use std::path::Path;
 use thiserror::Error;
@@ -115,7 +116,8 @@ pub enum RestartWorkflowRunResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateWorkflowRunInputResult {
     Updated,
-    /// The run is not `Pending` with empty `current_nodes`, so its input is frozen.
+    /// The run is executing (`Running`, or a `Pending` pause with in-flight nodes), so its
+    /// input is frozen. A not-started `Pending` run or any terminal run is editable.
     NotEditable,
     NotFound,
 }
@@ -148,6 +150,37 @@ pub trait WorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError>;
 
+    /// Finds the live node run bound to a session, if any.
+    ///
+    /// Session bindings are per-node (each node warms its own session), so at most one node run
+    /// carries a given session id; the interactive prompt hook uses this to flip the owning node
+    /// between `Pending` and `Running`.
+    fn find_node_run_by_session_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<WorkflowNodeRun>, RepositoryError>;
+
+    /// Finds one node run by id, if it exists and is not soft-deleted.
+    ///
+    /// Used by baseline cleanup to decide whether a node's side file is still needed: a baseline
+    /// survives only while its node is still awaiting input.
+    fn find_node_run_by_id(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+    ) -> Result<Option<WorkflowNodeRun>, RepositoryError>;
+
+    /// Transitions one node run's status only when its current status is exactly `from`.
+    ///
+    /// Awaiting interactive nodes flip between `Pending` and `Running` around a human turn; the
+    /// guard makes a stale flip against a completed or cancelled node a no-op (`NotRunning`).
+    fn transition_node_run_status(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+        from: WorkflowNodeStatus,
+        to: WorkflowNodeStatus,
+        now: i64,
+    ) -> Result<AdvanceWorkflowRunResult, RepositoryError>;
+
     /// Starts a run by creating the start node-run and transitioning the run to `Running`.
     ///
     /// Only a `Pending` run with empty `current_nodes` transitions; anything else returns
@@ -167,8 +200,8 @@ pub trait WorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError>;
 
-    /// Marks one node-run succeeded, records its output, stop reason, and file changes, and removes
-    /// it from `current_nodes`.
+    /// Marks one node-run succeeded, records its final assistant output, stop reason, and file
+    /// changes, and removes it from `current_nodes`.
     fn complete_node(
         &self,
         node_run_id: &WorkflowNodeRunId,
@@ -224,6 +257,9 @@ pub trait WorkflowRunEngineRepository {
     fn list_recoverable_runs(&self) -> Result<Vec<WorkflowRunId>, RepositoryError>;
 
     /// Fails the non-terminal node runs of the given runs and stops their running sessions.
+    ///
+    /// A run whose in-flight nodes are all `Pending` (awaiting interactive input) is preserved
+    /// as-is: it was parked on the human rather than computing, so a restart must not destroy it.
     fn fail_orphaned_node_runs(
         &self,
         run_ids: &[WorkflowRunId],

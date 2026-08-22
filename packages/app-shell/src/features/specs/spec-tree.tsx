@@ -1,7 +1,12 @@
 import { useState } from "react";
 import type { SpecDocument } from "@ora/contracts";
 import { Button, ScrollArea } from "@ora/ui";
-import { IconChevronDown, IconChevronRight, IconFileText, IconFolder } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconChevronRight,
+  IconFileText,
+  IconFolder,
+} from "@tabler/icons-react";
 
 interface TreeNode {
   name: string;
@@ -11,7 +16,11 @@ interface TreeNode {
 }
 
 /** Groups documents by workflow while preserving their complete workspace-relative directory paths. */
-export function SpecTree({ documents, selectedPath, onSelect }: {
+export function SpecTree({
+  documents,
+  selectedPath,
+  onSelect,
+}: {
   documents: SpecDocument[];
   selectedPath: string | null;
   onSelect: (path: string) => void;
@@ -21,14 +30,29 @@ export function SpecTree({ documents, selectedPath, onSelect }: {
     <ScrollArea className="h-full">
       <div className="p-2">
         {groups.map(([label, root]) => (
-          <TreeBranch key={label} node={root} label={label} depth={0} selectedPath={selectedPath} onSelect={onSelect} initiallyOpen />
+          <TreeBranch
+            key={label}
+            node={root}
+            label={label}
+            depth={0}
+            selectedPath={selectedPath}
+            onSelect={onSelect}
+            initiallyOpen
+          />
         ))}
       </div>
     </ScrollArea>
   );
 }
 
-function TreeBranch({ node, label, depth, selectedPath, onSelect, initiallyOpen = false }: {
+function TreeBranch({
+  node,
+  label,
+  depth,
+  selectedPath,
+  onSelect,
+  initiallyOpen = false,
+}: {
   node: TreeNode;
   label?: string;
   depth: number;
@@ -40,7 +64,9 @@ function TreeBranch({ node, label, depth, selectedPath, onSelect, initiallyOpen 
   if (node.document) {
     return (
       <Button
-        variant={selectedPath === node.document.relativePath ? "secondary" : "ghost"}
+        variant={
+          selectedPath === node.document.relativePath ? "secondary" : "ghost"
+        }
         size="sm"
         className="h-7 w-full justify-start gap-1.5 px-1.5 font-normal"
         style={{ paddingLeft: `${depth * 12 + 6}px` }}
@@ -65,13 +91,26 @@ function TreeBranch({ node, label, depth, selectedPath, onSelect, initiallyOpen 
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
         onClick={() => setOpen((value) => !value)}
       >
-        {open ? <IconChevronDown className="size-3.5" /> : <IconChevronRight className="size-3.5" />}
+        {open ? (
+          <IconChevronDown className="size-3.5" />
+        ) : (
+          <IconChevronRight className="size-3.5" />
+        )}
         <IconFolder className="size-3.5 text-amber-600" />
-        <span className="truncate text-xs font-medium">{label ?? node.name}</span>
+        <span className="truncate text-xs font-medium">
+          {label ?? node.name}
+        </span>
       </Button>
-      {open && children.map((child) => (
-        <TreeBranch key={child.path} node={child} depth={depth + 1} selectedPath={selectedPath} onSelect={onSelect} />
-      ))}
+      {open &&
+        children.map((child) => (
+          <TreeBranch
+            key={child.path}
+            node={child}
+            depth={depth + 1}
+            selectedPath={selectedPath}
+            onSelect={onSelect}
+          />
+        ))}
     </div>
   );
 }
@@ -79,11 +118,12 @@ function TreeBranch({ node, label, depth, selectedPath, onSelect, initiallyOpen 
 function groupDocuments(documents: SpecDocument[]): Array<[string, TreeNode]> {
   const groups = new Map<string, TreeNode>();
   for (const document of documents) {
-    const label = document.workflow.kind === "open_spec"
-      ? "OpenSpec"
-      : document.workflow.kind === "superpowers"
-        ? "Superpowers"
-        : document.workflow.name;
+    const label =
+      document.workflow.kind === "open_spec"
+        ? "OpenSpec"
+        : document.workflow.kind === "superpowers"
+          ? "Superpowers"
+          : document.workflow.name;
     let root = groups.get(label);
     if (root === undefined) {
       root = { name: label, path: label, children: new Map() };
@@ -91,7 +131,8 @@ function groupDocuments(documents: SpecDocument[]): Array<[string, TreeNode]> {
     }
     let parent = root;
     for (const segment of document.relativePath.split("/")) {
-      const path = parent.path === label ? segment : `${parent.path}/${segment}`;
+      const path =
+        parent.path === label ? segment : `${parent.path}/${segment}`;
       let child = parent.children.get(segment);
       if (child === undefined) {
         child = { name: segment, path, children: new Map() };
@@ -101,5 +142,7 @@ function groupDocuments(documents: SpecDocument[]): Array<[string, TreeNode]> {
     }
     parent.document = document;
   }
-  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+  return [...groups.entries()].sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
 }

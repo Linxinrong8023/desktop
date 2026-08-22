@@ -57,22 +57,6 @@ pub struct OpenLocationFailedParams {
     pub target: OpenLocationTarget,
 }
 
-/// Carries the configured upload limit without exposing uploaded file names.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "error.ts")]
-pub struct SkillUploadTooManyFilesParams {
-    pub max_files: usize,
-}
-
-/// Carries the configured request-body limit without exposing uploaded file contents.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "error.ts")]
-pub struct SkillUploadTooLargeParams {
-    pub max_bytes: usize,
-}
-
 /// Carries a validated skill name when its destination folder already exists.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -106,9 +90,9 @@ pub enum PublicError {
     AgentNameBlank(EmptyErrorParams),
     AgentNameConflict(EmptyErrorParams),
     AgentNotFound(EmptyErrorParams),
+    PluginNotFound(EmptyErrorParams),
+    PluginDisabled(EmptyErrorParams),
     ProjectNotFound(EmptyErrorParams),
-    ProjectOccupied(EmptyErrorParams),
-    ProjectWorkContextNotFound(EmptyErrorParams),
     TaskNotFound(EmptyErrorParams),
     ResourceInUse(EmptyErrorParams),
     WorktreeRequiresGitRepository(EmptyErrorParams),
@@ -118,10 +102,6 @@ pub enum PublicError {
     TaskDiffBaselineUnavailable(EmptyErrorParams),
     TaskDiffCommitMessageBlank(EmptyErrorParams),
     TaskDiffTooLarge(EmptyErrorParams),
-    TaskDiffStale(EmptyErrorParams),
-    TaskDiffCommentNotFound(EmptyErrorParams),
-    TaskDiffCommentInvalid(EmptyErrorParams),
-    TaskDiffCommentConflict(EmptyErrorParams),
     SessionNotFound(EmptyErrorParams),
     AgentCliNotFound(EmptyErrorParams),
     AgentRuntimeUnavailable(EmptyErrorParams),
@@ -130,29 +110,17 @@ pub enum PublicError {
     SessionLoadUnsupported(EmptyErrorParams),
     SessionHistoryDegraded(EmptyErrorParams),
     SessionAgentUnchanged(EmptyErrorParams),
-    MultipleClientsUnsupported(EmptyErrorParams),
     PermissionRequestNotPending(EmptyErrorParams),
     PermissionOptionInvalid(EmptyErrorParams),
     PromptEmpty(EmptyErrorParams),
     PromptTooLarge(EmptyErrorParams),
     TaskWorktreeUnavailable(EmptyErrorParams),
     TaskProjectRootUnavailable(EmptyErrorParams),
-    FileSystemPathNotAbsolute(EmptyErrorParams),
-    FileSystemPathNotDirectory(EmptyErrorParams),
     FileSystemPathNotFound(EmptyErrorParams),
-    FileSystemPathPermissionDenied(EmptyErrorParams),
-    SpecSourceInvalid(EmptyErrorParams),
-    SpecSourceOutsideWorkspace(EmptyErrorParams),
-    SpecSourceWorkspaceRoot(EmptyErrorParams),
     SpecDocumentNotFound(EmptyErrorParams),
     WorktreeRootNotAbsolute(EmptyErrorParams),
     WorktreeRootNotDirectory(EmptyErrorParams),
     OpenLocationFailed(OpenLocationFailedParams),
-    SkillUploadEmpty(EmptyErrorParams),
-    SkillUploadTooLarge(SkillUploadTooLargeParams),
-    SkillUploadTooManyFiles(SkillUploadTooManyFilesParams),
-    SkillUploadPathInvalid(EmptyErrorParams),
-    SkillUploadPathDuplicate(EmptyErrorParams),
     SkillManifestMissing(EmptyErrorParams),
     SkillManifestInvalid(EmptyErrorParams),
     SkillManifestNameBlank(EmptyErrorParams),
@@ -180,6 +148,7 @@ pub enum PublicError {
     ImportSessionAlreadyCommitted(EmptyErrorParams),
     SkillStorageInconsistent(EmptyErrorParams),
     WorkflowNameBlank(EmptyErrorParams),
+    WorkflowNameConflict(EmptyErrorParams),
     WorkflowNotFound(EmptyErrorParams),
     WorkflowSnapshotNotFound(EmptyErrorParams),
     WorkflowVersionAlreadyExists(EmptyErrorParams),
@@ -202,6 +171,8 @@ pub enum PublicError {
     WorkflowRunStartFailed(EmptyErrorParams),
     WorkflowRunNotRestartable(EmptyErrorParams),
     WorkflowRunNotEditable(EmptyErrorParams),
+    WorkflowNodeNotFound(EmptyErrorParams),
+    WorkflowNodeNotAwaitingInput(EmptyErrorParams),
 }
 
 impl PublicError {
@@ -220,9 +191,9 @@ impl PublicError {
             Self::AgentNameBlank(_) => "agent_name_blank",
             Self::AgentNameConflict(_) => "agent_name_conflict",
             Self::AgentNotFound(_) => "agent_not_found",
+            Self::PluginNotFound(_) => "plugin_not_found",
+            Self::PluginDisabled(_) => "plugin_disabled",
             Self::ProjectNotFound(_) => "project_not_found",
-            Self::ProjectOccupied(_) => "project_occupied",
-            Self::ProjectWorkContextNotFound(_) => "project_work_context_not_found",
             Self::TaskNotFound(_) => "task_not_found",
             Self::ResourceInUse(_) => "resource_in_use",
             Self::WorktreeRequiresGitRepository(_) => "worktree_requires_git_repository",
@@ -232,10 +203,6 @@ impl PublicError {
             Self::TaskDiffBaselineUnavailable(_) => "task_diff_baseline_unavailable",
             Self::TaskDiffCommitMessageBlank(_) => "task_diff_commit_message_blank",
             Self::TaskDiffTooLarge(_) => "task_diff_too_large",
-            Self::TaskDiffStale(_) => "task_diff_stale",
-            Self::TaskDiffCommentNotFound(_) => "task_diff_comment_not_found",
-            Self::TaskDiffCommentInvalid(_) => "task_diff_comment_invalid",
-            Self::TaskDiffCommentConflict(_) => "task_diff_comment_conflict",
             Self::SessionNotFound(_) => "session_not_found",
             Self::AgentCliNotFound(_) => "agent_cli_not_found",
             Self::AgentRuntimeUnavailable(_) => "agent_runtime_unavailable",
@@ -244,29 +211,17 @@ impl PublicError {
             Self::SessionLoadUnsupported(_) => "session_load_unsupported",
             Self::SessionHistoryDegraded(_) => "session_history_degraded",
             Self::SessionAgentUnchanged(_) => "session_agent_unchanged",
-            Self::MultipleClientsUnsupported(_) => "multiple_clients_unsupported",
             Self::PermissionRequestNotPending(_) => "permission_request_not_pending",
             Self::PermissionOptionInvalid(_) => "permission_option_invalid",
             Self::PromptEmpty(_) => "prompt_empty",
             Self::PromptTooLarge(_) => "prompt_too_large",
             Self::TaskWorktreeUnavailable(_) => "task_worktree_unavailable",
             Self::TaskProjectRootUnavailable(_) => "task_project_root_unavailable",
-            Self::FileSystemPathNotAbsolute(_) => "file_system_path_not_absolute",
-            Self::FileSystemPathNotDirectory(_) => "file_system_path_not_directory",
             Self::FileSystemPathNotFound(_) => "file_system_path_not_found",
-            Self::FileSystemPathPermissionDenied(_) => "file_system_path_permission_denied",
-            Self::SpecSourceInvalid(_) => "spec_source_invalid",
-            Self::SpecSourceOutsideWorkspace(_) => "spec_source_outside_workspace",
-            Self::SpecSourceWorkspaceRoot(_) => "spec_source_workspace_root",
             Self::SpecDocumentNotFound(_) => "spec_document_not_found",
             Self::WorktreeRootNotAbsolute(_) => "worktree_root_not_absolute",
             Self::WorktreeRootNotDirectory(_) => "worktree_root_not_directory",
             Self::OpenLocationFailed(_) => "open_location_failed",
-            Self::SkillUploadEmpty(_) => "skill_upload_empty",
-            Self::SkillUploadTooLarge(_) => "skill_upload_too_large",
-            Self::SkillUploadTooManyFiles(_) => "skill_upload_too_many_files",
-            Self::SkillUploadPathInvalid(_) => "skill_upload_path_invalid",
-            Self::SkillUploadPathDuplicate(_) => "skill_upload_path_duplicate",
             Self::SkillManifestMissing(_) => "skill_manifest_missing",
             Self::SkillManifestInvalid(_) => "skill_manifest_invalid",
             Self::SkillManifestNameBlank(_) => "skill_manifest_name_blank",
@@ -294,6 +249,7 @@ impl PublicError {
             Self::ImportSessionAlreadyCommitted(_) => "import_session_already_committed",
             Self::SkillStorageInconsistent(_) => "skill_storage_inconsistent",
             Self::WorkflowNameBlank(_) => "workflow_name_blank",
+            Self::WorkflowNameConflict(_) => "workflow_name_conflict",
             Self::WorkflowNotFound(_) => "workflow_not_found",
             Self::WorkflowSnapshotNotFound(_) => "workflow_snapshot_not_found",
             Self::WorkflowVersionAlreadyExists(_) => "workflow_version_already_exists",
@@ -316,6 +272,8 @@ impl PublicError {
             Self::WorkflowRunStartFailed(_) => "workflow_run_start_failed",
             Self::WorkflowRunNotRestartable(_) => "workflow_run_not_restartable",
             Self::WorkflowRunNotEditable(_) => "workflow_run_not_editable",
+            Self::WorkflowNodeNotFound(_) => "workflow_node_not_found",
+            Self::WorkflowNodeNotAwaitingInput(_) => "workflow_node_not_awaiting_input",
         }
     }
 }
@@ -336,8 +294,6 @@ pub(crate) fn export(config: &Config) -> Result<(), ExportError> {
     EmptyErrorParams::export_all(config)?;
     OpenLocationTarget::export_all(config)?;
     OpenLocationFailedParams::export_all(config)?;
-    SkillUploadTooManyFilesParams::export_all(config)?;
-    SkillUploadTooLargeParams::export_all(config)?;
     SkillFolderConflictParams::export_all(config)?;
     TaskBaseBranchNotFoundParams::export_all(config)?;
     PublicError::export_all(config)?;
@@ -349,8 +305,7 @@ pub(crate) fn export(config: &Config) -> Result<(), ExportError> {
 mod tests {
     use super::{
         ContractError, EmptyErrorParams, OpenLocationFailedParams, OpenLocationTarget, PublicError,
-        RequestId, SkillFolderConflictParams, SkillUploadTooLargeParams,
-        SkillUploadTooManyFilesParams, TaskBaseBranchNotFoundParams,
+        RequestId, SkillFolderConflictParams, TaskBaseBranchNotFoundParams,
     };
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -368,26 +323,6 @@ mod tests {
             json!({
                 "code": "project_not_found",
                 "params": {},
-                "requestId": "550e8400-e29b-41d4-a716-446655440000",
-            })
-        );
-    }
-
-    /// Verifies upload limits expose only the bounded configuration value.
-    #[test]
-    fn serializes_skill_upload_body_limit() {
-        let error = ContractError {
-            error: PublicError::SkillUploadTooLarge(SkillUploadTooLargeParams {
-                max_bytes: 52_428_800,
-            }),
-            request_id: RequestId::from_uuid(uuid!("550e8400-e29b-41d4-a716-446655440000")),
-        };
-
-        assert_eq!(
-            serde_json::to_value(error).unwrap(),
-            json!({
-                "code": "skill_upload_too_large",
-                "params": { "maxBytes": 52_428_800 },
                 "requestId": "550e8400-e29b-41d4-a716-446655440000",
             })
         );
@@ -413,9 +348,9 @@ mod tests {
             PublicError::AgentNameBlank(empty),
             PublicError::AgentNameConflict(empty),
             PublicError::AgentNotFound(empty),
+            PublicError::PluginNotFound(empty),
+            PublicError::PluginDisabled(empty),
             PublicError::ProjectNotFound(empty),
-            PublicError::ProjectOccupied(empty),
-            PublicError::ProjectWorkContextNotFound(empty),
             PublicError::TaskNotFound(empty),
             PublicError::ResourceInUse(empty),
             PublicError::WorktreeRequiresGitRepository(empty),
@@ -427,10 +362,6 @@ mod tests {
             PublicError::TaskDiffBaselineUnavailable(empty),
             PublicError::TaskDiffCommitMessageBlank(empty),
             PublicError::TaskDiffTooLarge(empty),
-            PublicError::TaskDiffStale(empty),
-            PublicError::TaskDiffCommentNotFound(empty),
-            PublicError::TaskDiffCommentInvalid(empty),
-            PublicError::TaskDiffCommentConflict(empty),
             PublicError::SessionNotFound(empty),
             PublicError::AgentCliNotFound(empty),
             PublicError::AgentRuntimeUnavailable(empty),
@@ -439,35 +370,19 @@ mod tests {
             PublicError::SessionLoadUnsupported(empty),
             PublicError::SessionHistoryDegraded(empty),
             PublicError::SessionAgentUnchanged(empty),
-            PublicError::MultipleClientsUnsupported(empty),
             PublicError::PermissionRequestNotPending(empty),
             PublicError::PermissionOptionInvalid(empty),
             PublicError::PromptEmpty(empty),
             PublicError::PromptTooLarge(empty),
             PublicError::TaskWorktreeUnavailable(empty),
             PublicError::TaskProjectRootUnavailable(empty),
-            PublicError::FileSystemPathNotAbsolute(empty),
-            PublicError::FileSystemPathNotDirectory(empty),
             PublicError::FileSystemPathNotFound(empty),
-            PublicError::FileSystemPathPermissionDenied(empty),
-            PublicError::SpecSourceInvalid(empty),
-            PublicError::SpecSourceOutsideWorkspace(empty),
-            PublicError::SpecSourceWorkspaceRoot(empty),
             PublicError::SpecDocumentNotFound(empty),
             PublicError::WorktreeRootNotAbsolute(empty),
             PublicError::WorktreeRootNotDirectory(empty),
             PublicError::OpenLocationFailed(OpenLocationFailedParams {
                 target: OpenLocationTarget::Explorer,
             }),
-            PublicError::SkillUploadEmpty(empty),
-            PublicError::SkillUploadTooLarge(SkillUploadTooLargeParams {
-                max_bytes: 52_428_800,
-            }),
-            PublicError::SkillUploadTooManyFiles(SkillUploadTooManyFilesParams {
-                max_files: 1_000,
-            }),
-            PublicError::SkillUploadPathInvalid(empty),
-            PublicError::SkillUploadPathDuplicate(empty),
             PublicError::SkillManifestMissing(empty),
             PublicError::SkillManifestInvalid(empty),
             PublicError::SkillManifestNameBlank(empty),
@@ -497,6 +412,7 @@ mod tests {
             PublicError::ImportSessionAlreadyCommitted(empty),
             PublicError::SkillStorageInconsistent(empty),
             PublicError::WorkflowNameBlank(empty),
+            PublicError::WorkflowNameConflict(empty),
             PublicError::WorkflowNotFound(empty),
             PublicError::WorkflowSnapshotNotFound(empty),
             PublicError::WorkflowVersionAlreadyExists(empty),
@@ -512,6 +428,8 @@ mod tests {
             PublicError::WorkflowRunCannotUseDraftSnapshot(empty),
             PublicError::WorkflowRunNotFound(empty),
             PublicError::WorkflowRunActive(empty),
+            PublicError::WorkflowNodeNotFound(empty),
+            PublicError::WorkflowNodeNotAwaitingInput(empty),
         ];
 
         for error in &samples {
@@ -528,9 +446,9 @@ mod tests {
                 | PublicError::AgentNameBlank(_)
                 | PublicError::AgentNameConflict(_)
                 | PublicError::AgentNotFound(_)
+                | PublicError::PluginNotFound(_)
+                | PublicError::PluginDisabled(_)
                 | PublicError::ProjectNotFound(_)
-                | PublicError::ProjectOccupied(_)
-                | PublicError::ProjectWorkContextNotFound(_)
                 | PublicError::TaskNotFound(_)
                 | PublicError::ResourceInUse(_)
                 | PublicError::WorktreeRequiresGitRepository(_)
@@ -540,10 +458,6 @@ mod tests {
                 | PublicError::TaskDiffBaselineUnavailable(_)
                 | PublicError::TaskDiffCommitMessageBlank(_)
                 | PublicError::TaskDiffTooLarge(_)
-                | PublicError::TaskDiffStale(_)
-                | PublicError::TaskDiffCommentNotFound(_)
-                | PublicError::TaskDiffCommentInvalid(_)
-                | PublicError::TaskDiffCommentConflict(_)
                 | PublicError::SessionNotFound(_)
                 | PublicError::AgentCliNotFound(_)
                 | PublicError::AgentRuntimeUnavailable(_)
@@ -552,29 +466,17 @@ mod tests {
                 | PublicError::SessionLoadUnsupported(_)
                 | PublicError::SessionHistoryDegraded(_)
                 | PublicError::SessionAgentUnchanged(_)
-                | PublicError::MultipleClientsUnsupported(_)
                 | PublicError::PermissionRequestNotPending(_)
                 | PublicError::PermissionOptionInvalid(_)
                 | PublicError::PromptEmpty(_)
                 | PublicError::PromptTooLarge(_)
                 | PublicError::TaskWorktreeUnavailable(_)
                 | PublicError::TaskProjectRootUnavailable(_)
-                | PublicError::FileSystemPathNotAbsolute(_)
-                | PublicError::FileSystemPathNotDirectory(_)
                 | PublicError::FileSystemPathNotFound(_)
-                | PublicError::FileSystemPathPermissionDenied(_)
-                | PublicError::SpecSourceInvalid(_)
-                | PublicError::SpecSourceOutsideWorkspace(_)
-                | PublicError::SpecSourceWorkspaceRoot(_)
                 | PublicError::SpecDocumentNotFound(_)
                 | PublicError::WorktreeRootNotAbsolute(_)
                 | PublicError::WorktreeRootNotDirectory(_)
                 | PublicError::OpenLocationFailed(_)
-                | PublicError::SkillUploadEmpty(_)
-                | PublicError::SkillUploadTooLarge(_)
-                | PublicError::SkillUploadTooManyFiles(_)
-                | PublicError::SkillUploadPathInvalid(_)
-                | PublicError::SkillUploadPathDuplicate(_)
                 | PublicError::SkillManifestMissing(_)
                 | PublicError::SkillManifestInvalid(_)
                 | PublicError::SkillManifestNameBlank(_)
@@ -602,6 +504,7 @@ mod tests {
                 | PublicError::ImportSessionAlreadyCommitted(_)
                 | PublicError::SkillStorageInconsistent(_)
                 | PublicError::WorkflowNameBlank(_)
+                | PublicError::WorkflowNameConflict(_)
                 | PublicError::WorkflowNotFound(_)
                 | PublicError::WorkflowSnapshotNotFound(_)
                 | PublicError::WorkflowVersionAlreadyExists(_)
@@ -623,7 +526,9 @@ mod tests {
                 | PublicError::WorkflowRoleNotFound(_)
                 | PublicError::WorkflowRunStartFailed(_)
                 | PublicError::WorkflowRunNotRestartable(_)
-                | PublicError::WorkflowRunNotEditable(_) => {}
+                | PublicError::WorkflowRunNotEditable(_)
+                | PublicError::WorkflowNodeNotFound(_)
+                | PublicError::WorkflowNodeNotAwaitingInput(_) => {}
             }
         }
 
@@ -634,7 +539,7 @@ mod tests {
     #[test]
     fn public_error_codes_match_serde_tags_for_every_variant() {
         let samples = public_error_samples();
-        assert_eq!(samples.len(), 101);
+        assert_eq!(samples.len(), 88);
 
         for error in samples {
             let serialized = serde_json::to_value(&error).unwrap();

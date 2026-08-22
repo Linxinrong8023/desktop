@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use ora_contracts::{ListProjectBranchesRequest, ListProjectBranchesResponse, ProjectBranch};
 use ora_domain::{
-    AuditFields, Project, ProjectId, Task, TaskId, TaskStatus, Worktree, WorktreeActivity,
-    WorktreeBaseline, WorktreeId,
+    AuditFields, Project, ProjectId, Task, TaskId, Worktree, WorktreeActivity, WorktreeBaseline,
+    WorktreeId,
 };
 use ora_logging::with_trace_logging;
 use pretty_assertions::assert_eq;
@@ -173,7 +173,6 @@ fn task_fixture(task_id: &str, project_id: &str, title: &str) -> Task {
         TaskId::new(task_id),
         ProjectId::new(project_id),
         title,
-        TaskStatus::Todo,
         None,
         AuditFields::new(1, 1, false),
     )
@@ -185,6 +184,7 @@ fn worktree_fixture(worktree_id: &str, task_id: &str, branch_name: Option<&str>)
         WorktreeId::new(worktree_id),
         TaskId::new(task_id),
         branch_name.map(str::to_string),
+        None,
         WorktreeBaseline::unavailable(),
         WorktreeActivity::Active,
         AuditFields::new(1, 1, false),
@@ -279,15 +279,6 @@ impl ProjectRepository for Rc<FakeProjectRepository> {
             .iter()
             .find(|project| project.id == *project_id)
             .cloned())
-    }
-
-    fn find_project_by_name(
-        &self,
-        _project_name: &str,
-    ) -> Result<Option<Project>, RepositoryError> {
-        Err(RepositoryError::from_message(
-            "name lookup is unsupported in branch-list tests",
-        ))
     }
 
     /// Rejects unsupported project listing in this focused fixture.

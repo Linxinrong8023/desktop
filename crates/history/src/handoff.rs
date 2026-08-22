@@ -1,10 +1,10 @@
-use crate::reader::SessionHistory;
+use crate::reader::{HistoryIntegrity, SessionHistory};
 use crate::record::HistoryRecord;
-use ora_contracts::acp::content::ContentBlock;
-use ora_contracts::acp::prompt::StopReason;
-use ora_contracts::acp::session::SessionUpdate;
-use ora_contracts::acp::tool_call::ToolCallStatus;
-use ora_domain::AgentCli;
+use agent_client_protocol_schema::v1::ContentBlock;
+use agent_client_protocol_schema::v1::SessionUpdate;
+use agent_client_protocol_schema::v1::StopReason;
+use agent_client_protocol_schema::v1::ToolCallStatus;
+use ora_domain::AgentRef;
 use std::fmt::Write as _;
 
 /// Wraps the transcript so the receiving agent can tell it from the user's words.
@@ -27,7 +27,7 @@ const CLOSE_MARKER: &str = "</ora_session_handoff>";
 /// second answer that can disagree with the transcript it introduces.
 pub fn render_handoff(history: &SessionHistory) -> Option<String> {
     let turns = collect_turns(history);
-    if turns.is_empty() {
+    if turns.is_empty() && history.integrity == HistoryIntegrity::Complete {
         return None;
     }
 
@@ -35,14 +35,29 @@ pub fn render_handoff(history: &SessionHistory) -> Option<String> {
     rendered.push_str(OPEN_MARKER);
     rendered.push_str("\nThis conversation was previously handled by a different coding agent");
     if let Some(previous) = previous_agent(history) {
-        let _ = write!(rendered, " ({name})", name = previous.executable_name());
+        let _ = write!(rendered, " ({previous})");
     }
-    rendered.push_str(
-        ". The transcript below is its complete history, and the work it describes has \
-         already been done — build on it instead of repeating it. Tool calls are listed \
-         by name and outcome only; their inputs and outputs are not included. Continue \
-         from where the conversation left off. The user's new message follows this block.\n",
-    );
+    match history.integrity {
+        HistoryIntegrity::Complete => rendered.push_str(
+            ". The transcript below is its complete history, and the work it describes has \
+             already been done — build on it instead of repeating it. Tool calls are listed \
+             by name and outcome only; their inputs and outputs are not included. Continue \
+             from where the conversation left off. The user's new message follows this block.\n",
+        ),
+        HistoryIntegrity::Damaged { unreadable_lines } => {
+            let count = unreadable_lines.get();
+            let noun = if count == 1 { "record" } else { "records" };
+            let _ = writeln!(
+                rendered,
+                ". This transcript is incomplete: {count} history {noun} could not be decoded, \
+                 and the original positions are unknown. Do not assume continuity. The surviving \
+                 work has already been done — build on it instead of repeating it. Tool calls are \
+                 listed by name and outcome only; their inputs and outputs are not included. \
+                 Continue from where the conversation left off. The user's new message follows \
+                 this block.",
+            );
+        }
+    }
 
     for (index, turn) in turns.iter().enumerate() {
         let _ = write!(rendered, "\n## Turn {number}\n", number = index + 1);
@@ -53,25 +68,33 @@ pub fn render_handoff(history: &SessionHistory) -> Option<String> {
     Some(rendered)
 }
 
-/// Reports whether the session's current provider binding has yet to be told the history.
+/// Reports whether the session's current provider binding has yet to be given the history.
 ///
 /// Switching agents replaces the binding eagerly but injects the transcript
-/// lazily, so this is the question "has anything been said to the agent now
-/// serving this conversation". It is answered from the record rather than a
-/// stored flag: a switch followed by no prompt is exactly a trailing
-/// `AgentSwitched` with no user message after it, and that survives a restart
-/// without anything having to remember it.
+/// lazily, so this is the question "has the agent now serving this conversation
+/// been shown what came before it". It is answered from the record rather than a
+/// stored flag, because the flag lives in an actor that a lost connection or a
+/// restart discards while the debt it tracked survives.
+///
+/// The two records it reads are the only ones that can settle the question, and
+/// the most recent of them wins: `HandoffDelivered` is written after a provider
+/// accepted the transcript, and `AgentSwitched` opens a debt that nothing has
+/// paid yet. A user turn deliberately settles nothing — Ora records a prompt
+/// before sending it, so one sitting after a switch is equally consistent with a
+/// delivered transcript and with a `session/prompt` that never left the process.
+///
+/// A switch whose delivery the file cannot prove therefore reads as still owed,
+/// which is the safe direction: handing a transcript over twice costs the
+/// successor a repeated history, while skipping it leaves the agent answering a
+/// conversation it cannot see. Reaching the start of the file is not that case —
+/// a session that never switched has no binding to bring up to date.
 pub fn binding_needs_handoff(history: &SessionHistory) -> bool {
     for line in history.lines.iter().rev() {
         match &line.record {
-            HistoryRecord::Update { update } => {
-                // A prompt already reached whichever agent is serving now.
-                if matches!(update, SessionUpdate::UserMessageChunk(_)) {
-                    return false;
-                }
-            }
+            HistoryRecord::HandoffDelivered { .. } => return false,
             HistoryRecord::AgentSwitched(_) => return true,
             HistoryRecord::Meta(_)
+            | HistoryRecord::Update { .. }
             | HistoryRecord::TurnEnded { .. }
             | HistoryRecord::Gap { .. } => {}
         }
@@ -82,17 +105,18 @@ pub fn binding_needs_handoff(history: &SessionHistory) -> bool {
 /// Names the agent whose work the transcript describes.
 ///
 /// The most recent switch says which agent was handling the conversation before
-/// it; a session that never switched has only the CLI it opened on.
-fn previous_agent(history: &SessionHistory) -> Option<AgentCli> {
+/// it; a session that never switched has only the agent it opened on.
+fn previous_agent(history: &SessionHistory) -> Option<AgentRef> {
     history
         .lines
         .iter()
         .rev()
         .find_map(|line| match &line.record {
-            HistoryRecord::AgentSwitched(switch) => Some(switch.from),
-            HistoryRecord::Meta(meta) => Some(meta.agent_cli),
+            HistoryRecord::AgentSwitched(switch) => Some(switch.from.clone()),
+            HistoryRecord::Meta(meta) => Some(meta.agent_ref.clone()),
             HistoryRecord::Update { .. }
             | HistoryRecord::TurnEnded { .. }
+            | HistoryRecord::HandoffDelivered { .. }
             | HistoryRecord::Gap { .. } => None,
         })
 }
@@ -162,6 +186,13 @@ impl HandoffTurn {
                 rendered.push_str("\n_This turn stopped at the previous agent's limits._\n");
             }
             Some(StopReason::EndTurn) | None => {}
+            // StopReason is non-exhaustive; retaining a neutral note avoids claiming
+            // completion semantics for a reason introduced by a newer ACP artifact.
+            Some(_) => {
+                rendered.push_str(
+                    "\n_This turn ended for a reason this Ora version does not recognize._\n",
+                );
+            }
         }
     }
 }
@@ -183,13 +214,15 @@ fn collect_turns(history: &SessionHistory) -> Vec<HandoffTurn> {
             }
             HistoryRecord::AgentSwitched(switch) => current.notes.push(format!(
                 "The conversation moved from {from} to {to} at this point.",
-                from = switch.from.executable_name(),
-                to = switch.to.executable_name(),
+                from = switch.from,
+                to = switch.to,
             )),
             HistoryRecord::Gap { reason } => current.notes.push(format!(
                 "Part of the conversation is missing here because it could not be recorded ({reason})."
             )),
-            HistoryRecord::Meta(_) => {}
+            // Bookkeeping about how this record reached an agent, not part of the
+            // conversation the next one is being shown.
+            HistoryRecord::Meta(_) | HistoryRecord::HandoffDelivered { .. } => {}
         }
     }
     // A turn interrupted by a crash never got its boundary, but its work still
@@ -223,6 +256,9 @@ fn absorb_update(turn: &mut HandoffTurn, update: &SessionUpdate) {
         | SessionUpdate::ConfigOptionUpdate(_)
         | SessionUpdate::SessionInfoUpdate(_)
         | SessionUpdate::UsageUpdate(_) => {}
+        // Future ACP updates are preserved in history but cannot be projected into a
+        // handoff until this Ora version understands their semantics.
+        _ => {}
     }
 }
 
@@ -237,6 +273,9 @@ fn describe_content(content: &ContentBlock) -> String {
         ContentBlock::Audio(_) => "[audio]".to_string(),
         ContentBlock::ResourceLink(link) => format!("[resource link: {uri}]", uri = link.uri),
         ContentBlock::Resource(_) => "[embedded resource]".to_string(),
+        // ContentBlock is non-exhaustive, so name future displayable content without
+        // guessing at a representation that could change its meaning.
+        _ => "[unsupported content]".to_string(),
     }
 }
 
@@ -265,7 +304,11 @@ fn describe_status(status: ToolCallStatus, stop_reason: Option<StopReason>) -> &
                 | StopReason::MaxTurnRequests,
             ) => "interrupted, outcome unknown",
             Some(StopReason::EndTurn) | None => "outcome not reported",
+            Some(_) => "outcome not reported",
         },
+        // A newer status is evidence that the provider reported something, but this
+        // Ora version cannot safely label it completed or failed.
+        _ => "status not recognized",
     }
 }
 

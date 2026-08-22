@@ -1,9 +1,11 @@
-import type { AgentCli } from "@ora/contracts";
-import type { WorkflowAgentConfig, WorkflowNodeData } from "@ora/workflow-runtime";
-import { AGENT_CLI_LABELS } from "../chat/model-catalog";
+import type {
+  WorkflowAgentConfig,
+  WorkflowNodeData,
+} from "@ora/workflow-runtime";
+import { AGENT_CLI_LABELS, type KnownAgentCli } from "../chat/model-catalog";
 
 /** True when the executor CLI id is one of the known product Agent CLIs. */
-export function isKnownAgentCli(agentCli: string): agentCli is AgentCli {
+export function isKnownAgentCli(agentCli: string): agentCli is KnownAgentCli {
   return agentCli in AGENT_CLI_LABELS;
 }
 
@@ -21,7 +23,9 @@ export function formatAgentExecutorLabel(
  * Theater mono detail line: flat tool/condition first, else agent executor.
  * Keeps the stage glance to one quiet line.
  */
-export function resolveTheaterActDetail(data: WorkflowNodeData): string | undefined {
+export function resolveTheaterActDetail(
+  data: WorkflowNodeData,
+): string | undefined {
   for (const candidate of [data.tool, data.condition]) {
     const trimmed = candidate?.trim();
     if (trimmed !== undefined && trimmed !== "") {

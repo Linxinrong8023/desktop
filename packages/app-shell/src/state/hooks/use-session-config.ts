@@ -12,7 +12,10 @@ import { useChatStore } from "../../chat-store-context";
  */
 export function useSetSessionConfig() {
   const chatStore = useChatStore();
-  const setSessionConfig = useStore(chatStore, (state) => state.setSessionConfig);
+  const setSessionConfig = useStore(
+    chatStore,
+    (state) => state.setSessionConfig,
+  );
   return useMutation({
     mutationFn: ({
       sessionId,

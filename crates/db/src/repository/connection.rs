@@ -32,6 +32,19 @@ impl RepositoryPool {
 
         operation(&connection)
     }
+
+    /// Runs one repository operation that requires exclusive access to a pooled connection.
+    ///
+    /// Explicit transactions use a mutable borrow so rusqlite can reject nested transactions
+    /// at compile time instead of relying on SQLite to detect them at runtime.
+    pub(crate) fn with_connection_mut<T>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> Result<T, crate::DatabaseError>,
+    ) -> Result<T, DatabaseError> {
+        let mut connection = self.inner.get()?;
+
+        operation(&mut connection)
+    }
 }
 
 /// Opens and validates SQLite connections for the repository pool.

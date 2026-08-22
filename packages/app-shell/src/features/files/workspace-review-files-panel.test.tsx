@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { PlatformProvider } from "@ora/platform";
+import { PlatformProvider } from "../../platform";
 import { TooltipProvider } from "@ora/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
@@ -13,15 +13,28 @@ vi.mock("../specs/specs-view", () => ({
 }));
 
 vi.mock("./workspace-files-view", () => ({
-  WorkspaceFilesView: ({ surface }: { surface: "explorer" | "search" }) => (
-    <div data-testid="files-explorer">{surface}</div>
+  WorkspaceFilesView: ({
+    surface,
+    fileRequest,
+    projectId,
+    taskId,
+  }: {
+    surface: "explorer" | "search";
+    fileRequest?: { path: string; requestId: number; line?: number };
+    projectId: string;
+    taskId?: string;
+  }) => (
+    <div data-testid="files-explorer">
+      {surface}:{projectId}:{taskId ?? ""}:{fileRequest?.path ?? ""}:
+      {fileRequest?.line ?? ""}
+    </div>
   ),
 }));
 
 function renderPanel(props: {
   projectId?: string;
-  projectRootPath?: string;
   taskId?: string;
+  fileRequest?: { path: string; requestId: number; line?: number };
 }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -33,8 +46,8 @@ function renderPanel(props: {
           <TooltipProvider>
             <WorkspaceReviewFilesPanel
               projectId={props.projectId ?? "project-1"}
-              projectRootPath={props.projectRootPath ?? "C:/project"}
               taskId={props.taskId}
+              fileRequest={props.fileRequest}
             />
           </TooltipProvider>
         </AppI18nProvider>
@@ -49,21 +62,50 @@ describe("WorkspaceReviewFilesPanel", () => {
     renderPanel({ taskId: "task-1" });
 
     expect(screen.getByTestId("files-explorer")).toHaveTextContent("explorer");
-    expect(screen.queryByRole("button", { name: /配置 Spec 来源|Configure Spec sources/ })).not.toBeInTheDocument();
-
     await user.click(screen.getByRole("button", { name: "Specs" }));
     expect(screen.getByTestId("specs-content")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /配置 Spec 来源|Configure Spec sources/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /刷新 Specs|Refresh Specs/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /刷新 Specs|Refresh Specs/ }),
+    ).toBeInTheDocument();
   });
 
-  it("opens project files directly on specs and hides explorer/search toggles", () => {
+  it("opens project files on explorer with search available when no task is selected", () => {
     renderPanel({});
 
-    expect(screen.getByTestId("specs-content")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /浏览|Explorer/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /搜索|Search/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /配置 Spec 来源|Configure Spec sources/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /刷新 Specs|Refresh Specs/ })).toBeInTheDocument();
+    expect(screen.getByTestId("files-explorer")).toHaveTextContent(
+      "explorer:project-1::",
+    );
+    expect(
+      screen.getByRole("button", { name: /资源管理器|Explorer/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /搜索|Search/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /刷新工作区文件|Refresh workspace files/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("forces explorer and forwards a file request from chat", () => {
+    renderPanel({
+      taskId: "task-1",
+      fileRequest: { path: "src/lib.ts", requestId: 1, line: 8 },
+    });
+
+    expect(screen.getByTestId("files-explorer")).toHaveTextContent(
+      "explorer:project-1:task-1:src/lib.ts:8",
+    );
+  });
+
+  it("opens a project-scoped file request without a task", () => {
+    renderPanel({
+      fileRequest: { path: "README.md", requestId: 2, line: 1 },
+    });
+
+    expect(screen.getByTestId("files-explorer")).toHaveTextContent(
+      "explorer:project-1::README.md:1",
+    );
   });
 });

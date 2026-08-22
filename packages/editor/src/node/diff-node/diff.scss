@@ -1,0 +1,48 @@
+/* Diff highlighting styles for TipTap history view */
+
+/* Added nodes - green background */
+.diff-added {
+  position: relative;
+  background-color: rgba(46, 160, 67, 0.15);
+  border-left: 3px solid rgba(46, 160, 67, 0.8);
+  padding-left: 8px;
+  margin-left: -11px;
+
+  @media (prefers-color-scheme: dark) {
+    background-color: rgba(46, 160, 67, 0.2);
+    border-left-color: rgba(46, 160, 67, 0.9);
+  }
+}
+
+/* Removed nodes - red background */
+.diff-removed {
+  position: relative;
+  background-color: rgba(248, 81, 73, 0.15);
+  border-left: 3px solid rgba(248, 81, 73, 0.8);
+  padding-left: 8px;
+  margin-left: -11px;
+  text-decoration: line-through;
+  opacity: 0.8;
+
+  @media (prefers-color-scheme: dark) {
+    background-color: rgba(248, 81, 73, 0.2);
+    border-left-color: rgba(248, 81, 73, 0.9);
+  }
+}
+
+/* Adjust nested elements */
+.diff-added .diff-added,
+.diff-removed .diff-removed {
+  background-color: transparent;
+  border-left: none;
+  padding-left: 0;
+  margin-left: 0;
+}
+
+/* Remove left spacing and border when inside list items */
+li.diff-added,
+li.diff-removed {
+  border-left: none;
+  padding-left: 0;
+  margin-left: 0;
+}

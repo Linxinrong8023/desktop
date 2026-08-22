@@ -4,8 +4,8 @@ use ora_application::{
     WorkflowRepository,
 };
 use ora_domain::{
-    AuditFields, CreatedWorkflow, Workflow, WorkflowDetail, WorkflowId, WorkflowSnapshot,
-    WorkflowSnapshotId, WorkflowSummary, WorkflowVersion,
+    AuditFields, CreatedWorkflow, Namespace, Workflow, WorkflowDetail, WorkflowId,
+    WorkflowSnapshot, WorkflowSnapshotId, WorkflowSummary, WorkflowVersion,
 };
 use rusqlite::{OptionalExtension, Row, Transaction, TransactionBehavior, params};
 
@@ -33,13 +33,14 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         draft: WorkflowSnapshot,
     ) -> Result<CreatedWorkflow, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 transaction.execute(
-                    "INSERT INTO workflows (id, name, published_snapshot_id, created_at, updated_at, is_deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    "INSERT INTO workflows (id, namespace, name, published_snapshot_id, created_at, updated_at, is_deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
                         workflow.id.as_ref(),
+                        workflow.namespace.as_ref(),
                         &workflow.name,
                         workflow.published_snapshot_id.as_ref().map(AsRef::as_ref),
                         workflow.audit_fields.created_at,
@@ -69,9 +70,25 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
-                    "SELECT id, name, published_snapshot_id, created_at, updated_at, is_deleted FROM workflows WHERE id = ?1 AND is_deleted = 0",
+                    "SELECT id, namespace, name, published_snapshot_id, created_at, updated_at, is_deleted FROM workflows WHERE id = ?1 AND is_deleted = 0",
                 )?;
                 let mut rows = statement.query(params![workflow_id.as_ref()])?;
+                rows.next()?.map(map_workflow_row).transpose()
+            })
+            .map_err(workflow_repository_error_from_database)
+    }
+
+    fn find_workflow_by_name(
+        &self,
+        namespace: &Namespace,
+        name: &str,
+    ) -> Result<Option<Workflow>, RepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, namespace, name, published_snapshot_id, created_at, updated_at, is_deleted FROM workflows WHERE namespace = ?1 COLLATE NOCASE AND name = ?2 COLLATE NOCASE AND is_deleted = 0",
+                )?;
+                let mut rows = statement.query(params![namespace.as_ref(), name])?;
                 rows.next()?.map(map_workflow_row).transpose()
             })
             .map_err(workflow_repository_error_from_database)
@@ -85,7 +102,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .with_connection(|connection| {
                 let workflow = {
                     let mut statement = connection.prepare(
-                        "SELECT id, name, published_snapshot_id, created_at, updated_at, is_deleted FROM workflows WHERE id = ?1 AND is_deleted = 0",
+                        "SELECT id, namespace, name, published_snapshot_id, created_at, updated_at, is_deleted FROM workflows WHERE id = ?1 AND is_deleted = 0",
                     )?;
                     let mut rows = statement.query(params![workflow_id.as_ref()])?;
                     match rows.next()?.map(map_workflow_row).transpose()? {
@@ -130,7 +147,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
-                    "SELECT w.id, w.name, ws.version, w.created_at, w.updated_at
+                    "SELECT w.id, w.namespace, w.name, ws.version, w.created_at, w.updated_at
                      FROM workflows w
                      LEFT JOIN workflow_snapshots ws
                        ON ws.id = w.published_snapshot_id AND ws.is_deleted = 0
@@ -142,6 +159,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
                 while let Some(row) = rows.next()? {
                     workflows.push(WorkflowSummary {
                         id: row.get::<_, String>("id")?,
+                        namespace: Namespace::new(row.get::<_, String>("namespace")?)?,
                         name: row.get::<_, String>("name")?,
                         published_version: row.get::<_, Option<String>>("version")?,
                         created_at: row.get("created_at")?,
@@ -163,7 +181,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
             .pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
-                        "UPDATE workflows SET name = ?2, updated_at = ?3 WHERE id = ?1 AND is_deleted = 0 RETURNING id, name, published_snapshot_id, created_at, updated_at, is_deleted",
+                        "UPDATE workflows SET name = ?2, updated_at = ?3 WHERE id = ?1 AND is_deleted = 0 RETURNING id, namespace, name, published_snapshot_id, created_at, updated_at, is_deleted",
                     )?;
                 let mut rows = statement.query(params![
                     workflow_id.as_ref(),
@@ -184,9 +202,9 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         deleted_at: i64,
     ) -> Result<DeleteWorkflowResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let exists = transaction
                     .query_row(
                         "SELECT 1 FROM workflows WHERE id = ?1 AND is_deleted = 0",
@@ -310,9 +328,9 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         updated_at: i64,
     ) -> Result<UpdateDraftResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let workflow_exists = transaction
                     .query_row(
                         "SELECT 1 FROM workflows WHERE id = ?1 AND is_deleted = 0",
@@ -356,9 +374,9 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         created_at: i64,
     ) -> Result<PublishSnapshotResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let workflow_exists = transaction
                     .query_row(
                         "SELECT 1 FROM workflows WHERE id = ?1 AND is_deleted = 0",
@@ -435,9 +453,9 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         updated_at: i64,
     ) -> Result<RollbackDraftResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let workflow_exists = transaction
                     .query_row(
                         "SELECT 1 FROM workflows WHERE id = ?1 AND is_deleted = 0",
@@ -498,9 +516,9 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         updated_at: i64,
     ) -> Result<ActivateVersionResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let workflow_exists = transaction
                     .query_row(
                         "SELECT 1 FROM workflows WHERE id = ?1 AND is_deleted = 0",
@@ -568,12 +586,12 @@ impl WorkflowRepository for SqliteWorkflowRepository {
         _deleted_at: i64,
     ) -> Result<DeleteSnapshotResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let workflow = {
                     let mut statement = transaction.prepare(
-                        "SELECT id, name, published_snapshot_id, created_at, updated_at, is_deleted FROM workflows WHERE id = ?1 AND is_deleted = 0",
+                        "SELECT id, namespace, name, published_snapshot_id, created_at, updated_at, is_deleted FROM workflows WHERE id = ?1 AND is_deleted = 0",
                     )?;
                     let mut rows = statement.query(params![workflow_id.as_ref()])?;
                     rows.next()?.map(map_workflow_row).transpose()?
@@ -628,6 +646,7 @@ impl WorkflowRepository for SqliteWorkflowRepository {
 fn map_workflow_row(row: &Row<'_>) -> Result<Workflow, crate::DatabaseError> {
     Workflow::new(
         WorkflowId::new(row.get::<_, String>("id")?),
+        Namespace::new(row.get::<_, String>("namespace")?)?,
         row.get::<_, String>("name")?,
         row.get::<_, Option<String>>("published_snapshot_id")?
             .map(WorkflowSnapshotId::new),

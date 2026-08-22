@@ -81,9 +81,7 @@ export function createMockHitlSchema(
     type: "textarea" as const,
     label: en ? "Your answer" : "你的回答",
     required: true,
-    placeholder: en
-      ? "Reply to the model’s question…"
-      : "直接回复模型的问题…",
+    placeholder: en ? "Reply to the model’s question…" : "直接回复模型的问题…",
   };
 
   if (nodeId === "quick_scan" || nodeId === "docs") {
@@ -181,8 +179,8 @@ function hitlAnswerOutput(
   schema: HitlSchema,
   payload: Record<string, unknown>,
 ): GraphWorkflowNodeIo {
-  const isSingleAnswerField = schema.fields.length === 1
-    && schema.fields[0]?.name === "answer";
+  const isSingleAnswerField =
+    schema.fields.length === 1 && schema.fields[0]?.name === "answer";
   const parts: string[] = [];
   for (const field of schema.fields) {
     const raw = payload[field.name];
@@ -194,8 +192,8 @@ function hitlAnswerOutput(
       continue;
     }
     if (field.type === "select") {
-      const label = field.options?.find((option) => option.value === text)?.label
-        ?? text;
+      const label =
+        field.options?.find((option) => option.value === text)?.label ?? text;
       parts.push(`${field.label}: ${label}`);
     } else {
       // Keep single-answer clarify responses chat-like ("xxx") while preserving
@@ -267,7 +265,9 @@ export function createMockRunEngine(
 
   /** Resolves step length: node mockStepMs when positive, else engine default. */
   function stepMsFor(run: GraphWorkflowRun, nodeId: string): number {
-    const node = run.definitionSnapshot.nodes.find((item) => item.id === nodeId);
+    const node = run.definitionSnapshot.nodes.find(
+      (item) => item.id === nodeId,
+    );
     const custom = node?.data.mockStepMs;
     if (typeof custom === "number" && Number.isFinite(custom) && custom > 0) {
       return custom;
@@ -287,7 +287,9 @@ export function createMockRunEngine(
     plans.delete(runId);
   }
 
-  function timersFor(runId: string): Map<string, ReturnType<typeof setTimeout>> {
+  function timersFor(
+    runId: string,
+  ): Map<string, ReturnType<typeof setTimeout>> {
     let byNode = timers.get(runId);
     if (byNode === undefined) {
       byNode = new Map();
@@ -336,13 +338,17 @@ export function createMockRunEngine(
     const allDone = plan.order.every((nodeId) => {
       const status = latest.nodeStates[nodeId]?.status;
       return (
-        status === "succeeded"
-        || status === "failed"
-        || status === "cancelled"
-        || plan.skipped.includes(nodeId)
+        status === "succeeded" ||
+        status === "failed" ||
+        status === "cancelled" ||
+        plan.skipped.includes(nodeId)
       );
     });
-    if (allDone && timersFor(runId).size === 0 && latest.openHitls.length === 0) {
+    if (
+      allDone &&
+      timersFor(runId).size === 0 &&
+      latest.openHitls.length === 0
+    ) {
       finishRun(runId, /*status*/ "succeeded");
     }
   }
@@ -355,7 +361,9 @@ export function createMockRunEngine(
     if (run.nodeStates[nodeId]?.status !== "idle") {
       return;
     }
-    const node = run.definitionSnapshot.nodes.find((item) => item.id === nodeId);
+    const node = run.definitionSnapshot.nodes.find(
+      (item) => item.id === nodeId,
+    );
     if (node?.data.kind === "human") {
       beginHitl(runId, nodeId);
       return;
@@ -406,7 +414,8 @@ export function createMockRunEngine(
         sessionId,
         activityKind: "thought",
         summary: "分析节点上下文",
-        detail: "Mock thought: compare the instruction with the current workflow context.",
+        detail:
+          "Mock thought: compare the instruction with the current workflow context.",
         status: "complete",
         createdAt: startedAt,
         updatedAt: startedAt,
@@ -463,7 +472,11 @@ export function createMockRunEngine(
     if (run.nodeStates[nodeId]?.status !== "idle") {
       return;
     }
-    if (run.openHitls.some((item) => item.nodeId === nodeId && item.status === "open")) {
+    if (
+      run.openHitls.some(
+        (item) => item.nodeId === nodeId && item.status === "open",
+      )
+    ) {
       return;
     }
     const startedAt = host.nowIso();
@@ -547,11 +560,17 @@ export function createMockRunEngine(
         continue;
       }
       const value = payload[field.name];
-      if (value === undefined || value === null || String(value).trim() === "") {
+      if (
+        value === undefined ||
+        value === null ||
+        String(value).trim() === ""
+      ) {
         throw new Error(`Missing required field ${field.name}`);
       }
       if (field.type === "select") {
-        const allowed = new Set((field.options ?? []).map((option) => option.value));
+        const allowed = new Set(
+          (field.options ?? []).map((option) => option.value),
+        );
         if (!allowed.has(String(value))) {
           throw new Error(`Invalid option for field ${field.name}`);
         }
@@ -646,7 +665,9 @@ export function createMockRunEngine(
       return;
     }
     const finishedAt = host.nowIso();
-    const node = run.definitionSnapshot.nodes.find((item) => item.id === nodeId);
+    const node = run.definitionSnapshot.nodes.find(
+      (item) => item.id === nodeId,
+    );
     const prev = run.nodeStates[nodeId];
     patchNode(runId, nodeId, {
       status: "succeeded",
@@ -663,15 +684,23 @@ export function createMockRunEngine(
     });
 
     if (node?.data.kind === "agent" || node?.data.kind === "output") {
-      const instruction = node.data.instruction
-        ?? node.data.agentConfig?.prompt
-        ?? node.data.description
-        ?? "节点已完成。";
-      const markdown = node.data.kind === "output"
-        ? markdownDemoOutput(node.data.title, run.name, locale)
-        : markdownDemoAgentReply(node.data.title, instruction, runId, nodeId, locale);
-      const sessionId = run.nodeStates[nodeId]?.sessionId
-        ?? `workflow-node:${runId}:${nodeId}`;
+      const instruction =
+        node.data.instruction ??
+        node.data.agentConfig?.prompt ??
+        node.data.description ??
+        "节点已完成。";
+      const markdown =
+        node.data.kind === "output"
+          ? markdownDemoOutput(node.data.title, run.name, locale)
+          : markdownDemoAgentReply(
+              node.data.title,
+              instruction,
+              runId,
+              nodeId,
+              locale,
+            );
+      const sessionId =
+        run.nodeStates[nodeId]?.sessionId ?? `workflow-node:${runId}:${nodeId}`;
       publishConversationMessage(
         runId,
         nodeId,
@@ -1095,9 +1124,7 @@ Mock run **${runName}** completed.
 
 function isTerminal(status: GraphWorkflowRun["status"]): boolean {
   return (
-    status === "succeeded"
-    || status === "failed"
-    || status === "cancelled"
+    status === "succeeded" || status === "failed" || status === "cancelled"
   );
 }
 

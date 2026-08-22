@@ -15,9 +15,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@ora/ui";
 import { useTranslation } from "react-i18next";
 import type { ChatThought, ChatToolCall, ChatTurnStatus } from "@ora/chat";
-import {
-  StreamingThoughtReveal,
-} from "./streaming-thought-reveal";
+import { StreamingThoughtReveal } from "./streaming-thought-reveal";
 import { useStreamingThoughtRevealStart } from "./use-streaming-thought-reveal-start";
 import { ToolCallBlock } from "./tool-call-block";
 
@@ -46,10 +44,17 @@ interface ToolTimelineEntry {
 type TimelineEntry = ThoughtTimelineEntry | ToolTimelineEntry;
 
 /** Condenses exploratory reasoning and file reads into one secondary timeline. */
-export function ActivityGroup({ items, turnStatus, isLatestActivity }: ActivityGroupProps) {
+export function ActivityGroup({
+  items,
+  turnStatus,
+  isLatestActivity,
+}: ActivityGroupProps) {
   const status = activityStatus(items, turnStatus, isLatestActivity);
   const entries = groupTimelineEntries(items);
-  const [disclosure, setDisclosure] = useState({ status, open: status === "active" });
+  const [disclosure, setDisclosure] = useState({
+    status,
+    open: status === "active",
+  });
   const latestItemId = entries.at(-1)?.id ?? null;
   const [selection, setSelection] = useState({
     followsLatest: status === "active",
@@ -59,10 +64,16 @@ export function ActivityGroup({ items, turnStatus, isLatestActivity }: ActivityG
     setDisclosure({ status, open: status === "active" });
   }
   const open = disclosure.open;
-  const selectedId = selection.followsLatest && status === "active" ? latestItemId : selection.selectedId;
+  const selectedId =
+    selection.followsLatest && status === "active"
+      ? latestItemId
+      : selection.selectedId;
 
   const toggleItem = (itemId: string, nextOpen: boolean) => {
-    setSelection({ followsLatest: false, selectedId: nextOpen ? itemId : null });
+    setSelection({
+      followsLatest: false,
+      selectedId: nextOpen ? itemId : null,
+    });
   };
 
   return (
@@ -74,7 +85,10 @@ export function ActivityGroup({ items, turnStatus, isLatestActivity }: ActivityG
       <CollapsibleTrigger className="flex min-h-11 w-full items-center gap-2.5 rounded-r-sm px-3 py-1 text-left outline-none transition-colors duration-200 hover:bg-muted/25 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50">
         <IconTimeline className="size-4 shrink-0 text-sky-700 dark:text-sky-400" />
         <span className="min-w-0 flex-1">
-          <span key={`${status}-${latestItemId}`} className="block truncate text-xs font-medium text-foreground animate-in fade-in slide-in-from-bottom-1 duration-200 motion-reduce:animate-none">
+          <span
+            key={`${status}-${latestItemId}`}
+            className="block truncate text-xs font-medium text-foreground animate-in fade-in slide-in-from-bottom-1 duration-200 motion-reduce:animate-none"
+          >
             <ActivityTitle status={status} items={items} />
           </span>
           <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">
@@ -82,13 +96,18 @@ export function ActivityGroup({ items, turnStatus, isLatestActivity }: ActivityG
           </span>
         </span>
         <ActivityStatusIcon status={status} />
-        <IconChevronDown className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none ${open ? "rotate-180" : ""}`} />
+        <IconChevronDown
+          className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none ${open ? "rotate-180" : ""}`}
+        />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <ol className="relative ml-5 border-l border-border/60 py-1 pl-2 pr-2">
           {entries.map((entry) => (
             <li key={entry.id} className="relative pl-3">
-              <TimelineNodeMarker kind={entry.kind} selected={selectedId === entry.id} />
+              <TimelineNodeMarker
+                kind={entry.kind}
+                selected={selectedId === entry.id}
+              />
               {entry.kind === "thought" ? (
                 <ThoughtTimelineItem
                   thought={entry.thought}
@@ -101,7 +120,9 @@ export function ActivityGroup({ items, turnStatus, isLatestActivity }: ActivityG
                   tool={entry.tools[0]}
                   appearance="timeline"
                   expanded={selectedId === entry.id}
-                  onExpandedChange={(nextOpen) => toggleItem(entry.id, nextOpen)}
+                  onExpandedChange={(nextOpen) =>
+                    toggleItem(entry.id, nextOpen)
+                  }
                 />
               ) : (
                 <ToolTimelineCluster
@@ -125,7 +146,11 @@ function groupTimelineEntries(items: ActivityItem[]): TimelineEntry[] {
 
   const flushTools = () => {
     if (pendingTools.length > 0) {
-      entries.push({ kind: "tools", id: `tool-cluster-${pendingTools[0].id}`, tools: pendingTools });
+      entries.push({
+        kind: "tools",
+        id: `tool-cluster-${pendingTools[0].id}`,
+        tools: pendingTools,
+      });
     }
     pendingTools = [];
   };
@@ -136,7 +161,8 @@ function groupTimelineEntries(items: ActivityItem[]): TimelineEntry[] {
       entries.push({ kind: "thought", id: item.id, thought: item });
       continue;
     }
-    if (pendingTools.length > 0 && pendingTools[0].toolKind !== item.toolKind) flushTools();
+    if (pendingTools.length > 0 && pendingTools[0].toolKind !== item.toolKind)
+      flushTools();
     pendingTools.push(item);
   }
   flushTools();
@@ -144,7 +170,13 @@ function groupTimelineEntries(items: ActivityItem[]): TimelineEntry[] {
 }
 
 /** Names the live operation from structured tool data instead of provider-authored titles. */
-function ActivityTitle({ status, items }: { status: ActivityStatus; items: ActivityItem[] }) {
+function ActivityTitle({
+  status,
+  items,
+}: {
+  status: ActivityStatus;
+  items: ActivityItem[];
+}) {
   const { t } = useTranslation();
   if (status === "failed") return t("chat.activity.failed");
   if (status === "cancelled") return t("chat.activity.cancelled");
@@ -162,7 +194,8 @@ function ActivityTitle({ status, items }: { status: ActivityStatus; items: Activ
     if (toolKinds.has("fetch")) return t("chat.activity.completed.fetch");
     return t("chat.activity.completed.tool");
   }
-  if (latestItem === undefined || latestItem.kind === "thought") return t("chat.activity.active.analysis");
+  if (latestItem === undefined || latestItem.kind === "thought")
+    return t("chat.activity.active.analysis");
 
   switch (latestItem.toolKind) {
     case "read": {
@@ -192,17 +225,27 @@ function ActivityTitle({ status, items }: { status: ActivityStatus; items: Activ
 function ActivityMetrics({ items }: { items: ActivityItem[] }) {
   const { t } = useTranslation();
   const thoughts = items.filter((item) => item.kind === "thought").length;
-  const tools = items.filter((item): item is ChatToolCall => item.kind === "toolCall");
+  const tools = items.filter(
+    (item): item is ChatToolCall => item.kind === "toolCall",
+  );
   const readTools = tools.filter((tool) => tool.toolKind === "read");
-  const paths = new Set(readTools.flatMap((tool) => tool.locations.map((location) => location.path)));
+  const paths = new Set(
+    readTools.flatMap((tool) =>
+      tool.locations.map((location) => location.path),
+    ),
+  );
   const files = paths.size > 0 ? paths.size : readTools.length;
   const searches = tools.filter((tool) => tool.toolKind === "search").length;
   const fetches = tools.filter((tool) => tool.toolKind === "fetch").length;
   const metrics = [
     files > 0 ? t("chat.activity.metric.files", { count: files }) : null,
-    searches > 0 ? t("chat.activity.metric.searches", { count: searches }) : null,
+    searches > 0
+      ? t("chat.activity.metric.searches", { count: searches })
+      : null,
     fetches > 0 ? t("chat.activity.metric.fetches", { count: fetches }) : null,
-    thoughts > 0 ? t("chat.activity.metric.thoughts", { count: thoughts }) : null,
+    thoughts > 0
+      ? t("chat.activity.metric.thoughts", { count: thoughts })
+      : null,
   ].filter((metric): metric is string => metric !== null);
   return metrics.join(" · ");
 }
@@ -220,10 +263,15 @@ function ThoughtTimelineItem({
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const revealStart = useStreamingThoughtRevealStart(thought.content, streaming);
+  const revealStart = useStreamingThoughtRevealStart(
+    thought.content,
+    streaming,
+  );
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
-      <CollapsibleTrigger className={`flex min-h-11 w-full items-center gap-2 rounded-r-sm px-2 py-1.5 text-left text-xs outline-none transition-colors duration-200 hover:bg-muted/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 ${open ? "bg-muted/25 text-foreground" : "text-muted-foreground"}`}>
+      <CollapsibleTrigger
+        className={`flex min-h-11 w-full items-center gap-2 rounded-r-sm px-2 py-1.5 text-left text-xs outline-none transition-colors duration-200 hover:bg-muted/25 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 ${open ? "bg-muted/25 text-foreground" : "text-muted-foreground"}`}
+      >
         <IconRoute className="size-4 shrink-0 text-violet-600 dark:text-violet-400" />
         <span className="shrink-0 font-medium">{t("chat.thought")}</span>
         <span className="min-w-0 flex-1 truncate opacity-80">
@@ -233,10 +281,15 @@ function ThoughtTimelineItem({
             revealStart={revealStart}
           />
         </span>
-        <IconChevronDown className={`size-3.5 shrink-0 transition-transform duration-200 motion-reduce:transition-none ${open ? "rotate-180" : ""}`} />
+        <IconChevronDown
+          className={`size-3.5 shrink-0 transition-transform duration-200 motion-reduce:transition-none ${open ? "rotate-180" : ""}`}
+        />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <p data-selectable className="ml-6 rounded-r-sm border-l-2 border-violet-500/50 bg-muted/20 px-3 py-2 text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
+        <p
+          data-selectable
+          className="ml-6 rounded-r-sm border-l-2 border-violet-500/50 bg-muted/20 px-3 py-2 text-xs leading-5 whitespace-pre-wrap text-muted-foreground"
+        >
           <StreamingThoughtText
             content={thought.content}
             reveal={streaming && open}
@@ -288,18 +341,30 @@ function ToolTimelineCluster({
   const previews = clusterPreviewItems(tools);
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
-      <CollapsibleTrigger className={`flex min-h-11 w-full items-center gap-2 rounded-r-sm px-2 py-1 text-left text-xs outline-none transition-colors duration-200 hover:bg-muted/25 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 ${open ? "bg-muted/25" : ""}`}>
+      <CollapsibleTrigger
+        className={`flex min-h-11 w-full items-center gap-2 rounded-r-sm px-2 py-1 text-left text-xs outline-none transition-colors duration-200 hover:bg-muted/25 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50 ${open ? "bg-muted/25" : ""}`}
+      >
         <ClusterIcon toolKind={toolKind} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium">{clusterTitle(toolKind, tools.length, t)}</span>
-          {previews.length > 0 && <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">{previews.join(" · ")}</span>}
+          <span className="block truncate font-medium">
+            {clusterTitle(toolKind, tools.length, t)}
+          </span>
+          {previews.length > 0 && (
+            <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground">
+              {previews.join(" · ")}
+            </span>
+          )}
         </span>
         <ActivityStatusIcon status={clusterStatus(tools)} />
-        <IconChevronDown className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none ${open ? "rotate-180" : ""}`} />
+        <IconChevronDown
+          className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none ${open ? "rotate-180" : ""}`}
+        />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="ml-4 border-l border-border/60 pl-2">
-          {tools.map((tool) => <ToolCallBlock key={tool.id} tool={tool} appearance="embedded" />)}
+          {tools.map((tool) => (
+            <ToolCallBlock key={tool.id} tool={tool} appearance="embedded" />
+          ))}
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -359,36 +424,67 @@ function clusterPreviewItems(tools: ChatToolCall[]): string[] {
     return path?.split(/[\\/]/).at(-1) ?? tool.title;
   });
   const visible = labels.slice(0, 3);
-  if (labels.length > visible.length) visible.push(`+${labels.length - visible.length}`);
+  if (labels.length > visible.length)
+    visible.push(`+${labels.length - visible.length}`);
   return visible;
 }
 
 /** Prevents completed calls from masking a failed or still-running item in the batch. */
 function clusterStatus(tools: ChatToolCall[]): ActivityStatus {
   if (tools.some((tool) => tool.status === "failed")) return "failed";
-  if (tools.some((tool) => tool.status === "pending" || tool.status === "in_progress")) return "active";
+  if (
+    tools.some(
+      (tool) => tool.status === "pending" || tool.status === "in_progress",
+    )
+  )
+    return "active";
   if (tools.some((tool) => tool.status === "cancelled")) return "cancelled";
   return "completed";
 }
 
 /** Gives the focused node a stable locator without changing the timeline's geometry. */
-function TimelineNodeMarker({ kind, selected }: { kind: TimelineEntry["kind"]; selected: boolean }) {
+function TimelineNodeMarker({
+  kind,
+  selected,
+}: {
+  kind: TimelineEntry["kind"];
+  selected: boolean;
+}) {
   return (
-    <span className="absolute -left-[15px] top-[17px] flex size-2 items-center justify-center bg-background" aria-hidden="true">
-      <span className={`transition-all duration-200 ${kind === "thought" ? "h-2 w-1 rounded-full" : "size-1.5 rounded-full"} ${selected ? "bg-foreground ring-2 ring-background outline outline-1 outline-foreground/25" : "bg-border"}`} />
+    <span
+      className="absolute -left-[15px] top-[17px] flex size-2 items-center justify-center bg-background"
+      aria-hidden="true"
+    >
+      <span
+        className={`transition-all duration-200 ${kind === "thought" ? "h-2 w-1 rounded-full" : "size-1.5 rounded-full"} ${selected ? "bg-foreground ring-2 ring-background outline outline-1 outline-foreground/25" : "bg-border"}`}
+      />
     </span>
   );
 }
 
 /** Resolves activity lifecycle without letting completed reads hide a live final thought. */
-function activityStatus(items: ActivityItem[], turnStatus: ChatTurnStatus, isLatestActivity: boolean): ActivityStatus {
-  const tools = items.filter((item): item is ChatToolCall => item.kind === "toolCall");
-  if (turnStatus === "failed" || tools.some((tool) => tool.status === "failed")) return "failed";
+function activityStatus(
+  items: ActivityItem[],
+  turnStatus: ChatTurnStatus,
+  isLatestActivity: boolean,
+): ActivityStatus {
+  const tools = items.filter(
+    (item): item is ChatToolCall => item.kind === "toolCall",
+  );
+  if (turnStatus === "failed" || tools.some((tool) => tool.status === "failed"))
+    return "failed";
   if (
-    tools.some((tool) => tool.status === "pending" || tool.status === "in_progress")
-    || (turnStatus === "streaming" && isLatestActivity)
-  ) return "active";
-  if (turnStatus === "cancelled" || tools.some((tool) => tool.status === "cancelled")) return "cancelled";
+    tools.some(
+      (tool) => tool.status === "pending" || tool.status === "in_progress",
+    ) ||
+    (turnStatus === "streaming" && isLatestActivity)
+  )
+    return "active";
+  if (
+    turnStatus === "cancelled" ||
+    tools.some((tool) => tool.status === "cancelled")
+  )
+    return "cancelled";
   return "completed";
 }
 
@@ -397,12 +493,32 @@ function ActivityStatusIcon({ status }: { status: ActivityStatus }) {
   const { t } = useTranslation();
   switch (status) {
     case "active":
-      return <IconLoader2 className="size-3.5 shrink-0 animate-spin text-sky-600 motion-reduce:animate-none" aria-label={t("chat.toolRunning")} />;
+      return (
+        <IconLoader2
+          className="size-3.5 shrink-0 animate-spin text-sky-600 motion-reduce:animate-none"
+          aria-label={t("chat.toolRunning")}
+        />
+      );
     case "completed":
-      return <IconCheck className="size-3.5 shrink-0 text-emerald-600" aria-label={t("chat.toolCompleted")} />;
+      return (
+        <IconCheck
+          className="size-3.5 shrink-0 text-emerald-600"
+          aria-label={t("chat.toolCompleted")}
+        />
+      );
     case "cancelled":
-      return <IconBan className="size-3.5 shrink-0 text-muted-foreground" aria-label={t("chat.toolCancelled")} />;
+      return (
+        <IconBan
+          className="size-3.5 shrink-0 text-muted-foreground"
+          aria-label={t("chat.toolCancelled")}
+        />
+      );
     case "failed":
-      return <IconAlertTriangle className="size-3.5 shrink-0 text-destructive" aria-label={t("chat.toolFailed")} />;
+      return (
+        <IconAlertTriangle
+          className="size-3.5 shrink-0 text-destructive"
+          aria-label={t("chat.toolFailed")}
+        />
+      );
   }
 }

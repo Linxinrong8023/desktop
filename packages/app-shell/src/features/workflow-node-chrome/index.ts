@@ -1,4 +1,5 @@
 export { WorkflowNodeCardShell } from "./card-shell";
+export { AgentExecutionModeMark } from "./agent-execution-mode-mark";
 export type {
   WorkflowNodeCardDensity,
   WorkflowNodeCardShellProps,

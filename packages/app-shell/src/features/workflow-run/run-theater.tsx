@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Badge, cn, toast } from "@ora/ui";
 import { useUpdateWorkflowRunInput } from "../../state/hooks/use-workflow-runs";
@@ -47,7 +53,7 @@ interface RunTheaterProps {
   onOpenInspectorOnMountConsumed?: () => void;
   /**
    * When Changes/Files is open, suppress *automatic* inspector opens (seeded
-   * mount, artifact reveal). Intentional act clicks still open the rail so
+   * mount, artifact reveal). Intentional node-detail actions still open the rail so
    * Diff and the inspector can coexist on the stage.
    */
   reviewPanelOpen?: boolean;
@@ -56,6 +62,8 @@ interface RunTheaterProps {
   /** Which node's session dock is open — lifted across Overview remounts. */
   sessionConversationNodeId?: string | null;
   onSessionConversationNodeIdChange?: (nodeId: string | null) => void;
+  /** Reports a completed interactive node so the workspace can follow its successor. */
+  onNodeCompleted?: (nodeId: string) => void;
 }
 
 /**
@@ -78,6 +86,7 @@ export function RunTheater({
   onShowOverview,
   sessionConversationNodeId = null,
   onSessionConversationNodeIdChange,
+  onNodeCompleted,
 }: RunTheaterProps) {
   const { t } = useTranslation();
   const updateInput = useUpdateWorkflowRunInput();
@@ -88,7 +97,9 @@ export function RunTheater({
   const inspectorAnimationRef = useRef<number | null>(null);
   const inspectorWidthRef = useRef(DEFAULT_INSPECTOR_WIDTH);
   const inspectorCurrentWidthRef = useRef(0);
-  const resizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const resizeDragRef = useRef<{ startX: number; startWidth: number } | null>(
+    null,
+  );
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [inspectorVisualWidth, setInspectorVisualWidth] = useState(0);
   const pathScrollOpenSigRef = useRef<string>("");
@@ -100,10 +111,11 @@ export function RunTheater({
   );
   const primaryId = focus.primaryId;
   const parallel = focus.activeIds.length > 1;
-  const parallelCarouselFocus = primaryId !== null
-    && parallel
-    && focus.activeIds.length > 1
-    && focus.activeIds.includes(primaryId);
+  const parallelCarouselFocus =
+    primaryId !== null &&
+    parallel &&
+    focus.activeIds.length > 1 &&
+    focus.activeIds.includes(primaryId);
   const showParallelCarousel = parallelCarouselFocus;
   const showResultAct = isTerminalRunStatus(run.status) && focusNodeId === null;
 
@@ -124,7 +136,10 @@ export function RunTheater({
 
   // Scroll path rail when the open-gate set changes — not on every primary tick.
   useEffect(() => {
-    const requestSig = openHitls.map((item) => item.id).sort().join("|");
+    const requestSig = openHitls
+      .map((item) => item.id)
+      .sort()
+      .join("|");
     const openSig = requestSig === "" ? "" : `${run.id}:${requestSig}`;
     if (openSig === "" || openSig === pathScrollOpenSigRef.current) {
       return;
@@ -153,10 +168,13 @@ export function RunTheater({
     [run.definitionSnapshot.nodes],
   );
   const primaryNode = primaryId === null ? undefined : nodeById.get(primaryId);
-  const primaryState = primaryId !== null
-    ? run.nodeStates[primaryId]
-    : undefined;
-  const isEditableStart = run.status === "pending" && primaryNode?.data?.kind === "start";
+  const primaryState =
+    primaryId !== null ? run.nodeStates[primaryId] : undefined;
+  // The start instruction is editable whenever the run is not executing — a not-started pending
+  // run or any terminal run — so the kickoff input can be changed before a restart re-runs it.
+  const isEditableStart =
+    (run.status === "pending" || isTerminalRunStatus(run.status)) &&
+    primaryNode?.data?.kind === "start";
 
   // Drop an uncommitted draft the moment the run leaves pending (or the run switches) so a stale
   // draft cannot reappear on the start node after a restart. Implemented as a render-time reset
@@ -175,19 +193,15 @@ export function RunTheater({
     [artifacts, primaryId],
   );
   const primaryRealConversation = primaryState?.conversation;
-  const primaryConversation = useMemo(
-    () => {
-      // The real adapter projects the node's conversation from its run output; the mock
-      // runtime provides it through the live snapshot instead.
-      const mockItems = primaryId === null
-        ? []
-        : (conversationByNodeId.get(primaryId) ?? []);
-      return primaryRealConversation != null && primaryRealConversation.length > 0
-        ? primaryRealConversation
-        : mockItems;
-    },
-    [primaryId, conversationByNodeId, primaryRealConversation],
-  );
+  const primaryConversation = useMemo(() => {
+    // The real adapter projects the node's conversation from its run output; the mock
+    // runtime provides it through the live snapshot instead.
+    const mockItems =
+      primaryId === null ? [] : (conversationByNodeId.get(primaryId) ?? []);
+    return primaryRealConversation != null && primaryRealConversation.length > 0
+      ? primaryRealConversation
+      : mockItems;
+  }, [primaryId, conversationByNodeId, primaryRealConversation]);
   const artifactCountByNode = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const artifact of artifacts) {
@@ -205,13 +219,15 @@ export function RunTheater({
       if (node === undefined || state === undefined) {
         return [];
       }
-      return [{
-        nodeId,
-        data: node.data,
-        state,
-        artifactCount: artifactCountByNode[nodeId] ?? 0,
-        conversation: conversationByNodeId.get(nodeId) ?? [],
-      }];
+      return [
+        {
+          nodeId,
+          data: node.data,
+          state,
+          artifactCount: artifactCountByNode[nodeId] ?? 0,
+          conversation: conversationByNodeId.get(nodeId) ?? [],
+        },
+      ];
     });
   }, [
     parallel,
@@ -227,9 +243,9 @@ export function RunTheater({
     const total = Math.max(states.length, 1);
     const done = states.filter(
       (state) =>
-        state.status === "succeeded"
-        || state.status === "failed"
-        || state.status === "cancelled",
+        state.status === "succeeded" ||
+        state.status === "failed" ||
+        state.status === "cancelled",
     ).length;
     return { done, total, percent: Math.round((done / total) * 100) };
   }, [run.nodeStates]);
@@ -250,7 +266,7 @@ export function RunTheater({
 
   /**
    * Opens the act inspector. Automatic triggers stay quiet while Diff/Files is
-   * open; user clicks always open so the rail can sit beside an open Diff.
+   * open; explicit user actions always open so the rail can sit beside an open Diff.
    */
   function openInspector(reason: "automatic" | "user"): void {
     if (reason === "automatic" && reviewPanelOpen) {
@@ -281,19 +297,31 @@ export function RunTheater({
     });
   }
 
+  /** Uses the card's persistent header control as the single inspector toggle. */
+  function toggleInspector(): void {
+    if (inspectorCollapsed) {
+      openInspector("user");
+      return;
+    }
+    closeInspector();
+  }
+
   // Commits the drafted start-node instruction to the run's kickoff input in one request and
   // clears the draft on success (the refetched run then surfaces the saved input).
   function saveInstructionDraft(): void {
     if (instructionDraft === null) {
       return;
     }
-    updateInput.mutate({
-      runId: run.id,
-      input: instructionDraft,
-    }, {
-      onSuccess: () => setInstructionDraft(null),
-      onError: () => toast.error(t("workflowRun.updateFailed")),
-    });
+    updateInput.mutate(
+      {
+        runId: run.id,
+        input: instructionDraft,
+      },
+      {
+        onSuccess: () => setInstructionDraft(null),
+        onError: () => toast.error(t("workflowRun.updateFailed")),
+      },
+    );
   }
 
   // Expanded HITL and the inspector rail compete for the same stage edge.
@@ -330,9 +358,8 @@ export function RunTheater({
       fromWidth: width,
       onCollapsed: () => setInspectorCollapsed(true),
       onFrame: applyInspectorWidth,
-      targetWidth: width < INSPECTOR_COLLAPSE_THRESHOLD
-        ? 0
-        : MIN_INSPECTOR_WIDTH,
+      targetWidth:
+        width < INSPECTOR_COLLAPSE_THRESHOLD ? 0 : MIN_INSPECTOR_WIDTH,
     });
   }
 
@@ -376,9 +403,9 @@ export function RunTheater({
     previousPrimaryForRevealRef.current = primaryId;
 
     if (
-      revealedArtifactId === null
-      || showResultAct
-      || sessionConversationNodeId !== null
+      revealedArtifactId === null ||
+      showResultAct ||
+      sessionConversationNodeId !== null
     ) {
       return;
     }
@@ -407,6 +434,9 @@ export function RunTheater({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
   }, [showResultAct]);
 
+  const primaryConversationOpen =
+    primaryNode !== undefined && sessionConversationNodeId === primaryNode.id;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <RunTheaterPathRail
@@ -420,94 +450,122 @@ export function RunTheater({
         pathRailRef={pathRailRef}
         onFocusNode={onFocusNode}
         onExpandHitl={expandHitlForRequest}
-        onShowResultAct={isTerminalRunStatus(run.status) ? onClearFocus : undefined}
+        onShowResultAct={
+          isTerminalRunStatus(run.status) ? onClearFocus : undefined
+        }
       />
 
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          <div className="absolute inset-0 flex flex-col overflow-auto p-6">
+          <div
+            className={cn(
+              "absolute inset-0 flex flex-col p-6",
+              primaryConversationOpen ? "overflow-hidden" : "overflow-auto",
+            )}
+            style={{ right: inspectorVisualWidth }}
+          >
             <div
               className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_30%,color-mix(in_oklch,var(--muted)_55%,transparent),transparent_65%)]"
               aria-hidden
             />
-            <div className="relative mx-auto my-auto w-full max-w-xl shrink-0">
-              {showResultAct
-                ? (
-                  <RunResultAct
-                    run={run}
-                    artifactCount={artifacts.length}
-                    changedFileCount={changedFileCount}
-                    onShowOverview={onShowOverview}
-                    onOpenArtifacts={artifacts.length > 0
+            <div
+              className={cn(
+                "relative w-full",
+                primaryConversationOpen
+                  ? "flex h-full min-h-0 max-w-none flex-1 flex-col"
+                  : "mx-auto my-auto max-w-xl shrink-0",
+              )}
+            >
+              {showResultAct ? (
+                <RunResultAct
+                  run={run}
+                  artifactCount={artifacts.length}
+                  changedFileCount={changedFileCount}
+                  onShowOverview={onShowOverview}
+                  onOpenArtifacts={
+                    artifacts.length > 0
                       ? () => {
-                        const recent = latestArtifact(artifacts);
-                        if (recent !== null) {
-                          onFocusNode(recent.nodeId);
+                          const recent = latestArtifact(artifacts);
+                          if (recent !== null) {
+                            onFocusNode(recent.nodeId);
+                          }
+                          openInspector("user");
                         }
-                        openInspector("user");
-                      }
-                      : undefined}
+                      : undefined
+                  }
+                />
+              ) : showParallelCarousel && !primaryConversationOpen ? (
+                <div className="space-y-3">
+                  <RunTheaterParallelStage
+                    runId={run.id}
+                    acts={parallelActs}
+                    primaryId={primaryId!}
+                    onFocusNode={onFocusNode}
+                    inspectorOpen={!inspectorCollapsed}
+                    onToggleInspector={toggleInspector}
+                    sessionConversationNodeId={sessionConversationNodeId}
+                    onSessionConversationNodeIdChange={
+                      onSessionConversationNodeIdChange
+                    }
+                    onNodeCompleted={onNodeCompleted}
+                    primaryInteraction={
+                      primaryHasHitl
+                        ? ({ accessory }) =>
+                            renderHitlComposer(accessory ?? undefined)
+                        : undefined
+                    }
                   />
-                )
-                : showParallelCarousel
-                ? (
-                  <div className="space-y-3">
-                    <RunTheaterParallelStage
-                      acts={parallelActs}
-                      primaryId={primaryId!}
-                      onFocusNode={onFocusNode}
-                      onOpenInspector={() => openInspector("user")}
-                      sessionConversationNodeId={sessionConversationNodeId}
-                      onSessionConversationNodeIdChange={onSessionConversationNodeIdChange}
-                      primaryInteraction={primaryHasHitl
-                        ? ({ accessory }) => renderHitlComposer(accessory ?? undefined)
-                        : undefined}
-                    />
-                    {!primaryHasHitl && hitlComposer !== null && (
-                      <div className="px-0.5">
-                        {hitlComposer}
-                      </div>
-                    )}
-                  </div>
-                )
-                : primaryNode && primaryState
-                ? (
-                  <div
-                    key={primaryNode.id}
-                    className="animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] fill-mode-both motion-reduce:animate-none"
-                  >
-                    <RunTheaterActCard
-                      data={primaryNode.data}
-                      state={primaryState}
-                      live={isNodeWorking(primaryState.status)}
-                      artifactCount={primaryArtifacts.length}
-                      conversation={primaryConversation}
-                      conversationOpen={sessionConversationNodeId === primaryNode.id}
-                      onConversationOpenChange={(open) => {
-                        onSessionConversationNodeIdChange?.(
-                          open ? primaryNode.id : null,
-                        );
-                      }}
-                      variant="stage"
-                      onSelect={() => openInspector("user")}
-                      interaction={primaryHasHitl
-                        ? ({ accessory }) => renderHitlComposer(accessory ?? undefined)
-                        : undefined}
-                    />
-                    {!primaryHasHitl && hitlComposer !== null && (
-                      <div className="mt-3">
-                        {hitlComposer}
-                      </div>
-                    )}
-                  </div>
-                )
-                : (
-                  <p className="text-center text-sm text-muted-foreground">
-                    {t("workflowRun.theater.empty")}
-                  </p>
-                )}
+                  {!primaryHasHitl && hitlComposer !== null && (
+                    <div className="px-0.5">{hitlComposer}</div>
+                  )}
+                </div>
+              ) : primaryNode && primaryState ? (
+                <div
+                  key={primaryNode.id}
+                  className={cn(
+                    "animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] fill-mode-both motion-reduce:animate-none",
+                    primaryConversationOpen &&
+                      "flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden",
+                  )}
+                >
+                  <RunTheaterActCard
+                    data={primaryNode.data}
+                    state={primaryState}
+                    runId={run.id}
+                    nodeId={primaryNode.id}
+                    live={isNodeWorking(primaryState.status)}
+                    artifactCount={primaryArtifacts.length}
+                    conversation={primaryConversation}
+                    conversationOpen={
+                      sessionConversationNodeId === primaryNode.id
+                    }
+                    onConversationOpenChange={(open) => {
+                      onSessionConversationNodeIdChange?.(
+                        open ? primaryNode.id : null,
+                      );
+                    }}
+                    onNodeCompleted={onNodeCompleted}
+                    variant="stage"
+                    inspectorOpen={!inspectorCollapsed}
+                    onToggleInspector={toggleInspector}
+                    interaction={
+                      primaryHasHitl
+                        ? ({ accessory }) =>
+                            renderHitlComposer(accessory ?? undefined)
+                        : undefined
+                    }
+                  />
+                  {!primaryHasHitl && hitlComposer !== null && (
+                    <div className="mt-3">{hitlComposer}</div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-center text-sm text-muted-foreground">
+                  {t("workflowRun.theater.empty")}
+                </p>
+              )}
 
-              {!showResultAct && (
+              {!showResultAct && !primaryConversationOpen && (
                 <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
                   {parallel && (
                     <Badge variant="secondary" className="tabular-nums">
@@ -518,13 +576,13 @@ export function RunTheater({
                   )}
                 </div>
               )}
-              {!showResultAct && (
+              {!showResultAct && !primaryConversationOpen && (
                 <p className="mt-3 text-center text-[10px] text-muted-foreground/70">
                   {hitlExpanded
                     ? t("workflowRun.theater.hitlHint")
                     : inspectorCollapsed
-                    ? t("workflowRun.theater.inspectorHint")
-                    : t("workflowRun.theater.returnOverviewHint")}
+                      ? t("workflowRun.theater.inspectorHint")
+                      : t("workflowRun.theater.returnOverviewHint")}
                 </p>
               )}
             </div>
@@ -591,8 +649,8 @@ export function RunTheater({
                   0,
                   Math.min(
                     1,
-                    (inspectorVisualWidth - INSPECTOR_FADE_START)
-                      / (MIN_INSPECTOR_WIDTH - INSPECTOR_FADE_START),
+                    (inspectorVisualWidth - INSPECTOR_FADE_START) /
+                      (MIN_INSPECTOR_WIDTH - INSPECTOR_FADE_START),
                   ),
                 ),
               }}
@@ -603,25 +661,33 @@ export function RunTheater({
                 state={primaryState ?? null}
                 artifacts={primaryArtifacts}
                 revealedArtifactId={revealedArtifactId}
-                editable={run.status === "pending"}
-                onPatchNode={isEditableStart
-                  ? (patch) => {
-                    // The start node's instruction is the run's kickoff input; the backend has no
-                    // way to edit other nodes of the frozen snapshot, so description patches are
-                    // intentionally ignored. Edits stay in a local draft until save.
-                    if (patch.instruction != null) {
-                      setInstructionDraft(patch.instruction);
-                    }
-                  }
-                  : undefined}
+                editable={isEditableStart}
+                onPatchNode={
+                  isEditableStart
+                    ? (patch) => {
+                        // The start node's instruction is the run's kickoff input; the backend has no
+                        // way to edit other nodes of the frozen snapshot, so description patches are
+                        // intentionally ignored. Edits stay in a local draft until save.
+                        if (patch.instruction != null) {
+                          setInstructionDraft(patch.instruction);
+                        }
+                      }
+                    : undefined
+                }
                 instructionDraft={isEditableStart ? instructionDraft : null}
-                onInstructionDraftChange={isEditableStart ? setInstructionDraft : undefined}
-                onSaveInstruction={isEditableStart ? saveInstructionDraft : undefined}
-                onDiscardInstructionDraft={isEditableStart
-                  ? () => setInstructionDraft(null)
-                  : undefined}
-                instructionSavePending={isEditableStart ? updateInput.isPending : false}
-                onClose={closeInspector}
+                onInstructionDraftChange={
+                  isEditableStart ? setInstructionDraft : undefined
+                }
+                onSaveInstruction={
+                  isEditableStart ? saveInstructionDraft : undefined
+                }
+                onDiscardInstructionDraft={
+                  isEditableStart ? () => setInstructionDraft(null) : undefined
+                }
+                instructionSavePending={
+                  isEditableStart ? updateInput.isPending : false
+                }
+                onClose={primaryNode === undefined ? closeInspector : undefined}
               />
             </div>
           </aside>

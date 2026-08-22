@@ -1,16 +1,18 @@
-//! Discovers installed Ora plugin packages without executing plugin code.
+//! Discovers installed Ora plugin packages and orchestrates new plugin installs.
 
 mod discovery;
+mod install;
 mod issue;
-mod manifest;
+mod logo;
 mod validation;
 
 #[cfg(test)]
 mod tests;
 
+pub use install::{InstallError, Installer};
 pub use issue::{PluginDiscoveryIssue, PluginDiscoveryIssueKind};
 pub use validation::{
-    InstalledPlugin, InstalledPluginAgent, PluginEngines, PluginKind, PluginPackageType,
+    InstalledPlugin, InstalledPluginAgent, PluginContribution, PluginEngines, PluginPackageType,
 };
 
 use std::path::Path;
@@ -26,7 +28,7 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
-    /// Discovers direct child plugin packages below `<data_dir>/plugins`.
+    /// Discovers the selected plugin versions below `<data_dir>/plugins/installed`.
     pub fn discover(data_dir: impl AsRef<Path>) -> Self {
         let discovery::PluginDiscovery {
             installed_plugins,

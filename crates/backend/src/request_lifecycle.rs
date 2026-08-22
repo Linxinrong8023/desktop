@@ -27,6 +27,35 @@ struct RequestLifecycleInner {
     completed: AtomicBool,
 }
 
+impl RequestLifecycleInner {
+    fn duration_ms(&self) -> u64 {
+        self.started_at.elapsed().as_millis() as u64
+    }
+}
+
+impl Drop for RequestLifecycleInner {
+    /// Records a completion for requests that lose their last handle without claiming an outcome.
+    ///
+    /// This makes "exactly one completion event per request" a structural guarantee instead of a
+    /// per-call-site checklist: a future seam that forgets `complete_*`, or a deferred stream whose
+    /// future is dropped when its transport disappears, still closes its record. The outcome is
+    /// distinct so those cases stay greppable, and the level matches cancellation because the
+    /// common cause is caller teardown rather than a backend failure.
+    fn drop(&mut self) {
+        if self.completed.load(Ordering::Acquire) {
+            return;
+        }
+
+        ora_debug!(
+            operation = self.operation.as_ref(),
+            request_id = %self.request_id,
+            outcome = "abandoned",
+            duration_ms = self.duration_ms(),
+            "request completed"
+        );
+    }
+}
+
 /// Coordinates correlation and exactly-once completion logging across cloned async handles.
 #[derive(Clone)]
 pub struct RequestLifecycle {
@@ -61,7 +90,7 @@ impl RequestLifecycle {
             operation = self.inner.operation.as_ref(),
             request_id = %self.inner.request_id,
             outcome = "success",
-            duration_ms = self.duration_ms(),
+            duration_ms = self.inner.duration_ms(),
             "request completed"
         );
     }
@@ -76,7 +105,7 @@ impl RequestLifecycle {
             operation = self.inner.operation.as_ref(),
             request_id = %self.inner.request_id,
             outcome = "success",
-            duration_ms = self.duration_ms(),
+            duration_ms = self.inner.duration_ms(),
             "request completed"
         );
     }
@@ -94,7 +123,7 @@ impl RequestLifecycle {
                 operation = self.inner.operation.as_ref(),
                 request_id = %self.inner.request_id,
                 outcome = "failure",
-                duration_ms = self.duration_ms(),
+                duration_ms = self.inner.duration_ms(),
                 error.code = code,
                 error.message = report.message(),
                 error.chain = report.chain(),
@@ -105,7 +134,7 @@ impl RequestLifecycle {
                 operation = self.inner.operation.as_ref(),
                 request_id = %self.inner.request_id,
                 outcome = "failure",
-                duration_ms = self.duration_ms(),
+                duration_ms = self.inner.duration_ms(),
                 error.code = code,
                 error.message = report.message(),
                 error.chain = report.chain(),
@@ -119,7 +148,7 @@ impl RequestLifecycle {
                 operation = self.inner.operation.as_ref(),
                 request_id = %self.inner.request_id,
                 outcome = "failure",
-                duration_ms = self.duration_ms(),
+                duration_ms = self.inner.duration_ms(),
                 error.code = code,
                 error.message = report.message(),
                 error.chain = report.chain(),
@@ -139,7 +168,7 @@ impl RequestLifecycle {
             operation = self.inner.operation.as_ref(),
             request_id = %self.inner.request_id,
             outcome = "cancelled",
-            duration_ms = self.duration_ms(),
+            duration_ms = self.inner.duration_ms(),
             "request completed"
         );
     }
@@ -149,10 +178,6 @@ impl RequestLifecycle {
             .completed
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
-    }
-
-    fn duration_ms(&self) -> u64 {
-        self.inner.started_at.elapsed().as_millis() as u64
     }
 }
 
@@ -165,6 +190,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::sync::{Arc, Mutex};
     use tracing::Level;
+    use tracing::field::{Field, Visit};
     use tracing_subscriber::layer::{Context, Layer};
 
     struct FixedRequestIdGenerator(RequestId);
@@ -193,7 +219,7 @@ mod tests {
     #[test]
     fn failure_classifications_map_to_expected_log_levels() {
         let cases = classification_cases();
-        let recorder = LevelRecorder::default();
+        let recorder = CompletionRecorder::default();
         with_recorded_trace_logging(recorder.layer(), || {
             for (classification, public_error) in &cases {
                 let lifecycle = RequestLifecycle::start(
@@ -209,11 +235,57 @@ mod tests {
         });
 
         assert_eq!(
-            recorder.levels(),
+            recorder.completions(),
             cases
                 .iter()
-                .map(|(classification, _)| expected_level(*classification))
+                .map(|(classification, _)| Completion {
+                    level: expected_level(*classification),
+                    outcome: Some("failure".to_string()),
+                })
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// A request whose last handle is dropped without an explicit outcome still closes its record.
+    #[test]
+    fn dropping_an_uncompleted_lifecycle_records_an_abandoned_completion() {
+        let recorder = CompletionRecorder::default();
+        with_recorded_trace_logging(recorder.layer(), || {
+            let lifecycle = RequestLifecycle::start(
+                "test_operation",
+                &FixedRequestIdGenerator(test_request_id()),
+            );
+            drop(lifecycle.clone());
+            drop(lifecycle);
+        });
+
+        assert_eq!(
+            recorder.completions(),
+            vec![Completion {
+                level: Level::DEBUG,
+                outcome: Some("abandoned".to_string()),
+            }]
+        );
+    }
+
+    /// The drop fallback never turns an already-recorded completion into a second event.
+    #[test]
+    fn dropping_a_completed_lifecycle_records_nothing_further() {
+        let recorder = CompletionRecorder::default();
+        with_recorded_trace_logging(recorder.layer(), || {
+            let lifecycle = RequestLifecycle::start(
+                "test_operation",
+                &FixedRequestIdGenerator(test_request_id()),
+            );
+            lifecycle.complete_success();
+        });
+
+        assert_eq!(
+            recorder.completions(),
+            vec![Completion {
+                level: Level::INFO,
+                outcome: Some("success".to_string()),
+            }]
         );
     }
 
@@ -242,9 +314,7 @@ mod tests {
             ),
             (
                 ErrorClassification::PayloadTooLarge,
-                PublicError::SkillUploadTooLarge(ora_contracts::SkillUploadTooLargeParams {
-                    max_bytes: 1,
-                }),
+                PublicError::ArchiveExpansionRatioExceeded(ora_contracts::EmptyErrorParams {}),
             ),
             (
                 ErrorClassification::Unprocessable,
@@ -283,39 +353,66 @@ mod tests {
         serde_json::from_str("\"550e8400-e29b-41d4-a716-446655440000\"").unwrap()
     }
 
-    /// Records emitted levels without depending on process-global subscriber state.
-    #[derive(Clone, Debug, Default)]
-    struct LevelRecorder {
-        levels: Arc<Mutex<Vec<Level>>>,
+    /// Describes one recorded event by the two facts completion assertions depend on.
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct Completion {
+        level: Level,
+        outcome: Option<String>,
     }
 
-    impl LevelRecorder {
+    /// Records emitted completions without depending on process-global subscriber state.
+    #[derive(Clone, Debug, Default)]
+    struct CompletionRecorder {
+        completions: Arc<Mutex<Vec<Completion>>>,
+    }
+
+    impl CompletionRecorder {
         /// Builds the scoped subscriber layer used by one test.
-        fn layer(&self) -> LevelRecordingLayer {
-            LevelRecordingLayer {
-                levels: self.levels.clone(),
+        fn layer(&self) -> CompletionRecordingLayer {
+            CompletionRecordingLayer {
+                completions: self.completions.clone(),
             }
         }
 
-        /// Returns captured event levels in emission order.
-        fn levels(&self) -> Vec<Level> {
-            self.levels.lock().unwrap().clone()
+        /// Returns captured completions in emission order.
+        fn completions(&self) -> Vec<Completion> {
+            self.completions.lock().unwrap().clone()
         }
     }
 
     /// Captures event metadata for assertions while leaving production formatting untouched.
     #[derive(Clone, Debug)]
-    struct LevelRecordingLayer {
-        levels: Arc<Mutex<Vec<Level>>>,
+    struct CompletionRecordingLayer {
+        completions: Arc<Mutex<Vec<Completion>>>,
     }
 
-    impl<S> Layer<S> for LevelRecordingLayer
+    impl<S> Layer<S> for CompletionRecordingLayer
     where
         S: tracing::Subscriber,
     {
-        /// Records each emitted event's level under the test-scoped TRACE subscriber.
+        /// Records each emitted event's level and outcome under the test-scoped TRACE subscriber.
         fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
-            self.levels.lock().unwrap().push(*event.metadata().level());
+            let mut visitor = OutcomeVisitor { outcome: None };
+            event.record(&mut visitor);
+            self.completions.lock().unwrap().push(Completion {
+                level: *event.metadata().level(),
+                outcome: visitor.outcome,
+            });
         }
+    }
+
+    /// Extracts the single `outcome` field carried by completion events.
+    struct OutcomeVisitor {
+        outcome: Option<String>,
+    }
+
+    impl Visit for OutcomeVisitor {
+        fn record_str(&mut self, field: &Field, value: &str) {
+            if field.name() == "outcome" {
+                self.outcome = Some(value.to_string());
+            }
+        }
+
+        fn record_debug(&mut self, _field: &Field, _value: &dyn std::fmt::Debug) {}
     }
 }

@@ -1,10 +1,12 @@
 import { createContext, useContext } from "react";
 
 export interface TaskChangesNavigation {
-  openFile: (path: string) => void;
+  openDiff: (path: string, line?: number) => void;
+  openWorkspaceFile: (path: string, line?: number, column?: number) => void;
 }
 
-export const TaskChangesNavigationContext = createContext<TaskChangesNavigation | null>(null);
+export const TaskChangesNavigationContext =
+  createContext<TaskChangesNavigation | null>(null);
 
 /** Returns the nearest task Changes navigator when the conversation belongs to a task. */
 export function useTaskChangesNavigation(): TaskChangesNavigation | null {

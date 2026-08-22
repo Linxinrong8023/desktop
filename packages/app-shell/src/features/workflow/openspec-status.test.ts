@@ -32,7 +32,14 @@ describe("parseOpenSpecStatus", () => {
 
   it("parses pure JSON stdout from a text content block", () => {
     const result = parseOpenSpecStatus([
-      toolCall({ content: [{ type: "content", content: { type: "text", text: JSON.stringify(STATUS) } }] }),
+      toolCall({
+        content: [
+          {
+            type: "content",
+            content: { type: "text", text: JSON.stringify(STATUS) },
+          },
+        ],
+      }),
     ]);
     expect(result?.artifacts).toHaveLength(2);
     expect(result?.changeName).toBe("add-dark-mode");
@@ -53,8 +60,12 @@ describe("parseOpenSpecStatus", () => {
   });
 
   it("returns null for unrelated or malformed output", () => {
-    expect(parseOpenSpecStatus([toolCall({ rawOutput: "ok, done" })])).toBeNull();
-    expect(parseOpenSpecStatus([toolCall({ rawOutput: { foo: "bar" } })])).toBeNull();
+    expect(
+      parseOpenSpecStatus([toolCall({ rawOutput: "ok, done" })]),
+    ).toBeNull();
+    expect(
+      parseOpenSpecStatus([toolCall({ rawOutput: { foo: "bar" } })]),
+    ).toBeNull();
     expect(parseOpenSpecStatus([])).toBeNull();
   });
 

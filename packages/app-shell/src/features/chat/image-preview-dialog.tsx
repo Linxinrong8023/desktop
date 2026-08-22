@@ -36,7 +36,12 @@ interface PanOffset {
 }
 
 /** Displays an image in a keyboard-accessible lightbox with bounded wheel zoom. */
-export function ImagePreviewDialog({ open, src, name, onOpenChange }: ImagePreviewDialogProps) {
+export function ImagePreviewDialog({
+  open,
+  src,
+  name,
+  onOpenChange,
+}: ImagePreviewDialogProps) {
   const { t } = useTranslation();
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState<PanOffset>({ x: 0, y: 0 });
@@ -61,10 +66,13 @@ export function ImagePreviewDialog({ open, src, name, onOpenChange }: ImagePrevi
     const zoomWithoutScrolling = (event: WheelEvent) => {
       event.preventDefault();
       event.stopPropagation();
-      setZoom((current) => clampZoom(current + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)));
+      setZoom((current) =>
+        clampZoom(current + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)),
+      );
     };
     canvas.addEventListener("wheel", zoomWithoutScrolling, { passive: false });
-    removeWheelListenerRef.current = () => canvas.removeEventListener("wheel", zoomWithoutScrolling);
+    removeWheelListenerRef.current = () =>
+      canvas.removeEventListener("wheel", zoomWithoutScrolling);
   }, []);
 
   /** Offers keyboard equivalents for the visible zoom controls. */
@@ -130,14 +138,24 @@ export function ImagePreviewDialog({ open, src, name, onOpenChange }: ImagePrevi
       <DialogContent
         showCloseButton={false}
         className="grid-rows-[3.25rem_1fr] gap-0 overflow-hidden rounded-xl border border-border/40 bg-background/60 p-0 text-foreground shadow-2xl ring-1 ring-foreground/5 backdrop-blur-xl dark:border-border/60 dark:bg-popover/85 dark:ring-foreground/10 sm:max-w-none"
-        style={{ width: "calc(100vw - 3rem)", maxWidth: "88rem", height: "calc(100dvh - 3rem)" }}
+        style={{
+          width: "calc(100vw - 3rem)",
+          maxWidth: "88rem",
+          height: "calc(100dvh - 3rem)",
+        }}
       >
         <header className="relative flex items-center border-b border-border/40 bg-background/50 px-2 backdrop-blur-xl dark:border-border/60 dark:bg-popover/80">
           <div data-tauri-drag-region="" className="flex-1 self-stretch" />
-          <DialogTitle className="pointer-events-none absolute left-1/2 max-w-[45%] -translate-x-1/2 truncate text-xs font-medium text-muted-foreground" title={name}>
+          <DialogTitle
+            className="pointer-events-none absolute left-1/2 max-w-[45%] -translate-x-1/2 truncate text-xs font-medium text-muted-foreground"
+            title={name}
+          >
             {name}
           </DialogTitle>
-          <div className="relative ml-auto flex shrink-0 items-center gap-0.5" aria-label={t("chat.imagePreview.zoomControls")}>
+          <div
+            className="relative ml-auto flex shrink-0 items-center gap-0.5"
+            aria-label={t("chat.imagePreview.zoomControls")}
+          >
             <Button
               type="button"
               variant="ghost"
@@ -193,7 +211,10 @@ export function ImagePreviewDialog({ open, src, name, onOpenChange }: ImagePrevi
           onPointerUp={stopDragging}
           onPointerCancel={stopDragging}
           onLostPointerCapture={stopDragging}
-          aria-label={t("chat.imagePreview.canvas", { name, zoom: zoomPercent })}
+          aria-label={t("chat.imagePreview.canvas", {
+            name,
+            zoom: zoomPercent,
+          })}
           className={`relative min-h-0 touch-none overflow-hidden bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${dragging ? "cursor-grabbing select-none" : "cursor-grab"}`}
         >
           <img
@@ -202,7 +223,9 @@ export function ImagePreviewDialog({ open, src, name, onOpenChange }: ImagePrevi
             alt={name}
             draggable={false}
             className="pointer-events-none absolute left-1/2 top-1/2 max-h-[calc(100%_-_4rem)] max-w-[calc(100%_-_4rem)] select-none object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.2)] will-change-transform"
-            style={{ transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+            style={{
+              transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            }}
           />
         </div>
       </DialogContent>

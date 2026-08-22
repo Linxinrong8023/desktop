@@ -12,7 +12,9 @@ export const WorkflowConnectionStateContext =
 export function useWorkflowConnectionState(): WorkflowConnectionState {
   const value = useContext(WorkflowConnectionStateContext);
   if (value === null) {
-    throw new Error("useWorkflowConnectionState requires WorkflowConnectionStateProvider");
+    throw new Error(
+      "useWorkflowConnectionState requires WorkflowConnectionStateProvider",
+    );
   }
   return value;
 }

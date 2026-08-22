@@ -84,21 +84,29 @@ export function RunTheaterPathRail({
               run.status === "running" && "bg-sky-600/80",
               run.status === "awaiting_input" && "bg-amber-600/80",
               run.status === "succeeded" && "bg-emerald-600/75",
-              run.status === "failed"
-                && "bg-rose-600/75",
+              run.status === "failed" && "bg-rose-600/75",
               run.status === "cancelled" && "bg-zinc-500/60",
             )}
             style={{ width: `${progress.percent}%` }}
           >
             {(run.status === "running" || run.status === "awaiting_input") && (
-              <span className="theater-progress-sheen absolute inset-0" aria-hidden />
+              <span
+                className="theater-progress-sheen absolute inset-0"
+                aria-hidden
+              />
             )}
           </div>
         </div>
-        <div className="overflow-x-auto" ref={pathRailRef} data-slot="theater-path-rail">
+        <div
+          className="overflow-x-auto"
+          ref={pathRailRef}
+          data-slot="theater-path-rail"
+        >
           <ol className="flex w-max gap-2 pb-0.5">
             {pathNodes.map((node) => {
-              const state = run.nodeStates[node.id] ?? { status: "idle" as const };
+              const state = run.nodeStates[node.id] ?? {
+                status: "idle" as const,
+              };
               const tone = runStatusTone(state.status);
               const selected = !showResultAct && node.id === primaryId;
               const waiting = state.status === "awaiting_input";
@@ -123,12 +131,12 @@ export function RunTheaterPathRail({
                       selected && waiting
                         ? "theater-chip-pop border-amber-500/55 bg-amber-500/15 text-amber-950 shadow-sm dark:text-amber-50"
                         : selected
-                        ? "theater-chip-pop border-foreground/35 bg-background shadow-sm"
-                        : waiting
-                        ? "border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
-                        : active
-                        ? "border-sky-500/40 bg-sky-500/10"
-                        : "border-transparent bg-background/60 hover:border-border hover:bg-background",
+                          ? "theater-chip-pop border-foreground/35 bg-background shadow-sm"
+                          : waiting
+                            ? "border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+                            : active
+                              ? "border-sky-500/40 bg-sky-500/10"
+                              : "border-transparent bg-background/60 hover:border-border hover:bg-background",
                     )}
                     aria-current={selected ? "step" : undefined}
                     aria-label={`${node.data.title}: ${t(tone.labelKey)}`}
@@ -161,17 +169,20 @@ export function RunTheaterPathRail({
                     "inline-flex max-w-[11rem] cursor-pointer items-center gap-2 rounded-full border px-2.5 py-1.5 text-left transition-[transform,colors,box-shadow] duration-200",
                     showResultAct
                       ? cn(
-                        "theater-chip-pop bg-background shadow-sm",
-                        run.status === "succeeded" && "border-emerald-500/45",
-                        run.status === "failed" && "border-rose-500/45",
-                        run.status === "cancelled" && "border-zinc-400/45",
-                      )
+                          "theater-chip-pop bg-background shadow-sm",
+                          run.status === "succeeded" && "border-emerald-500/45",
+                          run.status === "failed" && "border-rose-500/45",
+                          run.status === "cancelled" && "border-zinc-400/45",
+                        )
                       : cn(
-                        "bg-background/60 hover:bg-background",
-                        run.status === "succeeded" && "border-emerald-500/25 hover:border-emerald-500/40",
-                        run.status === "failed" && "border-rose-500/25 hover:border-rose-500/40",
-                        run.status === "cancelled" && "border-zinc-400/25 hover:border-zinc-400/40",
-                      ),
+                          "bg-background/60 hover:bg-background",
+                          run.status === "succeeded" &&
+                            "border-emerald-500/25 hover:border-emerald-500/40",
+                          run.status === "failed" &&
+                            "border-rose-500/25 hover:border-rose-500/40",
+                          run.status === "cancelled" &&
+                            "border-zinc-400/25 hover:border-zinc-400/40",
+                        ),
                   )}
                   aria-current={showResultAct ? "step" : undefined}
                   aria-label={`${t("workflowRun.result.pathChip")}: ${t(runStatusTone(run.status).labelKey)}`}

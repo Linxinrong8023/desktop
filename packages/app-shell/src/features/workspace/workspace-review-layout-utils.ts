@@ -19,5 +19,9 @@ export function responsiveReviewWidth(available: number): number {
   const ratio = available <= SMALL_HOST_WIDTH ? 0.4 : 0.45;
   const ideal = Math.round(available * ratio);
   const conversationFloor = Math.max(0, available - MIN_CONVERSATION_WIDTH);
-  return Math.min(Math.max(MIN_REVIEW_WIDTH, ideal), MAX_REVIEW_WIDTH, conversationFloor);
+  return Math.min(
+    Math.max(MIN_REVIEW_WIDTH, ideal),
+    MAX_REVIEW_WIDTH,
+    conversationFloor,
+  );
 }

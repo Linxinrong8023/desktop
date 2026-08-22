@@ -1,10 +1,11 @@
-use crate::{AuditFields, DomainModelError, WorkflowId, WorkflowSnapshotId};
+use crate::{AuditFields, DomainModelError, Namespace, WorkflowId, WorkflowSnapshotId};
 use serde::{Deserialize, Serialize};
 
 /// Represents one workflow definition entity with its lifecycle metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Workflow {
     pub id: WorkflowId,
+    pub namespace: Namespace,
     pub name: String,
     pub published_snapshot_id: Option<WorkflowSnapshotId>,
     pub audit_fields: AuditFields,
@@ -14,6 +15,7 @@ impl Workflow {
     /// Creates a workflow while normalizing its user-facing name for stable lookup.
     pub fn new(
         id: WorkflowId,
+        namespace: Namespace,
         name: impl Into<String>,
         published_snapshot_id: Option<WorkflowSnapshotId>,
         audit_fields: AuditFields,
@@ -26,6 +28,7 @@ impl Workflow {
 
         Ok(Self {
             id,
+            namespace,
             name,
             published_snapshot_id,
             audit_fields,
@@ -89,6 +92,7 @@ pub struct WorkflowDetail {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowSummary {
     pub id: String,
+    pub namespace: Namespace,
     pub name: String,
     pub published_version: Option<String>,
     pub created_at: i64,

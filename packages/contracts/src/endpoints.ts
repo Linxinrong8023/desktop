@@ -2,43 +2,27 @@
 import type { CreateAgentRequest, CreateAgentResponse, DeleteAgentRequest, DeleteAgentResponse, GetAgentRequest, GetAgentResponse, ListAgentsRequest, ListAgentsResponse, UpdateAgentRequest, UpdateAgentResponse } from "./agent.js";
 import type { CommitAgentImportRequest, CommitAgentImportResponse, PrepareAgentImportRequest, PrepareAgentImportResponse } from "./agent-import.js";
 import type { AppEvent, WatchAppEventsRequest } from "./app_event.js";
-import type { ListDirectoryRequest, ListDirectoryResponse, ListWorkspaceDirectoryRequest, ListWorkspaceDirectoryResponse, ReadWorkspaceFileRequest, ReadWorkspaceFileResponse, SearchWorkspaceRequest, SearchWorkspaceResponse, WatchWorkspaceRequest, WorkspaceFileEventBatch } from "./file-system.js";
+import type { DeveloperModeResponse, GetDeveloperModeRequest, SetDeveloperModeRequest } from "./developerMode.js";
+import type { ListProjectDirectoryRequest, ListWorkspaceDirectoryRequest, ListWorkspaceDirectoryResponse, ReadProjectFileRequest, ReadWorkspaceFileRequest, ReadWorkspaceFileResponse, SearchProjectRequest, SearchWorkspaceRequest, SearchWorkspaceResponse, WatchProjectRequest, WatchWorkspaceRequest, WorkspaceFileEventBatch } from "./file-system.js";
 import type { GetGitIdentityRequest, GitIdentityResponse } from "./git.js";
-import type { ListInstalledPluginsRequest, ListInstalledPluginsResponse } from "./plugin.js";
+import type { ActivatePluginRequest, ActivatePluginResponse, DisablePluginRequest, DisablePluginResponse, EnablePluginRequest, EnablePluginResponse, InstallPluginRequest, InstallPluginResponse, ListAvailablePluginsRequest, ListAvailablePluginsResponse, ListInstalledPluginsRequest, ListInstalledPluginsResponse, ScanPluginsRequest, ScanPluginsResponse, StopPluginRequest, StopPluginResponse, SyncAvailablePluginsRequest, SyncAvailablePluginsResponse, UninstallPluginRequest, UninstallPluginResponse } from "./plugin.js";
 import type { CreateProjectRequest, CreateProjectResponse, DeleteProjectRequest, DeleteProjectResponse, GetProjectRequest, GetProjectResponse, ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse, UpdateProjectRequest, UpdateProjectResponse } from "./project.js";
-import type { OpenProjectWorkContextRequest, OpenProjectWorkContextResponse, RenewProjectWorkContextRequest, RenewProjectWorkContextResponse } from "./project-work-context.js";
-import type { AttachSessionRequest, AttachSessionResponse, DeleteSessionRequest, DeleteSessionResponse, GetAgentRuntimeStatusRequest, GetAgentRuntimeStatusResponse, GetSessionRequest, GetSessionResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionEvent, LoadSessionRequest, PromptSessionEvent, PromptSessionRequest, RespondToPermissionRequest, RespondToPermissionResponse, ResumeSessionHistoryRequest, ResumeSessionHistoryResponse, SetSessionConfigRequest, SetSessionConfigResponse, StopSessionRequest, StopSessionResponse, SwitchSessionAgentRequest, SwitchSessionAgentResponse, WarmSessionRequest, WarmSessionResponse } from "./session.js";
+import type { GetRuntimeLogLevelRequest, RuntimeLogLevelStateResponse, SetRuntimeLogLevelRequest } from "./runtimeLogLevel.js";
+import type { AttachSessionRequest, AttachSessionResponse, CancelSessionPromptRequest, CancelSessionPromptResponse, DeleteSessionRequest, DeleteSessionResponse, GetAgentRuntimeStatusRequest, GetAgentRuntimeStatusResponse, GetSessionRequest, GetSessionResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionEvent, LoadSessionRequest, PromptSessionEvent, PromptSessionRequest, RenameSessionRequest, RenameSessionResponse, RespondToPermissionRequest, RespondToPermissionResponse, ResumeSessionHistoryRequest, ResumeSessionHistoryResponse, SetSessionConfigRequest, SetSessionConfigResponse, StopSessionRequest, StopSessionResponse, SwitchSessionAgentRequest, SwitchSessionAgentResponse, WarmSessionRequest, WarmSessionResponse } from "./session.js";
 import type { CreateSkillRequest, CreateSkillResponse, DeleteSkillRequest, DeleteSkillResponse, GetSkillRequest, GetSkillResponse, ListSkillsRequest, ListSkillsResponse, UpdateSkillRequest, UpdateSkillResponse } from "./skill.js";
 import type { CancelSkillImportRequest, CancelSkillImportResponse, CommitSkillImportRequest, CommitSkillImportResponse, GetSkillImportSessionRequest, GetSkillImportSessionResponse, PrepareSkillImportRequest, PrepareSkillImportResponse } from "./skill-import.js";
-import type { GetSpecCatalogRequest, ReadSpecRequest, ReadSpecResponse, ResolveSpecSourceRequest, ResolveSpecSourceResponse, SpecCatalogResponse, UpdateProjectSpecSourcesRequest, UpdateProjectSpecSourcesResponse, WatchSpecsRequest } from "./spec.js";
+import type { GetSpecCatalogRequest, ReadSpecRequest, ReadSpecResponse, SpecCatalogResponse, WatchSpecsRequest } from "./spec.js";
 import type { CreateTaskRequest, CreateTaskResponse, DeleteTaskRequest, DeleteTaskResponse, GetTaskRequest, GetTaskResponse, GetTaskWorkspaceRequest, GetTaskWorkspaceResponse, ListTasksRequest, ListTasksResponse, UpdateTaskRequest, UpdateTaskResponse } from "./task.js";
-import type { CommitTaskChangesRequest, CommitTaskChangesResponse, CreateTaskDiffCommentRequest, CreateTaskDiffCommentResponse, GetTaskDiffRequest, GetTaskDiffResponse, ListTaskDiffCommentsRequest, ListTaskDiffCommentsResponse, PushTaskBranchRequest, PushTaskBranchResponse, ReplyTaskDiffCommentRequest, ReplyTaskDiffCommentResponse, SetTaskDiffCommentStatusRequest, SetTaskDiffCommentStatusResponse } from "./task_diff.js";
+import type { CommitTaskChangesRequest, CommitTaskChangesResponse, GetTaskDiffRequest, GetTaskDiffResponse, PushTaskBranchRequest, PushTaskBranchResponse } from "./task_diff.js";
 import type { ActivateWorkflowRequest, ActivateWorkflowResponse, CreateWorkflowRequest, CreateWorkflowResponse, DeleteSnapshotRequest, DeleteSnapshotResponse, DeleteWorkflowRequest, DeleteWorkflowResponse, GetDraftRequest, GetDraftResponse, GetVersionRequest, GetVersionResponse, GetWorkflowRequest, GetWorkflowResponse, GetWorkflowSnapshotRequest, GetWorkflowSnapshotResponse, ListVersionsRequest, ListVersionsResponse, ListWorkflowsRequest, ListWorkflowsResponse, PublishWorkflowRequest, PublishWorkflowResponse, RollbackWorkflowRequest, RollbackWorkflowResponse, UpdateDraftRequest, UpdateDraftResponse, UpdateWorkflowRequest, UpdateWorkflowResponse } from "./workflow.js";
-import type { CancelWorkflowRunRequest, CancelWorkflowRunResponse, CreateWorkflowRunRequest, CreateWorkflowRunResponse, DeleteWorkflowRunRequest, DeleteWorkflowRunResponse, GetWorkflowRunRequest, GetWorkflowRunResponse, ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse, ListWorkflowRunsByWorkflowRequest, ListWorkflowRunsByWorkflowResponse, ListWorkflowRunsRequest, ListWorkflowRunsResponse, RestartWorkflowRunRequest, RestartWorkflowRunResponse, StartWorkflowRunRequest, StartWorkflowRunResponse, UpdateWorkflowRunInputRequest, UpdateWorkflowRunInputResponse } from "./workflowRun.js";
-import type { HttpMethod } from "./transport.js";
-
-export type EndpointPathParam = {
-  rustFieldName: string;
-  wireName: string;
-};
-
-export type EndpointQueryParam = {
-  rustFieldName: string;
-  wireName: string;
-};
-
+import type { CancelWorkflowRunRequest, CancelWorkflowRunResponse, CompleteWorkflowNodeRequest, CompleteWorkflowNodeResponse, CreateWorkflowRunRequest, CreateWorkflowRunResponse, DeleteWorkflowRunRequest, DeleteWorkflowRunResponse, GetWorkflowRunRequest, GetWorkflowRunResponse, ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse, ListWorkflowRunsByWorkflowRequest, ListWorkflowRunsByWorkflowResponse, ListWorkflowRunsRequest, ListWorkflowRunsResponse, RestartWorkflowRunRequest, RestartWorkflowRunResponse, StartWorkflowRunRequest, StartWorkflowRunResponse, UpdateWorkflowRunInputRequest, UpdateWorkflowRunInputResponse } from "./workflowRun.js";
 export type FrontendEndpointDefinition = {
   operationName: string;
   namespace: string;
   memberName: string;
-  method: HttpMethod;
-  pathTemplate: string;
   requestType: string;
   responseType: string;
   responseMode: "unary" | "stream";
-  pathParams: readonly EndpointPathParam[];
-  queryParams: readonly EndpointQueryParam[];
-  hasJsonBody: boolean;
 };
 
 export type RequestByOperation = {
@@ -48,8 +32,10 @@ export type RequestByOperation = {
   listProjectBranches: ListProjectBranchesRequest;
   updateProject: UpdateProjectRequest;
   deleteProject: DeleteProjectRequest;
-  openProjectWorkContext: OpenProjectWorkContextRequest;
-  renewProjectWorkContext: RenewProjectWorkContextRequest;
+  getDeveloperMode: GetDeveloperModeRequest;
+  setDeveloperMode: SetDeveloperModeRequest;
+  getRuntimeLogLevel: GetRuntimeLogLevelRequest;
+  setRuntimeLogLevel: SetRuntimeLogLevelRequest;
   createTask: CreateTaskRequest;
   getTask: GetTaskRequest;
   listTasks: ListTasksRequest;
@@ -59,10 +45,6 @@ export type RequestByOperation = {
   getTaskDiff: GetTaskDiffRequest;
   commitTaskChanges: CommitTaskChangesRequest;
   pushTaskBranch: PushTaskBranchRequest;
-  listTaskDiffComments: ListTaskDiffCommentsRequest;
-  createTaskDiffComment: CreateTaskDiffCommentRequest;
-  replyTaskDiffComment: ReplyTaskDiffCommentRequest;
-  setTaskDiffCommentStatus: SetTaskDiffCommentStatusRequest;
   warmSession: WarmSessionRequest;
   setSessionConfig: SetSessionConfigRequest;
   attachSession: AttachSessionRequest;
@@ -71,10 +53,12 @@ export type RequestByOperation = {
   loadSession: LoadSessionRequest;
   promptSession: PromptSessionRequest;
   respondToSessionPermission: RespondToPermissionRequest;
+  cancelSessionPrompt: CancelSessionPromptRequest;
   stopSession: StopSessionRequest;
   switchSessionAgent: SwitchSessionAgentRequest;
   resumeSessionHistory: ResumeSessionHistoryRequest;
   deleteSession: DeleteSessionRequest;
+  renameSession: RenameSessionRequest;
   getAgentRuntimeStatus: GetAgentRuntimeStatusRequest;
   watchAppEvents: WatchAppEventsRequest;
   createSkill: CreateSkillRequest;
@@ -93,17 +77,27 @@ export type RequestByOperation = {
   deleteAgent: DeleteAgentRequest;
   prepareAgentImport: PrepareAgentImportRequest;
   commitAgentImport: CommitAgentImportRequest;
+  listAvailablePlugins: ListAvailablePluginsRequest;
+  syncAvailablePlugins: SyncAvailablePluginsRequest;
   listInstalledPlugins: ListInstalledPluginsRequest;
-  listDirectory: ListDirectoryRequest;
+  scanPlugins: ScanPluginsRequest;
+  enablePlugin: EnablePluginRequest;
+  disablePlugin: DisablePluginRequest;
+  activatePlugin: ActivatePluginRequest;
+  stopPlugin: StopPluginRequest;
+  uninstallPlugin: UninstallPluginRequest;
+  installPlugin: InstallPluginRequest;
   listWorkspaceDirectory: ListWorkspaceDirectoryRequest;
   readWorkspaceFile: ReadWorkspaceFileRequest;
   searchWorkspace: SearchWorkspaceRequest;
   watchWorkspace: WatchWorkspaceRequest;
+  listProjectDirectory: ListProjectDirectoryRequest;
+  readProjectFile: ReadProjectFileRequest;
+  searchProject: SearchProjectRequest;
+  watchProject: WatchProjectRequest;
   getGitIdentity: GetGitIdentityRequest;
   getSpecCatalog: GetSpecCatalogRequest;
   readSpec: ReadSpecRequest;
-  resolveSpecSource: ResolveSpecSourceRequest;
-  updateProjectSpecSources: UpdateProjectSpecSourcesRequest;
   watchSpecs: WatchSpecsRequest;
   createWorkflow: CreateWorkflowRequest;
   getWorkflow: GetWorkflowRequest;
@@ -129,6 +123,7 @@ export type RequestByOperation = {
   cancelWorkflowRun: CancelWorkflowRunRequest;
   restartWorkflowRun: RestartWorkflowRunRequest;
   updateWorkflowRunInput: UpdateWorkflowRunInputRequest;
+  completeWorkflowNode: CompleteWorkflowNodeRequest;
 };
 
 export type ResponseByOperation = {
@@ -138,8 +133,10 @@ export type ResponseByOperation = {
   listProjectBranches: ListProjectBranchesResponse;
   updateProject: UpdateProjectResponse;
   deleteProject: DeleteProjectResponse;
-  openProjectWorkContext: OpenProjectWorkContextResponse;
-  renewProjectWorkContext: RenewProjectWorkContextResponse;
+  getDeveloperMode: DeveloperModeResponse;
+  setDeveloperMode: DeveloperModeResponse;
+  getRuntimeLogLevel: RuntimeLogLevelStateResponse;
+  setRuntimeLogLevel: RuntimeLogLevelStateResponse;
   createTask: CreateTaskResponse;
   getTask: GetTaskResponse;
   listTasks: ListTasksResponse;
@@ -149,10 +146,6 @@ export type ResponseByOperation = {
   getTaskDiff: GetTaskDiffResponse;
   commitTaskChanges: CommitTaskChangesResponse;
   pushTaskBranch: PushTaskBranchResponse;
-  listTaskDiffComments: ListTaskDiffCommentsResponse;
-  createTaskDiffComment: CreateTaskDiffCommentResponse;
-  replyTaskDiffComment: ReplyTaskDiffCommentResponse;
-  setTaskDiffCommentStatus: SetTaskDiffCommentStatusResponse;
   warmSession: WarmSessionResponse;
   setSessionConfig: SetSessionConfigResponse;
   attachSession: AttachSessionResponse;
@@ -161,10 +154,12 @@ export type ResponseByOperation = {
   loadSession: LoadSessionEvent;
   promptSession: PromptSessionEvent;
   respondToSessionPermission: RespondToPermissionResponse;
+  cancelSessionPrompt: CancelSessionPromptResponse;
   stopSession: StopSessionResponse;
   switchSessionAgent: SwitchSessionAgentResponse;
   resumeSessionHistory: ResumeSessionHistoryResponse;
   deleteSession: DeleteSessionResponse;
+  renameSession: RenameSessionResponse;
   getAgentRuntimeStatus: GetAgentRuntimeStatusResponse;
   watchAppEvents: AppEvent;
   createSkill: CreateSkillResponse;
@@ -183,17 +178,27 @@ export type ResponseByOperation = {
   deleteAgent: DeleteAgentResponse;
   prepareAgentImport: PrepareAgentImportResponse;
   commitAgentImport: CommitAgentImportResponse;
+  listAvailablePlugins: ListAvailablePluginsResponse;
+  syncAvailablePlugins: SyncAvailablePluginsResponse;
   listInstalledPlugins: ListInstalledPluginsResponse;
-  listDirectory: ListDirectoryResponse;
+  scanPlugins: ScanPluginsResponse;
+  enablePlugin: EnablePluginResponse;
+  disablePlugin: DisablePluginResponse;
+  activatePlugin: ActivatePluginResponse;
+  stopPlugin: StopPluginResponse;
+  uninstallPlugin: UninstallPluginResponse;
+  installPlugin: InstallPluginResponse;
   listWorkspaceDirectory: ListWorkspaceDirectoryResponse;
   readWorkspaceFile: ReadWorkspaceFileResponse;
   searchWorkspace: SearchWorkspaceResponse;
   watchWorkspace: WorkspaceFileEventBatch;
+  listProjectDirectory: ListWorkspaceDirectoryResponse;
+  readProjectFile: ReadWorkspaceFileResponse;
+  searchProject: SearchWorkspaceResponse;
+  watchProject: WorkspaceFileEventBatch;
   getGitIdentity: GitIdentityResponse;
   getSpecCatalog: SpecCatalogResponse;
   readSpec: ReadSpecResponse;
-  resolveSpecSource: ResolveSpecSourceResponse;
-  updateProjectSpecSources: UpdateProjectSpecSourcesResponse;
   watchSpecs: WorkspaceFileEventBatch;
   createWorkflow: CreateWorkflowResponse;
   getWorkflow: GetWorkflowResponse;
@@ -219,6 +224,7 @@ export type ResponseByOperation = {
   cancelWorkflowRun: CancelWorkflowRunResponse;
   restartWorkflowRun: RestartWorkflowRunResponse;
   updateWorkflowRunInput: UpdateWorkflowRunInputResponse;
+  completeWorkflowNode: CompleteWorkflowNodeResponse;
 };
 
 export type EndpointOperation = keyof RequestByOperation;
@@ -228,1131 +234,784 @@ export const endpoints = {
     operationName: "createProject",
     namespace: "project",
     memberName: "create",
-    method: "POST",
-    pathTemplate: "/api/projects",
     requestType: "CreateProjectRequest",
     responseType: "CreateProjectResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   getProject: {
     operationName: "getProject",
     namespace: "project",
     memberName: "get",
-    method: "GET",
-    pathTemplate: "/api/projects/{projectId}",
     requestType: "GetProjectRequest",
     responseType: "GetProjectResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "project_id", wireName: "projectId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   listProjects: {
     operationName: "listProjects",
     namespace: "project",
     memberName: "list",
-    method: "GET",
-    pathTemplate: "/api/projects",
     requestType: "ListProjectsRequest",
     responseType: "ListProjectsResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: false,
   },
   listProjectBranches: {
     operationName: "listProjectBranches",
     namespace: "project",
     memberName: "listBranches",
-    method: "GET",
-    pathTemplate: "/api/projects/{projectId}/branches",
     requestType: "ListProjectBranchesRequest",
     responseType: "ListProjectBranchesResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "project_id", wireName: "projectId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   updateProject: {
     operationName: "updateProject",
     namespace: "project",
     memberName: "update",
-    method: "PUT",
-    pathTemplate: "/api/projects/{projectId}",
     requestType: "UpdateProjectRequest",
     responseType: "UpdateProjectResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "project_id", wireName: "projectId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   deleteProject: {
     operationName: "deleteProject",
     namespace: "project",
     memberName: "delete",
-    method: "DELETE",
-    pathTemplate: "/api/projects/{projectId}",
     requestType: "DeleteProjectRequest",
     responseType: "DeleteProjectResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "project_id", wireName: "projectId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
-  openProjectWorkContext: {
-    operationName: "openProjectWorkContext",
-    namespace: "projectWorkContext",
-    memberName: "open",
-    method: "POST",
-    pathTemplate: "/api/project-work-contexts/open",
-    requestType: "OpenProjectWorkContextRequest",
-    responseType: "OpenProjectWorkContextResponse",
+  getDeveloperMode: {
+    operationName: "getDeveloperMode",
+    namespace: "developerMode",
+    memberName: "get",
+    requestType: "GetDeveloperModeRequest",
+    responseType: "DeveloperModeResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
-  renewProjectWorkContext: {
-    operationName: "renewProjectWorkContext",
-    namespace: "projectWorkContext",
-    memberName: "renew",
-    method: "POST",
-    pathTemplate: "/api/project-work-contexts/renew",
-    requestType: "RenewProjectWorkContextRequest",
-    responseType: "RenewProjectWorkContextResponse",
+  setDeveloperMode: {
+    operationName: "setDeveloperMode",
+    namespace: "developerMode",
+    memberName: "set",
+    requestType: "SetDeveloperModeRequest",
+    responseType: "DeveloperModeResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
+  },
+  getRuntimeLogLevel: {
+    operationName: "getRuntimeLogLevel",
+    namespace: "runtimeLogLevel",
+    memberName: "get",
+    requestType: "GetRuntimeLogLevelRequest",
+    responseType: "RuntimeLogLevelStateResponse",
+    responseMode: "unary",
+  },
+  setRuntimeLogLevel: {
+    operationName: "setRuntimeLogLevel",
+    namespace: "runtimeLogLevel",
+    memberName: "set",
+    requestType: "SetRuntimeLogLevelRequest",
+    responseType: "RuntimeLogLevelStateResponse",
+    responseMode: "unary",
   },
   createTask: {
     operationName: "createTask",
     namespace: "task",
     memberName: "create",
-    method: "POST",
-    pathTemplate: "/api/tasks",
     requestType: "CreateTaskRequest",
     responseType: "CreateTaskResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   getTask: {
     operationName: "getTask",
     namespace: "task",
     memberName: "get",
-    method: "GET",
-    pathTemplate: "/api/tasks/{taskId}",
     requestType: "GetTaskRequest",
     responseType: "GetTaskResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   listTasks: {
     operationName: "listTasks",
     namespace: "task",
     memberName: "list",
-    method: "GET",
-    pathTemplate: "/api/tasks",
     requestType: "ListTasksRequest",
     responseType: "ListTasksResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: false,
   },
   updateTask: {
     operationName: "updateTask",
     namespace: "task",
     memberName: "update",
-    method: "PUT",
-    pathTemplate: "/api/tasks/{taskId}",
     requestType: "UpdateTaskRequest",
     responseType: "UpdateTaskResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   deleteTask: {
     operationName: "deleteTask",
     namespace: "task",
     memberName: "delete",
-    method: "DELETE",
-    pathTemplate: "/api/tasks/{taskId}",
     requestType: "DeleteTaskRequest",
     responseType: "DeleteTaskResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   getTaskWorkspace: {
     operationName: "getTaskWorkspace",
     namespace: "task",
     memberName: "getWorkspace",
-    method: "GET",
-    pathTemplate: "/api/tasks/{taskId}/workspace",
     requestType: "GetTaskWorkspaceRequest",
     responseType: "GetTaskWorkspaceResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   getTaskDiff: {
     operationName: "getTaskDiff",
     namespace: "task",
     memberName: "getDiff",
-    method: "GET",
-    pathTemplate: "/api/tasks/{taskId}/diff",
     requestType: "GetTaskDiffRequest",
     responseType: "GetTaskDiffResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [{ rustFieldName: "scope", wireName: "scope" }],
-    hasJsonBody: false,
   },
   commitTaskChanges: {
     operationName: "commitTaskChanges",
     namespace: "task",
     memberName: "commitChanges",
-    method: "POST",
-    pathTemplate: "/api/tasks/{taskId}/git/commit",
     requestType: "CommitTaskChangesRequest",
     responseType: "CommitTaskChangesResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   pushTaskBranch: {
     operationName: "pushTaskBranch",
     namespace: "task",
     memberName: "pushBranch",
-    method: "POST",
-    pathTemplate: "/api/tasks/{taskId}/git/push",
     requestType: "PushTaskBranchRequest",
     responseType: "PushTaskBranchResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: false,
-  },
-  listTaskDiffComments: {
-    operationName: "listTaskDiffComments",
-    namespace: "task",
-    memberName: "listDiffComments",
-    method: "GET",
-    pathTemplate: "/api/tasks/{taskId}/diff/comments",
-    requestType: "ListTaskDiffCommentsRequest",
-    responseType: "ListTaskDiffCommentsResponse",
-    responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: false,
-  },
-  createTaskDiffComment: {
-    operationName: "createTaskDiffComment",
-    namespace: "task",
-    memberName: "createDiffComment",
-    method: "POST",
-    pathTemplate: "/api/tasks/{taskId}/diff/comments",
-    requestType: "CreateTaskDiffCommentRequest",
-    responseType: "CreateTaskDiffCommentResponse",
-    responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: true,
-  },
-  replyTaskDiffComment: {
-    operationName: "replyTaskDiffComment",
-    namespace: "task",
-    memberName: "replyDiffComment",
-    method: "POST",
-    pathTemplate: "/api/tasks/{taskId}/diff/comments/{commentId}/replies",
-    requestType: "ReplyTaskDiffCommentRequest",
-    responseType: "ReplyTaskDiffCommentResponse",
-    responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }, { rustFieldName: "comment_id", wireName: "commentId" }],
-    queryParams: [],
-    hasJsonBody: true,
-  },
-  setTaskDiffCommentStatus: {
-    operationName: "setTaskDiffCommentStatus",
-    namespace: "task",
-    memberName: "setDiffCommentStatus",
-    method: "PUT",
-    pathTemplate: "/api/tasks/{taskId}/diff/comments/{commentId}/status",
-    requestType: "SetTaskDiffCommentStatusRequest",
-    responseType: "SetTaskDiffCommentStatusResponse",
-    responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }, { rustFieldName: "comment_id", wireName: "commentId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   warmSession: {
     operationName: "warmSession",
     namespace: "session",
     memberName: "warm",
-    method: "POST",
-    pathTemplate: "/api/sessions/warm",
     requestType: "WarmSessionRequest",
     responseType: "WarmSessionResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   setSessionConfig: {
     operationName: "setSessionConfig",
     namespace: "session",
     memberName: "setConfig",
-    method: "POST",
-    pathTemplate: "/api/sessions/{sessionId}/config",
     requestType: "SetSessionConfigRequest",
     responseType: "SetSessionConfigResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   attachSession: {
     operationName: "attachSession",
     namespace: "session",
     memberName: "attach",
-    method: "POST",
-    pathTemplate: "/api/sessions/{sessionId}/attach",
     requestType: "AttachSessionRequest",
     responseType: "AttachSessionResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   getSession: {
     operationName: "getSession",
     namespace: "session",
     memberName: "get",
-    method: "GET",
-    pathTemplate: "/api/sessions/{sessionId}",
     requestType: "GetSessionRequest",
     responseType: "GetSessionResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   listSessions: {
     operationName: "listSessions",
     namespace: "session",
     memberName: "list",
-    method: "GET",
-    pathTemplate: "/api/sessions",
     requestType: "ListSessionsRequest",
     responseType: "ListSessionsResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: false,
   },
   loadSession: {
     operationName: "loadSession",
     namespace: "session",
     memberName: "load",
-    method: "POST",
-    pathTemplate: "/api/sessions/{sessionId}/load",
     requestType: "LoadSessionRequest",
     responseType: "LoadSessionEvent",
     responseMode: "stream",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   promptSession: {
     operationName: "promptSession",
     namespace: "session",
     memberName: "prompt",
-    method: "POST",
-    pathTemplate: "/api/sessions/{sessionId}/prompt",
     requestType: "PromptSessionRequest",
     responseType: "PromptSessionEvent",
     responseMode: "stream",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   respondToSessionPermission: {
     operationName: "respondToSessionPermission",
     namespace: "session",
     memberName: "respondToPermission",
-    method: "POST",
-    pathTemplate: "/api/sessions/{sessionId}/permissions/respond",
     requestType: "RespondToPermissionRequest",
     responseType: "RespondToPermissionResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: true,
+  },
+  cancelSessionPrompt: {
+    operationName: "cancelSessionPrompt",
+    namespace: "session",
+    memberName: "cancelPrompt",
+    requestType: "CancelSessionPromptRequest",
+    responseType: "CancelSessionPromptResponse",
+    responseMode: "unary",
   },
   stopSession: {
     operationName: "stopSession",
     namespace: "session",
     memberName: "stop",
-    method: "POST",
-    pathTemplate: "/api/sessions/{sessionId}/stop",
     requestType: "StopSessionRequest",
     responseType: "StopSessionResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   switchSessionAgent: {
     operationName: "switchSessionAgent",
     namespace: "session",
     memberName: "switchAgent",
-    method: "POST",
-    pathTemplate: "/api/sessions/{sessionId}/agent",
     requestType: "SwitchSessionAgentRequest",
     responseType: "SwitchSessionAgentResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   resumeSessionHistory: {
     operationName: "resumeSessionHistory",
     namespace: "session",
     memberName: "resumeHistory",
-    method: "POST",
-    pathTemplate: "/api/sessions/{sessionId}/history/resume",
     requestType: "ResumeSessionHistoryRequest",
     responseType: "ResumeSessionHistoryResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   deleteSession: {
     operationName: "deleteSession",
     namespace: "session",
     memberName: "delete",
-    method: "DELETE",
-    pathTemplate: "/api/sessions/{sessionId}",
     requestType: "DeleteSessionRequest",
     responseType: "DeleteSessionResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: false,
+  },
+  renameSession: {
+    operationName: "renameSession",
+    namespace: "session",
+    memberName: "rename",
+    requestType: "RenameSessionRequest",
+    responseType: "RenameSessionResponse",
+    responseMode: "unary",
   },
   getAgentRuntimeStatus: {
     operationName: "getAgentRuntimeStatus",
     namespace: "agentRuntime",
     memberName: "getStatus",
-    method: "GET",
-    pathTemplate: "/api/agent-runtime/status",
     requestType: "GetAgentRuntimeStatusRequest",
     responseType: "GetAgentRuntimeStatusResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: false,
   },
   watchAppEvents: {
     operationName: "watchAppEvents",
     namespace: "appEvents",
     memberName: "watch",
-    method: "POST",
-    pathTemplate: "/api/app-events/watch",
     requestType: "WatchAppEventsRequest",
     responseType: "AppEvent",
     responseMode: "stream",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   createSkill: {
     operationName: "createSkill",
     namespace: "skill",
     memberName: "create",
-    method: "POST",
-    pathTemplate: "/api/skills",
     requestType: "CreateSkillRequest",
     responseType: "CreateSkillResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   getSkill: {
     operationName: "getSkill",
     namespace: "skill",
     memberName: "get",
-    method: "GET",
-    pathTemplate: "/api/skills/{skillId}",
     requestType: "GetSkillRequest",
     responseType: "GetSkillResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "skill_id", wireName: "skillId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   listSkills: {
     operationName: "listSkills",
     namespace: "skill",
     memberName: "list",
-    method: "GET",
-    pathTemplate: "/api/skills",
     requestType: "ListSkillsRequest",
     responseType: "ListSkillsResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: false,
   },
   updateSkill: {
     operationName: "updateSkill",
     namespace: "skill",
     memberName: "update",
-    method: "PUT",
-    pathTemplate: "/api/skills/{skillId}",
     requestType: "UpdateSkillRequest",
     responseType: "UpdateSkillResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "skill_id", wireName: "skillId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   deleteSkill: {
     operationName: "deleteSkill",
     namespace: "skill",
     memberName: "delete",
-    method: "DELETE",
-    pathTemplate: "/api/skills/{skillId}",
     requestType: "DeleteSkillRequest",
     responseType: "DeleteSkillResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "skill_id", wireName: "skillId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   prepareSkillImport: {
     operationName: "prepareSkillImport",
     namespace: "skillImport",
     memberName: "prepare",
-    method: "POST",
-    pathTemplate: "/api/skill-imports",
     requestType: "PrepareSkillImportRequest",
     responseType: "PrepareSkillImportResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: false,
   },
   getSkillImport: {
     operationName: "getSkillImport",
     namespace: "skillImport",
     memberName: "get",
-    method: "GET",
-    pathTemplate: "/api/skill-imports/{sessionId}",
     requestType: "GetSkillImportSessionRequest",
     responseType: "GetSkillImportSessionResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   commitSkillImport: {
     operationName: "commitSkillImport",
     namespace: "skillImport",
     memberName: "commit",
-    method: "POST",
-    pathTemplate: "/api/skill-imports/{sessionId}/commit",
     requestType: "CommitSkillImportRequest",
     responseType: "CommitSkillImportResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   cancelSkillImport: {
     operationName: "cancelSkillImport",
     namespace: "skillImport",
     memberName: "cancel",
-    method: "DELETE",
-    pathTemplate: "/api/skill-imports/{sessionId}",
     requestType: "CancelSkillImportRequest",
     responseType: "CancelSkillImportResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "session_id", wireName: "sessionId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   createAgent: {
     operationName: "createAgent",
     namespace: "agent",
     memberName: "create",
-    method: "POST",
-    pathTemplate: "/api/agents",
     requestType: "CreateAgentRequest",
     responseType: "CreateAgentResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   getAgent: {
     operationName: "getAgent",
     namespace: "agent",
     memberName: "get",
-    method: "GET",
-    pathTemplate: "/api/agents/{agentId}",
     requestType: "GetAgentRequest",
     responseType: "GetAgentResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "agent_id", wireName: "agentId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   listAgents: {
     operationName: "listAgents",
     namespace: "agent",
     memberName: "list",
-    method: "GET",
-    pathTemplate: "/api/agents",
     requestType: "ListAgentsRequest",
     responseType: "ListAgentsResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: false,
   },
   updateAgent: {
     operationName: "updateAgent",
     namespace: "agent",
     memberName: "update",
-    method: "PUT",
-    pathTemplate: "/api/agents/{agentId}",
     requestType: "UpdateAgentRequest",
     responseType: "UpdateAgentResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "agent_id", wireName: "agentId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   deleteAgent: {
     operationName: "deleteAgent",
     namespace: "agent",
     memberName: "delete",
-    method: "DELETE",
-    pathTemplate: "/api/agents/{agentId}",
     requestType: "DeleteAgentRequest",
     responseType: "DeleteAgentResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "agent_id", wireName: "agentId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   prepareAgentImport: {
     operationName: "prepareAgentImport",
     namespace: "agentImport",
     memberName: "prepare",
-    method: "POST",
-    pathTemplate: "/api/agent-imports/prepare",
     requestType: "PrepareAgentImportRequest",
     responseType: "PrepareAgentImportResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   commitAgentImport: {
     operationName: "commitAgentImport",
     namespace: "agentImport",
     memberName: "commit",
-    method: "POST",
-    pathTemplate: "/api/agent-imports/commit",
     requestType: "CommitAgentImportRequest",
     responseType: "CommitAgentImportResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
+  },
+  listAvailablePlugins: {
+    operationName: "listAvailablePlugins",
+    namespace: "plugin",
+    memberName: "listAvailable",
+    requestType: "ListAvailablePluginsRequest",
+    responseType: "ListAvailablePluginsResponse",
+    responseMode: "unary",
+  },
+  syncAvailablePlugins: {
+    operationName: "syncAvailablePlugins",
+    namespace: "plugin",
+    memberName: "syncAvailable",
+    requestType: "SyncAvailablePluginsRequest",
+    responseType: "SyncAvailablePluginsResponse",
+    responseMode: "unary",
   },
   listInstalledPlugins: {
     operationName: "listInstalledPlugins",
     namespace: "plugin",
     memberName: "listInstalled",
-    method: "GET",
-    pathTemplate: "/api/plugins/installed",
     requestType: "ListInstalledPluginsRequest",
     responseType: "ListInstalledPluginsResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: false,
   },
-  listDirectory: {
-    operationName: "listDirectory",
-    namespace: "fileSystem",
-    memberName: "listDirectory",
-    method: "GET",
-    pathTemplate: "/api/file-system/directory",
-    requestType: "ListDirectoryRequest",
-    responseType: "ListDirectoryResponse",
+  scanPlugins: {
+    operationName: "scanPlugins",
+    namespace: "plugin",
+    memberName: "scan",
+    requestType: "ScanPluginsRequest",
+    responseType: "ScanPluginsResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [{ rustFieldName: "path", wireName: "path" }],
-    hasJsonBody: false,
+  },
+  enablePlugin: {
+    operationName: "enablePlugin",
+    namespace: "plugin",
+    memberName: "enable",
+    requestType: "EnablePluginRequest",
+    responseType: "EnablePluginResponse",
+    responseMode: "unary",
+  },
+  disablePlugin: {
+    operationName: "disablePlugin",
+    namespace: "plugin",
+    memberName: "disable",
+    requestType: "DisablePluginRequest",
+    responseType: "DisablePluginResponse",
+    responseMode: "unary",
+  },
+  activatePlugin: {
+    operationName: "activatePlugin",
+    namespace: "plugin",
+    memberName: "activate",
+    requestType: "ActivatePluginRequest",
+    responseType: "ActivatePluginResponse",
+    responseMode: "unary",
+  },
+  stopPlugin: {
+    operationName: "stopPlugin",
+    namespace: "plugin",
+    memberName: "stop",
+    requestType: "StopPluginRequest",
+    responseType: "StopPluginResponse",
+    responseMode: "unary",
+  },
+  uninstallPlugin: {
+    operationName: "uninstallPlugin",
+    namespace: "plugin",
+    memberName: "uninstall",
+    requestType: "UninstallPluginRequest",
+    responseType: "UninstallPluginResponse",
+    responseMode: "unary",
+  },
+  installPlugin: {
+    operationName: "installPlugin",
+    namespace: "plugin",
+    memberName: "install",
+    requestType: "InstallPluginRequest",
+    responseType: "InstallPluginResponse",
+    responseMode: "unary",
   },
   listWorkspaceDirectory: {
     operationName: "listWorkspaceDirectory",
     namespace: "fileSystem",
     memberName: "listWorkspaceDirectory",
-    method: "POST",
-    pathTemplate: "/api/tasks/{taskId}/files/list",
     requestType: "ListWorkspaceDirectoryRequest",
     responseType: "ListWorkspaceDirectoryResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   readWorkspaceFile: {
     operationName: "readWorkspaceFile",
     namespace: "fileSystem",
     memberName: "readWorkspaceFile",
-    method: "POST",
-    pathTemplate: "/api/tasks/{taskId}/files/read",
     requestType: "ReadWorkspaceFileRequest",
     responseType: "ReadWorkspaceFileResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   searchWorkspace: {
     operationName: "searchWorkspace",
     namespace: "fileSystem",
     memberName: "searchWorkspace",
-    method: "POST",
-    pathTemplate: "/api/tasks/{taskId}/files/search",
     requestType: "SearchWorkspaceRequest",
     responseType: "SearchWorkspaceResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   watchWorkspace: {
     operationName: "watchWorkspace",
     namespace: "fileSystem",
     memberName: "watchWorkspace",
-    method: "GET",
-    pathTemplate: "/api/tasks/{taskId}/files/watch",
     requestType: "WatchWorkspaceRequest",
     responseType: "WorkspaceFileEventBatch",
     responseMode: "stream",
-    pathParams: [{ rustFieldName: "task_id", wireName: "taskId" }],
-    queryParams: [],
-    hasJsonBody: false,
+  },
+  listProjectDirectory: {
+    operationName: "listProjectDirectory",
+    namespace: "fileSystem",
+    memberName: "listProjectDirectory",
+    requestType: "ListProjectDirectoryRequest",
+    responseType: "ListWorkspaceDirectoryResponse",
+    responseMode: "unary",
+  },
+  readProjectFile: {
+    operationName: "readProjectFile",
+    namespace: "fileSystem",
+    memberName: "readProjectFile",
+    requestType: "ReadProjectFileRequest",
+    responseType: "ReadWorkspaceFileResponse",
+    responseMode: "unary",
+  },
+  searchProject: {
+    operationName: "searchProject",
+    namespace: "fileSystem",
+    memberName: "searchProject",
+    requestType: "SearchProjectRequest",
+    responseType: "SearchWorkspaceResponse",
+    responseMode: "unary",
+  },
+  watchProject: {
+    operationName: "watchProject",
+    namespace: "fileSystem",
+    memberName: "watchProject",
+    requestType: "WatchProjectRequest",
+    responseType: "WorkspaceFileEventBatch",
+    responseMode: "stream",
   },
   getGitIdentity: {
     operationName: "getGitIdentity",
     namespace: "gitIdentity",
     memberName: "get",
-    method: "GET",
-    pathTemplate: "/api/git/identity",
     requestType: "GetGitIdentityRequest",
     responseType: "GitIdentityResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: false,
   },
   getSpecCatalog: {
     operationName: "getSpecCatalog",
     namespace: "spec",
     memberName: "catalog",
-    method: "POST",
-    pathTemplate: "/api/specs/catalog",
     requestType: "GetSpecCatalogRequest",
     responseType: "SpecCatalogResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   readSpec: {
     operationName: "readSpec",
     namespace: "spec",
     memberName: "read",
-    method: "POST",
-    pathTemplate: "/api/specs/read",
     requestType: "ReadSpecRequest",
     responseType: "ReadSpecResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
-  },
-  resolveSpecSource: {
-    operationName: "resolveSpecSource",
-    namespace: "spec",
-    memberName: "resolveSource",
-    method: "POST",
-    pathTemplate: "/api/specs/resolve-source",
-    requestType: "ResolveSpecSourceRequest",
-    responseType: "ResolveSpecSourceResponse",
-    responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
-  },
-  updateProjectSpecSources: {
-    operationName: "updateProjectSpecSources",
-    namespace: "spec",
-    memberName: "updateProjectSources",
-    method: "PUT",
-    pathTemplate: "/api/projects/{projectId}/spec-sources",
-    requestType: "UpdateProjectSpecSourcesRequest",
-    responseType: "UpdateProjectSpecSourcesResponse",
-    responseMode: "unary",
-    pathParams: [{ rustFieldName: "project_id", wireName: "projectId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   watchSpecs: {
     operationName: "watchSpecs",
     namespace: "spec",
     memberName: "watch",
-    method: "POST",
-    pathTemplate: "/api/specs/watch",
     requestType: "WatchSpecsRequest",
     responseType: "WorkspaceFileEventBatch",
     responseMode: "stream",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   createWorkflow: {
     operationName: "createWorkflow",
     namespace: "workflow",
     memberName: "create",
-    method: "POST",
-    pathTemplate: "/api/workflows",
     requestType: "CreateWorkflowRequest",
     responseType: "CreateWorkflowResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   getWorkflow: {
     operationName: "getWorkflow",
     namespace: "workflow",
     memberName: "get",
-    method: "GET",
-    pathTemplate: "/api/workflows/{workflowId}",
     requestType: "GetWorkflowRequest",
     responseType: "GetWorkflowResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   listWorkflows: {
     operationName: "listWorkflows",
     namespace: "workflow",
     memberName: "list",
-    method: "GET",
-    pathTemplate: "/api/workflows",
     requestType: "ListWorkflowsRequest",
     responseType: "ListWorkflowsResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: false,
   },
   updateWorkflow: {
     operationName: "updateWorkflow",
     namespace: "workflow",
     memberName: "update",
-    method: "PUT",
-    pathTemplate: "/api/workflows/{workflowId}",
     requestType: "UpdateWorkflowRequest",
     responseType: "UpdateWorkflowResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   deleteWorkflow: {
     operationName: "deleteWorkflow",
     namespace: "workflow",
     memberName: "delete",
-    method: "DELETE",
-    pathTemplate: "/api/workflows/{workflowId}",
     requestType: "DeleteWorkflowRequest",
     responseType: "DeleteWorkflowResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   getDraft: {
     operationName: "getDraft",
     namespace: "workflow",
     memberName: "getDraft",
-    method: "GET",
-    pathTemplate: "/api/workflows/{workflowId}/draft",
     requestType: "GetDraftRequest",
     responseType: "GetDraftResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   updateDraft: {
     operationName: "updateDraft",
     namespace: "workflow",
     memberName: "updateDraft",
-    method: "PUT",
-    pathTemplate: "/api/workflows/{workflowId}/draft",
     requestType: "UpdateDraftRequest",
     responseType: "UpdateDraftResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   publishWorkflow: {
     operationName: "publishWorkflow",
     namespace: "workflow",
     memberName: "publish",
-    method: "POST",
-    pathTemplate: "/api/workflows/{workflowId}/publish",
     requestType: "PublishWorkflowRequest",
     responseType: "PublishWorkflowResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   rollbackWorkflow: {
     operationName: "rollbackWorkflow",
     namespace: "workflow",
     memberName: "rollback",
-    method: "POST",
-    pathTemplate: "/api/workflows/{workflowId}/rollback",
     requestType: "RollbackWorkflowRequest",
     responseType: "RollbackWorkflowResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   activateWorkflow: {
     operationName: "activateWorkflow",
     namespace: "workflow",
     memberName: "activate",
-    method: "POST",
-    pathTemplate: "/api/workflows/{workflowId}/activate",
     requestType: "ActivateWorkflowRequest",
     responseType: "ActivateWorkflowResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }],
-    queryParams: [],
-    hasJsonBody: true,
   },
   listVersions: {
     operationName: "listVersions",
     namespace: "workflow",
     memberName: "listVersions",
-    method: "GET",
-    pathTemplate: "/api/workflows/{workflowId}/versions",
     requestType: "ListVersionsRequest",
     responseType: "ListVersionsResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   getVersion: {
     operationName: "getVersion",
     namespace: "workflow",
     memberName: "getVersion",
-    method: "GET",
-    pathTemplate: "/api/workflows/{workflowId}/versions/{version}",
     requestType: "GetVersionRequest",
     responseType: "GetVersionResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }, { rustFieldName: "version", wireName: "version" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   deleteSnapshot: {
     operationName: "deleteSnapshot",
     namespace: "workflow",
     memberName: "deleteSnapshot",
-    method: "DELETE",
-    pathTemplate: "/api/workflows/{workflowId}/versions/{version}",
     requestType: "DeleteSnapshotRequest",
     responseType: "DeleteSnapshotResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }, { rustFieldName: "version", wireName: "version" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   getWorkflowSnapshot: {
     operationName: "getWorkflowSnapshot",
     namespace: "workflow",
     memberName: "getSnapshot",
-    method: "GET",
-    pathTemplate: "/api/workflow-snapshots/{snapshotId}",
     requestType: "GetWorkflowSnapshotRequest",
     responseType: "GetWorkflowSnapshotResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "snapshot_id", wireName: "snapshotId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   createWorkflowRun: {
     operationName: "createWorkflowRun",
     namespace: "workflowRun",
     memberName: "create",
-    method: "POST",
-    pathTemplate: "/api/workflow-runs",
     requestType: "CreateWorkflowRunRequest",
     responseType: "CreateWorkflowRunResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [],
-    hasJsonBody: true,
   },
   getWorkflowRun: {
     operationName: "getWorkflowRun",
     namespace: "workflowRun",
     memberName: "get",
-    method: "GET",
-    pathTemplate: "/api/workflow-runs/{runId}",
     requestType: "GetWorkflowRunRequest",
     responseType: "GetWorkflowRunResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "run_id", wireName: "runId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   listWorkflowRuns: {
     operationName: "listWorkflowRuns",
     namespace: "workflowRun",
     memberName: "list",
-    method: "GET",
-    pathTemplate: "/api/workflow-runs",
     requestType: "ListWorkflowRunsRequest",
     responseType: "ListWorkflowRunsResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [{ rustFieldName: "project_id", wireName: "projectId" }],
-    hasJsonBody: false,
   },
   listWorkflowRunsByWorkflow: {
     operationName: "listWorkflowRunsByWorkflow",
     namespace: "workflowRun",
     memberName: "listByWorkflow",
-    method: "GET",
-    pathTemplate: "/api/workflow-runs",
     requestType: "ListWorkflowRunsByWorkflowRequest",
     responseType: "ListWorkflowRunsByWorkflowResponse",
     responseMode: "unary",
-    pathParams: [],
-    queryParams: [{ rustFieldName: "workflow_id", wireName: "workflowId" }],
-    hasJsonBody: false,
   },
   listWorkflowNodeRuns: {
     operationName: "listWorkflowNodeRuns",
     namespace: "workflowRun",
     memberName: "listNodeRuns",
-    method: "GET",
-    pathTemplate: "/api/workflow-runs/{runId}/nodes",
     requestType: "ListWorkflowNodeRunsRequest",
     responseType: "ListWorkflowNodeRunsResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "run_id", wireName: "runId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   deleteWorkflowRun: {
     operationName: "deleteWorkflowRun",
     namespace: "workflowRun",
     memberName: "delete",
-    method: "DELETE",
-    pathTemplate: "/api/workflow-runs/{runId}",
     requestType: "DeleteWorkflowRunRequest",
     responseType: "DeleteWorkflowRunResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "run_id", wireName: "runId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   startWorkflowRun: {
     operationName: "startWorkflowRun",
     namespace: "workflowRun",
     memberName: "start",
-    method: "POST",
-    pathTemplate: "/api/workflow-runs/{runId}/start",
     requestType: "StartWorkflowRunRequest",
     responseType: "StartWorkflowRunResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "run_id", wireName: "runId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   cancelWorkflowRun: {
     operationName: "cancelWorkflowRun",
     namespace: "workflowRun",
     memberName: "cancel",
-    method: "POST",
-    pathTemplate: "/api/workflow-runs/{runId}/cancel",
     requestType: "CancelWorkflowRunRequest",
     responseType: "CancelWorkflowRunResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "run_id", wireName: "runId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   restartWorkflowRun: {
     operationName: "restartWorkflowRun",
     namespace: "workflowRun",
     memberName: "restart",
-    method: "POST",
-    pathTemplate: "/api/workflow-runs/{runId}/restart",
     requestType: "RestartWorkflowRunRequest",
     responseType: "RestartWorkflowRunResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "run_id", wireName: "runId" }],
-    queryParams: [],
-    hasJsonBody: false,
   },
   updateWorkflowRunInput: {
     operationName: "updateWorkflowRunInput",
     namespace: "workflowRun",
     memberName: "updateInput",
-    method: "POST",
-    pathTemplate: "/api/workflow-runs/{runId}/input",
     requestType: "UpdateWorkflowRunInputRequest",
     responseType: "UpdateWorkflowRunInputResponse",
     responseMode: "unary",
-    pathParams: [{ rustFieldName: "run_id", wireName: "runId" }],
-    queryParams: [],
-    hasJsonBody: true,
+  },
+  completeWorkflowNode: {
+    operationName: "completeWorkflowNode",
+    namespace: "workflowRun",
+    memberName: "completeNode",
+    requestType: "CompleteWorkflowNodeRequest",
+    responseType: "CompleteWorkflowNodeResponse",
+    responseMode: "unary",
   },
 } as const satisfies Record<EndpointOperation, FrontendEndpointDefinition>;

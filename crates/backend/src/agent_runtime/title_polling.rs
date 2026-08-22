@@ -5,12 +5,12 @@ use super::super::support::contract_session;
 use super::super::title_acquisition::PollAttempt;
 use super::RuntimeActor;
 use super::permission_not_pending;
+use agent_client_protocol_schema::v1::AGENT_METHOD_NAMES;
+use agent_client_protocol_schema::v1::StopReason;
+use agent_client_protocol_schema::v1::{ListSessionsRequest, ListSessionsResponse, SessionUpdate};
 use ora_application::{Clock, SessionRepository};
 use ora_contracts::AppEvent;
 use ora_contracts::StopSessionResponse;
-use ora_contracts::acp::literals::AGENT_METHOD_NAMES;
-use ora_contracts::acp::prompt::StopReason;
-use ora_contracts::acp::session::{ListSessionsRequest, ListSessionsResponse, SessionUpdate};
 use ora_domain::SessionTitle;
 use ora_logging::{ora_debug, ora_warn};
 use std::time::Duration;
@@ -60,8 +60,9 @@ impl RuntimeActor {
                         RuntimeCommand::Load { operation_id, events, accepted } => {
                             self.channel = Some(channel);
                             self.title_acquisition.preempt_attempt(attempt);
-                            let _ = accepted.send(Ok(()));
-                            self.run_load(operation_id, events).await;
+                            // run_load resolves `accepted` only after the Running
+                            // row is persisted (see actor.rs for the ordering).
+                            self.run_load(operation_id, events, accepted).await;
                             return;
                         }
                         RuntimeCommand::Prompt { operation_id, prompt, events, accepted } => {
@@ -90,9 +91,16 @@ impl RuntimeActor {
                             // A prompt stream sends this after its Completed event is consumed;
                             // it is not a cancellation of the independent title fallback.
                         }
+                        RuntimeCommand::CancelActivePrompt => {}
                         RuntimeCommand::PreemptTitlePolling { response } => {
                             self.channel = Some(channel);
                             self.title_acquisition.preempt_attempt(attempt);
+                            let _ = response.send(());
+                            return;
+                        }
+                        RuntimeCommand::AdoptUserTitle { title, response } => {
+                            self.channel = Some(channel);
+                            self.adopt_user_title(title);
                             let _ = response.send(());
                             return;
                         }
@@ -257,8 +265,28 @@ impl RuntimeActor {
         self.persist_agent_title(title);
     }
 
+    /// Locks acquisition and records the user-chosen title so later agent titles cannot win.
+    pub(super) fn adopt_user_title(&mut self, title: SessionTitle) {
+        self.title_acquisition.close();
+        self.session = self.session.clone().with_title(Some(title.clone()));
+        match self.repository.update_session_title(
+            &self.session.id,
+            &title,
+            self.clock.now_timestamp_millis(),
+        ) {
+            Ok(session) => self.session = session,
+            Err(error) => {
+                ora_warn!(
+                    session_id = %self.session.id,
+                    error = %error,
+                    "failed to re-persist user session title after rename",
+                );
+            }
+        }
+    }
+
     /// Validates and persists a title, publishing invalidation only after the write succeeds.
-    fn persist_agent_title(&mut self, raw_title: &str) {
+    pub(super) fn persist_agent_title(&mut self, raw_title: &str) {
         if !self.title_acquisition.accepts_title() {
             return;
         }

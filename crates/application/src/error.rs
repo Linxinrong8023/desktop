@@ -4,8 +4,7 @@ use crate::workflow_run::{
     EngineError, GraphError, StartPrerequisitesError, WorkflowValidationError,
 };
 use crate::{
-    BoxRepositorySource, BranchListingError, RepositoryError, TaskDiffCommentRepositoryError,
-    TaskDiffReaderError, TaskWorktreeProvisionerError,
+    BoxRepositorySource, BranchListingError, RepositoryError, TaskWorktreeProvisionerError,
 };
 use ora_domain::DomainModelError;
 use thiserror::Error;
@@ -23,8 +22,8 @@ pub enum ApplicationError {
     SkillDescriptionBlank,
     #[error("skill description exceeds 4096 bytes")]
     SkillDescriptionTooLarge,
-    #[error("skill name already exists: {name}")]
-    SkillNameConflict { name: String },
+    #[error("skill name already exists: {namespace}/{name}")]
+    SkillNameConflict { namespace: String, name: String },
     #[error("skill not found: {skill_id}")]
     SkillNotFound { skill_id: String },
     #[error("skill repository operation failed")]
@@ -32,14 +31,6 @@ pub enum ApplicationError {
         #[source]
         source: RepositoryError,
     },
-    #[error("skill upload contained no files")]
-    SkillUploadEmpty,
-    #[error("skill upload exceeds the {max_files}-file limit")]
-    SkillUploadTooManyFiles { max_files: usize },
-    #[error("skill upload contains an unsafe path")]
-    SkillUploadPathInvalid,
-    #[error("skill upload contains a duplicate path")]
-    SkillUploadPathDuplicate,
     #[error("skill upload is missing a root SKILL.md manifest")]
     SkillManifestMissing,
     #[error("skill manifest is invalid")]
@@ -66,8 +57,8 @@ pub enum ApplicationError {
     SkillImport(#[source] SkillImportError),
     #[error("agent definition name must not be blank")]
     AgentDefinitionNameBlank,
-    #[error("agent definition name already exists: {name}")]
-    AgentDefinitionNameConflict { name: String },
+    #[error("agent definition name already exists: {namespace}/{name}")]
+    AgentDefinitionNameConflict { namespace: String, name: String },
     #[error("agent import Markdown is invalid")]
     AgentImportInvalid,
     #[error("agent import conflict decision is missing")]
@@ -86,26 +77,10 @@ pub enum ApplicationError {
         #[source]
         source: RepositoryError,
     },
-    #[error("specification source configuration is invalid")]
-    SpecSourceInvalid,
-    #[error("specification source repository operation failed")]
-    SpecSourceRepository {
-        #[source]
-        source: RepositoryError,
-    },
     #[error("project branch listing operation failed")]
     ProjectBranchListing {
         #[source]
         source: BoxRepositorySource,
-    },
-    #[error("project is already occupied: {project_id}")]
-    ProjectOccupied { project_id: String },
-    #[error("project work context not found for {surface}/{window_id}")]
-    ProjectWorkContextNotFound { surface: String, window_id: String },
-    #[error("project work context repository operation failed")]
-    ProjectWorkContextRepository {
-        #[source]
-        source: RepositoryError,
     },
     #[error("task not found: {task_id}")]
     TaskNotFound { task_id: String },
@@ -142,26 +117,6 @@ pub enum ApplicationError {
     },
     #[error("task diff commit message must not be blank")]
     TaskDiffCommitMessageBlank,
-    #[error("task diff baseline is unavailable")]
-    TaskDiffBaselineUnavailable,
-    #[error("task diff is too large: {byte_count} bytes exceeds {max_byte_count} bytes")]
-    TaskDiffTooLarge {
-        byte_count: usize,
-        max_byte_count: usize,
-    },
-    #[error("task diff changed before the comment was created")]
-    TaskDiffStale,
-    #[error("task diff comment not found: {comment_id}")]
-    TaskDiffCommentNotFound { comment_id: String },
-    #[error("invalid task diff comment: {message}")]
-    TaskDiffCommentInvalid { message: String },
-    #[error("task diff comment conflicts with stored state: {message}")]
-    TaskDiffCommentConflict { message: String },
-    #[error("task diff comment repository operation failed")]
-    TaskDiffCommentRepository {
-        #[source]
-        source: BoxRepositorySource,
-    },
     #[error("worktree not found: {worktree_id}")]
     WorktreeNotFound { worktree_id: String },
     #[error("worktree repository operation failed")]
@@ -171,13 +126,24 @@ pub enum ApplicationError {
     },
     #[error("session not found: {session_id}")]
     SessionNotFound { session_id: String },
+    #[error("session title must not be blank")]
+    SessionTitleBlank,
+    #[error("session title exceeds the maximum length")]
+    SessionTitleTooLong,
     #[error("session repository operation failed")]
     SessionRepository {
         #[source]
         source: RepositoryError,
     },
+    #[error("user configuration repository operation failed")]
+    UserConfigRepository {
+        #[source]
+        source: RepositoryError,
+    },
     #[error("workflow name must not be blank")]
     WorkflowNameBlank,
+    #[error("workflow name already exists: {namespace}/{name}")]
+    WorkflowNameConflict { namespace: String, name: String },
     #[error("workflow not found: {workflow_id}")]
     WorkflowNotFound { workflow_id: String },
     #[error("workflow snapshot not found: {workflow_id}/{version}")]
@@ -228,6 +194,10 @@ pub enum ApplicationError {
     WorkflowRunNotRestartable,
     #[error("workflow run input can only be changed while the run is pending")]
     WorkflowRunNotEditable,
+    #[error("workflow node not found: {node_id}")]
+    WorkflowNodeNotFound { node_id: String },
+    #[error("workflow node is not awaiting input and cannot be completed: {node_id}")]
+    WorkflowNodeNotAwaitingInput { node_id: String },
     #[error("workflow run is active and cannot be deleted")]
     WorkflowRunActive,
     #[error("workflow repository operation failed")]
@@ -260,8 +230,11 @@ impl ApplicationError {
     /// Converts formal-storage failures into the stable application contract.
     pub(crate) fn from_skill_storage_error(error: SkillStorageError) -> Self {
         match error {
-            SkillStorageError::FormalDirectoryMissing { name }
-            | SkillStorageError::FormalDirectoryExists { name } => {
+            // Destination occupancy is a client-visible conflict whether the handler
+            // observed it before staging or only at promotion; missing directories are
+            // the inconsistent half of the same package invariant.
+            SkillStorageError::FormalDirectoryExists { name } => Self::SkillFolderConflict { name },
+            SkillStorageError::FormalDirectoryMissing { name } => {
                 Self::SkillStorageInconsistent { name }
             }
             source @ SkillStorageError::OperationFailed { .. } => Self::SkillStorage { source },
@@ -301,22 +274,12 @@ impl ApplicationError {
         Self::ProjectRepository { source: error }
     }
 
-    /// Maps specification source persistence failures into stable application errors.
-    pub(crate) fn from_spec_source_repository_error(error: RepositoryError) -> Self {
-        Self::SpecSourceRepository { source: error }
-    }
-
     /// Maps Git-facing branch listing failures into stable application errors.
     pub(crate) fn from_branch_listing_error(error: BranchListingError) -> Self {
         match error {
             BranchListingError::NotARepository => Self::TaskWorktreeRequiresGitRepository,
             BranchListingError::OperationFailed(source) => Self::ProjectBranchListing { source },
         }
-    }
-
-    /// Maps project work context repository failures into stable application errors.
-    pub(crate) fn from_project_work_context_repository_error(error: RepositoryError) -> Self {
-        Self::ProjectWorkContextRepository { source: error }
     }
 
     /// Maps task repository failures into stable application errors.
@@ -339,37 +302,6 @@ impl ApplicationError {
         }
     }
 
-    /// Maps task diff reader failures while preserving infrastructure diagnostics.
-    pub(crate) fn from_task_diff_reader_error(error: TaskDiffReaderError) -> Self {
-        match error {
-            TaskDiffReaderError::OperationFailed(source) => Self::TaskDiff { source },
-            TaskDiffReaderError::TooLarge {
-                byte_count,
-                max_byte_count,
-            } => Self::TaskDiffTooLarge {
-                byte_count,
-                max_byte_count,
-            },
-        }
-    }
-
-    /// Maps task diff comment persistence failures while preserving infrastructure diagnostics.
-    pub(crate) fn from_task_diff_comment_repository_error(
-        error: TaskDiffCommentRepositoryError,
-    ) -> Self {
-        match error {
-            TaskDiffCommentRepositoryError::OperationFailed(source) => {
-                Self::TaskDiffCommentRepository { source }
-            }
-            TaskDiffCommentRepositoryError::Invalid(message) => {
-                Self::TaskDiffCommentInvalid { message }
-            }
-            TaskDiffCommentRepositoryError::Conflict(message) => {
-                Self::TaskDiffCommentConflict { message }
-            }
-        }
-    }
-
     /// Builds an internal task diff failure for an invariant that was violated below the handler.
     pub(crate) fn task_diff_failure(error: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::TaskDiff {
@@ -385,6 +317,19 @@ impl ApplicationError {
     /// Maps session repository failures into stable application errors.
     pub(crate) fn from_session_repository_error(error: RepositoryError) -> Self {
         Self::SessionRepository { source: error }
+    }
+
+    /// Maps session-title validation failures into stable application errors.
+    pub(crate) fn from_session_title_error(error: ora_domain::SessionTitleError) -> Self {
+        match error {
+            ora_domain::SessionTitleError::Blank => Self::SessionTitleBlank,
+            ora_domain::SessionTitleError::TooLong { .. } => Self::SessionTitleTooLong,
+        }
+    }
+
+    /// Maps user-configuration persistence failures into stable application errors.
+    pub(crate) fn from_user_config_repository_error(error: RepositoryError) -> Self {
+        Self::UserConfigRepository { source: error }
     }
 
     /// Converts workflow-construction validation failures into application errors.
@@ -441,9 +386,6 @@ impl PartialEq for ApplicationError {
 
         match (self, other) {
             (SkillNameBlank, SkillNameBlank)
-            | (SkillUploadEmpty, SkillUploadEmpty)
-            | (SkillUploadPathInvalid, SkillUploadPathInvalid)
-            | (SkillUploadPathDuplicate, SkillUploadPathDuplicate)
             | (SkillManifestMissing, SkillManifestMissing)
             | (SkillManifestInvalid { .. }, SkillManifestInvalid { .. })
             | (SkillManifestNameBlank, SkillManifestNameBlank)
@@ -452,7 +394,6 @@ impl PartialEq for ApplicationError {
             | (SkillStorage { .. }, SkillStorage { .. })
             | (SkillImport(_), SkillImport(_))
             | (AgentDefinitionNameBlank, AgentDefinitionNameBlank)
-            | (SpecSourceInvalid, SpecSourceInvalid)
             | (AgentImportInvalid, AgentImportInvalid)
             | (AgentImportDecisionMissing, AgentImportDecisionMissing)
             | (TaskWorktreeRequiresGitRepository, TaskWorktreeRequiresGitRepository)
@@ -474,27 +415,29 @@ impl PartialEq for ApplicationError {
             | (AgentDefinitionRepository { .. }, AgentDefinitionRepository { .. })
             | (ProjectRepository { .. }, ProjectRepository { .. })
             | (ProjectBranchListing { .. }, ProjectBranchListing { .. })
-            | (ProjectWorkContextRepository { .. }, ProjectWorkContextRepository { .. })
             | (TaskRepository { .. }, TaskRepository { .. })
             | (TaskWorktreeProvisioner { .. }, TaskWorktreeProvisioner { .. })
-            | (TaskDiffStale, TaskDiffStale)
             | (TaskDiffCommitMessageBlank, TaskDiffCommitMessageBlank)
             | (WorktreeRepository { .. }, WorktreeRepository { .. })
             | (SessionRepository { .. }, SessionRepository { .. })
+            | (UserConfigRepository { .. }, UserConfigRepository { .. })
             | (WorkflowRepository { .. }, WorkflowRepository { .. })
             | (TaskFilesystem { .. }, TaskFilesystem { .. }) => true,
             (SkillNotFound { skill_id: left }, SkillNotFound { skill_id: right }) => left == right,
-            (
-                SkillUploadTooManyFiles { max_files: left },
-                SkillUploadTooManyFiles { max_files: right },
-            ) => left == right,
             (SkillFolderConflict { name: left }, SkillFolderConflict { name: right }) => {
                 left == right
             }
-            (SkillNameInvalid { name: left }, SkillNameInvalid { name: right })
-            | (SkillNameConflict { name: left }, SkillNameConflict { name: right }) => {
-                left == right
-            }
+            (SkillNameInvalid { name: left }, SkillNameInvalid { name: right }) => left == right,
+            (
+                SkillNameConflict {
+                    namespace: left_namespace,
+                    name: left_name,
+                },
+                SkillNameConflict {
+                    namespace: right_namespace,
+                    name: right_name,
+                },
+            ) => left_namespace == right_namespace && left_name == right_name,
             (SkillNameTooLong, SkillNameTooLong)
             | (SkillDescriptionBlank, SkillDescriptionBlank)
             | (SkillDescriptionTooLarge, SkillDescriptionTooLarge) => true,
@@ -502,27 +445,32 @@ impl PartialEq for ApplicationError {
                 left == right
             }
             (
-                AgentDefinitionNameConflict { name: left },
-                AgentDefinitionNameConflict { name: right },
-            ) => left == right,
+                AgentDefinitionNameConflict {
+                    namespace: left_namespace,
+                    name: left_name,
+                },
+                AgentDefinitionNameConflict {
+                    namespace: right_namespace,
+                    name: right_name,
+                },
+            ) => left_namespace == right_namespace && left_name == right_name,
+            (
+                WorkflowNameConflict {
+                    namespace: left_namespace,
+                    name: left_name,
+                },
+                WorkflowNameConflict {
+                    namespace: right_namespace,
+                    name: right_name,
+                },
+            ) => left_namespace == right_namespace && left_name == right_name,
             (
                 AgentDefinitionNotFound { agent_id: left },
                 AgentDefinitionNotFound { agent_id: right },
             ) => left == right,
-            (ProjectNotFound { project_id: left }, ProjectNotFound { project_id: right })
-            | (ProjectOccupied { project_id: left }, ProjectOccupied { project_id: right }) => {
+            (ProjectNotFound { project_id: left }, ProjectNotFound { project_id: right }) => {
                 left == right
             }
-            (
-                ProjectWorkContextNotFound {
-                    surface: left_surface,
-                    window_id: left_window,
-                },
-                ProjectWorkContextNotFound {
-                    surface: right_surface,
-                    window_id: right_window,
-                },
-            ) => left_surface == right_surface && left_window == right_window,
             (TaskNotFound { task_id: left }, TaskNotFound { task_id: right }) => left == right,
             (TaskBaseBranchRequired, TaskBaseBranchRequired) => true,
             (
@@ -530,30 +478,6 @@ impl PartialEq for ApplicationError {
                 TaskBaseBranchNotFound { branch_name: right },
             ) => left == right,
             (TaskDiff { .. }, TaskDiff { .. }) => true,
-            (
-                TaskDiffCommentInvalid { message: left },
-                TaskDiffCommentInvalid { message: right },
-            ) => left == right,
-            (
-                TaskDiffCommentConflict { message: left },
-                TaskDiffCommentConflict { message: right },
-            ) => left == right,
-            (TaskDiffCommentRepository { .. }, TaskDiffCommentRepository { .. }) => true,
-            (TaskDiffBaselineUnavailable, TaskDiffBaselineUnavailable) => true,
-            (
-                TaskDiffTooLarge {
-                    byte_count: left_bytes,
-                    max_byte_count: left_max,
-                },
-                TaskDiffTooLarge {
-                    byte_count: right_bytes,
-                    max_byte_count: right_max,
-                },
-            ) => left_bytes == right_bytes && left_max == right_max,
-            (
-                TaskDiffCommentNotFound { comment_id: left },
-                TaskDiffCommentNotFound { comment_id: right },
-            ) => left == right,
             (
                 TaskWorktreeIdExhausted { attempts: left },
                 TaskWorktreeIdExhausted { attempts: right },
@@ -563,6 +487,9 @@ impl PartialEq for ApplicationError {
             }
             (SessionNotFound { session_id: left }, SessionNotFound { session_id: right }) => {
                 left == right
+            }
+            (SessionTitleBlank, SessionTitleBlank) | (SessionTitleTooLong, SessionTitleTooLong) => {
+                true
             }
             (WorkflowNotFound { workflow_id: left }, WorkflowNotFound { workflow_id: right }) => {
                 left == right
@@ -588,6 +515,13 @@ impl PartialEq for ApplicationError {
             | (WorkflowRunValidation(_), WorkflowRunValidation(_))
             | (WorkflowRunNotRestartable, WorkflowRunNotRestartable)
             | (WorkflowRunNotEditable, WorkflowRunNotEditable) => true,
+            (WorkflowNodeNotFound { node_id: left }, WorkflowNodeNotFound { node_id: right }) => {
+                left == right
+            }
+            (
+                WorkflowNodeNotAwaitingInput { node_id: left },
+                WorkflowNodeNotAwaitingInput { node_id: right },
+            ) => left == right,
             (
                 WorkflowSkillNotFound { skill_id: left },
                 WorkflowSkillNotFound { skill_id: right },

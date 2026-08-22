@@ -25,29 +25,9 @@ CREATE TABLE IF NOT EXISTS worktrees (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,
     branch_name TEXT,
+    base_commit_id TEXT CHECK (base_commit_id IS NULL OR base_commit_id <> ''),
+    checkout_root TEXT,
     is_active INTEGER DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    is_deleted INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS virtual_folders (
-    id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    mount_point TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    is_deleted INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS virtual_entries (
-    id TEXT PRIMARY KEY,
-    virtual_folder_id TEXT NOT NULL,
-    parent_entry_id TEXT,
-    name TEXT NOT NULL,
-    kind INTEGER NOT NULL DEFAULT 0,
-    content_ref TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     is_deleted INTEGER NOT NULL DEFAULT 0
@@ -56,18 +36,11 @@ CREATE TABLE IF NOT EXISTS virtual_entries (
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,
+    title TEXT,
     agent_cli TEXT NOT NULL,
     agent_session_id TEXT NOT NULL,
+    history_degraded_reason TEXT,
     status INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL,
-    updated_at INTEGER NOT NULL,
-    is_deleted INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS artifacts (
-    id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL,
-    content TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     is_deleted INTEGER NOT NULL DEFAULT 0
@@ -80,10 +53,7 @@ CREATE TABLE IF NOT EXISTS migrations (
 "#];
 
 const DOWN_STATEMENTS: &[&str] = &[r#"
-DROP TABLE IF EXISTS artifacts;
 DROP TABLE IF EXISTS sessions;
-DROP TABLE IF EXISTS virtual_entries;
-DROP TABLE IF EXISTS virtual_folders;
 DROP TABLE IF EXISTS worktrees;
 DROP TABLE IF EXISTS tasks;
 DROP TABLE IF EXISTS projects;

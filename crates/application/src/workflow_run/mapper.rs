@@ -26,6 +26,17 @@ pub(crate) fn map_run(run: WorkflowRun) -> ContractRun {
     }
 }
 
+/// Converts a domain run into its public contract representation, deriving `AwaitingInput` when
+/// the run is `Running` and has an awaiting (`Pending`) interactive node.
+pub(crate) fn map_run_awaiting(run: WorkflowRun, has_awaiting_node: bool) -> ContractRun {
+    let awaiting = run.status == WorkflowRunStatus::Running && has_awaiting_node;
+    let mut mapped = map_run(run);
+    if awaiting {
+        mapped.status = ContractRunStatus::AwaitingInput;
+    }
+    mapped
+}
+
 /// Converts a domain node run into its public contract representation.
 pub(crate) fn map_node_run(node_run: WorkflowNodeRun) -> ContractNodeRun {
     ContractNodeRun {
@@ -53,10 +64,20 @@ pub(crate) fn map_run_summary(summary: WorkflowRunSummary) -> ContractRunSummary
         name: summary.name,
         project_id: summary.project_id.to_string(),
         workflow_id: summary.workflow_id.to_string(),
-        status: map_run_status(summary.status),
+        status: map_summary_status(summary.status, summary.has_awaiting_node),
         started_at: summary.started_at,
         finished_at: summary.finished_at,
         created_at: summary.created_at,
+    }
+}
+
+/// Derives the summary's wire status: a `Running` run with an awaiting node reads as
+/// `AwaitingInput` so the sidebar surfaces the need for human action.
+fn map_summary_status(status: WorkflowRunStatus, has_awaiting_node: bool) -> ContractRunStatus {
+    if status == WorkflowRunStatus::Running && has_awaiting_node {
+        ContractRunStatus::AwaitingInput
+    } else {
+        map_run_status(status)
     }
 }
 
@@ -79,5 +100,75 @@ fn map_node_status(status: WorkflowNodeStatus) -> ContractNodeStatus {
         WorkflowNodeStatus::Succeeded => ContractNodeStatus::Succeeded,
         WorkflowNodeStatus::Failed => ContractNodeStatus::Failed,
         WorkflowNodeStatus::Cancelled => ContractNodeStatus::Cancelled,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{map_run_awaiting, map_run_summary};
+    use ora_contracts::WorkflowRunStatus as ContractRunStatus;
+    use ora_domain::{
+        AuditFields, ProjectId, WorkflowId, WorkflowRun, WorkflowRunId, WorkflowRunStatus,
+        WorkflowRunSummary, WorkflowSnapshotId,
+    };
+    use pretty_assertions::assert_eq;
+
+    fn running_run() -> WorkflowRun {
+        WorkflowRun::new(
+            WorkflowRunId::new("run-1"),
+            WorkflowId::new("wf-1"),
+            WorkflowSnapshotId::new("snap-1"),
+            WorkflowRunStatus::Running,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            AuditFields::new(1, 1, false),
+        )
+    }
+
+    /// A `Running` run reads as `AwaitingInput` on the detail wire only when it has an awaiting
+    /// node; otherwise it keeps its plain status.
+    #[test]
+    fn map_run_awaiting_derives_awaiting_input_only_with_an_awaiting_node() {
+        assert_eq!(
+            map_run_awaiting(running_run(), true).status,
+            ContractRunStatus::AwaitingInput
+        );
+        assert_eq!(
+            map_run_awaiting(running_run(), false).status,
+            ContractRunStatus::Running
+        );
+    }
+
+    /// A listed summary derives `AwaitingInput` for the sidebar from the awaiting-node flag.
+    #[test]
+    fn map_run_summary_derives_awaiting_input_for_listing() {
+        let summary = WorkflowRunSummary {
+            id: WorkflowRunId::new("run-1"),
+            name: "run".to_string(),
+            project_id: ProjectId::new("project-1"),
+            workflow_id: WorkflowId::new("wf-1"),
+            status: WorkflowRunStatus::Running,
+            has_awaiting_node: true,
+            started_at: None,
+            finished_at: None,
+            created_at: 1,
+        };
+        assert_eq!(
+            map_run_summary(summary.clone()).status,
+            ContractRunStatus::AwaitingInput
+        );
+        assert_eq!(
+            map_run_summary(WorkflowRunSummary {
+                has_awaiting_node: false,
+                ..summary
+            })
+            .status,
+            ContractRunStatus::Running
+        );
     }
 }

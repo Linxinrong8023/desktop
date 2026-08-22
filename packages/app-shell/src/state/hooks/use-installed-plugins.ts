@@ -7,6 +7,7 @@ export function useInstalledPlugins() {
   const client = useContractsClient();
   return useQuery({
     queryKey: queryKeys.installedPlugins,
-    queryFn: () => client.plugin.listInstalled({}).then((response) => response.plugins),
+    queryFn: () =>
+      client.plugin.listInstalled({}).then((response) => response.plugins),
   });
 }

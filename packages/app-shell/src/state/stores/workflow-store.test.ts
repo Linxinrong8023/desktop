@@ -71,13 +71,17 @@ describe("useWorkflowStore", () => {
     useWorkflowStore.getState().launchNode(KEY, "propose");
     useWorkflowStore.getState().completeNode(KEY, "propose");
     expect(run().currentNodeId).toBeNull();
-    expect(run().nodes.find((node) => node.id === "propose")?.status).toBe("done");
+    expect(run().nodes.find((node) => node.id === "propose")?.status).toBe(
+      "done",
+    );
   });
 
   it("skipping marks the node skipped", () => {
     useWorkflowStore.getState().toggleVisible(KEY);
     useWorkflowStore.getState().skipNode(KEY, "sync");
-    expect(run().nodes.find((node) => node.id === "sync")?.status).toBe("skipped");
+    expect(run().nodes.find((node) => node.id === "sync")?.status).toBe(
+      "skipped",
+    );
   });
 
   it("rekey moves a run to a new key", () => {
@@ -127,7 +131,9 @@ describe("buildWorkflowReminder", () => {
   });
 
   it("maps apply to the apply-change skill", () => {
-    expect(buildWorkflowReminder("apply", "/x/.opencode/skills")).toContain("openspec-apply-change");
+    expect(buildWorkflowReminder("apply", "/x/.opencode/skills")).toContain(
+      "openspec-apply-change",
+    );
   });
 });
 
@@ -143,7 +149,10 @@ describe("suggestedNextNode", () => {
   });
 
   it("returns null when nothing is pending", () => {
-    const nodes = run().nodes.map((node) => ({ ...node, status: "done" as const }));
+    const nodes = run().nodes.map((node) => ({
+      ...node,
+      status: "done" as const,
+    }));
     expect(suggestedNextNode(nodes)).toBeNull();
   });
 });

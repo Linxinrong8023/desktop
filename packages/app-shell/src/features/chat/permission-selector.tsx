@@ -6,15 +6,28 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@ora/ui";
-import { IconCheck, IconChevronDown, IconShieldCheck, IconShieldHalf, IconShieldLock } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconChevronDown,
+  IconShieldCheck,
+  IconShieldHalf,
+  IconShieldLock,
+} from "@tabler/icons-react";
 import type { ComponentType } from "react";
 import type { ApprovalPolicy } from "../../state/stores/settings-store";
 import { useSettingsStore } from "../../state/stores/settings-store";
 
 /** The approval policies offered in the composer, ordered from most cautious to most permissive. */
-const POLICIES: readonly ApprovalPolicy[] = ["always", "risky", "trusted"] as const;
+const POLICIES: readonly ApprovalPolicy[] = [
+  "always",
+  "risky",
+  "trusted",
+] as const;
 
-const POLICY_ICONS: Record<ApprovalPolicy, ComponentType<{ className?: string }>> = {
+const POLICY_ICONS: Record<
+  ApprovalPolicy,
+  ComponentType<{ className?: string }>
+> = {
   always: IconShieldLock,
   risky: IconShieldHalf,
   trusted: IconShieldCheck,
@@ -32,9 +45,15 @@ const POLICY_LABEL_KEYS: Record<ApprovalPolicy, string> = {
  * policy ("trusted" / full access) stays visually neutral because it is a normal operating mode;
  * its explicit shield icon and label communicate the scope without presenting a false warning.
  */
-export function PermissionSelector({ disabled = false }: { disabled?: boolean }) {
+export function PermissionSelector({
+  disabled = false,
+}: {
+  disabled?: boolean;
+}) {
   const { t } = useTranslation();
-  const approvalPolicy = useSettingsStore((state) => state.settings.approvalPolicy);
+  const approvalPolicy = useSettingsStore(
+    (state) => state.settings.approvalPolicy,
+  );
   const updateSettings = useSettingsStore((state) => state.updateSettings);
 
   const ActiveIcon = POLICY_ICONS[approvalPolicy];
@@ -53,8 +72,13 @@ export function PermissionSelector({ disabled = false }: { disabled?: boolean })
         }
       >
         <ActiveIcon className="size-3.5 shrink-0" />
-        <span className="whitespace-nowrap">{t(POLICY_LABEL_KEYS[approvalPolicy])}</span>
-        <IconChevronDown className="size-3 shrink-0 opacity-50" aria-hidden="true" />
+        <span className="whitespace-nowrap">
+          {t(POLICY_LABEL_KEYS[approvalPolicy])}
+        </span>
+        <IconChevronDown
+          className="size-3 shrink-0 opacity-50"
+          aria-hidden="true"
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-44">
         {POLICIES.map((policy) => {
@@ -71,7 +95,9 @@ export function PermissionSelector({ disabled = false }: { disabled?: boolean })
             >
               <Icon className="size-3.5 shrink-0" />
               {t(POLICY_LABEL_KEYS[policy])}
-              {policy === approvalPolicy && <IconCheck className="ml-auto size-4" />}
+              {policy === approvalPolicy && (
+                <IconCheck className="ml-auto size-4" />
+              )}
             </DropdownMenuItem>
           );
         })}

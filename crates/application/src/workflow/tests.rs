@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
 use ora_domain::{
-    CreatedWorkflow, Workflow, WorkflowDetail, WorkflowId, WorkflowSnapshot, WorkflowSnapshotId,
-    WorkflowSummary, WorkflowVersion,
+    CreatedWorkflow, Namespace, Workflow, WorkflowDetail, WorkflowId, WorkflowSnapshot,
+    WorkflowSnapshotId, WorkflowSummary, WorkflowVersion,
 };
 use pretty_assertions::assert_eq;
 
@@ -128,6 +128,14 @@ impl WorkflowRepository for PublishRepository {
         _workflow_id: &WorkflowId,
     ) -> Result<Option<Workflow>, RepositoryError> {
         unreachable!("publish tests never load workflows")
+    }
+
+    fn find_workflow_by_name(
+        &self,
+        _namespace: &Namespace,
+        _name: &str,
+    ) -> Result<Option<Workflow>, RepositoryError> {
+        unreachable!("publish tests never load workflows by name")
     }
 
     fn get_workflow_detail(
@@ -321,6 +329,14 @@ impl WorkflowRepository for SnapshotLookupRepository {
         _workflow_id: &WorkflowId,
     ) -> Result<Option<Workflow>, RepositoryError> {
         unreachable!("snapshot lookup tests never load workflows")
+    }
+
+    fn find_workflow_by_name(
+        &self,
+        _namespace: &Namespace,
+        _name: &str,
+    ) -> Result<Option<Workflow>, RepositoryError> {
+        unreachable!("snapshot lookup tests never load workflows by name")
     }
 
     fn get_workflow_detail(

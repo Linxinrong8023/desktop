@@ -15,10 +15,16 @@ interface InitialsAvatarProps {
  * than the muted chip but softer than near-black `primary` - and inverts with the
  * light/dark theme.
  */
-export function InitialsAvatar({ name, size = "default", className }: InitialsAvatarProps) {
+export function InitialsAvatar({
+  name,
+  size = "default",
+  className,
+}: InitialsAvatarProps) {
   return (
     <Avatar size={size} className={className}>
-      <AvatarFallback className={cn("bg-muted-foreground font-semibold text-muted")}>
+      <AvatarFallback
+        className={cn("bg-muted-foreground font-semibold text-muted")}
+      >
         {getInitials(name)}
       </AvatarFallback>
     </Avatar>

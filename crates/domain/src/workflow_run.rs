@@ -216,6 +216,9 @@ pub struct WorkflowRunSummary {
     pub project_id: ProjectId,
     pub workflow_id: WorkflowId,
     pub status: WorkflowRunStatus,
+    /// Whether the run has an awaiting (`Pending`) interactive node; the wire status derives
+    /// `AwaitingInput` from this while the persisted run status stays `Running`.
+    pub has_awaiting_node: bool,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
     pub created_at: i64,
@@ -226,6 +229,8 @@ pub struct WorkflowRunSummary {
 pub struct WorkflowRunDetail {
     pub run: WorkflowRun,
     pub name: String,
+    /// The project owning the run-task, mirroring the summary's `project_id`.
+    pub project_id: ProjectId,
     pub task_id: TaskId,
     pub nodes: Vec<WorkflowNodeRun>,
 }

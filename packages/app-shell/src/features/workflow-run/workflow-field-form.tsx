@@ -1,12 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Input,
-  NativeSelect,
-  NativeSelectOption,
-  Textarea,
-  cn,
-} from "@ora/ui";
+import { Input, NativeSelect, NativeSelectOption, Textarea, cn } from "@ora/ui";
 import type { HitlSchema } from "@ora/workflow-runtime";
 
 export interface WorkflowFieldFormProps {
@@ -98,50 +92,46 @@ export function WorkflowFieldForm({
                 </span>
               )}
             </label>
-            {field.type === "textarea"
-              ? (
-                <Textarea
-                  id={id}
-                  value={values[field.name] ?? ""}
-                  placeholder={field.placeholder}
-                  disabled={disabled}
-                  rows={3}
-                  aria-invalid={error !== undefined}
-                  className="min-h-20 resize-y text-xs leading-5"
-                  onChange={(event) => setField(field.name, event.target.value)}
-                />
-              )
-              : field.type === "select"
-              ? (
-                <NativeSelect
-                  id={id}
-                  value={values[field.name] ?? ""}
-                  disabled={disabled}
-                  aria-invalid={error !== undefined}
-                  className="w-full"
-                  onChange={(event) => setField(field.name, event.target.value)}
-                >
-                  <NativeSelectOption value="">
-                    {t("workflowRun.hitl.selectPlaceholder")}
+            {field.type === "textarea" ? (
+              <Textarea
+                id={id}
+                value={values[field.name] ?? ""}
+                placeholder={field.placeholder}
+                disabled={disabled}
+                rows={3}
+                aria-invalid={error !== undefined}
+                className="min-h-20 resize-y text-xs leading-5"
+                onChange={(event) => setField(field.name, event.target.value)}
+              />
+            ) : field.type === "select" ? (
+              <NativeSelect
+                id={id}
+                value={values[field.name] ?? ""}
+                disabled={disabled}
+                aria-invalid={error !== undefined}
+                className="w-full"
+                onChange={(event) => setField(field.name, event.target.value)}
+              >
+                <NativeSelectOption value="">
+                  {t("workflowRun.hitl.selectPlaceholder")}
+                </NativeSelectOption>
+                {(field.options ?? []).map((option) => (
+                  <NativeSelectOption key={option.value} value={option.value}>
+                    {option.label}
                   </NativeSelectOption>
-                  {(field.options ?? []).map((option) => (
-                    <NativeSelectOption key={option.value} value={option.value}>
-                      {option.label}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              )
-              : (
-                <Input
-                  id={id}
-                  value={values[field.name] ?? ""}
-                  placeholder={field.placeholder}
-                  disabled={disabled}
-                  aria-invalid={error !== undefined}
-                  className="h-9 text-xs"
-                  onChange={(event) => setField(field.name, event.target.value)}
-                />
-              )}
+                ))}
+              </NativeSelect>
+            ) : (
+              <Input
+                id={id}
+                value={values[field.name] ?? ""}
+                placeholder={field.placeholder}
+                disabled={disabled}
+                aria-invalid={error !== undefined}
+                className="h-9 text-xs"
+                onChange={(event) => setField(field.name, event.target.value)}
+              />
+            )}
             {error !== undefined && (
               <p role="alert" className="text-[11px] text-destructive">
                 {error}

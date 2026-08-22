@@ -28,12 +28,12 @@ pub enum DatabaseError {
     ConnectionPool(#[from] r2d2::Error),
     #[error("domain model error: {0}")]
     DomainModel(#[from] ora_domain::DomainModelError),
-    #[error("task diff comment row is corrupt")]
-    CorruptCommentRow,
     #[error("workflow run state is corrupt: {0}")]
     CorruptWorkflowRunState(#[from] serde_json::Error),
     #[error("workflow run execution context is incomplete")]
     IncompleteWorkflowRunContext,
+    #[error("user configuration value for `{key}` is corrupt")]
+    CorruptUserConfigValue { key: &'static str },
     #[error("migration versions must be unique, found duplicate version `{0}`")]
     DuplicateMigrationVersion(String),
     #[error("migration versions must be strictly increasing, found `{current}` after `{previous}`")]

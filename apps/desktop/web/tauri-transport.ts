@@ -20,18 +20,14 @@ type ChannelFactory = <TEvent>() => ChannelLike<TEvent>;
 
 const MAX_QUEUED_FRAMES = 256;
 
-const unsupportedOperations = {
-  openProjectWorkContext: true,
-  renewProjectWorkContext: true,
-  listDirectory: true,
-} as const satisfies Partial<Record<EndpointOperation, true>>;
-
-type UnsupportedTauriOperation = keyof typeof unsupportedOperations;
-type TauriStreamOperation = "loadSession" | "promptSession" | "watchAppEvents" | "watchSpecs" | "watchWorkspace";
-type SupportedTauriOperation = Exclude<
-  EndpointOperation,
-  UnsupportedTauriOperation | TauriStreamOperation
->;
+type TauriStreamOperation =
+  | "loadSession"
+  | "promptSession"
+  | "watchAppEvents"
+  | "watchSpecs"
+  | "watchWorkspace"
+  | "watchProject";
+type SupportedTauriOperation = Exclude<EndpointOperation, TauriStreamOperation>;
 
 const tauriCommands = {
   // =============================================================================
@@ -56,10 +52,6 @@ const tauriCommands = {
   getTaskDiff: "get_task_diff",
   commitTaskChanges: "commit_task_changes",
   pushTaskBranch: "push_task_branch",
-  listTaskDiffComments: "list_task_diff_comments",
-  createTaskDiffComment: "create_task_diff_comment",
-  replyTaskDiffComment: "reply_task_diff_comment",
-  setTaskDiffCommentStatus: "set_task_diff_comment_status",
 
   // =============================================================================
   // fileSystem
@@ -67,14 +59,15 @@ const tauriCommands = {
   listWorkspaceDirectory: "list_workspace_directory",
   readWorkspaceFile: "read_workspace_file",
   searchWorkspace: "search_workspace",
+  listProjectDirectory: "list_project_directory",
+  readProjectFile: "read_project_file",
+  searchProject: "search_project",
 
   // =============================================================================
   // spec
   // =============================================================================
   getSpecCatalog: "get_spec_catalog",
   readSpec: "read_spec",
-  resolveSpecSource: "resolve_spec_source",
-  updateProjectSpecSources: "update_project_spec_sources",
 
   // =============================================================================
   // session
@@ -87,14 +80,15 @@ const tauriCommands = {
   switchSessionAgent: "switch_session_agent",
   resumeSessionHistory: "resume_session_history",
   respondToSessionPermission: "respond_to_session_permission",
+  cancelSessionPrompt: "cancel_session_prompt",
   stopSession: "stop_session",
   deleteSession: "delete_session",
+  renameSession: "rename_session",
 
   // =============================================================================
   // agentRuntime
   // =============================================================================
   getAgentRuntimeStatus: "get_agent_runtime_status",
-
   // =============================================================================
   // skill
   // =============================================================================
@@ -121,7 +115,16 @@ const tauriCommands = {
   // =============================================================================
   // plugin
   // =============================================================================
+  listAvailablePlugins: "list_available_plugins",
+  syncAvailablePlugins: "sync_available_plugins",
   listInstalledPlugins: "list_installed_plugins",
+  scanPlugins: "scan_plugins",
+  enablePlugin: "enable_plugin",
+  disablePlugin: "disable_plugin",
+  activatePlugin: "activate_plugin",
+  stopPlugin: "stop_plugin",
+  uninstallPlugin: "uninstall_plugin",
+  installPlugin: "install_plugin",
 
   // =============================================================================
   // gitIdentity
@@ -159,6 +162,18 @@ const tauriCommands = {
   cancelWorkflowRun: "cancel_workflow_run",
   restartWorkflowRun: "restart_workflow_run",
   updateWorkflowRunInput: "update_workflow_run_input",
+  // =============================================================================
+  // developerMode
+  // =============================================================================
+  getDeveloperMode: "get_developer_mode",
+  setDeveloperMode: "set_developer_mode",
+
+  // =============================================================================
+  // runtimeLogLevel
+  // =============================================================================
+  getRuntimeLogLevel: "get_runtime_log_level",
+  setRuntimeLogLevel: "set_runtime_log_level",
+  completeWorkflowNode: "complete_workflow_node",
 } as const satisfies Record<SupportedTauriOperation, string>;
 
 /** Creates the Desktop contracts transport backed by unary commands and Tauri IPC channels. */
@@ -167,13 +182,18 @@ export function createTauriTransport(
   createChannel: ChannelFactory = () => new Channel(),
 ): ContractTransport {
   return {
-    async send<TResponse>(request: ContractTransportRequest, options?: ContractCallOptions): Promise<TResponse> {
+    async send<TResponse>(
+      request: ContractTransportRequest,
+      options?: ContractCallOptions,
+    ): Promise<TResponse> {
       const operation = request.operationName as EndpointOperation;
-      if (operation in unsupportedOperations || isTauriStreamOperation(operation)) {
-        throw unsupportedOperation(operation);
+      if (isTauriStreamOperation(operation)) {
+        throw transportError(
+          "tauri_invoke_failure",
+          `Stream operation ${operation} must use stream()`,
+        );
       }
-      const command = tauriCommands[operation as SupportedTauriOperation];
-      if (!command) throw unsupportedOperation(request.operationName);
+      const command = tauriCommands[operation];
 
       try {
         return await abortable(
@@ -181,18 +201,36 @@ export function createTauriTransport(
           options?.signal,
         );
       } catch (error) {
-        if (error instanceof RemoteContractError || error instanceof UnknownRemoteError || error instanceof LocalTransportError) throw error;
-        if (isAbortError(error)) throw transportError("cancelled", "Desktop command was cancelled");
+        if (
+          error instanceof RemoteContractError ||
+          error instanceof UnknownRemoteError ||
+          error instanceof LocalTransportError
+        )
+          throw error;
+        if (isAbortError(error))
+          throw transportError("cancelled", "Desktop command was cancelled");
         throw normalizeInvokeError(error);
       }
     },
-    stream<TEvent>(request: ContractTransportRequest, options?: ContractCallOptions): AsyncIterable<TEvent> {
+    stream<TEvent>(
+      request: ContractTransportRequest,
+      options?: ContractCallOptions,
+    ): AsyncIterable<TEvent> {
       let consumed = false;
       return {
         [Symbol.asyncIterator](): AsyncIterator<TEvent> {
-          if (consumed) throw transportError("stream_already_consumed", "contract streams can only be consumed once");
+          if (consumed)
+            throw transportError(
+              "stream_already_consumed",
+              "contract streams can only be consumed once",
+            );
           consumed = true;
-          return streamFromChannel<TEvent>(invokeCommand, createChannel, request, options);
+          return streamFromChannel<TEvent>(
+            invokeCommand,
+            createChannel,
+            request,
+            options,
+          );
         },
       };
     },
@@ -200,8 +238,17 @@ export function createTauriTransport(
 }
 
 /** Identifies operations that must use the shared Tauri channel stream command. */
-function isTauriStreamOperation(operation: EndpointOperation): operation is TauriStreamOperation {
-  return operation === "loadSession" || operation === "promptSession" || operation === "watchAppEvents" || operation === "watchSpecs" || operation === "watchWorkspace";
+function isTauriStreamOperation(
+  operation: EndpointOperation,
+): operation is TauriStreamOperation {
+  return (
+    operation === "loadSession" ||
+    operation === "promptSession" ||
+    operation === "watchAppEvents" ||
+    operation === "watchSpecs" ||
+    operation === "watchWorkspace" ||
+    operation === "watchProject"
+  );
 }
 
 /** Starts one private channel stream and cancels its backend registration on every early exit. */
@@ -211,7 +258,8 @@ async function* streamFromChannel<TEvent>(
   request: ContractTransportRequest,
   options?: ContractCallOptions,
 ): AsyncGenerator<TEvent> {
-  if (options?.signal?.aborted === true) throw abortError(options.signal.reason);
+  if (options?.signal?.aborted === true)
+    throw abortError(options.signal.reason);
   const streamCallId = crypto.randomUUID();
   const channel = createChannel<ContractStreamFrame<TEvent>>();
   const frames: ContractStreamFrame<TEvent>[] = [];
@@ -242,7 +290,8 @@ async function* streamFromChannel<TEvent>(
       onEvent: channel,
     });
     while (true) {
-      if (isSignalAborted(options?.signal)) throw abortError(options?.signal?.reason);
+      if (isSignalAborted(options?.signal))
+        throw abortError(options?.signal?.reason);
       if (overflowed) {
         throw transportError(
           "stream_queue_overflow",
@@ -251,22 +300,32 @@ async function* streamFromChannel<TEvent>(
       }
       const frame = frames.shift();
       if (frame === undefined) {
-        await new Promise<void>((resolve) => { wake = resolve; });
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
         continue;
       }
       if (frame.type === "data") yield frame.data;
       if (frame.type === "error") {
-        throw decodeRemoteError(frame.error, null, frame);
+        throw decodeRemoteError(frame.error);
       }
       if (frame.type === "end") return;
     }
   } catch (error) {
-    if (error instanceof RemoteContractError || error instanceof UnknownRemoteError || error instanceof LocalTransportError) throw error;
-    if (isAbortError(error)) throw transportError("cancelled", "Desktop stream was cancelled");
+    if (
+      error instanceof RemoteContractError ||
+      error instanceof UnknownRemoteError ||
+      error instanceof LocalTransportError
+    )
+      throw error;
+    if (isAbortError(error))
+      throw transportError("cancelled", "Desktop stream was cancelled");
     throw normalizeInvokeError(error);
   } finally {
     options?.signal?.removeEventListener("abort", abort);
-    await invokeCommand<void>("cancel_contract_stream", { streamCallId }).catch(() => undefined);
+    await invokeCommand<void>("cancel_contract_stream", { streamCallId }).catch(
+      () => undefined,
+    );
   }
 }
 
@@ -277,12 +336,17 @@ function abortable<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(abortError(signal.reason));
     signal.addEventListener("abort", abort, { once: true });
-    operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    operation
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", abort));
   });
 }
 
 function abortError(reason: unknown): DOMException {
-  return new DOMException(typeof reason === "string" ? reason : "The operation was aborted", "AbortError");
+  return new DOMException(
+    typeof reason === "string" ? reason : "The operation was aborted",
+    "AbortError",
+  );
 }
 
 function isAbortError(error: unknown): boolean {
@@ -300,16 +364,18 @@ function transportError(
   return new LocalTransportError(kind, message);
 }
 
-/** Builds the stable failure used for intentionally excluded Desktop operations. */
-function unsupportedOperation(operationName: string): LocalTransportError {
-  return transportError("unsupported_operation", `Desktop does not support operation ${operationName}`);
-}
-
 /** Normalizes serialized Rust command errors and opaque Tauri invocation failures. */
 function normalizeInvokeError(error: unknown): Error {
-  const decoded = decodeRemoteError(error, null, error);
-  if (!(decoded instanceof LocalTransportError) || decoded.kind !== "malformed_response") {
+  const decoded = decodeRemoteError(error);
+  if (
+    !(decoded instanceof LocalTransportError) ||
+    decoded.kind !== "malformed_response"
+  ) {
     return decoded;
   }
-  return new LocalTransportError("tauri_invoke_failure", "Desktop command invocation failed", error);
+  return new LocalTransportError(
+    "tauri_invoke_failure",
+    "Desktop command invocation failed",
+    error,
+  );
 }

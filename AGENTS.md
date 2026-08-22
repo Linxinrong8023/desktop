@@ -35,6 +35,8 @@ Ora is an IDE for AI Agent. In the crates folder where the rust code lives:
     the new implementation so the invariants stay close to the code that owns them.
 - Use local time instead of UTC time.
 - Use ora-logging wrapper macros instead of `tracing` macros. Use `ora_logging::clock::now_local` instead of `OffsetDateTime::now_local()`.
+- Put logic that is generic — independent of any Ora domain concept, transport, or runtime — in `ora-utils` (`crates/utils`) instead of the calling crate. If you believe a piece of logic is generic, default to placing it in `ora-utils`. `ora-utils` must not depend on any other `ora-*` crate and must not carry domain vocabulary; gate heavier optional dependencies (such as archive formats) behind Cargo features so path-only consumers stay light.
+- Before implementing path validation, normalization, or archive extraction, prefer the shared `ora-utils::path` and `ora-utils::archive` capabilities over crate-local logic. If `ora-utils` does not yet provide the required capability, extend `ora-utils` and then consume it instead of implementing it locally in the caller.
 
 ## Module READMEs
 
@@ -47,18 +49,53 @@ Ora is an IDE for AI Agent. In the crates folder where the rust code lives:
 
 ## Tests
 
-`task test` runs all frontend, backend, and Desktop lint and test tasks. It can take a
+`task test` runs the frontend and Rust workspace lint and test tasks. It can take a
 long time, so prefer the smallest relevant task while iterating and run the full task
-before considering a repository-wide change complete.
+before considering a repository-wide change complete. Use `task --list` to see the
+authoritative list of available tasks.
 
+- Format changed files: `task format`
 - Frontend lint: `task lint:frontend`
 - Frontend tests: `task test:frontend`
-- Backend lint and formatting: `task lint:backend`
-- Backend tests: `task test:backend`
-- Desktop lint: `task lint:desktop`
-- Desktop tests: `task test:desktop`
+- Rust workspace lint: `task lint:crates`
+- Rust workspace tests: `task test:crates`
 - All lint tasks: `task lint`
-- Full lint and test suite (long-running): `task test`
+- All lint and test tasks (long-running): `task test`
+
+### Frontend React / TipTap tests and the stderr gate
+
+Frontend package tests run under `scripts/run-with-clean-stderr.mjs`. Any React
+Testing Library warning on stderr — especially `An update to … was not wrapped
+in act(...)` — fails the whole `task test` run even when Vitest reports green.
+
+TipTap / ProseMirror `setContent` can call `flushSync` (React node views). That
+creates two hard constraints:
+
+1. **Do not call programmatic `setContent` / `clear` / `replaceDocument` inside
+   `useLayoutEffect` (or other React commit/layout work).** Nested `flushSync`
+   also fails the stderr gate.
+2. **Do not let those deferred editor transactions call parent `setState`.**
+   Session / draft switches often schedule TipTap updates on a microtask after
+   `act(() => selectSession(…))` returns. If `onUpdate` still drives
+   `onQueryChange` / attachment React state from that microtask, the update
+   lands outside `act` and the suite fails.
+
+Preferred product pattern (chat composer already follows this):
+
+- Treat conversation-keyed **React** state (attachments, slash/@ query, menu
+  dismiss) as derived from the selection key and sync it during render (or
+  another path that stays inside the same `act` as the selection change).
+- Keep TipTap document restore on a deferred path when needed, but suppress
+  parent notify for programmatic `replaceText` / `replaceDocument` / `clear`
+  (still update `dataset.composerText` for tests). User typing continues to
+  emit query/doc/text callbacks normally.
+- Skip no-op attachment `setState` when the parked image id list is unchanged.
+
+Do **not** rely on sprinkling `flushComposerEffects` / extra `act` +
+`Promise.resolve` in every test as the primary fix. Use those flushes only to
+assert after a deferred TipTap document apply, not to hide parent `setState`
+escaping `act`. When a send-failure / abandon test awaits a rejected promise,
+keep that await inside `act` so restore that still updates React stays covered.
 
 ### Test assertions
 

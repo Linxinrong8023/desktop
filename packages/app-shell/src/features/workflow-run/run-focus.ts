@@ -52,10 +52,10 @@ export function shouldReleaseFocusToFollow(
   currentStatus: GraphWorkflowNodeStatus | undefined,
 ): boolean {
   if (
-    prev === null
-    || focusNodeId === null
-    || currentStatus === undefined
-    || prev.nodeId !== focusNodeId
+    prev === null ||
+    focusNodeId === null ||
+    currentStatus === undefined ||
+    prev.nodeId !== focusNodeId
   ) {
     return false;
   }
@@ -68,6 +68,20 @@ function orderedActiveIds(run: GraphWorkflowRun): string[] {
     const state = run.nodeStates[nodeId];
     return state !== undefined && isActiveStatus(state.status);
   });
+}
+
+/** Picks the first active successor surface using the Theater's stable path ordering. */
+export function resolveCompletionAdvanceNodeId(
+  run: GraphWorkflowRun,
+  completedNodeId: string,
+): string | null {
+  const completedStatus = run.nodeStates[completedNodeId]?.status;
+  if (completedStatus === undefined || !isTerminalNodeStatus(completedStatus)) {
+    return null;
+  }
+  return (
+    orderedActiveIds(run).find((nodeId) => nodeId !== completedNodeId) ?? null
+  );
 }
 
 /**
@@ -104,8 +118,8 @@ function pickFallbackPrimary(run: GraphWorkflowRun): string | null {
     const state = run.nodeStates[node.id];
     if (state?.status === "succeeded" && state.finishedAt !== undefined) {
       if (
-        latestSucceeded === null
-        || state.finishedAt.localeCompare(latestSucceeded.finishedAt) > 0
+        latestSucceeded === null ||
+        state.finishedAt.localeCompare(latestSucceeded.finishedAt) > 0
       ) {
         latestSucceeded = { nodeId: node.id, finishedAt: state.finishedAt };
       }
@@ -133,16 +147,16 @@ export function resolveTheaterFocus(
   const activeIds = orderedActiveIds(run);
 
   if (
-    preferredNodeId !== null
-    && run.nodeStates[preferredNodeId] !== undefined
+    preferredNodeId !== null &&
+    run.nodeStates[preferredNodeId] !== undefined
   ) {
     // Keep user focus even after the act leaves "active", until they pick another
     // or the workspace releases a live pin that just finished.
     return { primaryId: preferredNodeId, activeIds };
   }
 
-  const primaryId = pickPrimaryAmongActive(run, activeIds)
-    ?? pickFallbackPrimary(run);
+  const primaryId =
+    pickPrimaryAmongActive(run, activeIds) ?? pickFallbackPrimary(run);
   return { primaryId, activeIds };
 }
 
@@ -183,6 +197,22 @@ export function shouldReleaseLivePinToFollow(
     return false;
   }
   return shouldReleaseFocusToFollow(prev, focusNodeId, currentStatus);
+}
+
+/**
+ * True when an open non-interactive session just finished and should follow the workflow onward.
+ * Interactive sessions advance through their explicit completion action instead.
+ */
+export function shouldAdvanceAutomaticConversation(
+  prev: TheaterFocusStatusSample | null,
+  conversationNodeId: string | null,
+  currentStatus: GraphWorkflowNodeStatus | undefined,
+  interactive: boolean,
+): boolean {
+  return (
+    !interactive &&
+    shouldReleaseFocusToFollow(prev, conversationNodeId, currentStatus)
+  );
 }
 
 /**

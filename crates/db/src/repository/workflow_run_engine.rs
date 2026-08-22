@@ -1,7 +1,7 @@
 use ora_application::{
-    AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, FileChange, NodeRunToStart,
-    RepositoryError, RestartWorkflowRunResult, StartWorkflowRunResult, UpdateWorkflowRunInputResult,
-    WorkflowRunEngineRepository,
+    AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, FileChange,
+    NodeRunToStart, RepositoryError, RestartWorkflowRunResult, StartWorkflowRunResult,
+    UpdateWorkflowRunInputResult, WorkflowRunEngineRepository,
 };
 use ora_domain::{
     SessionId, SessionStatus, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus,
@@ -10,7 +10,7 @@ use ora_domain::{
 use rusqlite::{OptionalExtension, Row, Transaction, TransactionBehavior, params};
 
 use super::task::map_task_row;
-use super::workflow_run::map_run_row;
+use super::workflow_run::{map_node_run_row, map_run_row};
 use super::worktree::map_worktree_row;
 use crate::repository::RepositoryPool;
 
@@ -55,14 +55,14 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
                 // snapshot; any of them missing is corruption, not a legitimate absence.
                 let task = {
                     let mut statement = connection.prepare(
-                        "SELECT id, project_id, title, status, type, workflow_run_id, worktree_id, created_at, updated_at, is_deleted
+                        "SELECT id, project_id, title, type, workflow_run_id, worktree_id, created_at, updated_at, is_deleted
                          FROM tasks WHERE workflow_run_id = ?1 AND is_deleted = 0",
                     )?;
                     require_row(&mut statement.query(params![run_id.as_ref()])?, map_task_row)?
                 };
                 let worktree = {
                     let mut statement = connection.prepare(
-                        "SELECT id, task_id, branch_name, base_commit_id, is_active, created_at, updated_at, is_deleted
+                        "SELECT id, task_id, branch_name, checkout_root, base_commit_id, is_active, created_at, updated_at, is_deleted
                          FROM worktrees WHERE task_id = ?1 AND is_deleted = 0",
                     )?;
                     require_row(&mut statement.query(params![task.id.as_ref()])?, map_worktree_row)?
@@ -113,6 +113,90 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
             .map_err(engine_repository_error_from_database)
     }
 
+    fn find_node_run_by_session_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<WorkflowNodeRun>, RepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, run_id, node_id, node_type, session_id, status, input, output, error, payload, started_at, finished_at, created_at, updated_at, is_deleted
+                     FROM workflow_node_runs
+                     WHERE session_id = ?1 AND is_deleted = 0
+                     LIMIT 1",
+                )?;
+                let mut rows = statement.query(params![session_id.as_ref()])?;
+                match rows.next()? {
+                    Some(row) => Ok(Some(map_node_run_row(row)?)),
+                    None => Ok(None),
+                }
+            })
+            .map_err(engine_repository_error_from_database)
+    }
+
+    fn find_node_run_by_id(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+    ) -> Result<Option<WorkflowNodeRun>, RepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, run_id, node_id, node_type, session_id, status, input, output, error, payload, started_at, finished_at, created_at, updated_at, is_deleted
+                     FROM workflow_node_runs
+                     WHERE id = ?1 AND is_deleted = 0",
+                )?;
+                let mut rows = statement.query(params![node_run_id.as_ref()])?;
+                match rows.next()? {
+                    Some(row) => Ok(Some(map_node_run_row(row)?)),
+                    None => Ok(None),
+                }
+            })
+            .map_err(engine_repository_error_from_database)
+    }
+
+    fn transition_node_run_status(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+        from: WorkflowNodeStatus,
+        to: WorkflowNodeStatus,
+        now: i64,
+    ) -> Result<AdvanceWorkflowRunResult, RepositoryError> {
+        self.pool
+            .with_connection_mut(|connection| {
+                let transaction = Transaction::new(connection, TransactionBehavior::Immediate)?;
+                let updated = transaction.execute(
+                    "UPDATE workflow_node_runs SET status = ?3, updated_at = ?4
+                     WHERE id = ?1 AND status = ?2 AND is_deleted = 0",
+                    params![
+                        node_run_id.as_ref(),
+                        from.database_value(),
+                        to.database_value(),
+                        now
+                    ],
+                )?;
+                if updated > 0 {
+                    transaction.commit()?;
+                    return Ok(AdvanceWorkflowRunResult::Advanced);
+                }
+                // The guard rejected the update: distinguish a missing row from one in another
+                // status so a stale flip is a clean no-op rather than a misleading success.
+                let exists = transaction
+                    .query_row(
+                        "SELECT 1 FROM workflow_node_runs WHERE id = ?1 AND is_deleted = 0",
+                        params![node_run_id.as_ref()],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                Ok(if exists {
+                    AdvanceWorkflowRunResult::NotRunning
+                } else {
+                    AdvanceWorkflowRunResult::NotFound
+                })
+            })
+            .map_err(engine_repository_error_from_database)
+    }
+
     fn start_run(
         &self,
         run_id: &WorkflowRunId,
@@ -120,9 +204,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<StartWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let Some((status, state)) = transaction
                     .query_row(
                         "SELECT run_status, state FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",
@@ -163,9 +247,8 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError> {
         self.pool
-            .with_connection(|connection| {
-                let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+            .with_connection_mut(|connection| {
+                let transaction = Transaction::new(connection, TransactionBehavior::Immediate)?;
                 for node_run in node_runs {
                     insert_node_run(&transaction, run_id, node_run, now)?;
                 }
@@ -187,9 +270,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<AdvanceWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let Some((run_id, node_id, status)) = transaction
                     .query_row(
                         "SELECT run_id, node_id, status FROM workflow_node_runs WHERE id = ?1 AND is_deleted = 0",
@@ -206,7 +289,12 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
                 else {
                     return Ok(AdvanceWorkflowRunResult::NotFound);
                 };
-                if WorkflowNodeStatus::from_database_value(status)? != WorkflowNodeStatus::Running {
+                // A `Pending` node run is an awaiting interactive node and is completed the same
+                // way as a running one; any other status is a late or duplicate callback.
+                if !matches!(
+                    WorkflowNodeStatus::from_database_value(status)?,
+                    WorkflowNodeStatus::Running | WorkflowNodeStatus::Pending
+                ) {
                     return Ok(AdvanceWorkflowRunResult::NotRunning);
                 }
                 let payload = complete_payload(stop_reason, file_changes);
@@ -239,9 +327,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<AdvanceWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let Some((run_id, node_id, status)) = transaction
                     .query_row(
                         "SELECT run_id, node_id, status FROM workflow_node_runs WHERE id = ?1 AND is_deleted = 0",
@@ -300,9 +388,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let state = current_nodes_to_state(&[])?;
                 transaction.execute(
                     "UPDATE workflow_runs SET run_status = ?2, output = ?3, finished_at = ?4, updated_at = ?4, state = ?5
@@ -327,9 +415,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<CancelWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let status = transaction
                     .query_row(
                         "SELECT run_status FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",
@@ -371,9 +459,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<RestartWorkflowRunResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let status = transaction
                     .query_row(
                         "SELECT run_status FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",
@@ -418,9 +506,9 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<UpdateWorkflowRunInputResult, RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 let Some((status, state)) = transaction
                     .query_row(
                         "SELECT run_status, state FROM workflow_runs WHERE id = ?1 AND is_deleted = 0",
@@ -433,7 +521,17 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
                 };
                 let status = WorkflowRunStatus::from_database_value(status)?;
                 let current_nodes = current_nodes_from_state(state.as_deref())?;
-                if status != WorkflowRunStatus::Pending || !current_nodes.is_empty() {
+                // The kickoff input is frozen only while the run is executing: a `Running` run (or
+                // a `Pending` pause with in-flight nodes) is using it, but a not-started `Pending`
+                // run and any terminal run may be edited to prepare the next execution.
+                let editable = (status == WorkflowRunStatus::Pending && current_nodes.is_empty())
+                    || matches!(
+                        status,
+                        WorkflowRunStatus::Succeeded
+                            | WorkflowRunStatus::Failed
+                            | WorkflowRunStatus::Cancelled
+                    );
+                if !editable {
                     return Ok(UpdateWorkflowRunInputResult::NotEditable);
                 }
                 transaction.execute(
@@ -472,10 +570,27 @@ impl WorkflowRunEngineRepository for SqliteWorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError> {
         self.pool
-            .with_connection(|connection| {
+            .with_connection_mut(|connection| {
                 let transaction =
-                    Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+                    Transaction::new(connection, TransactionBehavior::Immediate)?;
                 for run_id in run_ids {
+                    // An awaiting (`Pending`) node is parked on human input, not computing: a
+                    // restart must not destroy it. Only a run that has a `Running` (actively
+                    // generating) node fails, and it takes every non-terminal node with it.
+                    let has_generating: bool = transaction.query_row(
+                        "SELECT EXISTS(
+                            SELECT 1 FROM workflow_node_runs
+                            WHERE run_id = ?1 AND status = ?2 AND is_deleted = 0
+                         )",
+                        params![
+                            run_id.as_ref(),
+                            WorkflowNodeStatus::Running.database_value()
+                        ],
+                        |row| row.get(0),
+                    )?;
+                    if !has_generating {
+                        continue;
+                    }
                     transaction.execute(
                         "UPDATE workflow_node_runs SET status = ?2, error = ?3, finished_at = ?4, updated_at = ?4
                          WHERE run_id = ?1 AND status IN (0, 1) AND is_deleted = 0",
@@ -541,10 +656,7 @@ fn current_nodes_to_state(current_nodes: &[String]) -> Result<String, crate::Dat
 }
 
 /// Builds the node-run `payload` blob: the ACP stop reason and incremental file changes, when any.
-fn complete_payload(
-    stop_reason: Option<String>,
-    file_changes: Vec<FileChange>,
-) -> Option<String> {
+fn complete_payload(stop_reason: Option<String>, file_changes: Vec<FileChange>) -> Option<String> {
     let mut payload = serde_json::Map::new();
     if let Some(reason) = stop_reason {
         payload.insert("stop_reason".to_string(), serde_json::json!(reason));
@@ -552,13 +664,18 @@ fn complete_payload(
     if !file_changes.is_empty() {
         payload.insert(
             "file_changes".to_string(),
-            serde_json::json!(file_changes.iter().map(|change| {
-                serde_json::json!({
-                    "path": change.path,
-                    "additions": change.additions,
-                    "deletions": change.deletions,
-                })
-            }).collect::<Vec<_>>()),
+            serde_json::json!(
+                file_changes
+                    .iter()
+                    .map(|change| {
+                        serde_json::json!({
+                            "path": change.path,
+                            "additions": change.additions,
+                            "deletions": change.deletions,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            ),
         );
     }
     if payload.is_empty() {

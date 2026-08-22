@@ -1,15 +1,15 @@
 import { create } from "zustand";
-import type { AgentCli } from "@ora/contracts";
+import type { KnownAgentCli } from "../../features/chat/model-catalog";
 
 interface PendingAgentState {
   /** The agent chosen for one not-yet-started chat surface, keyed by its warm target. */
-  selections: Record<string, AgentCli>;
+  selections: Record<string, KnownAgentCli>;
   /** The agent a persisted session is set to move onto, keyed by that session's id. */
-  switches: Record<string, AgentCli>;
+  switches: Record<string, KnownAgentCli>;
   /** Records the agent chosen for one warm target, replacing any earlier pick for it. */
-  setPendingAgent: (targetKey: string, agentCli: AgentCli) => void;
+  setPendingAgent: (targetKey: string, agentCli: KnownAgentCli) => void;
   /** Records that a session should be rebound onto `agentCli` when it is next sent into. */
-  setPendingSwitch: (sessionId: string, agentCli: AgentCli) => void;
+  setPendingSwitch: (sessionId: string, agentCli: KnownAgentCli) => void;
   /** Drops a session's recorded move once it has been committed or abandoned. */
   clearPendingSwitch: (sessionId: string) => void;
 }
@@ -36,9 +36,13 @@ export const usePendingAgentStore = create<PendingAgentState>((set) => ({
   selections: {},
   switches: {},
   setPendingAgent: (targetKey, agentCli) =>
-    set((state) => ({ selections: { ...state.selections, [targetKey]: agentCli } })),
+    set((state) => ({
+      selections: { ...state.selections, [targetKey]: agentCli },
+    })),
   setPendingSwitch: (sessionId, agentCli) =>
-    set((state) => ({ switches: { ...state.switches, [sessionId]: agentCli } })),
+    set((state) => ({
+      switches: { ...state.switches, [sessionId]: agentCli },
+    })),
   clearPendingSwitch: (sessionId) =>
     set((state) => {
       const switches = { ...state.switches };
@@ -55,7 +59,9 @@ export const usePendingAgentStore = create<PendingAgentState>((set) => ({
  * *because a move is pending*". Only the latter warms a session for the incoming
  * CLI and commits the rebind on the next send.
  */
-export function usePendingSwitch(sessionId: string | null): AgentCli | undefined {
+export function usePendingSwitch(
+  sessionId: string | null,
+): KnownAgentCli | undefined {
   return usePendingAgentStore((state) =>
     sessionId === null ? undefined : state.switches[sessionId],
   );

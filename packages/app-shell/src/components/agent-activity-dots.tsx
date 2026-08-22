@@ -5,9 +5,15 @@
  * assembled at runtime would never make it into the generated stylesheet.
  */
 const AGENT_DOT_ANIMATIONS = [
-  "animate-dot-column-top", "animate-dot-column-top", "animate-dot-column-top",
-  "animate-dot-column-middle", "animate-dot-column-middle", "animate-dot-column-middle",
-  "animate-dot-column-bottom", "animate-dot-column-bottom", "animate-dot-column-bottom",
+  "animate-dot-column-top",
+  "animate-dot-column-top",
+  "animate-dot-column-top",
+  "animate-dot-column-middle",
+  "animate-dot-column-middle",
+  "animate-dot-column-middle",
+  "animate-dot-column-bottom",
+  "animate-dot-column-bottom",
+  "animate-dot-column-bottom",
 ];
 
 /**
@@ -39,14 +45,24 @@ interface AgentActivityDotsProps {
  * The animation carries the "still running" meaning on its own, so callers show
  * nothing at all when the agent is idle rather than a stalled grid.
  */
-export function AgentActivityDots({ label, className, dotClassName = "size-[3px]" }: AgentActivityDotsProps) {
+export function AgentActivityDots({
+  label,
+  className,
+  dotClassName = "size-[3px]",
+}: AgentActivityDotsProps) {
   return (
-    <span role="img" aria-label={label} className={`grid grid-cols-3 gap-[2.5px] ${className ?? ""}`}>
+    <span
+      role="img"
+      aria-label={label}
+      className={`grid grid-cols-3 gap-[2.5px] ${className ?? ""}`}
+    >
       {AGENT_DOT_ANIMATIONS.map((animation, index) => (
         <span
           key={index}
           className={`${dotClassName} rounded-[0.5px] bg-current ${animation}`}
-          style={{ animationDelay: `${(index % 3) * AGENT_DOT_COLUMN_DELAY_MS}ms` }}
+          style={{
+            animationDelay: `${(index % 3) * AGENT_DOT_COLUMN_DELAY_MS}ms`,
+          }}
         />
       ))}
     </span>

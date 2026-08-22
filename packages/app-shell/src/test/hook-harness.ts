@@ -34,17 +34,18 @@ export function createHookWrapper(
       createElement(
         QueryClientProvider,
         { client: queryClient },
-        createElement(
-          WorkflowRuntimeProvider,
-          {
-            runtime,
-            children: createElement(
-              ContractsClientContext.Provider,
-              { value: client },
-              createElement(ChatStoreContext.Provider, { value: chatStore }, children),
+        createElement(WorkflowRuntimeProvider, {
+          runtime,
+          children: createElement(
+            ContractsClientContext.Provider,
+            { value: client },
+            createElement(
+              ChatStoreContext.Provider,
+              { value: chatStore },
+              children,
             ),
-          },
-        ),
+          ),
+        }),
       ),
     );
   };

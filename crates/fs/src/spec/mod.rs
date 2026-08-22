@@ -5,6 +5,7 @@ use crate::search::{
 use crate::workspace::{canonical_root, relative_string, resolve_existing};
 use crate::{ReadFile, WorkspaceFileSystem, WorkspaceFileSystemError};
 use ora_process::{ManagedProcess, ProcessSpawner, ProcessSpec, ProcessStdio};
+use ora_utils::path::CanonicalPathRoot;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -59,41 +60,6 @@ where
         self.read_file(root, relative_path)
     }
 
-    /// Resolves a platform-selected absolute directory into Ora's relative slash representation.
-    pub fn resolve_spec_source(
-        &self,
-        root: &Path,
-        absolute_path: &Path,
-    ) -> Result<String, WorkspaceFileSystemError> {
-        if !absolute_path.is_absolute() {
-            return Err(WorkspaceFileSystemError::PathNotRelative {
-                path: absolute_path.to_path_buf(),
-            });
-        }
-        let root = canonical_root(root)?;
-        let resolved = absolute_path.canonicalize().map_err(|source| {
-            if source.kind() == std::io::ErrorKind::NotFound {
-                WorkspaceFileSystemError::PathNotFound {
-                    path: absolute_path.to_path_buf(),
-                }
-            } else {
-                WorkspaceFileSystemError::Io {
-                    path: absolute_path.to_path_buf(),
-                    source,
-                }
-            }
-        })?;
-        if !resolved.is_dir() {
-            return Err(WorkspaceFileSystemError::NotDirectory { path: resolved });
-        }
-        if !resolved.starts_with(&root) {
-            return Err(WorkspaceFileSystemError::PathOutsideWorkspace {
-                path: absolute_path.to_path_buf(),
-            });
-        }
-        relative_string(&root, &resolved)
-    }
-
     /// Runs the shared ripgrep process with spec-specific globs and bounded output collection.
     async fn enumerate_markdown(
         &self,
@@ -121,7 +87,7 @@ where
         let arguments = markdown_arguments(&scopes, ignore_policy);
         let spec = ProcessSpec::new(self.ripgrep_path.as_os_str())
             .args(arguments)
-            .cwd(&root)
+            .cwd(root.as_path())
             .stdin(ProcessStdio::Null);
         let mut process = self.process_spawner.spawn(spec).map_err(|source| {
             WorkspaceFileSystemError::SearchToolUnavailable {
@@ -207,7 +173,7 @@ fn markdown_arguments(scopes: &[String], ignore_policy: IgnorePolicy) -> Vec<Str
 
 /// Parses bounded ripgrep output, deduplicates overlaps, and obtains authoritative file sizes.
 fn parse_markdown_output(
-    root: &Path,
+    root: &CanonicalPathRoot,
     output: &[u8],
     mut truncated: bool,
     max_results: usize,
@@ -265,6 +231,7 @@ fn is_markdown_path(path: &Path) -> bool {
 mod tests {
     use super::{IgnorePolicy, WorkspaceFileSystem, markdown_arguments, parse_markdown_output};
     use ora_process::TokioProcessSpawner;
+    use ora_utils::path::CanonicalPathRoot;
     use pretty_assertions::assert_eq;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -368,10 +335,11 @@ mod tests {
             write_file(workspace.path(), name, name);
         }
         let output = b"a.md\nb.md\nc.md\n";
+        let root = CanonicalPathRoot::new(workspace.path())
+            .unwrap_or_else(|error| panic!("canonicalize workspace: {error}"));
 
         assert_eq!(
-            parse_markdown_output(workspace.path(), output, false, 2)
-                .expect("parse bounded output"),
+            parse_markdown_output(&root, output, false, 2).expect("parse bounded output"),
             super::MarkdownIndex {
                 files: vec![
                     super::MarkdownFile {
@@ -387,7 +355,7 @@ mod tests {
             }
         );
         assert!(
-            parse_markdown_output(workspace.path(), b"a.md\n", true, 2)
+            parse_markdown_output(&root, b"a.md\n", true, 2)
                 .expect("parse byte-truncated output")
                 .truncated
         );

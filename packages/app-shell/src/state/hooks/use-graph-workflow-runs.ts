@@ -74,7 +74,8 @@ export function useMountWorkflow() {
     }: {
       projectId: string;
       definition: WorkflowDefinitionInput;
-    }) => runtime.host.mount(projectId, normalizeWorkflowDefinition(definition)),
+    }) =>
+      runtime.host.mount(projectId, normalizeWorkflowDefinition(definition)),
     onSuccess: (_mount, variables) => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.workflowMounts(variables.projectId),
@@ -125,10 +126,14 @@ export function useDeleteGraphWorkflowRun() {
         queryKey: queryKeys.workflowRuns(projectId),
       });
       queryClient.removeQueries({ queryKey: queryKeys.workflowRun(runId) });
-      queryClient.removeQueries({ queryKey: queryKeys.workflowArtifacts(runId) });
+      queryClient.removeQueries({
+        queryKey: queryKeys.workflowArtifacts(runId),
+      });
       const selection = useWorkspaceSelectionStore.getState().selection;
       if (selection.workflowRunId === runId) {
-        useWorkspaceSelectionStore.getState().clearWorkflowRunSelection(projectId);
+        useWorkspaceSelectionStore
+          .getState()
+          .clearWorkflowRunSelection(projectId);
       }
     },
   });
@@ -212,13 +217,8 @@ export function useRenameGraphWorkflowRun() {
   const runtime = useWorkflowRuntime();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      runId,
-      name,
-    }: {
-      runId: string;
-      name: string;
-    }) => runtime.runs.rename(runId, name),
+    mutationFn: ({ runId, name }: { runId: string; name: string }) =>
+      runtime.runs.rename(runId, name),
     onSuccess: (run) => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.workflowRuns(run.projectId),
@@ -334,93 +334,109 @@ export function useGraphWorkflowRunLive(
     if (runId == null || runId === "" || !hasSnapshot) {
       return;
     }
-    return runtime.runs.subscribe(runId, (event) => {
-      const cacheKey = queryKeys.workflowArtifacts(runId);
-      if (event.type === "artifact_added") {
-        const artifact = structuredClone(event.artifact);
-        queryClient.setQueryData(
-          cacheKey,
-          (previous: LiveSnapshotIndexed | null | undefined) => {
-            if (previous === undefined || previous === null) {
-              return previous;
-            }
-            if (previous.artifacts.some((item) => item.id === artifact.id)) {
-              return previous;
-            }
-            return {
-              ...previous,
-              artifacts: [...previous.artifacts, artifact],
-              cursor: event.cursor,
-            };
-          },
-        );
-        setRevealed({ runId, artifactId: artifact.id });
-        return;
-      }
-      if (event.type === "node_conversation_item_upserted") {
-        const item = structuredClone(event.item);
-        queryClient.setQueryData(
-          cacheKey,
-          (previous: LiveSnapshotIndexed | null | undefined) => {
-            if (previous === undefined || previous === null) {
-              return previous;
-            }
-            let resolvedIndex = previous.conversationIndexById.get(item.id) ?? -1;
-            if (resolvedIndex < 0) {
-              // Defensive fallback for cache migrations or external cache writes:
-              // if an item exists but was not indexed, repair instead of duplicating.
-              resolvedIndex = previous.conversation.findIndex((current) => current.id === item.id);
-            }
-            const existing = resolvedIndex < 0 ? undefined : previous.conversation[resolvedIndex];
-            const conversation = previous.conversation.slice();
-            if (resolvedIndex < 0) {
-              conversation.push(item);
-            } else if (
-              existing !== undefined
-              && isSameConversationItem(existing, item)
-            ) {
+    return runtime.runs.subscribe(
+      runId,
+      (event) => {
+        const cacheKey = queryKeys.workflowArtifacts(runId);
+        if (event.type === "artifact_added") {
+          const artifact = structuredClone(event.artifact);
+          queryClient.setQueryData(
+            cacheKey,
+            (previous: LiveSnapshotIndexed | null | undefined) => {
+              if (previous === undefined || previous === null) {
+                return previous;
+              }
+              if (previous.artifacts.some((item) => item.id === artifact.id)) {
+                return previous;
+              }
               return {
                 ...previous,
+                artifacts: [...previous.artifacts, artifact],
                 cursor: event.cursor,
               };
-            } else {
-              conversation[resolvedIndex] = item;
-            }
-            return {
-              ...previous,
-              conversation,
-              conversationIndexById: upsertConversationIndexById(
-                previous.conversationIndexById,
-                item,
-                resolvedIndex,
-                conversation.length,
-              ),
-              conversationByNodeId: upsertConversationByNodeId(previous.conversationByNodeId, item),
-              cursor: event.cursor,
-            };
-          },
+            },
+          );
+          setRevealed({ runId, artifactId: artifact.id });
+          return;
+        }
+        if (event.type === "node_conversation_item_upserted") {
+          const item = structuredClone(event.item);
+          queryClient.setQueryData(
+            cacheKey,
+            (previous: LiveSnapshotIndexed | null | undefined) => {
+              if (previous === undefined || previous === null) {
+                return previous;
+              }
+              let resolvedIndex =
+                previous.conversationIndexById.get(item.id) ?? -1;
+              if (resolvedIndex < 0) {
+                // Defensive fallback for cache migrations or external cache writes:
+                // if an item exists but was not indexed, repair instead of duplicating.
+                resolvedIndex = previous.conversation.findIndex(
+                  (current) => current.id === item.id,
+                );
+              }
+              const existing =
+                resolvedIndex < 0
+                  ? undefined
+                  : previous.conversation[resolvedIndex];
+              const conversation = previous.conversation.slice();
+              if (resolvedIndex < 0) {
+                conversation.push(item);
+              } else if (
+                existing !== undefined &&
+                isSameConversationItem(existing, item)
+              ) {
+                return {
+                  ...previous,
+                  cursor: event.cursor,
+                };
+              } else {
+                conversation[resolvedIndex] = item;
+              }
+              return {
+                ...previous,
+                conversation,
+                conversationIndexById: upsertConversationIndexById(
+                  previous.conversationIndexById,
+                  item,
+                  resolvedIndex,
+                  conversation.length,
+                ),
+                conversationByNodeId: upsertConversationByNodeId(
+                  previous.conversationByNodeId,
+                  item,
+                ),
+                cursor: event.cursor,
+              };
+            },
+          );
+          return;
+        }
+        queryClient.setQueryData(
+          cacheKey,
+          (previous: LiveSnapshotIndexed | null | undefined) =>
+            previous === undefined || previous === null
+              ? previous
+              : { ...previous, cursor: event.cursor },
         );
-        return;
-      }
-      queryClient.setQueryData(
-        cacheKey,
-        (previous: LiveSnapshotIndexed | null | undefined) => previous === undefined
-          || previous === null
-          ? previous
-          : { ...previous, cursor: event.cursor },
-      );
-      if (event.type === "hitl_required") {
-        handlersRef.current.onHitlRequired?.(event.request);
-        return;
-      }
-      if (event.type === "run_finished") {
-        handlersRef.current.onRunFinished?.();
-      }
-    }, { afterCursor: snapshotRef.current?.cursor ?? null });
+        if (event.type === "hitl_required") {
+          handlersRef.current.onHitlRequired?.(event.request);
+          return;
+        }
+        if (event.type === "run_finished") {
+          handlersRef.current.onRunFinished?.();
+        }
+      },
+      { afterCursor: snapshotRef.current?.cursor ?? null },
+    );
   }, [runtime, queryClient, runId, hasSnapshot]);
   const conversation = query.data?.conversation ?? [];
-  const conversationByNodeId = query.data?.conversationByNodeId ?? new Map<string, WorkflowNodeConversationItem[]>();
-  const revealedId = revealed !== null && revealed.runId === runId ? revealed.artifactId : null;
+  const conversationByNodeId =
+    query.data?.conversationByNodeId ??
+    new Map<string, WorkflowNodeConversationItem[]>();
+  const revealedId =
+    revealed !== null && revealed.runId === runId ? revealed.artifactId : null;
 
   return {
     ...query,
@@ -437,7 +453,9 @@ interface LiveSnapshotIndexed extends WorkflowRunLiveSnapshot {
 }
 
 /** Adds a node-scoped conversation index to the live snapshot once at load time. */
-function withConversationIndex(snapshot: WorkflowRunLiveSnapshot): LiveSnapshotIndexed {
+function withConversationIndex(
+  snapshot: WorkflowRunLiveSnapshot,
+): LiveSnapshotIndexed {
   return {
     ...snapshot,
     conversationIndexById: buildConversationIndexById(snapshot.conversation),
@@ -468,7 +486,10 @@ function upsertConversationIndexById(
     return previous;
   }
   const next = new Map(previous);
-  next.set(item.id, resolvedIndex >= 0 ? resolvedIndex : conversationLength - 1);
+  next.set(
+    item.id,
+    resolvedIndex >= 0 ? resolvedIndex : conversationLength - 1,
+  );
   return next;
 }
 
@@ -522,14 +543,14 @@ function isSameConversationItem(
   right: WorkflowNodeConversationItem,
 ): boolean {
   if (
-    left.id !== right.id
-    || left.kind !== right.kind
-    || left.runId !== right.runId
-    || left.nodeId !== right.nodeId
-    || left.sessionId !== right.sessionId
-    || left.createdAt !== right.createdAt
-    || left.updatedAt !== right.updatedAt
-    || left.status !== right.status
+    left.id !== right.id ||
+    left.kind !== right.kind ||
+    left.runId !== right.runId ||
+    left.nodeId !== right.nodeId ||
+    left.sessionId !== right.sessionId ||
+    left.createdAt !== right.createdAt ||
+    left.updatedAt !== right.updatedAt ||
+    left.status !== right.status
   ) {
     return false;
   }
@@ -537,9 +558,11 @@ function isSameConversationItem(
     return left.role === right.role && left.markdown === right.markdown;
   }
   if (left.kind === "activity" && right.kind === "activity") {
-    return left.activityKind === right.activityKind
-      && left.summary === right.summary
-      && left.detail === right.detail;
+    return (
+      left.activityKind === right.activityKind &&
+      left.summary === right.summary &&
+      left.detail === right.detail
+    );
   }
   return false;
 }

@@ -1,7 +1,8 @@
 import { create } from "zustand";
 
 /** The core-profile OpenSpec workflow commands the stepper walks through. */
-export type WorkflowNodeId = "explore" | "propose" | "apply" | "sync" | "archive";
+export type WorkflowNodeId =
+  "explore" | "propose" | "apply" | "sync" | "archive";
 
 /** Lifecycle of one stepper node. Transitions are user-driven (suggest-only). */
 export type WorkflowNodeStatus = "pending" | "running" | "done" | "skipped";
@@ -62,7 +63,10 @@ const REMINDER_BODY: Record<WorkflowNodeId, string> = {
  * in the agent's current working directory (its worktree) — otherwise the agent
  * follows the absolute path and writes them into the project root's `openspec/`.
  */
-export function buildWorkflowReminder(nodeId: WorkflowNodeId, skillsDir: string): string {
+export function buildWorkflowReminder(
+  nodeId: WorkflowNodeId,
+  skillsDir: string,
+): string {
   return `请使用位于 ${skillsDir} 的 ${WORKFLOW_SKILL[nodeId]} skill（该绝对路径仅用于读取 skill 说明）。所有 openspec 产物（proposal、specs、design、tasks、changes）以及代码实现都必须在你当前的工作目录中完成，不要写入 skill 所在的项目根目录。${REMINDER_BODY[nodeId]}`;
 }
 
@@ -148,7 +152,9 @@ export const useWorkflowStore = create<WorkflowState>((set) => {
       set((state) => {
         const run = state.runs[key];
         if (run !== undefined) {
-          return { runs: { ...state.runs, [key]: { ...run, visible: !run.visible } } };
+          return {
+            runs: { ...state.runs, [key]: { ...run, visible: !run.visible } },
+          };
         }
         return {
           runs: {
@@ -201,12 +207,17 @@ export const useWorkflowStore = create<WorkflowState>((set) => {
 });
 
 /** One session's run, or a stable inactive placeholder when it has none. */
-export function getRun(state: { runs: Record<string, WorkflowRun> }, key: string): WorkflowRun {
+export function getRun(
+  state: { runs: Record<string, WorkflowRun> },
+  key: string,
+): WorkflowRun {
   return state.runs[key] ?? EMPTY_RUN;
 }
 
 /** The first still-pending node — the stepper's suggested next step (starts at explore). */
-export function suggestedNextNode(nodes: WorkflowNode[]): WorkflowNodeId | null {
+export function suggestedNextNode(
+  nodes: WorkflowNode[],
+): WorkflowNodeId | null {
   return nodes.find((node) => node.status === "pending")?.id ?? null;
 }
 

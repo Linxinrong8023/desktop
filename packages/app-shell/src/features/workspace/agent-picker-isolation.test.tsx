@@ -1,27 +1,52 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TooltipProvider } from "@ora/ui";
-import { PlatformProvider } from "@ora/platform";
+import { PlatformProvider } from "../../platform";
 import { describe, expect, it, beforeEach } from "vitest";
 import type { Project, Task } from "@ora/contracts";
 import { createChatStore } from "@ora/chat";
 import { AppI18nProvider } from "../../i18n/i18n";
-import { createHookWrapper, createTestQueryClient } from "../../test/hook-harness";
+import {
+  createHookWrapper,
+  createTestQueryClient,
+} from "../../test/hook-harness";
 import { createStubPlatform } from "../../test/stub-platform";
-import { createMockClient, createMockClientState } from "../../test/mock-client";
+import {
+  createMockClient,
+  createMockClientState,
+} from "../../test/mock-client";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
-import { useSettingsStore, DEFAULT_SETTINGS } from "../../state/stores/settings-store";
+import { useDraftSessionsStore } from "../../state/stores/draft-sessions-store";
+import {
+  useSettingsStore,
+  DEFAULT_SETTINGS,
+} from "../../state/stores/settings-store";
 import { usePendingAgentStore } from "../../state/stores/pending-agent-store";
 import { WorkspaceSidebar } from "./workspace-sidebar";
 import { WorkspaceView } from "./workspace-view";
 
 const USER = { name: "Eric", email: "eric@example.com" };
 const PROJECT: Project = { id: "p1", name: "Ora Desktop", rootPath: "/ora" };
-const TASK1: Task = { id: "t1", projectId: "p1", title: "Task One", status: "todo", workspaceMode: "worktree", type: "default", workflowRunId: null };
-const TASK2: Task = { id: "t2", projectId: "p1", title: "Task Two", status: "todo", workspaceMode: "worktree", type: "default", workflowRunId: null };
+const TASK1: Task = {
+  id: "t1",
+  projectId: "p1",
+  title: "Task One",
+  workspaceMode: "worktree",
+  type: "default",
+  workflowRunId: null,
+};
+const TASK2: Task = {
+  id: "t2",
+  projectId: "p1",
+  title: "Task Two",
+  workspaceMode: "worktree",
+  type: "default",
+  workflowRunId: null,
+};
 
 beforeEach(() => {
   useWorkspaceSelectionStore.getState().clearSelection();
+  useDraftSessionsStore.getState().clear();
   useSettingsStore.setState({ settings: DEFAULT_SETTINGS });
   usePendingAgentStore.setState({ selections: {} });
 });
@@ -48,9 +73,23 @@ function renderWorkspace() {
   );
 }
 
-/** Clicks a task row in the sidebar tree by its visible title. */
-async function clickTask(user: ReturnType<typeof userEvent.setup>, title: string) {
-  await user.click(await screen.findByText(title));
+/**
+ * Opens a worktree's new-chat surface: expand the row, then click its hover
+ * plus. Row click alone only toggles expand and does not select a composer.
+ */
+async function openTaskComposer(
+  user: ReturnType<typeof userEvent.setup>,
+  title: string,
+) {
+  const label = await screen.findByText(title);
+  const row = label.closest(".group\\/tree");
+  expect(row).not.toBeNull();
+  await user.click(label);
+  await user.click(
+    within(row as HTMLElement).getByRole("button", {
+      name: /新建会话|New session/,
+    }),
+  );
 }
 
 /** The collapsed picker, which names the agent the selected surface is on. */
@@ -65,7 +104,10 @@ function picker() {
  * screen twice until it is dismissed. Closing here keeps each assertion about
  * what the picker settled on rather than what the open list still offers.
  */
-async function pickAgent(user: ReturnType<typeof userEvent.setup>, agentLabel: RegExp) {
+async function pickAgent(
+  user: ReturnType<typeof userEvent.setup>,
+  agentLabel: RegExp,
+) {
   await user.click(picker());
   const menu = await screen.findByRole("menu");
   await user.click(within(menu).getByText(agentLabel));
@@ -77,21 +119,21 @@ describe("agent picker isolation across real sidebar navigation", () => {
     const user = userEvent.setup();
     renderWorkspace();
 
-    await clickTask(user, "Task One");
+    await openTaskComposer(user, "Task One");
     await pickAgent(user, /Claude Code/);
     expect(within(picker()).getByText("Claude Code")).not.toBeNull();
 
-    await clickTask(user, "Task Two");
+    await openTaskComposer(user, "Task Two");
     await pickAgent(user, /OpenCode/);
     expect(within(picker()).getByText("OpenCode")).not.toBeNull();
 
-    await clickTask(user, "Task One");
+    await openTaskComposer(user, "Task One");
     expect(within(picker()).getByText("Claude Code")).not.toBeNull();
 
-    await clickTask(user, "Task Two");
+    await openTaskComposer(user, "Task Two");
     expect(within(picker()).getByText("OpenCode")).not.toBeNull();
 
-    await clickTask(user, "Task One");
+    await openTaskComposer(user, "Task One");
     expect(within(picker()).getByText("Claude Code")).not.toBeNull();
-  });
+  }, 15_000);
 });

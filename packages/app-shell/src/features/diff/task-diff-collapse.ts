@@ -21,6 +21,45 @@ interface CollapsedRange {
   key: string;
 }
 
+export interface NewSideLineTarget {
+  change: ChangeData;
+  collapsedKey: string | null;
+}
+
+/** Returns the old or new source line represented by one parsed change. */
+function lineNumberFor(change: ChangeData, side: "old" | "new"): number | null {
+  if (change.type === "normal") {
+    return side === "old" ? change.oldLineNumber : change.newLineNumber;
+  }
+  if (change.type === "delete") {
+    return side === "old" ? change.lineNumber : null;
+  }
+  return side === "new" ? change.lineNumber : null;
+}
+
+/**
+ * Locates a new-side line in the original hunks and names the collapsed block
+ * that currently hides it, so a chat jump can expand then scroll.
+ */
+export function findNewSideLineTarget(
+  hunks: HunkData[],
+  line: number,
+): NewSideLineTarget | null {
+  for (let hunkIndex = 0; hunkIndex < hunks.length; hunkIndex += 1) {
+    const hunk = hunks[hunkIndex]!;
+    const ranges = findCollapsedRanges(hunk, hunkIndex);
+    for (let index = 0; index < hunk.changes.length; index += 1) {
+      const change = hunk.changes[index]!;
+      if (lineNumberFor(change, "new") !== line) continue;
+      const collapsed = ranges.find(
+        (range) => index >= range.start && index < range.end,
+      );
+      return { change, collapsedKey: collapsed?.key ?? null };
+    }
+  }
+  return null;
+}
+
 /**
  * Splits complete-context hunks into visible change neighborhoods and expandable
  * unchanged blocks while preserving the parser's original change objects.
@@ -32,11 +71,13 @@ export function buildCollapsedDiffSegments(
   return hunks.flatMap((hunk, hunkIndex) => {
     const collapsedRanges = findCollapsedRanges(hunk, hunkIndex);
     if (collapsedRanges.length === 0) {
-      return [{
-        kind: "hunk" as const,
-        key: `${hunkIndex}:complete`,
-        hunk,
-      }];
+      return [
+        {
+          kind: "hunk" as const,
+          key: `${hunkIndex}:complete`,
+          hunk,
+        },
+      ];
     }
 
     const segments: DiffRenderSegment[] = [];
@@ -46,7 +87,9 @@ export function buildCollapsedDiffSegments(
         segments.push(createHunkSegment(hunk, hunkIndex, cursor, range.start));
       }
       if (expandedBlocks.has(range.key)) {
-        segments.push(createHunkSegment(hunk, hunkIndex, range.start, range.end));
+        segments.push(
+          createHunkSegment(hunk, hunkIndex, range.start, range.end),
+        );
       } else {
         segments.push({
           kind: "collapsed",
@@ -58,14 +101,19 @@ export function buildCollapsedDiffSegments(
     });
 
     if (cursor < hunk.changes.length) {
-      segments.push(createHunkSegment(hunk, hunkIndex, cursor, hunk.changes.length));
+      segments.push(
+        createHunkSegment(hunk, hunkIndex, cursor, hunk.changes.length),
+      );
     }
     return segments;
   });
 }
 
-/** Finds the middle of long normal-line runs while retaining nearby review context. */
-function findCollapsedRanges(hunk: HunkData, hunkIndex: number): CollapsedRange[] {
+/** Finds the middle of long normal-line runs while retaining nearby changed context. */
+function findCollapsedRanges(
+  hunk: HunkData,
+  hunkIndex: number,
+): CollapsedRange[] {
   const ranges: CollapsedRange[] = [];
   let cursor = 0;
 
@@ -76,12 +124,16 @@ function findCollapsedRanges(hunk: HunkData, hunkIndex: number): CollapsedRange[
     }
 
     const runStart = cursor;
-    while (cursor < hunk.changes.length && hunk.changes[cursor]?.type === "normal") {
+    while (
+      cursor < hunk.changes.length &&
+      hunk.changes[cursor]?.type === "normal"
+    ) {
       cursor += 1;
     }
     const runEnd = cursor;
     const hiddenStart = runStart + (runStart > 0 ? CONTEXT_LINE_COUNT : 0);
-    const hiddenEnd = runEnd - (runEnd < hunk.changes.length ? CONTEXT_LINE_COUNT : 0);
+    const hiddenEnd =
+      runEnd - (runEnd < hunk.changes.length ? CONTEXT_LINE_COUNT : 0);
     if (hiddenEnd - hiddenStart < MIN_COLLAPSED_LINE_COUNT) continue;
 
     ranges.push({
@@ -126,6 +178,6 @@ function createHunkSegment(
 /** Counts the lines represented on one side of a change slice. */
 function countSideLines(changes: ChangeData[], side: "old" | "new"): number {
   return changes.filter((change) =>
-    side === "old" ? change.type !== "insert" : change.type !== "delete"
+    side === "old" ? change.type !== "insert" : change.type !== "delete",
   ).length;
 }

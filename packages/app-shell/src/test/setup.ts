@@ -32,16 +32,17 @@ Object.defineProperty(window, "localStorage", {
 
 // jsdom lacks matchMedia; settings theme subscription depends on it.
 if (!window.matchMedia) {
-  window.matchMedia = (query: string): MediaQueryList => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    addListener: () => {},
-    removeListener: () => {},
-    dispatchEvent: () => false,
-  }) as MediaQueryList;
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
 }
 
 // jsdom lacks ResizeObserver. Notify consumers with the fixture's declared
@@ -52,8 +53,12 @@ if (!globalThis.ResizeObserver) {
 
     observe(target: Element) {
       const bounds = target.getBoundingClientRect();
-      const width = bounds.width || (target instanceof HTMLElement ? target.clientWidth : 0);
-      const height = bounds.height || (target instanceof HTMLElement ? target.clientHeight : 0);
+      const width =
+        bounds.width ||
+        (target instanceof HTMLElement ? target.clientWidth : 0);
+      const height =
+        bounds.height ||
+        (target instanceof HTMLElement ? target.clientHeight : 0);
       const contentRect = {
         x: bounds.x,
         y: bounds.y,
@@ -65,13 +70,18 @@ if (!globalThis.ResizeObserver) {
         height,
         toJSON: () => ({}),
       };
-      this.callback([{
-        target,
-        contentRect,
-        borderBoxSize: [],
-        contentBoxSize: [],
-        devicePixelContentBoxSize: [],
-      }], this);
+      this.callback(
+        [
+          {
+            target,
+            contentRect,
+            borderBoxSize: [],
+            contentBoxSize: [],
+            devicePixelContentBoxSize: [],
+          },
+        ],
+        this,
+      );
     }
 
     unobserve() {}
@@ -99,6 +109,53 @@ if (!window.DOMMatrixReadOnly) {
 // view whenever the selection changes.
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
+}
+
+// ProseMirror maps pointer coordinates through document.elementFromPoint.
+// jsdom leaves it undefined, which throws on mousedown and drops typed input.
+if (typeof document.elementFromPoint !== "function") {
+  document.elementFromPoint = () => null;
+}
+if (typeof document.caretRangeFromPoint !== "function") {
+  document.caretRangeFromPoint = () => null;
+}
+
+const emptyClientRect = (): DOMRect =>
+  ({
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    toJSON: () => ({}),
+  }) as DOMRect;
+
+const emptyClientRectList = (): DOMRectList => {
+  const list = [] as unknown as DOMRectList;
+  Object.defineProperty(list, "item", {
+    value: () => emptyClientRect(),
+  });
+  return list;
+};
+
+if (typeof Range !== "undefined") {
+  if (typeof Range.prototype.getClientRects !== "function") {
+    Range.prototype.getClientRects = emptyClientRectList;
+  }
+  if (typeof Range.prototype.getBoundingClientRect !== "function") {
+    Range.prototype.getBoundingClientRect = emptyClientRect;
+  }
+}
+if (typeof Text !== "undefined") {
+  const textProto = Text.prototype as Text & {
+    getClientRects?: () => DOMRectList;
+  };
+  if (typeof textProto.getClientRects !== "function") {
+    textProto.getClientRects = emptyClientRectList;
+  }
 }
 
 // jsdom does not implement the Web Animations API; Base UI's ScrollArea checks

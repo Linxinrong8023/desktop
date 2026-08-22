@@ -11,6 +11,9 @@ pub enum WorkflowRunStatus {
     Succeeded,
     Failed,
     Cancelled,
+    /// Derived on the wire when a `Running` run has at least one awaiting (interactive) node;
+    /// the persisted run status stays `Running` so cancel/restart semantics are unchanged.
+    AwaitingInput,
 }
 
 /// Describes the lifecycle state of one node execution in the public contract.
@@ -81,6 +84,18 @@ pub struct WorkflowRunSummary {
     pub created_at: i64,
 }
 
+/// Identifies the Ora display language frozen for generated workflow-run prompts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export_to = "workflowRun.ts")]
+pub enum WorkflowRunLocale {
+    #[serde(rename = "zh-CN")]
+    #[ts(rename = "zh-CN")]
+    ZhCn,
+    #[serde(rename = "en-US")]
+    #[ts(rename = "en-US")]
+    EnUs,
+}
+
 // ── Create ──
 
 /// Carries the fields required to create a workflow run against a published snapshot.
@@ -93,6 +108,7 @@ pub struct WorkflowRunSummary {
 pub struct CreateWorkflowRunRequest {
     pub project_id: String,
     pub workflow_id: String,
+    pub locale: WorkflowRunLocale,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub snapshot_id: Option<String>,
@@ -134,6 +150,7 @@ pub struct GetWorkflowRunRequest {
 pub struct GetWorkflowRunResponse {
     pub run: WorkflowRun,
     pub name: String,
+    pub project_id: String,
     pub task_id: String,
     pub nodes: Vec<WorkflowNodeRun>,
 }
@@ -277,6 +294,38 @@ pub struct UpdateWorkflowRunInputResponse {
     pub run: WorkflowRun,
 }
 
+// ── Complete workflow node (interactive fallback) ──
+
+/// Who requested the completion of one workflow node.
+///
+/// Phase 1 carries only the human path; the agent/CLI path reuses the same command later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub enum NodeCompletionRequester {
+    Human,
+}
+
+/// Identifies the awaiting interactive node to complete.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct CompleteWorkflowNodeRequest {
+    pub run_id: String,
+    pub node_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub requester: Option<NodeCompletionRequester>,
+}
+
+/// Returns the run after the node completed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflowRun.ts")]
+pub struct CompleteWorkflowNodeResponse {
+    pub run: WorkflowRun,
+}
+
 /// Exports every TypeScript binding declared in this module into the target directory.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     WorkflowRunStatus::export(config)?;
@@ -284,6 +333,7 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     WorkflowRun::export(config)?;
     WorkflowNodeRun::export(config)?;
     WorkflowRunSummary::export(config)?;
+    WorkflowRunLocale::export(config)?;
     CreateWorkflowRunRequest::export(config)?;
     CreateWorkflowRunResponse::export(config)?;
     GetWorkflowRunRequest::export(config)?;
@@ -304,18 +354,22 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     RestartWorkflowRunResponse::export(config)?;
     UpdateWorkflowRunInputRequest::export(config)?;
     UpdateWorkflowRunInputResponse::export(config)?;
+    NodeCompletionRequester::export(config)?;
+    CompleteWorkflowNodeRequest::export(config)?;
+    CompleteWorkflowNodeResponse::export(config)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        CreateWorkflowRunRequest, CreateWorkflowRunResponse, DeleteWorkflowRunRequest,
-        DeleteWorkflowRunResponse, GetWorkflowRunRequest, GetWorkflowRunResponse,
-        ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse,
-        ListWorkflowRunsByWorkflowRequest, ListWorkflowRunsByWorkflowResponse,
-        ListWorkflowRunsRequest, ListWorkflowRunsResponse, WorkflowNodeRun, WorkflowNodeStatus,
-        WorkflowRun, WorkflowRunStatus, WorkflowRunSummary,
+        CompleteWorkflowNodeRequest, CompleteWorkflowNodeResponse, CreateWorkflowRunRequest,
+        CreateWorkflowRunResponse, DeleteWorkflowRunRequest, DeleteWorkflowRunResponse,
+        GetWorkflowRunRequest, GetWorkflowRunResponse, ListWorkflowNodeRunsRequest,
+        ListWorkflowNodeRunsResponse, ListWorkflowRunsByWorkflowRequest,
+        ListWorkflowRunsByWorkflowResponse, ListWorkflowRunsRequest, ListWorkflowRunsResponse,
+        NodeCompletionRequester, WorkflowNodeRun, WorkflowNodeStatus, WorkflowRun,
+        WorkflowRunLocale, WorkflowRunStatus, WorkflowRunSummary,
     };
     use pretty_assertions::assert_eq;
     use serde::Serialize;
@@ -378,12 +432,17 @@ mod tests {
             &CreateWorkflowRunRequest {
                 project_id: "project-1".to_string(),
                 workflow_id: "workflow-1".to_string(),
+                locale: WorkflowRunLocale::ZhCn,
                 snapshot_id: None,
                 kickoff_input: None,
                 name: None,
                 base_branch: None,
             },
-            json!({ "projectId": "project-1", "workflowId": "workflow-1" }),
+            json!({
+                "projectId": "project-1",
+                "workflowId": "workflow-1",
+                "locale": "zh-CN"
+            }),
         );
         assert_serialized_json(
             &CreateWorkflowRunResponse {
@@ -419,6 +478,7 @@ mod tests {
             &GetWorkflowRunResponse {
                 run: run.clone(),
                 name: "Workflow workflow-1 30".to_string(),
+                project_id: "project-1".to_string(),
                 task_id: "task-1".to_string(),
                 nodes: vec![node.clone()],
             },
@@ -439,6 +499,7 @@ mod tests {
                     "updatedAt": 30,
                 },
                 "name": "Workflow workflow-1 30",
+                "projectId": "project-1",
                 "taskId": "task-1",
                 "nodes": [{
                     "id": "node-1",
@@ -561,6 +622,43 @@ mod tests {
             },
             json!({ "runId": "run-1" }),
         );
+        assert_serialized_json(
+            &CompleteWorkflowNodeRequest {
+                run_id: "run-1".to_string(),
+                node_id: "node-1".to_string(),
+                requester: None,
+            },
+            json!({ "runId": "run-1", "nodeId": "node-1" }),
+        );
+        assert_serialized_json(
+            &CompleteWorkflowNodeRequest {
+                run_id: "run-1".to_string(),
+                node_id: "node-1".to_string(),
+                requester: Some(NodeCompletionRequester::Human),
+            },
+            json!({ "runId": "run-1", "nodeId": "node-1", "requester": "human" }),
+        );
+        assert_serialized_json(
+            &CompleteWorkflowNodeResponse { run },
+            json!({
+                "run": {
+                    "id": "run-1",
+                    "workflowId": "workflow-1",
+                    "snapshotId": "snapshot-1",
+                    "status": "pending",
+                    "state": "{\"current_nodes\":[]}",
+                    "input": "kickoff",
+                    "output": null,
+                    "error": null,
+                    "payload": null,
+                    "startedAt": null,
+                    "finishedAt": null,
+                    "createdAt": 30,
+                    "updatedAt": 30,
+                }
+            }),
+        );
+        assert_serialized_json(&WorkflowRunStatus::AwaitingInput, json!("awaitingInput"));
     }
 
     /// Serializes one value and compares the full JSON payload so field names stay stable.

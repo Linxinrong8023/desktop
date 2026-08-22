@@ -1,0 +1,22 @@
+[package]
+name = "ora-runtime-settings"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+name = "ora_runtime_settings"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+ora-logging = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }

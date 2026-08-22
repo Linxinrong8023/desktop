@@ -62,9 +62,10 @@ export function useConversationNavigation({
     activeAnchorId: lastAnchorId,
     lastAnchorId,
   });
-  const activeAnchorId = navigation.lastAnchorId === lastAnchorId
-    ? navigation.activeAnchorId
-    : lastAnchorId;
+  const activeAnchorId =
+    navigation.lastAnchorId === lastAnchorId
+      ? navigation.activeAnchorId
+      : lastAnchorId;
 
   const cancelPendingNavigation = useCallback(() => {
     pendingNavigationRef.current = null;
@@ -74,13 +75,24 @@ export function useConversationNavigation({
     const element = scrollRef.current;
     if (!element) return;
 
-    const nextIsAtTail = element.scrollHeight - element.scrollTop - element.clientHeight < TAIL_PROXIMITY_PX;
+    const nextIsAtTail =
+      element.scrollHeight - element.scrollTop - element.clientHeight <
+      TAIL_PROXIMITY_PX;
     setIsAtTail(nextIsAtTail);
     const pendingNavigation = pendingNavigationRef.current;
     if (pendingNavigation) {
-      const maximumScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-      const destination = Math.min(pendingNavigation.scrollTop, maximumScrollTop);
-      if (Math.abs(element.scrollTop - destination) <= NAVIGATION_ARRIVAL_TOLERANCE_PX) {
+      const maximumScrollTop = Math.max(
+        0,
+        element.scrollHeight - element.clientHeight,
+      );
+      const destination = Math.min(
+        pendingNavigation.scrollTop,
+        maximumScrollTop,
+      );
+      if (
+        Math.abs(element.scrollTop - destination) <=
+        NAVIGATION_ARRIVAL_TOLERANCE_PX
+      ) {
         pendingNavigationRef.current = null;
       }
       return;
@@ -89,17 +101,21 @@ export function useConversationNavigation({
     if (nextIsAtTail) followTailRef.current = true;
     else if (pointerScrollRef.current) followTailRef.current = false;
     const nextAnchorId = findActiveAnchorId(element);
-    setNavigation((current) => (
-      current.activeAnchorId === nextAnchorId && current.lastAnchorId === lastAnchorId
+    setNavigation((current) =>
+      current.activeAnchorId === nextAnchorId &&
+      current.lastAnchorId === lastAnchorId
         ? current
-        : { activeAnchorId: nextAnchorId, lastAnchorId }
-    ));
+        : { activeAnchorId: nextAnchorId, lastAnchorId },
+    );
   }, [lastAnchorId, scrollRef]);
 
-  const handleWheel = useCallback((deltaY: number) => {
-    cancelPendingNavigation();
-    if (deltaY < 0) followTailRef.current = false;
-  }, [cancelPendingNavigation]);
+  const handleWheel = useCallback(
+    (deltaY: number) => {
+      cancelPendingNavigation();
+      if (deltaY < 0) followTailRef.current = false;
+    },
+    [cancelPendingNavigation],
+  );
 
   const beginPointerScroll = useCallback(() => {
     cancelPendingNavigation();
@@ -130,23 +146,30 @@ export function useConversationNavigation({
     return () => observer.disconnect();
   }, [contentRef, scrollRef]);
 
-  const navigateToAnchor = useCallback((anchorId: string) => {
-    const element = scrollRef.current;
-    if (!element) return;
-    const anchor = Array.from(element.querySelectorAll<HTMLElement>("[data-conversation-anchor]"))
-      .find((candidate) => candidate.dataset.conversationAnchor === anchorId);
-    if (!anchor) return;
+  const navigateToAnchor = useCallback(
+    (anchorId: string) => {
+      const element = scrollRef.current;
+      if (!element) return;
+      const anchor = Array.from(
+        element.querySelectorAll<HTMLElement>("[data-conversation-anchor]"),
+      ).find((candidate) => candidate.dataset.conversationAnchor === anchorId);
+      if (!anchor) return;
 
-    followTailRef.current = false;
-    const top = Math.max(0, anchor.offsetTop - NAVIGATION_TOP_OFFSET_PX);
-    pendingNavigationRef.current = { scrollTop: top };
-    setNavigation({ activeAnchorId: anchorId, lastAnchorId });
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const behavior = reduceMotion ? "auto" : "smooth";
-    if (typeof element.scrollTo === "function") element.scrollTo({ top, behavior });
-    else element.scrollTop = top;
-    highlightConversationAnchor(anchor, reduceMotion);
-  }, [lastAnchorId, scrollRef]);
+      followTailRef.current = false;
+      const top = Math.max(0, anchor.offsetTop - NAVIGATION_TOP_OFFSET_PX);
+      pendingNavigationRef.current = { scrollTop: top };
+      setNavigation({ activeAnchorId: anchorId, lastAnchorId });
+      const reduceMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+      const behavior = reduceMotion ? "auto" : "smooth";
+      if (typeof element.scrollTo === "function")
+        element.scrollTo({ top, behavior });
+      else element.scrollTop = top;
+      highlightConversationAnchor(anchor, reduceMotion);
+    },
+    [lastAnchorId, scrollRef],
+  );
 
   const navigateToTail = useCallback(() => {
     const element = scrollRef.current;
@@ -154,8 +177,12 @@ export function useConversationNavigation({
     followTailRef.current = true;
     pendingNavigationRef.current = { scrollTop: element.scrollHeight };
     setNavigation({ activeAnchorId: lastAnchorId, lastAnchorId });
-    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
-    if (typeof element.scrollTo === "function") element.scrollTo({ top: element.scrollHeight, behavior });
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)")
+      .matches
+      ? "auto"
+      : "smooth";
+    if (typeof element.scrollTo === "function")
+      element.scrollTo({ top: element.scrollHeight, behavior });
     else element.scrollTop = element.scrollHeight;
   }, [lastAnchorId, scrollRef]);
 
@@ -173,9 +200,14 @@ export function useConversationNavigation({
 
 /** Finds the prompt or response aligned with the viewport-top reading line. */
 function findActiveAnchorId(element: HTMLDivElement): string | null {
-  const anchors = Array.from(element.querySelectorAll<HTMLElement>("[data-conversation-anchor]"));
+  const anchors = Array.from(
+    element.querySelectorAll<HTMLElement>("[data-conversation-anchor]"),
+  );
   if (anchors.length === 0) return null;
-  if (element.scrollHeight - element.scrollTop - element.clientHeight < TAIL_PROXIMITY_PX) {
+  if (
+    element.scrollHeight - element.scrollTop - element.clientHeight <
+    TAIL_PROXIMITY_PX
+  ) {
     return anchors.at(-1)?.dataset.conversationAnchor ?? null;
   }
 
@@ -189,7 +221,10 @@ function findActiveAnchorId(element: HTMLDivElement): string | null {
 }
 
 /** Briefly outlines an anchor after a navigator jump. */
-function highlightConversationAnchor(anchor: HTMLElement, reduceMotion: boolean): void {
+function highlightConversationAnchor(
+  anchor: HTMLElement,
+  reduceMotion: boolean,
+): void {
   const outline = anchor.querySelector<HTMLElement>("[data-anchor-highlight]");
   if (!outline || typeof outline.animate !== "function") return;
   if (typeof outline.getAnimations === "function") {
@@ -199,16 +234,16 @@ function highlightConversationAnchor(anchor: HTMLElement, reduceMotion: boolean)
   // "half outlines" on both the full chat and embedded node sessions.
   outline.animate(
     reduceMotion
-      ? [
-          { opacity: 0.82 },
-          { opacity: 0 },
-        ]
+      ? [{ opacity: 0.82 }, { opacity: 0 }]
       : [
           { opacity: 0, offset: 0 },
           { opacity: 0.95, offset: 0.08 },
           { opacity: 0.95, offset: 0.7 },
           { opacity: 0, offset: 1 },
         ],
-    { duration: reduceMotion ? 250 : 2500, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+    {
+      duration: reduceMotion ? 250 : 2500,
+      easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+    },
   );
 }

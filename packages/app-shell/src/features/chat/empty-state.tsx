@@ -23,14 +23,22 @@ export function LandingHeading() {
   const { t } = useTranslation();
   return (
     <div className="mb-7">
-      <h1 className="text-2xl font-medium tracking-[-0.035em] text-foreground sm:text-[28px]">{t("chat.heading")}</h1>
-      <p className="mt-2 text-sm text-muted-foreground">{t("chat.subheading")}</p>
+      <h1 className="text-2xl font-medium tracking-[-0.035em] text-foreground sm:text-[28px]">
+        {t("chat.heading")}
+      </h1>
+      <p className="mt-2 text-sm text-muted-foreground">
+        {t("chat.subheading")}
+      </p>
     </div>
   );
 }
 
 /** Starter prompts shown under the landing composer. */
-export function LandingSuggestions({ onSend, isResponding, disabled }: LandingSuggestionsProps) {
+export function LandingSuggestions({
+  onSend,
+  isResponding,
+  disabled,
+}: LandingSuggestionsProps) {
   const { t } = useTranslation();
   return (
     <div className="mt-3 flex flex-wrap gap-2">

@@ -1,18 +1,18 @@
 use crate::{
     ApplicationError, Clock, CreateTaskHandler, CreateTaskWorktreeRequest,
     CreateTaskWorktreeResponse, DeleteTaskWorktreeRequest, GetTaskHandler, ListTasksHandler,
-    RepositoryError, TaskIdGenerator, TaskRepository, TaskWorktreeDeletionMode,
-    TaskWorktreeProvisioner, TaskWorktreeProvisionerError, UpdateTaskHandler, WorktreeIdGenerator,
-    WorktreeRepository,
+    RepositoryError, TaskIdGenerator, TaskRepository, TaskWorkspaceCommit, TaskWorktreeProvisioner,
+    TaskWorktreeProvisionerError, UpdateTaskHandler, WorkspaceCommitOutcome, WorktreeIdGenerator,
+    WorktreeProvisioningLeaseStore, WorktreeRepository,
 };
 use ora_contracts::{
     CreateTaskRequest, CreateTaskResponse, GetTaskRequest, GetTaskResponse, ListTasksRequest,
-    ListTasksResponse, Task as ContractTask, TaskStatus as ContractTaskStatus,
-    TaskType as ContractTaskType, TaskWorkspaceMode, UpdateTaskRequest, UpdateTaskResponse,
+    ListTasksResponse, Task as ContractTask, TaskType as ContractTaskType, TaskWorkspaceMode,
+    UpdateTaskRequest, UpdateTaskResponse,
 };
 use ora_domain::{
-    AuditFields, ProjectId, Task, TaskId, TaskStatus as DomainTaskStatus, Worktree,
-    WorktreeActivity as DomainWorktreeActivity, WorktreeId,
+    AuditFields, ProjectId, Task, TaskId, Worktree, WorktreeActivity as DomainWorktreeActivity,
+    WorktreeId, WorktreeProvisioningLease, WorktreeProvisioningLeaseId,
 };
 use ora_logging::with_trace_logging;
 use pretty_assertions::assert_eq;
@@ -20,6 +20,9 @@ use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+
+const REPO_ROOT: &str = "/repos/project-1";
 
 const TASK_ID: &str = "12345678-1234-5678-90ab-1234567890ab";
 const WORK_DIR: &str = "/tmp/ora-worktrees";
@@ -28,15 +31,16 @@ const WORK_DIR: &str = "/tmp/ora-worktrees";
 #[test]
 fn creates_tasks_with_owned_worktrees_and_clock_values() {
     with_trace_logging(|| {
-        let task_repository = Rc::new(FakeTaskRepository::default());
-        let worktree_repository = Rc::new(FakeWorktreeRepository::default());
+        let workspace_commit = Rc::new(FakeWorkspaceCommit::default());
+        let lease_store = FakeLeaseStore::default();
         let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
         let handler = CreateTaskHandler::new(
-            task_repository.clone(),
-            worktree_repository.clone(),
+            workspace_commit.clone(),
+            lease_store.clone(),
             FixedTaskIdGenerator::new(TASK_ID),
             FixedWorktreeIdGenerator::new("worktree-1"),
             provisioner.clone(),
+            PathBuf::from(REPO_ROOT),
             PathBuf::from(WORK_DIR),
             FixedClock::new(1_700_000_000_000),
         );
@@ -45,7 +49,6 @@ fn creates_tasks_with_owned_worktrees_and_clock_values() {
             .handle(CreateTaskRequest {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
-                status: ContractTaskStatus::Doing,
                 workspace_mode: None,
                 base_branch: Some("main".to_string()),
             })
@@ -58,7 +61,6 @@ fn creates_tasks_with_owned_worktrees_and_clock_values() {
                     id: TASK_ID.to_string(),
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
-                    status: ContractTaskStatus::Doing,
                     workspace_mode: TaskWorkspaceMode::Worktree,
                     task_type: ContractTaskType::Default,
                     workflow_run_id: None,
@@ -73,27 +75,61 @@ fn creates_tasks_with_owned_worktrees_and_clock_values() {
                 worktree_path: Path::new(WORK_DIR).join(TASK_ID),
             }]
         );
+        // The provisioning lease is written before Git work with the exact
+        // identity the cleanup path would need to reclaim the resources.
+        let created_leases = lease_store.created_leases();
+        assert_eq!(created_leases.len(), 1);
+        let lease = &created_leases[0];
         assert_eq!(
-            worktree_repository.visible_worktrees(),
-            vec![Worktree::new(
+            (
+                lease.project_id.clone(),
+                lease.task_id.clone(),
+                lease.repository_root.clone(),
+                lease.checkout_root.clone(),
+                lease.branch_name.clone(),
+            ),
+            (
+                ProjectId::new("project-1"),
+                TaskId::new(TASK_ID),
+                REPO_ROOT.to_string(),
+                Path::new(WORK_DIR)
+                    .join(TASK_ID)
+                    .to_string_lossy()
+                    .into_owned(),
+                "ora/12345678".to_string(),
+            )
+        );
+        assert!(lease_store.released_leases().is_empty());
+        let committed = workspace_commit.committed_worktree_tasks();
+        assert_eq!(committed.len(), 1);
+        let (task, worktree, lease_id) = &committed[0];
+        assert_eq!(lease_id, &lease.id);
+        assert_eq!(
+            worktree,
+            &Worktree::new(
                 WorktreeId::new("worktree-1"),
                 TaskId::new(TASK_ID),
                 Some("ora/12345678".to_string()),
+                Some(
+                    Path::new(WORK_DIR)
+                        .join(TASK_ID)
+                        .to_string_lossy()
+                        .into_owned()
+                ),
                 ora_domain::WorktreeBaseline::recorded("base-commit").unwrap(),
                 DomainWorktreeActivity::Active,
                 AuditFields::new(1_700_000_000_000, 1_700_000_000_000, false),
-            )]
+            )
         );
         assert_eq!(
-            task_repository.visible_tasks(),
-            vec![Task::new(
+            task,
+            &Task::new(
                 TaskId::new(TASK_ID),
                 ProjectId::new("project-1"),
                 "Ship handlers",
-                DomainTaskStatus::Doing,
                 Some(WorktreeId::new("worktree-1")),
                 AuditFields::new(1_700_000_000_000, 1_700_000_000_000, false),
-            )]
+            )
         );
     });
 }
@@ -102,15 +138,16 @@ fn creates_tasks_with_owned_worktrees_and_clock_values() {
 #[test]
 fn creates_project_root_tasks_without_worktrees() {
     with_trace_logging(|| {
-        let task_repository = Rc::new(FakeTaskRepository::default());
-        let worktree_repository = Rc::new(FakeWorktreeRepository::default());
+        let workspace_commit = Rc::new(FakeWorkspaceCommit::default());
+        let lease_store = FakeLeaseStore::default();
         let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
         let handler = CreateTaskHandler::new(
-            task_repository.clone(),
-            worktree_repository.clone(),
+            workspace_commit.clone(),
+            lease_store.clone(),
             FixedTaskIdGenerator::new(TASK_ID),
             FixedWorktreeIdGenerator::new("worktree-1"),
             provisioner.clone(),
+            PathBuf::from(REPO_ROOT),
             PathBuf::from(WORK_DIR),
             FixedClock::new(1_700_000_000_000),
         );
@@ -119,7 +156,6 @@ fn creates_project_root_tasks_without_worktrees() {
             .handle(CreateTaskRequest {
                 project_id: "project-1".to_string(),
                 title: "Chat in project root".to_string(),
-                status: ContractTaskStatus::Doing,
                 workspace_mode: Some(TaskWorkspaceMode::ProjectRoot),
                 base_branch: None,
             })
@@ -132,7 +168,6 @@ fn creates_project_root_tasks_without_worktrees() {
                     id: TASK_ID.to_string(),
                     project_id: "project-1".to_string(),
                     title: "Chat in project root".to_string(),
-                    status: ContractTaskStatus::Doing,
                     workspace_mode: TaskWorkspaceMode::ProjectRoot,
                     task_type: ContractTaskType::Default,
                     workflow_run_id: None,
@@ -140,8 +175,11 @@ fn creates_project_root_tasks_without_worktrees() {
             }
         );
         assert!(provisioner.created_requests().is_empty());
-        assert!(worktree_repository.visible_worktrees().is_empty());
-        assert_eq!(task_repository.visible_tasks()[0].worktree_id, None,);
+        assert!(lease_store.created_leases().is_empty());
+        assert_eq!(
+            workspace_commit.committed_project_root_tasks()[0].worktree_id,
+            None,
+        );
     });
 }
 
@@ -149,16 +187,17 @@ fn creates_project_root_tasks_without_worktrees() {
 #[test]
 fn rejects_worktree_tasks_outside_git_repositories() {
     with_trace_logging(|| {
-        let task_repository = Rc::new(FakeTaskRepository::default());
-        let worktree_repository = Rc::new(FakeWorktreeRepository::default());
+        let workspace_commit = Rc::new(FakeWorkspaceCommit::default());
+        let lease_store = FakeLeaseStore::default();
         let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
         provisioner.fail_repository_validation(TaskWorktreeProvisionerError::NotARepository);
         let handler = CreateTaskHandler::new(
-            task_repository.clone(),
-            worktree_repository.clone(),
+            workspace_commit.clone(),
+            lease_store.clone(),
             FixedTaskIdGenerator::new(TASK_ID),
             FixedWorktreeIdGenerator::new("worktree-1"),
             provisioner.clone(),
+            PathBuf::from(REPO_ROOT),
             PathBuf::from(WORK_DIR),
             FixedClock::new(1_700_000_000_000),
         );
@@ -167,7 +206,6 @@ fn rejects_worktree_tasks_outside_git_repositories() {
             .handle(CreateTaskRequest {
                 project_id: "project-1".to_string(),
                 title: "Cannot create worktree here".to_string(),
-                status: ContractTaskStatus::Doing,
                 workspace_mode: Some(TaskWorkspaceMode::Worktree),
                 base_branch: Some("main".to_string()),
             })
@@ -175,8 +213,8 @@ fn rejects_worktree_tasks_outside_git_repositories() {
 
         assert_eq!(error, ApplicationError::TaskWorktreeRequiresGitRepository);
         assert!(provisioner.created_requests().is_empty());
-        assert!(worktree_repository.visible_worktrees().is_empty());
-        assert!(task_repository.visible_tasks().is_empty());
+        assert!(lease_store.created_leases().is_empty());
+        assert!(workspace_commit.committed_worktree_tasks().is_empty());
     });
 }
 
@@ -184,18 +222,19 @@ fn rejects_worktree_tasks_outside_git_repositories() {
 #[test]
 fn rejects_missing_base_branches_without_persisting_ora_records() {
     with_trace_logging(|| {
-        let task_repository = Rc::new(FakeTaskRepository::default());
-        let worktree_repository = Rc::new(FakeWorktreeRepository::default());
+        let workspace_commit = Rc::new(FakeWorkspaceCommit::default());
+        let lease_store = FakeLeaseStore::default();
         let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
         provisioner.fail_next_create(TaskWorktreeProvisionerError::BaseBranchNotFound {
             branch_name: "ghost-branch".to_string(),
         });
         let handler = CreateTaskHandler::new(
-            task_repository.clone(),
-            worktree_repository.clone(),
+            workspace_commit.clone(),
+            lease_store.clone(),
             FixedTaskIdGenerator::new(TASK_ID),
             FixedWorktreeIdGenerator::new("worktree-1"),
             provisioner.clone(),
+            PathBuf::from(REPO_ROOT),
             PathBuf::from(WORK_DIR),
             FixedClock::new(1_700_000_000_000),
         );
@@ -204,7 +243,6 @@ fn rejects_missing_base_branches_without_persisting_ora_records() {
             .handle(CreateTaskRequest {
                 project_id: "project-1".to_string(),
                 title: "Cannot find base branch".to_string(),
-                status: ContractTaskStatus::Doing,
                 workspace_mode: Some(TaskWorkspaceMode::Worktree),
                 base_branch: Some("ghost-branch".to_string()),
             })
@@ -217,8 +255,9 @@ fn rejects_missing_base_branches_without_persisting_ora_records() {
             }
         );
         assert!(provisioner.created_requests().is_empty());
-        assert!(worktree_repository.visible_worktrees().is_empty());
-        assert!(task_repository.visible_tasks().is_empty());
+        // The failed provisioning released its write-ahead lease to cleanup.
+        assert_eq!(lease_store.released_leases().len(), 1);
+        assert!(workspace_commit.committed_worktree_tasks().is_empty());
     });
 }
 
@@ -226,15 +265,16 @@ fn rejects_missing_base_branches_without_persisting_ora_records() {
 #[test]
 fn rejects_worktree_tasks_without_a_base_branch() {
     with_trace_logging(|| {
-        let task_repository = Rc::new(FakeTaskRepository::default());
-        let worktree_repository = Rc::new(FakeWorktreeRepository::default());
+        let workspace_commit = Rc::new(FakeWorkspaceCommit::default());
+        let lease_store = FakeLeaseStore::default();
         let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
         let handler = CreateTaskHandler::new(
-            task_repository.clone(),
-            worktree_repository.clone(),
+            workspace_commit.clone(),
+            lease_store.clone(),
             FixedTaskIdGenerator::new(TASK_ID),
             FixedWorktreeIdGenerator::new("worktree-1"),
             provisioner.clone(),
+            PathBuf::from(REPO_ROOT),
             PathBuf::from(WORK_DIR),
             FixedClock::new(1_700_000_000_000),
         );
@@ -243,7 +283,6 @@ fn rejects_worktree_tasks_without_a_base_branch() {
             .handle(CreateTaskRequest {
                 project_id: "project-1".to_string(),
                 title: "Missing base branch".to_string(),
-                status: ContractTaskStatus::Todo,
                 workspace_mode: Some(TaskWorkspaceMode::Worktree),
                 base_branch: None,
             })
@@ -251,8 +290,8 @@ fn rejects_worktree_tasks_without_a_base_branch() {
 
         assert_eq!(error, ApplicationError::TaskBaseBranchRequired);
         assert!(provisioner.created_requests().is_empty());
-        assert!(worktree_repository.visible_worktrees().is_empty());
-        assert!(task_repository.visible_tasks().is_empty());
+        assert!(lease_store.created_leases().is_empty());
+        assert!(workspace_commit.committed_worktree_tasks().is_empty());
     });
 }
 
@@ -263,18 +302,18 @@ fn regenerates_task_ids_when_branch_prefix_folder_exists() {
         let work_dir = unique_test_work_dir("task-prefix-collision");
         fs::create_dir_all(work_dir.join("12345678-existing-worktree"))
             .unwrap_or_else(|error| panic!("failed to create prefix collision fixture: {error}"));
-        let task_repository = Rc::new(FakeTaskRepository::default());
-        let worktree_repository = Rc::new(FakeWorktreeRepository::default());
+        let workspace_commit = Rc::new(FakeWorkspaceCommit::default());
         let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
         let handler = CreateTaskHandler::new(
-            task_repository.clone(),
-            worktree_repository,
+            workspace_commit.clone(),
+            FakeLeaseStore::default(),
             SequenceTaskIdGenerator::new(vec![
                 "12345678-1234-5678-90ab-1234567890ab",
                 "87654321-1234-5678-90ab-1234567890ab",
             ]),
             FixedWorktreeIdGenerator::new("worktree-1"),
             provisioner.clone(),
+            PathBuf::from(REPO_ROOT),
             work_dir.clone(),
             FixedClock::new(1_700_000_000_000),
         );
@@ -283,7 +322,6 @@ fn regenerates_task_ids_when_branch_prefix_folder_exists() {
             .handle(CreateTaskRequest {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
-                status: ContractTaskStatus::Doing,
                 workspace_mode: None,
                 base_branch: Some("main".to_string()),
             })
@@ -296,7 +334,6 @@ fn regenerates_task_ids_when_branch_prefix_folder_exists() {
                     id: "87654321-1234-5678-90ab-1234567890ab".to_string(),
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
-                    status: ContractTaskStatus::Doing,
                     workspace_mode: TaskWorkspaceMode::Worktree,
                     task_type: ContractTaskType::Default,
                     workflow_run_id: None,
@@ -312,10 +349,10 @@ fn regenerates_task_ids_when_branch_prefix_folder_exists() {
             }]
         );
         assert_eq!(
-            task_repository
-                .visible_tasks()
+            workspace_commit
+                .committed_worktree_tasks()
                 .into_iter()
-                .map(|task| task.id)
+                .map(|(task, _, _)| task.id)
                 .collect::<Vec<_>>(),
             vec![TaskId::new("87654321-1234-5678-90ab-1234567890ab")]
         );
@@ -334,14 +371,15 @@ fn regenerates_task_ids_when_orphaned_branch_exists() {
             "ora/12345678",
         ]));
         let handler = CreateTaskHandler::new(
-            Rc::new(FakeTaskRepository::default()),
-            Rc::new(FakeWorktreeRepository::default()),
+            Rc::new(FakeWorkspaceCommit::default()),
+            FakeLeaseStore::default(),
             SequenceTaskIdGenerator::new(vec![
                 "12345678-1234-5678-90ab-1234567890ab",
                 "87654321-1234-5678-90ab-1234567890ab",
             ]),
             FixedWorktreeIdGenerator::new("worktree-1"),
             provisioner.clone(),
+            PathBuf::from(REPO_ROOT),
             work_dir.clone(),
             FixedClock::new(1_700_000_000_000),
         );
@@ -350,7 +388,6 @@ fn regenerates_task_ids_when_orphaned_branch_exists() {
             .handle(CreateTaskRequest {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
-                status: ContractTaskStatus::Doing,
                 workspace_mode: None,
                 base_branch: Some("main".to_string()),
             })
@@ -363,7 +400,6 @@ fn regenerates_task_ids_when_orphaned_branch_exists() {
                     id: "87654321-1234-5678-90ab-1234567890ab".to_string(),
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
-                    status: ContractTaskStatus::Doing,
                     workspace_mode: TaskWorkspaceMode::Worktree,
                     task_type: ContractTaskType::Default,
                     workflow_run_id: None,
@@ -388,11 +424,12 @@ fn creates_task_when_work_dir_does_not_exist() {
         let work_dir = unique_test_work_dir("missing-work-dir");
         let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
         let handler = CreateTaskHandler::new(
-            Rc::new(FakeTaskRepository::default()),
-            Rc::new(FakeWorktreeRepository::default()),
+            Rc::new(FakeWorkspaceCommit::default()),
+            FakeLeaseStore::default(),
             FixedTaskIdGenerator::new(TASK_ID),
             FixedWorktreeIdGenerator::new("worktree-1"),
             provisioner.clone(),
+            PathBuf::from(REPO_ROOT),
             work_dir.clone(),
             FixedClock::new(1_700_000_000_000),
         );
@@ -401,7 +438,6 @@ fn creates_task_when_work_dir_does_not_exist() {
             .handle(CreateTaskRequest {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
-                status: ContractTaskStatus::Doing,
                 workspace_mode: None,
                 base_branch: Some("main".to_string()),
             })
@@ -414,7 +450,6 @@ fn creates_task_when_work_dir_does_not_exist() {
                     id: TASK_ID.to_string(),
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
-                    status: ContractTaskStatus::Doing,
                     workspace_mode: TaskWorkspaceMode::Worktree,
                     task_type: ContractTaskType::Default,
                     workflow_run_id: None,
@@ -439,11 +474,12 @@ fn reports_task_worktree_error_when_task_id_retries_are_exhausted() {
     fs::create_dir_all(work_dir.join("12345678-existing-worktree"))
         .unwrap_or_else(|error| panic!("failed to create prefix collision fixture: {error}"));
     let handler = CreateTaskHandler::new(
-        Rc::new(FakeTaskRepository::default()),
-        Rc::new(FakeWorktreeRepository::default()),
+        Rc::new(FakeWorkspaceCommit::default()),
+        FakeLeaseStore::default(),
         FixedTaskIdGenerator::new(TASK_ID),
         FixedWorktreeIdGenerator::new("worktree-1"),
         Rc::new(FakeTaskWorktreeProvisioner::default()),
+        PathBuf::from(REPO_ROOT),
         work_dir.clone(),
         FixedClock::new(1_700_000_000_000),
     );
@@ -453,7 +489,6 @@ fn reports_task_worktree_error_when_task_id_retries_are_exhausted() {
             .handle(CreateTaskRequest {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
-                status: ContractTaskStatus::Doing,
                 workspace_mode: None,
                 base_branch: Some("main".to_string()),
             })
@@ -473,7 +508,6 @@ fn gets_tasks_by_identifier() {
             TaskId::new("task-1"),
             ProjectId::new("project-1"),
             "Ship handlers",
-            DomainTaskStatus::Todo,
             None,
             AuditFields::new(1, 2, false),
         )]));
@@ -492,7 +526,6 @@ fn gets_tasks_by_identifier() {
                     id: "task-1".to_string(),
                     project_id: "project-1".to_string(),
                     title: "Ship handlers".to_string(),
-                    status: ContractTaskStatus::Todo,
                     workspace_mode: TaskWorkspaceMode::ProjectRoot,
                     task_type: ContractTaskType::Default,
                     workflow_run_id: None,
@@ -511,7 +544,6 @@ fn lists_visible_tasks() {
                 TaskId::new("task-1"),
                 ProjectId::new("project-1"),
                 "Ship handlers",
-                DomainTaskStatus::Todo,
                 None,
                 AuditFields::new(1, 2, false),
             ),
@@ -519,7 +551,6 @@ fn lists_visible_tasks() {
                 TaskId::new("task-2"),
                 ProjectId::new("project-2"),
                 "Wire exports",
-                DomainTaskStatus::Done,
                 Some(WorktreeId::new("worktree-2")),
                 AuditFields::new(3, 4, false),
             ),
@@ -538,7 +569,6 @@ fn lists_visible_tasks() {
                         id: "task-1".to_string(),
                         project_id: "project-1".to_string(),
                         title: "Ship handlers".to_string(),
-                        status: ContractTaskStatus::Todo,
                         workspace_mode: TaskWorkspaceMode::ProjectRoot,
                         task_type: ContractTaskType::Default,
                         workflow_run_id: None,
@@ -547,7 +577,6 @@ fn lists_visible_tasks() {
                         id: "task-2".to_string(),
                         project_id: "project-2".to_string(),
                         title: "Wire exports".to_string(),
-                        status: ContractTaskStatus::Done,
                         workspace_mode: TaskWorkspaceMode::Worktree,
                         task_type: ContractTaskType::Default,
                         workflow_run_id: None,
@@ -566,7 +595,6 @@ fn updates_tasks_with_refreshed_timestamps() {
             TaskId::new("task-1"),
             ProjectId::new("project-1"),
             "Ship handlers",
-            DomainTaskStatus::Todo,
             None,
             AuditFields::new(10, 20, false),
         )]));
@@ -576,7 +604,6 @@ fn updates_tasks_with_refreshed_timestamps() {
             .handle(UpdateTaskRequest {
                 task_id: "task-1".to_string(),
                 title: "Ship updated handlers".to_string(),
-                status: ContractTaskStatus::Done,
             })
             .unwrap_or_else(|error| panic!("update handler failed: {error}"));
 
@@ -587,7 +614,6 @@ fn updates_tasks_with_refreshed_timestamps() {
                     id: "task-1".to_string(),
                     project_id: "project-1".to_string(),
                     title: "Ship updated handlers".to_string(),
-                    status: ContractTaskStatus::Done,
                     workspace_mode: TaskWorkspaceMode::ProjectRoot,
                     task_type: ContractTaskType::Default,
                     workflow_run_id: None,
@@ -600,7 +626,6 @@ fn updates_tasks_with_refreshed_timestamps() {
                 TaskId::new("task-1"),
                 ProjectId::new("project-1"),
                 "Ship updated handlers",
-                DomainTaskStatus::Done,
                 None,
                 AuditFields::new(10, 30, false),
             )]
@@ -608,22 +633,23 @@ fn updates_tasks_with_refreshed_timestamps() {
     });
 }
 
-/// Verifies create handlers compensate by deleting the created worktree when task persistence fails.
+/// Verifies a failed workspace commit releases the lease to durable cleanup.
 #[test]
-fn cleans_up_created_worktree_when_task_persistence_fails() {
+fn releases_lease_to_cleanup_when_workspace_commit_fails() {
     with_trace_logging(|| {
-        let task_repository = Rc::new(FakeTaskRepository::default());
-        let worktree_repository = Rc::new(FakeWorktreeRepository::default());
+        let workspace_commit = Rc::new(FakeWorkspaceCommit::default());
+        let lease_store = FakeLeaseStore::default();
         let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
-        task_repository.fail_next(RepositoryError::from_message(
+        workspace_commit.fail_next(RepositoryError::from_message(
             "task write failed".to_string(),
         ));
         let handler = CreateTaskHandler::new(
-            task_repository.clone(),
-            worktree_repository,
+            workspace_commit.clone(),
+            lease_store.clone(),
             FixedTaskIdGenerator::new(TASK_ID),
             FixedWorktreeIdGenerator::new("worktree-1"),
             provisioner.clone(),
+            PathBuf::from(REPO_ROOT),
             PathBuf::from(WORK_DIR),
             FixedClock::new(50),
         );
@@ -632,7 +658,6 @@ fn cleans_up_created_worktree_when_task_persistence_fails() {
             .handle(CreateTaskRequest {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
-                status: ContractTaskStatus::Todo,
                 workspace_mode: None,
                 base_branch: Some("main".to_string()),
             })
@@ -644,12 +669,86 @@ fn cleans_up_created_worktree_when_task_persistence_fails() {
                 source: RepositoryError::from_message("task write failed"),
             }
         );
+        let created = lease_store.created_leases();
         assert_eq!(
-            provisioner.deleted_requests(),
-            vec![DeleteTaskWorktreeRequest {
-                branch_name: "ora/12345678".to_string(),
-                mode: TaskWorktreeDeletionMode::Force,
-            }]
+            lease_store.released_leases(),
+            vec![created[0].id.clone()],
+            "the provisioned Git resources must be handed to durable cleanup"
+        );
+    });
+}
+
+/// Verifies losing the race to a project deletion reports project-not-found
+/// and releases the provisioned resources to durable cleanup.
+#[test]
+fn releases_lease_to_cleanup_when_project_was_deleted_concurrently() {
+    with_trace_logging(|| {
+        let workspace_commit = Rc::new(FakeWorkspaceCommit::default());
+        let lease_store = FakeLeaseStore::default();
+        let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
+        workspace_commit.reject_next_as_project_not_visible();
+        let handler = CreateTaskHandler::new(
+            workspace_commit.clone(),
+            lease_store.clone(),
+            FixedTaskIdGenerator::new(TASK_ID),
+            FixedWorktreeIdGenerator::new("worktree-1"),
+            provisioner.clone(),
+            PathBuf::from(REPO_ROOT),
+            PathBuf::from(WORK_DIR),
+            FixedClock::new(50),
+        );
+
+        let error = handler
+            .handle(CreateTaskRequest {
+                project_id: "project-1".to_string(),
+                title: "Ship handlers".to_string(),
+                workspace_mode: None,
+                base_branch: Some("main".to_string()),
+            })
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            ApplicationError::ProjectNotFound {
+                project_id: "project-1".to_string(),
+            }
+        );
+        let created = lease_store.created_leases();
+        assert_eq!(lease_store.released_leases(), vec![created[0].id.clone()]);
+    });
+}
+
+/// Verifies a deleted project rejects new project-root tasks atomically.
+#[test]
+fn rejects_project_root_tasks_when_project_was_deleted_concurrently() {
+    with_trace_logging(|| {
+        let workspace_commit = Rc::new(FakeWorkspaceCommit::default());
+        workspace_commit.reject_next_as_project_not_visible();
+        let handler = CreateTaskHandler::new(
+            workspace_commit.clone(),
+            FakeLeaseStore::default(),
+            FixedTaskIdGenerator::new(TASK_ID),
+            FixedWorktreeIdGenerator::new("worktree-1"),
+            Rc::new(FakeTaskWorktreeProvisioner::default()),
+            PathBuf::from(REPO_ROOT),
+            PathBuf::from(WORK_DIR),
+            FixedClock::new(50),
+        );
+
+        let error = handler
+            .handle(CreateTaskRequest {
+                project_id: "project-1".to_string(),
+                title: "Chat in project root".to_string(),
+                workspace_mode: Some(TaskWorkspaceMode::ProjectRoot),
+                base_branch: None,
+            })
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            ApplicationError::ProjectNotFound {
+                project_id: "project-1".to_string(),
+            }
         );
     });
 }
@@ -660,19 +759,18 @@ fn reports_application_errors() {
     with_trace_logging(|| {
         let missing_repository = Rc::new(FakeTaskRepository::default());
         let get_handler = GetTaskHandler::new(missing_repository);
-        let task_repository = Rc::new(FakeTaskRepository::default());
-        let worktree_repository = Rc::new(FakeWorktreeRepository::default());
         let provisioner = Rc::new(FakeTaskWorktreeProvisioner::default());
         provisioner.fail_next_create(TaskWorktreeProvisionerError::operation_failed(
             "failed to create task worktree",
             std::io::Error::other("failed to create linked worktree"),
         ));
         let create_handler = CreateTaskHandler::new(
-            task_repository,
-            worktree_repository,
+            Rc::new(FakeWorkspaceCommit::default()),
+            FakeLeaseStore::default(),
             FixedTaskIdGenerator::new(TASK_ID),
             FixedWorktreeIdGenerator::new("worktree-1"),
             provisioner,
+            PathBuf::from(REPO_ROOT),
             PathBuf::from(WORK_DIR),
             FixedClock::new(60),
         );
@@ -686,7 +784,6 @@ fn reports_application_errors() {
             .handle(CreateTaskRequest {
                 project_id: "project-1".to_string(),
                 title: "Ship handlers".to_string(),
-                status: ContractTaskStatus::Todo,
                 workspace_mode: None,
                 base_branch: Some("main".to_string()),
             })
@@ -718,11 +815,6 @@ impl FakeTaskRepository {
             tasks: RefCell::new(tasks),
             next_error: RefCell::new(None),
         }
-    }
-
-    /// Configures the next repository call to fail with a deterministic error.
-    fn fail_next(&self, error: RepositoryError) {
-        self.next_error.replace(Some(error));
     }
 
     /// Returns every non-deleted task so tests can assert visible repository state.
@@ -922,11 +1014,6 @@ impl FakeTaskWorktreeProvisioner {
         self.created_requests.borrow().clone()
     }
 
-    /// Returns the delete requests recorded by this fake provisioner.
-    fn deleted_requests(&self) -> Vec<DeleteTaskWorktreeRequest> {
-        self.deleted_requests.borrow().clone()
-    }
-
     /// Returns the next queued create failure, if any.
     fn take_create_error(&self) -> Result<(), TaskWorktreeProvisionerError> {
         match self.next_create_error.borrow_mut().take() {
@@ -1041,6 +1128,7 @@ impl WorktreeIdGenerator for FixedWorktreeIdGenerator {
     }
 }
 
+#[derive(Clone, Copy)]
 struct FixedClock {
     timestamp_millis: i64,
 }
@@ -1055,6 +1143,141 @@ impl FixedClock {
 impl Clock for FixedClock {
     fn now_timestamp_millis(&self) -> i64 {
         self.timestamp_millis
+    }
+}
+
+/// Records workspace commits so tests can assert atomic-persistence inputs.
+#[derive(Debug, Default)]
+struct FakeWorkspaceCommit {
+    worktree_tasks: RefCell<Vec<(Task, Worktree, WorktreeProvisioningLeaseId)>>,
+    project_root_tasks: RefCell<Vec<Task>>,
+    next_error: RefCell<Option<RepositoryError>>,
+    reject_next: RefCell<bool>,
+}
+
+impl FakeWorkspaceCommit {
+    /// Configures the next commit call to fail with a deterministic error.
+    fn fail_next(&self, error: RepositoryError) {
+        self.next_error.replace(Some(error));
+    }
+
+    /// Configures the next commit call to lose against a project deletion.
+    fn reject_next_as_project_not_visible(&self) {
+        self.reject_next.replace(true);
+    }
+
+    /// Returns every committed worktree task with its worktree and lease id.
+    fn committed_worktree_tasks(&self) -> Vec<(Task, Worktree, WorktreeProvisioningLeaseId)> {
+        self.worktree_tasks.borrow().clone()
+    }
+
+    /// Returns every committed project-root task.
+    fn committed_project_root_tasks(&self) -> Vec<Task> {
+        self.project_root_tasks.borrow().clone()
+    }
+
+    /// Applies the queued failure or rejection, if any.
+    fn take_outcome(&self) -> Result<Option<WorkspaceCommitOutcome>, RepositoryError> {
+        if let Some(error) = self.next_error.borrow_mut().take() {
+            return Err(error);
+        }
+        if self.reject_next.replace(false) {
+            return Ok(Some(WorkspaceCommitOutcome::ProjectNotVisible));
+        }
+        Ok(None)
+    }
+}
+
+impl TaskWorkspaceCommit for Rc<FakeWorkspaceCommit> {
+    fn commit_worktree_task(
+        &self,
+        task: &Task,
+        worktree: &Worktree,
+        lease_id: &WorktreeProvisioningLeaseId,
+    ) -> Result<WorkspaceCommitOutcome, RepositoryError> {
+        if let Some(outcome) = self.take_outcome()? {
+            return Ok(outcome);
+        }
+        self.worktree_tasks
+            .borrow_mut()
+            .push((task.clone(), worktree.clone(), lease_id.clone()));
+        Ok(WorkspaceCommitOutcome::Committed)
+    }
+
+    fn commit_project_root_task(
+        &self,
+        task: &Task,
+    ) -> Result<WorkspaceCommitOutcome, RepositoryError> {
+        if let Some(outcome) = self.take_outcome()? {
+            return Ok(outcome);
+        }
+        self.project_root_tasks.borrow_mut().push(task.clone());
+        Ok(WorkspaceCommitOutcome::Committed)
+    }
+}
+
+/// Records lease lifecycle calls; `Arc`-shared because renewal runs on a thread.
+#[derive(Clone, Debug, Default)]
+struct FakeLeaseStore {
+    state: Arc<Mutex<FakeLeaseStoreState>>,
+}
+
+#[derive(Debug, Default)]
+struct FakeLeaseStoreState {
+    created: Vec<WorktreeProvisioningLease>,
+    released: Vec<WorktreeProvisioningLeaseId>,
+}
+
+impl FakeLeaseStore {
+    /// Returns every lease created through the store.
+    fn created_leases(&self) -> Vec<WorktreeProvisioningLease> {
+        self.state
+            .lock()
+            .expect("lease store state")
+            .created
+            .clone()
+    }
+
+    /// Returns every lease id released to durable cleanup.
+    fn released_leases(&self) -> Vec<WorktreeProvisioningLeaseId> {
+        self.state
+            .lock()
+            .expect("lease store state")
+            .released
+            .clone()
+    }
+}
+
+impl WorktreeProvisioningLeaseStore for FakeLeaseStore {
+    fn create_lease(&self, lease: &WorktreeProvisioningLease) -> Result<(), RepositoryError> {
+        self.state
+            .lock()
+            .expect("lease store state")
+            .created
+            .push(lease.clone());
+        Ok(())
+    }
+
+    fn renew_lease(
+        &self,
+        _lease_id: &WorktreeProvisioningLeaseId,
+        _lease_expires_at: i64,
+        _now: i64,
+    ) -> Result<bool, RepositoryError> {
+        Ok(true)
+    }
+
+    fn release_to_cleanup(
+        &self,
+        lease_id: &WorktreeProvisioningLeaseId,
+        _now: i64,
+    ) -> Result<(), RepositoryError> {
+        self.state
+            .lock()
+            .expect("lease store state")
+            .released
+            .push(lease_id.clone());
+        Ok(())
     }
 }
 

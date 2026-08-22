@@ -17,11 +17,14 @@ export function createWorkflowSummaryLabels(
   const capabilities = createMockWorkflowCapabilities(locale);
   return {
     operatorLabel: (operator) =>
-      capabilities.conditionOperators.find((candidate) => candidate.value === operator)?.label
-        ?? operator,
+      capabilities.conditionOperators.find(
+        (candidate) => candidate.value === operator,
+      )?.label ?? operator,
     operationLabel: (operation) => {
       for (const operations of Object.values(capabilities.toolOperations)) {
-        const found = operations.find((candidate) => candidate.value === operation);
+        const found = operations.find(
+          (candidate) => candidate.value === operation,
+        );
         if (found !== undefined) {
           return found.label;
         }
@@ -29,8 +32,9 @@ export function createWorkflowSummaryLabels(
       return operation;
     },
     triggerLabel: (trigger) =>
-      capabilities.startTriggers.find((candidate) => candidate.value === trigger)?.label
-        ?? trigger,
+      capabilities.startTriggers.find(
+        (candidate) => candidate.value === trigger,
+      )?.label ?? trigger,
   };
 }
 
@@ -81,10 +85,16 @@ export function conditionBranchesSummary(
   const lines = branches.map((branch) =>
     branch.conditions
       .map((rule) => {
-        const clause = [rule.variable, labels.operatorLabel(rule.operator), rule.value]
+        const clause = [
+          rule.variable,
+          labels.operatorLabel(rule.operator),
+          rule.value,
+        ]
           .filter((part) => part !== "")
           .join(" ");
-        return rule.negated === true && clause !== "" ? `${negated}${clause}` : clause;
+        return rule.negated === true && clause !== ""
+          ? `${negated}${clause}`
+          : clause;
       })
       .filter((line) => line !== "")
       .join(branch.logic === "or" ? or : and),

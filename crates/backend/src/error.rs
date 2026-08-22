@@ -1,15 +1,15 @@
 use ora_application::{ApplicationError, SkillImportError};
 use ora_contracts::{
     ContractError, EmptyErrorParams, PublicError, RequestId, SkillFolderConflictParams,
-    SkillUploadTooManyFilesParams,
 };
+use ora_plugin_lifecycle::PluginLifecycleError;
 use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
 type SharedError = Arc<dyn Error + Send + Sync + 'static>;
 
-/// Classifies public failures without coupling the shared runtime to HTTP status codes.
+/// Classifies public failures without coupling the shared runtime to adapter-specific status codes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErrorClassification {
     InvalidRequest,
@@ -111,6 +111,33 @@ impl fmt::Display for BackendError {
 impl Error for BackendError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         self.source.as_deref().map(|source| source as &dyn Error)
+    }
+}
+
+impl From<PluginLifecycleError> for BackendError {
+    /// Maps lifecycle semantics to stable adapter classifications while retaining diagnostics.
+    fn from(error: PluginLifecycleError) -> Self {
+        let (classification, public_error, context) = match &error {
+            PluginLifecycleError::PluginNotFound { .. } => (
+                ErrorClassification::NotFound,
+                PublicError::PluginNotFound(EmptyErrorParams {}),
+                "installed plugin was not found",
+            ),
+            PluginLifecycleError::PluginDisabled { .. } => (
+                ErrorClassification::Conflict,
+                PublicError::PluginDisabled(EmptyErrorParams {}),
+                "plugin must be enabled before activation",
+            ),
+            PluginLifecycleError::Repository(_)
+            | PluginLifecycleError::RuntimeLaunch { .. }
+            | PluginLifecycleError::RuntimeStop { .. }
+            | PluginLifecycleError::PackageRemoval { .. } => (
+                ErrorClassification::Internal,
+                PublicError::InternalError(EmptyErrorParams {}),
+                "plugin lifecycle operation failed",
+            ),
+        };
+        Self::with_source(classification, public_error, context, error)
     }
 }
 
@@ -286,28 +313,6 @@ impl From<ApplicationError> for BackendError {
                 PublicError::SkillNotFound(EmptyErrorParams {}),
                 "skill not found",
             ),
-            ApplicationError::SkillUploadEmpty => (
-                ErrorClassification::Unprocessable,
-                PublicError::SkillUploadEmpty(EmptyErrorParams {}),
-                "skill upload contained no files",
-            ),
-            ApplicationError::SkillUploadTooManyFiles { max_files } => (
-                ErrorClassification::Unprocessable,
-                PublicError::SkillUploadTooManyFiles(SkillUploadTooManyFilesParams {
-                    max_files: *max_files,
-                }),
-                "skill upload contains too many files",
-            ),
-            ApplicationError::SkillUploadPathInvalid => (
-                ErrorClassification::Unprocessable,
-                PublicError::SkillUploadPathInvalid(EmptyErrorParams {}),
-                "skill upload contains an unsafe path",
-            ),
-            ApplicationError::SkillUploadPathDuplicate => (
-                ErrorClassification::Unprocessable,
-                PublicError::SkillUploadPathDuplicate(EmptyErrorParams {}),
-                "skill upload contains a duplicate path",
-            ),
             ApplicationError::SkillManifestMissing => (
                 ErrorClassification::Unprocessable,
                 PublicError::SkillManifestMissing(EmptyErrorParams {}),
@@ -368,21 +373,6 @@ impl From<ApplicationError> for BackendError {
                 PublicError::ProjectNotFound(EmptyErrorParams {}),
                 "project not found",
             ),
-            ApplicationError::ProjectOccupied { .. } => (
-                ErrorClassification::Conflict,
-                PublicError::ProjectOccupied(EmptyErrorParams {}),
-                "project is already occupied",
-            ),
-            ApplicationError::SpecSourceInvalid => (
-                ErrorClassification::InvalidRequest,
-                PublicError::SpecSourceInvalid(EmptyErrorParams {}),
-                "specification source configuration is invalid",
-            ),
-            ApplicationError::ProjectWorkContextNotFound { .. } => (
-                ErrorClassification::NotFound,
-                PublicError::ProjectWorkContextNotFound(EmptyErrorParams {}),
-                "project work context not found",
-            ),
             ApplicationError::ProjectBranchListing { .. } => (
                 ErrorClassification::Internal,
                 PublicError::InternalError(EmptyErrorParams {}),
@@ -415,61 +405,39 @@ impl From<ApplicationError> for BackendError {
                 PublicError::WorktreeNotFound(EmptyErrorParams {}),
                 "worktree not found",
             ),
-            ApplicationError::TaskDiffBaselineUnavailable => (
-                ErrorClassification::Conflict,
-                PublicError::TaskDiffBaselineUnavailable(EmptyErrorParams {}),
-                "task diff baseline is unavailable",
-            ),
             ApplicationError::TaskDiffCommitMessageBlank => (
                 ErrorClassification::InvalidRequest,
                 PublicError::TaskDiffCommitMessageBlank(EmptyErrorParams {}),
                 "task diff commit message must not be blank",
-            ),
-            ApplicationError::TaskDiffTooLarge { .. } => (
-                ErrorClassification::PayloadTooLarge,
-                PublicError::TaskDiffTooLarge(EmptyErrorParams {}),
-                "task diff exceeds the response limit",
-            ),
-            ApplicationError::TaskDiffStale => (
-                ErrorClassification::Conflict,
-                PublicError::TaskDiffStale(EmptyErrorParams {}),
-                "task diff changed before the comment was created",
-            ),
-            ApplicationError::TaskDiffCommentNotFound { .. } => (
-                ErrorClassification::NotFound,
-                PublicError::TaskDiffCommentNotFound(EmptyErrorParams {}),
-                "task diff comment not found",
-            ),
-            ApplicationError::TaskDiffCommentInvalid { .. } => (
-                ErrorClassification::InvalidRequest,
-                PublicError::TaskDiffCommentInvalid(EmptyErrorParams {}),
-                "task diff comment is invalid",
-            ),
-            ApplicationError::TaskDiffCommentConflict { .. } => (
-                ErrorClassification::Conflict,
-                PublicError::TaskDiffCommentConflict(EmptyErrorParams {}),
-                "task diff comment conflicts with stored state",
             ),
             ApplicationError::SessionNotFound { .. } => (
                 ErrorClassification::NotFound,
                 PublicError::SessionNotFound(EmptyErrorParams {}),
                 "session not found",
             ),
+            ApplicationError::SessionTitleBlank => (
+                ErrorClassification::InvalidRequest,
+                PublicError::InvalidRequest(EmptyErrorParams {}),
+                "session title must not be blank",
+            ),
+            ApplicationError::SessionTitleTooLong => (
+                ErrorClassification::InvalidRequest,
+                PublicError::InvalidRequest(EmptyErrorParams {}),
+                "session title exceeds the maximum length",
+            ),
             ApplicationError::SkillRepository { .. }
             | ApplicationError::SkillStorage { .. }
             | ApplicationError::AgentDefinitionRepository { .. }
             | ApplicationError::ProjectRepository { .. }
-            | ApplicationError::SpecSourceRepository { .. }
-            | ApplicationError::ProjectWorkContextRepository { .. }
             | ApplicationError::TaskRepository { .. }
             | ApplicationError::TaskWorktreeIdExhausted { .. }
             | ApplicationError::TaskWorktreeRootUnavailable
             | ApplicationError::TaskFilesystem { .. }
             | ApplicationError::TaskWorktreeProvisioner { .. }
             | ApplicationError::TaskDiff { .. }
-            | ApplicationError::TaskDiffCommentRepository { .. }
             | ApplicationError::WorktreeRepository { .. }
             | ApplicationError::SessionRepository { .. }
+            | ApplicationError::UserConfigRepository { .. }
             | ApplicationError::WorkflowRepository { .. }
             | ApplicationError::WorkflowRunRepository { .. } => (
                 ErrorClassification::Internal,
@@ -480,6 +448,11 @@ impl From<ApplicationError> for BackendError {
                 ErrorClassification::InvalidRequest,
                 PublicError::WorkflowNameBlank(EmptyErrorParams {}),
                 "workflow name must not be blank",
+            ),
+            ApplicationError::WorkflowNameConflict { .. } => (
+                ErrorClassification::Conflict,
+                PublicError::WorkflowNameConflict(EmptyErrorParams {}),
+                "workflow name already exists",
             ),
             ApplicationError::WorkflowNotFound { .. } => (
                 ErrorClassification::NotFound,
@@ -561,6 +534,16 @@ impl From<ApplicationError> for BackendError {
                 PublicError::WorkflowRunActive(EmptyErrorParams {}),
                 "workflow run is active and cannot be deleted",
             ),
+            ApplicationError::WorkflowNodeNotFound { .. } => (
+                ErrorClassification::NotFound,
+                PublicError::WorkflowNodeNotFound(EmptyErrorParams {}),
+                "workflow node not found",
+            ),
+            ApplicationError::WorkflowNodeNotAwaitingInput { .. } => (
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowNodeNotAwaitingInput(EmptyErrorParams {}),
+                "workflow node is not awaiting input and cannot be completed",
+            ),
             ApplicationError::WorkflowRunGraphParse(_) => (
                 ErrorClassification::InvalidRequest,
                 PublicError::WorkflowRunGraphParse(EmptyErrorParams {}),
@@ -611,9 +594,7 @@ impl From<ApplicationError> for BackendError {
 mod tests {
     use super::{BackendError, ErrorClassification};
     use ora_application::{ApplicationError, RepositoryError, SkillImportError};
-    use ora_contracts::{
-        EmptyErrorParams, PublicError, SkillFolderConflictParams, SkillUploadTooManyFilesParams,
-    };
+    use ora_contracts::{EmptyErrorParams, PublicError, SkillFolderConflictParams};
     use pretty_assertions::assert_eq;
     use std::error::Error;
 
@@ -633,27 +614,16 @@ mod tests {
         );
     }
 
-    /// Verifies skill import validation and conflicts expose only bounded typed parameters.
+    /// Verifies skill conflicts expose only bounded typed parameters.
     #[test]
     fn maps_skill_import_semantics_to_public_contracts() {
-        let too_many =
-            BackendError::from(ApplicationError::SkillUploadTooManyFiles { max_files: 1000 });
         let conflict = BackendError::from(ApplicationError::SkillFolderConflict {
             name: "grilling".to_string(),
         });
 
         assert_eq!(
+            (conflict.classification(), conflict.public_error().clone()),
             (
-                too_many.classification(),
-                too_many.public_error().clone(),
-                conflict.classification(),
-                conflict.public_error().clone(),
-            ),
-            (
-                ErrorClassification::Unprocessable,
-                PublicError::SkillUploadTooManyFiles(SkillUploadTooManyFilesParams {
-                    max_files: 1000,
-                }),
                 ErrorClassification::Conflict,
                 PublicError::SkillFolderConflict(SkillFolderConflictParams {
                     name: "grilling".to_string(),
@@ -682,6 +652,7 @@ mod tests {
     #[test]
     fn maps_agent_name_conflicts_to_the_public_contract() {
         let error = BackendError::from(ApplicationError::AgentDefinitionNameConflict {
+            namespace: "local".to_string(),
             name: "reviewer".to_string(),
         });
 
@@ -737,6 +708,14 @@ mod tests {
                 ApplicationError::WorkflowNameBlank,
                 ErrorClassification::InvalidRequest,
                 PublicError::WorkflowNameBlank(EmptyErrorParams {}),
+            ),
+            (
+                ApplicationError::WorkflowNameConflict {
+                    namespace: "local".to_string(),
+                    name: "review".to_string(),
+                },
+                ErrorClassification::Conflict,
+                PublicError::WorkflowNameConflict(EmptyErrorParams {}),
             ),
             (
                 ApplicationError::WorkflowNotFound {
@@ -822,6 +801,20 @@ mod tests {
                 ApplicationError::WorkflowRunActive,
                 ErrorClassification::InvalidRequest,
                 PublicError::WorkflowRunActive(EmptyErrorParams {}),
+            ),
+            (
+                ApplicationError::WorkflowNodeNotFound {
+                    node_id: "node-1".to_string(),
+                },
+                ErrorClassification::NotFound,
+                PublicError::WorkflowNodeNotFound(EmptyErrorParams {}),
+            ),
+            (
+                ApplicationError::WorkflowNodeNotAwaitingInput {
+                    node_id: "node-1".to_string(),
+                },
+                ErrorClassification::InvalidRequest,
+                PublicError::WorkflowNodeNotAwaitingInput(EmptyErrorParams {}),
             ),
         ];
 

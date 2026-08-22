@@ -1,23 +1,49 @@
 # Ora Plugin Manager
 
-`ora-plugin-manager` discovers installed Ora plugin packages from an Ora data directory.
+`ora-plugin-manager` discovers installed Ora plugin packages from an Ora data directory using the
+orax package shape, and orchestrates installing new plugin releases.
 
 ## Responsibilities
 
-- Scan direct child directories under `<data-dir>/plugins`.
-- Read and validate each child package's `package.json`.
+- Scan `<data-dir>/plugins/installed/<namespace>/<name>/<version>`.
+- Parse version directory names as SemVer and select only the highest version for each
+  namespace/name pair without falling back when that selected package is invalid.
+- Read the selected package's `orax.toml` and parse it through `ora-plugin-manifest`.
+- Resolve the fixed `main.js` entrypoint as an existing regular file whose canonical target remains
+  inside its package, then retain its normalized portable relative path.
+- Normalize plugin identity to `namespace/name` and retain the validated orax metadata needed by the
+  lifecycle layer.
+- Read the package's optional `logo.svg` icon and retain its source text once
+  `ora-utils::svg` accepts it. A package without an icon is ordinary; an icon that is present but
+  unreadable or unsafe becomes a discovery issue and leaves the plugin itself discovered without one.
 - Return a deterministic, immutable snapshot of valid installed plugins.
 - Isolate malformed or unsupported packages as structured discovery issues.
+- Install a plugin release: download the `.orax` package (through an injected `ora-utils::http`
+  `HttpDownload`), verify its SHA-256 while downloading, and safely extract it into
+  `<data-dir>/plugins/installed/<namespace>/<name>/<version>` with `ora-utils::archive`.
 
 ## Non-responsibilities
 
-- Installing, enabling, disabling, or removing plugins.
+- Enabling, disabling, or removing plugins (those reach through the lifecycle layer).
 - Starting plugin processes or loading plugin JavaScript.
-- Evaluating Ora, Bun, or plugin API engine ranges.
+- Choosing a concrete network transport: the installer consumes the `HttpDownload` trait, so
+  production wiring supplies a network downloader and tests/offline installs use the local one.
+- Resolving plugin dependency graphs or evaluating host-version requirements at discovery time.
 - Watching the filesystem after discovery completes.
 
 ## Public interface
 
-Call `PluginManager::discover(data_dir)` once during application bootstrap. Consumers read the resulting snapshot through `installed_plugins()` and report any non-fatal problems from `discovery_issues()`.
+Call `PluginManager::discover(data_dir)` once during application bootstrap. Consumers read the
+resulting snapshot through `installed_plugins()` and report any non-fatal problems from
+`discovery_issues()`.
 
-Discovery never follows symlinked package directories, never recurses below one package directory, and never reads more than 1 MiB from one manifest. A missing plugins directory represents an empty installation and is not an error.
+Build an `Installer::new(downloader)` with any `HttpDownload` implementation and call
+`install(&manifest, source, data_dir)`, passing a `DownloadSource::Url(...)` for online installs or
+a `Local` path for offline and test installs.
+
+Discovery never follows symlinked package directories and never reads more than 1 MiB from one
+manifest. The manifest version must match the selected version directory. Entrypoint containment
+rejects the current target of a package-escaping symlink, but path-based validation cannot prevent a
+concurrent symlink replacement between discovery and later loading. A missing installed-plugins
+directory represents an empty installation and is not an error. The legacy
+`<data-dir>/plugins/<package>` layout is not discovered or migrated.

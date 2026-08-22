@@ -1,6 +1,6 @@
-use ora_contracts::acp::prompt::StopReason;
-use ora_contracts::acp::session::SessionUpdate;
-use ora_domain::AgentCli;
+use agent_client_protocol_schema::v1::SessionUpdate;
+use agent_client_protocol_schema::v1::StopReason;
+use ora_domain::AgentRef;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -45,7 +45,7 @@ pub enum HistoryRecord {
     /// Opens the file and pins the schema and provider binding it started with.
     Meta(SessionMeta),
     /// One settled conversation item.
-    Update { update: SessionUpdate },
+    Update { update: Box<SessionUpdate> },
     /// Closes one prompt turn with the provider's typed stop reason.
     ///
     /// Without this a replayed turn cannot be told apart from a completed one,
@@ -53,6 +53,14 @@ pub enum HistoryRecord {
     TurnEnded { stop_reason: StopReason },
     /// Records that the conversation moved to a different agent CLI.
     AgentSwitched(AgentSwitch),
+    /// Records that the agent bound by the preceding switch was given the record.
+    ///
+    /// Written only once the provider accepted the prompt carrying the
+    /// transcript, which is what separates it from the user turn recorded just
+    /// before that prompt was sent. Ora records a prompt before sending it, so a
+    /// user turn following a switch proves only that Ora meant to hand the
+    /// transcript over — this proves it did.
+    HandoffDelivered { agent_session_id: String },
     /// Marks a discontinuity left by a failed write, so a hole is never silent.
     Gap { reason: String },
 }
@@ -64,45 +72,17 @@ pub struct SessionMeta {
     pub schema_version: u32,
     pub session_id: String,
     pub task_id: String,
-    #[serde(with = "agent_cli_text")]
-    pub agent_cli: AgentCli,
+    pub agent_ref: AgentRef,
     pub agent_session_id: String,
     pub cwd: PathBuf,
 }
 
-/// Rebinds the conversation onto a new provider session on a different CLI.
+/// Rebinds the conversation onto a new provider session on a different agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSwitch {
-    #[serde(with = "agent_cli_text")]
-    pub from: AgentCli,
-    #[serde(with = "agent_cli_text")]
-    pub to: AgentCli,
+    pub from: AgentRef,
+    pub to: AgentRef,
     /// The provider session the conversation continues on after the switch.
     pub agent_session_id: String,
-}
-
-/// Serializes a CLI identity through its stable namespaced persistence value.
-///
-/// The derived representation would encode the Rust variant name, which makes an
-/// archived file depend on how the enum happens to be spelled today. History
-/// files outlive that, so they reuse the same stable text the database stores.
-mod agent_cli_text {
-    use ora_domain::AgentCli;
-    use serde::{Deserialize, Deserializer, Serializer, de::Error as _};
-
-    #[expect(clippy::trivially_copy_pass_by_ref, reason = "Required by serde")]
-    pub(super) fn serialize<S: Serializer>(
-        agent_cli: &AgentCli,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(agent_cli.database_value())
-    }
-
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<AgentCli, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        AgentCli::from_database_value(&value).map_err(D::Error::custom)
-    }
 }

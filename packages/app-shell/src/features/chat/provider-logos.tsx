@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 import { IconRobot, IconTerminal } from "@tabler/icons-react";
-import type { AgentCli } from "@ora/contracts";
+import type { KnownAgentCli } from "./model-catalog";
 import { ClaudeMark, OpenCodeMark } from "../settings/plugin-marks";
 
 type LogoProps = SVGProps<SVGSVGElement>;
@@ -9,17 +9,23 @@ type LogoProps = SVGProps<SVGSVGElement>;
  * Renders an agent CLI's brand mark. CLIs without a custom logo fall back to a
  * generic icon so every row still reads as a distinct group.
  */
-export function ProviderLogo({ agentCli, className }: { agentCli: AgentCli; className?: string }) {
+export function ProviderLogo({
+  agentCli,
+  className,
+}: {
+  agentCli: KnownAgentCli;
+  className?: string;
+}) {
   switch (agentCli) {
-    case "open_code":
+    case "ora-space.opencode":
       return <OpenCodeMark className={className} />;
-    case "nga":
+    case "ora-space.nga":
       return <IconRobot className={className} />;
-    case "code_agent_cli":
+    case "ora-space.codeagentcli":
       return <IconTerminal className={className} />;
-    case "claude":
+    case "ora-space.claude":
       return <ClaudeMark className={className} />;
-    case "codex":
+    case "ora-space.codex":
       return <OpenAiLogo className={className} />;
   }
 }

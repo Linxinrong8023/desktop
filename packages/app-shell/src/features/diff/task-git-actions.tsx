@@ -1,5 +1,11 @@
 import type { ReactNode, KeyboardEvent } from "react";
-import { Button, Popover, PopoverContent, PopoverTrigger, Textarea } from "@ora/ui";
+import {
+  Button,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Textarea,
+} from "@ora/ui";
 import {
   IconCheck,
   IconChevronDown,
@@ -38,14 +44,22 @@ export function TaskGitActions({
   const canCommit = message.trim() !== "";
 
   const handleMessageKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && canCommit && !pending) {
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key === "Enter" &&
+      canCommit &&
+      !pending
+    ) {
       event.preventDefault();
       onCommit();
     }
   };
 
   return (
-    <Popover open={open} onOpenChange={(nextOpen) => !pending && onOpenChange(nextOpen)}>
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => !pending && onOpenChange(nextOpen)}
+    >
       <PopoverTrigger
         render={
           <Button
@@ -59,7 +73,9 @@ export function TaskGitActions({
         }
       >
         <IconGitCommit />
-        <span className="ora-diff-toolbar__commit-label">{t("diff.commit")}</span>
+        <span className="ora-diff-toolbar__commit-label">
+          {t("diff.commit")}
+        </span>
         <IconChevronDown
           className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
           aria-hidden="true"
@@ -84,10 +100,19 @@ export function TaskGitActions({
             className="min-h-16 resize-none bg-muted/35 text-xs shadow-none focus-visible:ring-1"
           />
           <div className="mt-2 flex items-center gap-1.5 rounded-md bg-muted/35 px-2 py-1.5 text-[11px] text-muted-foreground">
-            <IconCheck className="size-3.5 shrink-0 text-emerald-600" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate">{t("diff.allChangesIncluded")}</span>
-            <span className="shrink-0 font-mono text-emerald-600">+{additions}</span>
-            <span className="shrink-0 font-mono text-red-600">-{deletions}</span>
+            <IconCheck
+              className="size-3.5 shrink-0 text-emerald-600"
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 truncate">
+              {t("diff.allChangesIncluded")}
+            </span>
+            <span className="shrink-0 font-mono text-emerald-600">
+              +{additions}
+            </span>
+            <span className="shrink-0 font-mono text-red-600">
+              -{deletions}
+            </span>
           </div>
         </div>
         <div className="p-1.5">
@@ -126,7 +151,13 @@ interface GitActionRowProps {
 }
 
 /** Keeps each Git command keyboard-friendly and visually aligned in the action menu. */
-function GitActionRow({ icon, label, shortcut, disabled, onClick }: GitActionRowProps) {
+function GitActionRow({
+  icon,
+  label,
+  shortcut,
+  disabled,
+  onClick,
+}: GitActionRowProps) {
   return (
     <Button
       type="button"
@@ -139,7 +170,12 @@ function GitActionRow({ icon, label, shortcut, disabled, onClick }: GitActionRow
       {icon}
       <span>{label}</span>
       {shortcut !== undefined && (
-        <kbd aria-hidden="true" className="ml-auto text-[10px] text-muted-foreground">{shortcut}</kbd>
+        <kbd
+          aria-hidden="true"
+          className="ml-auto text-[10px] text-muted-foreground"
+        >
+          {shortcut}
+        </kbd>
       )}
     </Button>
   );

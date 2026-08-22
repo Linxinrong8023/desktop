@@ -1,4 +1,8 @@
-import { IconAlertTriangle, IconBan, IconInfoCircle } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconBan,
+  IconInfoCircle,
+} from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import type { ChatTurn } from "@ora/chat";
 import { OraMark } from "../../components/ora-mark";
@@ -18,7 +22,10 @@ export function ResponseTurn({ turn, userName }: ResponseTurnProps) {
   const { t } = useTranslation();
   const displayItems = buildTurnDisplayItems(turn.items, turn.status);
   return (
-    <section className="flex gap-3 py-3" aria-label={t("chat.assistantReplied")}>
+    <section
+      className="flex gap-3 py-3"
+      aria-label={t("chat.assistantReplied")}
+    >
       <OraMark size="sm" />
       <div className="min-w-0 flex-1 space-y-2.5">
         {displayItems.map((item, index) => {
@@ -39,7 +46,10 @@ export function ResponseTurn({ turn, userName }: ResponseTurnProps) {
                   message={item}
                   userName={userName}
                   embeddedAssistant
-                  streaming={turn.status === "streaming" && index === displayItems.length - 1}
+                  streaming={
+                    turn.status === "streaming" &&
+                    index === displayItems.length - 1
+                  }
                 />
               );
             case "content":
@@ -57,16 +67,42 @@ export function ResponseTurn({ turn, userName }: ResponseTurnProps) {
 function TurnEnding({ turn }: { turn: ChatTurn }) {
   const { t } = useTranslation();
   if (turn.status === "cancelled") {
-    return <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><IconBan className="size-3.5" />{t("chat.turnCancelled")}</p>;
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <IconBan className="size-3.5" />
+        {t("chat.turnCancelled")}
+      </p>
+    );
   }
   if (turn.status === "failed") {
-    return <p data-selectable className="flex items-center gap-1.5 text-xs text-destructive"><IconAlertTriangle className="size-3.5" />{turn.error ?? t("chat.turnFailed")}</p>;
+    return (
+      <p
+        data-selectable
+        className="flex items-center gap-1.5 text-xs text-destructive"
+      >
+        <IconAlertTriangle className="size-3.5" />
+        {turn.error ?? t("chat.turnFailed")}
+      </p>
+    );
   }
-  if (turn.stopReason === "max_tokens" || turn.stopReason === "max_turn_requests") {
-    return <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400"><IconAlertTriangle className="size-3.5" />{t("chat.turnIncomplete")}</p>;
+  if (
+    turn.stopReason === "max_tokens" ||
+    turn.stopReason === "max_turn_requests"
+  ) {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+        <IconAlertTriangle className="size-3.5" />
+        {t("chat.turnIncomplete")}
+      </p>
+    );
   }
   if (turn.stopReason === "refusal") {
-    return <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><IconInfoCircle className="size-3.5" />{t("chat.turnRefused")}</p>;
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <IconInfoCircle className="size-3.5" />
+        {t("chat.turnRefused")}
+      </p>
+    );
   }
   return null;
 }

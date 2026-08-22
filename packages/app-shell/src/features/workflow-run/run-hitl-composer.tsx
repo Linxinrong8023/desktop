@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Textarea, cn } from "@ora/ui";
+import { Button, cn } from "@ora/ui";
 import {
   IconArrowUp,
   IconCheck,
@@ -10,7 +9,15 @@ import {
   IconLoader2,
 } from "@tabler/icons-react";
 import { formatRunClock } from "../../lib/format";
-import type { HitlField, HitlGateKind, HitlRequest } from "@ora/workflow-runtime";
+import type {
+  HitlField,
+  HitlGateKind,
+  HitlRequest,
+} from "@ora/workflow-runtime";
+import {
+  ComposerEditor,
+  type ComposerEditorHandle,
+} from "../editor/composer-editor";
 
 export interface HitlGateOption {
   request: HitlRequest;
@@ -96,30 +103,42 @@ export function RunHitlComposer({
 }: RunHitlComposerProps) {
   const { t, i18n } = useTranslation();
   const locale = i18n.resolvedLanguage === "en-US" ? "en-US" : "zh-CN";
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const primaryEditorRef = useRef<ComposerEditorHandle>(null);
+  const editorByFieldRef = useRef(new Map<string, ComposerEditorHandle>());
   const selected = useMemo(
-    () => gates.find((gate) => gate.request.id === selectedRequestId) ?? gates[0] ?? null,
+    () =>
+      gates.find((gate) => gate.request.id === selectedRequestId) ??
+      gates[0] ??
+      null,
     [gates, selectedRequestId],
   );
   const request = selected?.request ?? null;
   const waitingNodeTitle = selected?.nodeTitle ?? "";
   const multi = gates.length > 1;
-  const selectFields = request?.schema.fields.filter((field) => field.type === "select") ?? [];
-  const textFields = request?.schema.fields.filter(
-    (field) => field.type === "text" || field.type === "textarea",
-  ) ?? [];
+  const selectFields =
+    request?.schema.fields.filter((field) => field.type === "select") ?? [];
+  const textFields =
+    request?.schema.fields.filter(
+      (field) => field.type === "text" || field.type === "textarea",
+    ) ?? [];
   const primaryTextField = textFields[0] ?? null;
   const choiceOnly = selectFields.length > 0 && textFields.length === 0;
   const schemaTitle = request?.schema.title;
-  const gateBusy = submittingRequestId !== null
-    ? submittingRequestId === request?.id
-    : submitting;
+  const gateBusy =
+    submittingRequestId !== null
+      ? submittingRequestId === request?.id
+      : submitting;
 
   const [internalDrafts, setInternalDrafts] = useState<
     Record<string, Record<string, string>>
-  >(() => Object.fromEntries(
-    gates.map((gate) => [gate.request.id, initialValues(gate.request.schema.fields)]),
-  ));
+  >(() =>
+    Object.fromEntries(
+      gates.map((gate) => [
+        gate.request.id,
+        initialValues(gate.request.schema.fields),
+      ]),
+    ),
+  );
   const controlled = onDraftsChange !== undefined;
   const drafts = draftsProp ?? internalDrafts;
 
@@ -157,24 +176,19 @@ export function RunHitlComposer({
     setPreviousRequestId(request?.id);
     setLocalError(null);
   }
-  const values = request === null
-    ? {}
-    : effectiveDrafts[request.id] ?? initialValues(request.schema.fields);
+  const values =
+    request === null
+      ? {}
+      : (effectiveDrafts[request.id] ?? initialValues(request.schema.fields));
 
   // Focus once when the surface opens or the active gate changes —not per keystroke.
   useEffect(() => {
     if (!expanded || request === null || primaryTextField === null) {
       return;
     }
-    const el = textAreaRef.current;
-    if (el === null) {
-      return;
-    }
     // preventScroll avoids Theater jump-scrolling the stage onto the composer
     // when a gate opens or the active request changes.
-    el.focus({ preventScroll: true });
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    primaryEditorRef.current?.focus({ preventScroll: true });
   }, [expanded, request, primaryTextField]);
 
   if (request === null) {
@@ -184,7 +198,10 @@ export function RunHitlComposer({
   function setField(name: string, value: string): void {
     replaceDrafts({
       ...effectiveDrafts,
-      [request.id]: { ...(effectiveDrafts[request.id] ?? values), [name]: value },
+      [request.id]: {
+        ...(effectiveDrafts[request.id] ?? values),
+        [name]: value,
+      },
     });
     setLocalError(null);
   }
@@ -200,6 +217,14 @@ export function RunHitlComposer({
     return null;
   }
 
+  function collectFieldValues(): Record<string, string> {
+    const next = { ...values };
+    for (const [name, handle] of editorByFieldRef.current) {
+      next[name] = handle.getText();
+    }
+    return next;
+  }
+
   async function submitWith(next: Record<string, string>): Promise<void> {
     const missing = missingRequired(next);
     if (missing !== null) {
@@ -210,7 +235,7 @@ export function RunHitlComposer({
   }
 
   async function submit(): Promise<void> {
-    await submitWith(values);
+    await submitWith(collectFieldValues());
   }
 
   function onSelectOption(fieldName: string, optionValue: string): void {
@@ -231,15 +256,6 @@ export function RunHitlComposer({
     }
   }
 
-  function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-      event.preventDefault();
-      if (!gateBusy && missingRequired(values) === null) {
-        void submit();
-      }
-    }
-  }
-
   const errorMessage = localError ?? submitError;
   const canSend = !gateBusy && missingRequired(values) === null;
   const schemaPrompt = request.schema.prompt?.trim() ?? "";
@@ -250,15 +266,16 @@ export function RunHitlComposer({
   const collapsedDetail = multi
     ? t("workflowRun.hitl.multiWaitingHint")
     : schemaPrompt !== ""
-    ? promptPreview(schemaPrompt)
-    : (schemaTitle ?? t("workflowRun.hitl.reopenTitle"));
+      ? promptPreview(schemaPrompt)
+      : (schemaTitle ?? t("workflowRun.hitl.reopenTitle"));
   const detail = schemaTitle ?? t("workflowRun.hitl.reopenTitle");
   const embedded = layout === "embedded";
-  const showTimeout = request.timeoutAt !== undefined
-    && request.policy !== "wait";
-  const timeoutLabel = showTimeout && request.timeoutAt !== undefined
-    ? formatRunClock(request.timeoutAt, locale)
-    : "";
+  const showTimeout =
+    request.timeoutAt !== undefined && request.policy !== "wait";
+  const timeoutLabel =
+    showTimeout && request.timeoutAt !== undefined
+      ? formatRunClock(request.timeoutAt, locale)
+      : "";
 
   /** Spotlight this gate when the user pointer-engages the under-stage dock. */
   function engageOverlay(event?: { target: EventTarget | null }): void {
@@ -266,8 +283,9 @@ export function RunHitlComposer({
       return;
     }
     if (
-      event?.target instanceof Element
-      && event.target.closest("[data-hitl-collapse], [data-hitl-accessory]") !== null
+      event?.target instanceof Element &&
+      event.target.closest("[data-hitl-collapse], [data-hitl-accessory]") !==
+        null
     ) {
       return;
     }
@@ -291,10 +309,10 @@ export function RunHitlComposer({
             embedded
               ? "rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 hover:border-amber-500/45 hover:bg-amber-500/[0.08]"
               : cn(
-                "rounded-2xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-3",
-                "shadow-[0_1px_2px_rgba(180,83,9,0.04)]",
-                "hover:border-amber-500/45 hover:bg-amber-500/[0.08]",
-              ),
+                  "rounded-2xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-3",
+                  "shadow-[0_1px_2px_rgba(180,83,9,0.04)]",
+                  "hover:border-amber-500/45 hover:bg-amber-500/[0.08]",
+                ),
           )}
           aria-expanded={false}
           onClick={() => onExpandedChange(true)}
@@ -303,14 +321,19 @@ export function RunHitlComposer({
             <IconHandClick className="size-3.5" aria-hidden />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-foreground">{collapsedSummary}</p>
+            <p className="truncate text-sm font-medium text-foreground">
+              {collapsedSummary}
+            </p>
             <p className="truncate text-xs text-muted-foreground">
               {collapsedDetail}
             </p>
           </div>
           <span className="inline-flex h-7 shrink-0 items-center gap-1 text-xs font-medium text-amber-900/80 transition-colors group-hover:text-amber-950 dark:text-amber-200/80">
             {t("workflowRun.hitl.reopenAction")}
-            <IconChevronDown className="size-3.5 rotate-180 opacity-70" aria-hidden />
+            <IconChevronDown
+              className="size-3.5 rotate-180 opacity-70"
+              aria-hidden
+            />
           </span>
         </button>
         {accessory !== undefined && accessory !== null && (
@@ -335,10 +358,10 @@ export function RunHitlComposer({
           embedded
             ? "rounded-xl border border-amber-500/25 bg-amber-500/[0.05] p-3 dark:bg-amber-400/[0.07]"
             : cn(
-              "rounded-2xl border border-amber-500/20 bg-card p-4",
-              "shadow-[0_1px_2px_rgba(180,83,9,0.04),0_8px_24px_rgba(0,0,0,0.04)]",
-              "dark:shadow-[0_1px_2px_rgba(0,0,0,0.28),0_10px_28px_rgba(0,0,0,0.16)]",
-            ),
+                "rounded-2xl border border-amber-500/20 bg-card p-4",
+                "shadow-[0_1px_2px_rgba(180,83,9,0.04),0_8px_24px_rgba(0,0,0,0.04)]",
+                "dark:shadow-[0_1px_2px_rgba(0,0,0,0.28),0_10px_28px_rgba(0,0,0,0.16)]",
+              ),
         )}
       >
         <div className="flex items-start gap-3">
@@ -350,63 +373,61 @@ export function RunHitlComposer({
             <span className="relative size-2.5 animate-pulse rounded-full bg-amber-500 motion-reduce:animate-none" />
           </span>
           <div className="min-w-0 flex-1 pt-0.5">
-            {multi
-              ? (
-                <div
-                  className="flex flex-wrap gap-1"
-                  role="tablist"
-                  aria-label={t("workflowRun.hitl.gatesLabel")}
-                >
-                  {gates.map((gate) => {
-                    const active = gate.request.id === request.id;
-                    return (
-                      <button
-                        key={gate.request.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={active}
+            {multi ? (
+              <div
+                className="flex flex-wrap gap-1"
+                role="tablist"
+                aria-label={t("workflowRun.hitl.gatesLabel")}
+              >
+                {gates.map((gate) => {
+                  const active = gate.request.id === request.id;
+                  return (
+                    <button
+                      key={gate.request.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      className={cn(
+                        "inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors duration-150",
+                        active
+                          ? "border-foreground/20 bg-foreground text-background"
+                          : "border-border bg-background text-muted-foreground hover:border-foreground/15 hover:text-foreground",
+                      )}
+                      onClick={() => {
+                        onSelectRequest(gate.request.id);
+                        setLocalError(null);
+                      }}
+                    >
+                      <span className="truncate">{gate.nodeTitle}</span>
+                      <span
                         className={cn(
-                          "inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors duration-150",
+                          "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
                           active
-                            ? "border-foreground/20 bg-foreground text-background"
-                            : "border-border bg-background text-muted-foreground hover:border-foreground/15 hover:text-foreground",
+                            ? "bg-background/20 text-background"
+                            : "bg-muted text-muted-foreground",
                         )}
-                        onClick={() => {
-                          onSelectRequest(gate.request.id);
-                          setLocalError(null);
-                        }}
                       >
-                        <span className="truncate">{gate.nodeTitle}</span>
-                        <span
-                          className={cn(
-                            "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-                            active
-                              ? "bg-background/20 text-background"
-                              : "bg-muted text-muted-foreground",
-                          )}
-                        >
-                          {t(KIND_LABEL_KEY[gate.request.schema.kind])}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )
-              : (
-                <>
-                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                    <p className="truncate text-sm font-medium tracking-tight text-foreground">
-                      {waitingNodeTitle}
-                    </p>
-                    <span className="rounded-full border border-border/80 bg-background/80 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                      {t(KIND_LABEL_KEY[gateKind])}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {detail}
+                        {t(KIND_LABEL_KEY[gate.request.schema.kind])}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <>
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <p className="truncate text-sm font-medium tracking-tight text-foreground">
+                    {waitingNodeTitle}
                   </p>
-                </>
-              )}
+                  <span className="rounded-full border border-border/80 bg-background/80 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    {t(KIND_LABEL_KEY[gateKind])}
+                  </span>
+                </div>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {detail}
+                </p>
+              </>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
             {accessory !== undefined && accessory !== null && (
@@ -465,140 +486,147 @@ export function RunHitlComposer({
           </p>
         )}
 
-        {choiceOnly
-          ? (
-            <div className="mt-4 space-y-3">
-              {selectFields.map((field) => {
-                const options = field.options ?? [];
-                const evenPair = options.length === 2;
-                return (
-                  <div
-                    key={field.name}
-                    className={cn(
-                      "grid gap-2",
-                      evenPair ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2",
-                    )}
-                  >
-                    {options.map((option, index) => {
-                      const active = values[field.name] === option.value;
-                      return (
-                        <button
-                          key={option.value}
-                          type="button"
-                          disabled={gateBusy}
-                          aria-pressed={active}
-                          style={{ animationDelay: `${index * 40}ms` }}
-                          className={cn(
-                            "group relative flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-center text-sm font-medium",
-                            "animate-in fade-in zoom-in-95 duration-200 fill-mode-both motion-reduce:animate-none",
-                            "transition-[background-color,border-color,box-shadow,color,opacity] duration-200 ease-out",
-                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/30",
-                            "disabled:pointer-events-none disabled:opacity-60",
-                            active
-                              ? "border-foreground/25 bg-foreground text-background shadow-sm"
-                              : "border-border/90 bg-background text-foreground hover:border-amber-500/40 hover:bg-amber-500/[0.06]",
-                          )}
-                          onClick={() => onSelectOption(field.name, option.value)}
-                        >
-                          {gateBusy && active
-                            ? <IconLoader2 className="size-4 animate-spin" />
-                            : (
-                              <>
-                                <span className="leading-none">{option.label}</span>
-                                {active && (
-                                  <IconCheck
-                                    className="size-3.5 shrink-0 opacity-90"
-                                    aria-hidden
-                                  />
-                                )}
-                              </>
-                            )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-          )
-          : (
-            <div className="mt-4 space-y-3">
-              {selectFields.length > 0 && (
-                <HitlChoiceStrip
-                  fields={selectFields}
-                  values={values}
-                  submitting={gateBusy}
-                  onSelect={onSelectOption}
-                />
-              )}
-              {textFields.map((field, index) => {
-                const isPrimary = index === 0;
-                return (
-                  <div
-                    key={field.name}
-                    data-slot={isPrimary ? "hitl-composer" : undefined}
-                    className={cn(
-                      "relative flex flex-col rounded-xl border border-border/80 bg-background",
-                      "transition-[border-color,box-shadow] duration-200",
-                      "focus-within:border-amber-500/40 focus-within:ring-2 focus-within:ring-amber-500/20",
-                    )}
-                  >
-                    <div className="flex flex-col p-2">
-                      <label
-                        htmlFor={`hitl-text-${request.id}-${field.name}`}
-                        className={cn(
-                          textFields.length > 1
-                            ? "px-2 pb-1 text-[11px] font-medium text-muted-foreground"
-                            : "sr-only",
-                        )}
-                      >
-                        {field.label}
-                      </label>
-                      <Textarea
-                        id={`hitl-text-${request.id}-${field.name}`}
-                        ref={isPrimary ? textAreaRef : undefined}
-                        value={values[field.name] ?? ""}
-                        placeholder={
-                          field.placeholder
-                          ?? t("workflowRun.hitl.composerPlaceholder")
-                        }
+        {choiceOnly ? (
+          <div className="mt-4 space-y-3">
+            {selectFields.map((field) => {
+              const options = field.options ?? [];
+              const evenPair = options.length === 2;
+              return (
+                <div
+                  key={field.name}
+                  className={cn(
+                    "grid gap-2",
+                    evenPair ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-2",
+                  )}
+                >
+                  {options.map((option, index) => {
+                    const active = values[field.name] === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
                         disabled={gateBusy}
-                        rows={2}
-                        className="min-h-14 max-h-[200px] resize-none rounded-none border-0 bg-transparent px-2 py-1 text-[15px] leading-6 shadow-none focus-visible:ring-0 disabled:bg-transparent"
-                        onChange={(event) => {
-                          setField(field.name, event.target.value);
-                          if (isPrimary) {
-                            const el = event.currentTarget;
-                            el.style.height = "auto";
-                            el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-                          }
-                        }}
-                        onKeyDown={isPrimary ? onComposerKeyDown : undefined}
-                      />
-                      {index === textFields.length - 1 && (
-                        <div className="flex min-h-8 items-center justify-end gap-2 pt-0.5">
-                          <Button
-                            type="button"
-                            size="icon"
-                            disabled={!canSend}
-                            aria-label={t("workflowRun.hitl.submit")}
-                            className="size-8 shrink-0 cursor-pointer rounded-full bg-foreground text-background shadow-sm transition-[background-color,color,box-shadow] duration-200 hover:bg-foreground/85 hover:shadow-md disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
-                            onClick={() => {
-                              void submit();
-                            }}
-                          >
-                            {gateBusy
-                              ? <IconLoader2 className="size-[18px] animate-spin" />
-                              : <IconArrowUp className="size-[18px]" />}
-                          </Button>
-                        </div>
+                        aria-pressed={active}
+                        style={{ animationDelay: `${index * 40}ms` }}
+                        className={cn(
+                          "group relative flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-center text-sm font-medium",
+                          "animate-in fade-in zoom-in-95 duration-200 fill-mode-both motion-reduce:animate-none",
+                          "transition-[background-color,border-color,box-shadow,color,opacity] duration-200 ease-out",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/30",
+                          "disabled:pointer-events-none disabled:opacity-60",
+                          active
+                            ? "border-foreground/25 bg-foreground text-background shadow-sm"
+                            : "border-border/90 bg-background text-foreground hover:border-amber-500/40 hover:bg-amber-500/[0.06]",
+                        )}
+                        onClick={() => onSelectOption(field.name, option.value)}
+                      >
+                        {gateBusy && active ? (
+                          <IconLoader2 className="size-4 animate-spin" />
+                        ) : (
+                          <>
+                            <span className="leading-none">{option.label}</span>
+                            {active && (
+                              <IconCheck
+                                className="size-3.5 shrink-0 opacity-90"
+                                aria-hidden
+                              />
+                            )}
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {selectFields.length > 0 && (
+              <HitlChoiceStrip
+                fields={selectFields}
+                values={values}
+                submitting={gateBusy}
+                onSelect={onSelectOption}
+              />
+            )}
+            {textFields.map((field, index) => {
+              const isPrimary = index === 0;
+              return (
+                <div
+                  key={field.name}
+                  data-slot={isPrimary ? "hitl-composer" : undefined}
+                  className={cn(
+                    "relative flex flex-col rounded-xl border border-border/80 bg-background",
+                    "transition-[border-color,box-shadow] duration-200",
+                    "focus-within:border-amber-500/40 focus-within:ring-2 focus-within:ring-amber-500/20",
+                  )}
+                >
+                  <div className="flex flex-col p-2">
+                    <label
+                      htmlFor={`hitl-text-${request.id}-${field.name}`}
+                      className={cn(
+                        textFields.length > 1
+                          ? "px-2 pb-1 text-[11px] font-medium text-muted-foreground"
+                          : "sr-only",
                       )}
-                    </div>
+                    >
+                      {field.label}
+                    </label>
+                    <ComposerEditor
+                      key={`${request.id}-${field.name}`}
+                      id={`hitl-text-${request.id}-${field.name}`}
+                      ref={(handle) => {
+                        if (handle === null) {
+                          editorByFieldRef.current.delete(field.name);
+                        } else {
+                          editorByFieldRef.current.set(field.name, handle);
+                        }
+                        if (isPrimary) {
+                          primaryEditorRef.current = handle;
+                        }
+                      }}
+                      initialText={values[field.name] ?? ""}
+                      placeholder={
+                        field.placeholder ??
+                        t("workflowRun.hitl.composerPlaceholder")
+                      }
+                      disabled={gateBusy}
+                      enterKey={isPrimary ? "submit" : "newline"}
+                      ariaLabel={field.label}
+                      onSubmit={() => {
+                        if (!gateBusy) {
+                          void submit();
+                        }
+                      }}
+                      onTextChange={(text) => setField(field.name, text)}
+                    />
+                    {index === textFields.length - 1 && (
+                      <div className="flex min-h-8 items-center justify-end gap-2 pt-0.5">
+                        <Button
+                          type="button"
+                          size="icon"
+                          disabled={!canSend}
+                          aria-label={t("workflowRun.hitl.submit")}
+                          className="size-8 shrink-0 cursor-pointer rounded-full bg-foreground text-background shadow-sm transition-[background-color,color,box-shadow] duration-200 hover:bg-foreground/85 hover:shadow-md disabled:bg-muted disabled:text-muted-foreground disabled:shadow-none"
+                          onClick={() => {
+                            void submit();
+                          }}
+                        >
+                          {gateBusy ? (
+                            <IconLoader2 className="size-[18px] animate-spin" />
+                          ) : (
+                            <IconArrowUp className="size-[18px]" />
+                          )}
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     </div>
   );
@@ -644,7 +672,9 @@ function HitlChoiceStrip({
                   onClick={() => onSelect(field.name, option.value)}
                 >
                   {option.label}
-                  {active && <IconCheck className="size-3 opacity-90" aria-hidden />}
+                  {active && (
+                    <IconCheck className="size-3 opacity-90" aria-hidden />
+                  )}
                 </button>
               );
             })}

@@ -11,7 +11,10 @@ export interface TurnDiffFile {
 
 /** Merges repeated edits to a path so the summary represents its complete turn-level change. */
 export function collectTurnDiffFiles(turn: ChatTurn): TurnDiffFile[] {
-  const files = new Map<string, { path: string; oldText: string; newText: string }>();
+  const files = new Map<
+    string,
+    { path: string; oldText: string; newText: string }
+  >();
 
   for (const item of turn.items) {
     if (item.kind !== "toolCall" || item.status !== "completed") continue;
@@ -48,14 +51,19 @@ export function collectTurnDiffFiles(turn: ChatTurn): TurnDiffFile[] {
 }
 
 /** Counts changed lines using the same line-diff semantics as the rendered viewer. */
-function countTextChanges(oldText: string, newText: string): {
+function countTextChanges(
+  oldText: string,
+  newText: string,
+): {
   additions: number;
   deletions: number;
 } {
   let additions = 0;
   let deletions = 0;
   for (const part of diffLines(oldText, newText)) {
-    const lineCount = part.value.endsWith("\n") ? part.count ?? 0 : (part.count ?? 1);
+    const lineCount = part.value.endsWith("\n")
+      ? (part.count ?? 0)
+      : (part.count ?? 1);
     if (part.added) additions += lineCount;
     if (part.removed) deletions += lineCount;
   }
@@ -68,11 +76,16 @@ function fullContentWriteDiff(
 ): { path: string; oldText: string; newText: string } | null {
   if (tool.toolKind !== "edit" || !isRecord(tool.rawInput)) return null;
 
-  const newText = stringField(tool.rawInput, ["content", "newText", "new_text"]);
+  const newText = stringField(tool.rawInput, [
+    "content",
+    "newText",
+    "new_text",
+  ]);
   if (newText === null) return null;
 
-  const rawPath = tool.locations.at(-1)?.path
-    ?? stringField(tool.rawInput, ["filePath", "file_path", "path"]);
+  const rawPath =
+    tool.locations.at(-1)?.path ??
+    stringField(tool.rawInput, ["filePath", "file_path", "path"]);
   if (rawPath === null) return null;
 
   return {

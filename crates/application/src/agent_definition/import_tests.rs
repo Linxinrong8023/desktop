@@ -4,7 +4,7 @@ use ora_contracts::{
     AgentImportCandidateStatus, AgentImportDecision, AgentImportResultStatus,
     CommitAgentImportRequest, PrepareAgentImportRequest,
 };
-use ora_domain::{AgentDefinition, AgentDefinitionId, AuditFields};
+use ora_domain::{AgentDefinition, AgentDefinitionId, AuditFields, Namespace};
 use pretty_assertions::assert_eq;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -220,13 +220,18 @@ impl AgentDefinitionRepository for Rc<FakeRepository> {
 
     fn find_agent_definition_by_name(
         &self,
+        namespace: &Namespace,
         name: &str,
     ) -> Result<Option<AgentDefinition>, RepositoryError> {
         Ok(self
             .agents
             .borrow()
             .iter()
-            .find(|agent| agent.name.eq_ignore_ascii_case(name) && !agent.audit_fields.is_deleted)
+            .find(|agent| {
+                agent.namespace == *namespace
+                    && agent.name.eq_ignore_ascii_case(name)
+                    && !agent.audit_fields.is_deleted
+            })
             .cloned())
     }
 
@@ -274,6 +279,7 @@ impl Clock for FixedClock {
 fn agent(created_at: i64, updated_at: i64, content: &str) -> AgentDefinition {
     AgentDefinition::new(
         AgentDefinitionId::new("agent-1"),
+        Namespace::local(),
         "reviewer",
         "Old description",
         content,

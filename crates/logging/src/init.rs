@@ -2,18 +2,21 @@ use std::io::Write;
 
 use tracing::Dispatch;
 use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
-use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt::layer;
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::reload;
 
 use crate::correlation::CorrelationLayer;
 use crate::fanout::FanoutMakeWriter;
 use crate::file_output::prepare_file_output;
 use crate::formatter::JsonEventFormatter;
-use crate::{LogLevel, LogOutput, LoggingConfig, LoggingGuard, LoggingInitError};
+use crate::level_control::level_filter;
+use crate::{
+    InitializedLogging, LogLevelControl, LogOutput, LoggingConfig, LoggingGuard, LoggingInitError,
+};
 
-/// Installs the configured process clock and subscriber, then returns its writer-lifetime guard.
-pub fn init_logging(config: LoggingConfig) -> Result<LoggingGuard, LoggingInitError> {
+/// Installs the process clock and subscriber, returning separate writer and level-control ownership.
+pub fn init_logging(config: LoggingConfig) -> Result<InitializedLogging, LoggingInitError> {
     // Prepare fallible sinks before changing either irreversible process-wide singleton.
     let (dispatch, guard) = build_dispatch(&config, std::io::stdout())?;
     crate::clock::initialize(config.timezone)
@@ -28,11 +31,11 @@ pub fn init_logging(config: LoggingConfig) -> Result<LoggingGuard, LoggingInitEr
 pub(crate) fn build_dispatch<W>(
     config: &LoggingConfig,
     stdout_writer: W,
-) -> Result<(Dispatch, LoggingGuard), LoggingInitError>
+) -> Result<(Dispatch, InitializedLogging), LoggingInitError>
 where
     W: Write + Send + 'static,
 {
-    let level_filter = level_filter(config.level);
+    let (level_layer, level_handle) = reload::Layer::new(level_filter(config.level));
 
     match &config.output {
         LogOutput::Stdout => {
@@ -41,8 +44,8 @@ where
             // the queue is full so log integrity wins under sustained sink stalls.
             let prepared_stdout = prepare_stdout_output(stdout_writer);
             let subscriber = tracing_subscriber::registry()
+                .with(level_layer)
                 .with(CorrelationLayer)
-                .with(level_filter)
                 .with(
                     layer()
                         .event_format(JsonEventFormatter::new(config.timezone))
@@ -52,14 +55,17 @@ where
 
             Ok((
                 Dispatch::new(subscriber),
-                LoggingGuard::new(vec![prepared_stdout.guard]),
+                InitializedLogging::new(
+                    LoggingGuard::new(vec![prepared_stdout.guard]),
+                    LogLevelControl::new(level_handle),
+                ),
             ))
         }
         LogOutput::File(file_config) => {
             let prepared_output = prepare_file_output(file_config)?;
             let subscriber = tracing_subscriber::registry()
+                .with(level_layer)
                 .with(CorrelationLayer)
-                .with(level_filter)
                 .with(
                     layer()
                         .event_format(JsonEventFormatter::new(config.timezone))
@@ -69,7 +75,10 @@ where
 
             Ok((
                 Dispatch::new(subscriber),
-                LoggingGuard::new(vec![prepared_output.guard]),
+                InitializedLogging::new(
+                    LoggingGuard::new(vec![prepared_output.guard]),
+                    LogLevelControl::new(level_handle),
+                ),
             ))
         }
         LogOutput::StdoutAndFile(file_config) => {
@@ -80,8 +89,8 @@ where
             let fanout =
                 FanoutMakeWriter::new(prepared_stdout.writer, prepared_output.writer.clone());
             let subscriber = tracing_subscriber::registry()
+                .with(level_layer)
                 .with(CorrelationLayer)
-                .with(level_filter)
                 .with(
                     layer()
                         .event_format(JsonEventFormatter::new(config.timezone))
@@ -91,7 +100,10 @@ where
 
             Ok((
                 Dispatch::new(subscriber),
-                LoggingGuard::new(vec![prepared_stdout.guard, prepared_output.guard]),
+                InitializedLogging::new(
+                    LoggingGuard::new(vec![prepared_stdout.guard, prepared_output.guard]),
+                    LogLevelControl::new(level_handle),
+                ),
             ))
         }
     }
@@ -115,15 +127,4 @@ where
         .finish(stdout_writer);
 
     PreparedStdoutOutput { writer, guard }
-}
-
-/// Maps the public level enum into the tracing filter used by every active sink.
-fn level_filter(level: LogLevel) -> LevelFilter {
-    match level {
-        LogLevel::Trace => LevelFilter::TRACE,
-        LogLevel::Debug => LevelFilter::DEBUG,
-        LogLevel::Info => LevelFilter::INFO,
-        LogLevel::Warn => LevelFilter::WARN,
-        LogLevel::Error => LevelFilter::ERROR,
-    }
 }

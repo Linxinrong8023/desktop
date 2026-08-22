@@ -16,9 +16,15 @@ import {
   IconTestPipe,
   IconTicket,
 } from "@tabler/icons-react";
-import type { AgentCli } from "@ora/contracts";
+import type { KnownAgentCli } from "../chat/model-catalog";
 import { OpenAiLogo } from "../chat/provider-logos";
-import { ClaudeMark, CodeAgentCliMark, NgaMark, OpenCodeMark, RtkMark } from "./plugin-marks";
+import {
+  ClaudeMark,
+  CodeAgentCliMark,
+  NgaMark,
+  OpenCodeMark,
+  RtkMark,
+} from "./plugin-marks";
 
 /** A plugin's brand mark. Tabler icons and the hand-drawn marks both satisfy this. */
 export type PluginMark = ComponentType<{ className?: string }>;
@@ -54,7 +60,7 @@ export interface PluginEntry {
    * `useAgentRuntimeStatus`) instead of the local install/uninstall toggle, and its
    * card renders read-only.
    */
-  detectionAgentCli?: AgentCli;
+  detectionAgentCli?: KnownAgentCli;
 }
 
 /** Category shared by the coding-agent CLI plugins, kept separate so composer surfaces can exclude them. */
@@ -76,12 +82,16 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: true,
     categoryKey: AI_AGENT_CATEGORY_KEY,
-    capabilityKeys: ["settings.plugins.capability.interactive", "settings.plugins.capability.write", "settings.plugins.capability.terminal"],
+    capabilityKeys: [
+      "settings.plugins.capability.interactive",
+      "settings.plugins.capability.write",
+      "settings.plugins.capability.terminal",
+    ],
     mark: OpenCodeMark,
     tone: "text-neutral-900 dark:text-neutral-100",
     summaryKey: "settings.plugins.catalog.opencode",
     skills: ["OpenCode", "Terminal"],
-    detectionAgentCli: "open_code",
+    detectionAgentCli: "ora-space.opencode",
   },
   {
     id: "nga",
@@ -94,12 +104,16 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: true,
     categoryKey: AI_AGENT_CATEGORY_KEY,
-    capabilityKeys: ["settings.plugins.capability.interactive", "settings.plugins.capability.write", "settings.plugins.capability.terminal"],
+    capabilityKeys: [
+      "settings.plugins.capability.interactive",
+      "settings.plugins.capability.write",
+      "settings.plugins.capability.terminal",
+    ],
     mark: NgaMark,
     tone: "text-sky-600 dark:text-sky-400",
     summaryKey: "settings.plugins.catalog.nga",
     skills: ["NGA"],
-    detectionAgentCli: "nga",
+    detectionAgentCli: "ora-space.nga",
   },
   {
     id: "codeagentcli",
@@ -112,12 +126,16 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: true,
     categoryKey: AI_AGENT_CATEGORY_KEY,
-    capabilityKeys: ["settings.plugins.capability.interactive", "settings.plugins.capability.write", "settings.plugins.capability.terminal"],
+    capabilityKeys: [
+      "settings.plugins.capability.interactive",
+      "settings.plugins.capability.write",
+      "settings.plugins.capability.terminal",
+    ],
     mark: CodeAgentCliMark,
     tone: "text-orange-600 dark:text-orange-400",
     summaryKey: "settings.plugins.catalog.codeagentcli",
     skills: ["CodeAgentCLI"],
-    detectionAgentCli: "code_agent_cli",
+    detectionAgentCli: "ora-space.codeagentcli",
   },
   {
     id: "claude",
@@ -130,12 +148,16 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: true,
     categoryKey: AI_AGENT_CATEGORY_KEY,
-    capabilityKeys: ["settings.plugins.capability.interactive", "settings.plugins.capability.write", "settings.plugins.capability.terminal"],
+    capabilityKeys: [
+      "settings.plugins.capability.interactive",
+      "settings.plugins.capability.write",
+      "settings.plugins.capability.terminal",
+    ],
     mark: ClaudeMark,
     tone: "text-[#D97757]",
     summaryKey: "settings.plugins.catalog.claude",
     skills: ["Claude Code", "Subagents", "Skills"],
-    detectionAgentCli: "claude",
+    detectionAgentCli: "ora-space.claude",
   },
   {
     id: "codex",
@@ -148,12 +170,15 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: true,
     categoryKey: AI_AGENT_CATEGORY_KEY,
-    capabilityKeys: ["settings.plugins.capability.interactive", "settings.plugins.capability.write"],
+    capabilityKeys: [
+      "settings.plugins.capability.interactive",
+      "settings.plugins.capability.write",
+    ],
     mark: OpenAiLogo,
     tone: "text-emerald-600 dark:text-emerald-400",
     summaryKey: "settings.plugins.catalog.codex",
     skills: ["Codex", "Code Review"],
-    detectionAgentCli: "codex",
+    detectionAgentCli: "ora-space.codex",
   },
   {
     id: "rtk",
@@ -166,7 +191,10 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: true,
     categoryKey: "settings.plugins.category.devtools",
-    capabilityKeys: ["settings.plugins.capability.interactive", "settings.plugins.capability.terminal"],
+    capabilityKeys: [
+      "settings.plugins.capability.interactive",
+      "settings.plugins.capability.terminal",
+    ],
     mark: RtkMark,
     tone: "text-lime-600 dark:text-lime-400",
     summaryKey: "settings.plugins.catalog.rtk",
@@ -183,7 +211,10 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: true,
     categoryKey: "settings.plugins.category.devtools",
-    capabilityKeys: ["settings.plugins.capability.read", "settings.plugins.capability.network"],
+    capabilityKeys: [
+      "settings.plugins.capability.read",
+      "settings.plugins.capability.network",
+    ],
     mark: IconBrandGithub,
     tone: "text-zinc-700 dark:text-zinc-300",
     summaryKey: "settings.plugins.catalog.github",
@@ -200,7 +231,10 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: true,
     categoryKey: "settings.plugins.category.devtools",
-    capabilityKeys: ["settings.plugins.capability.interactive", "settings.plugins.capability.read"],
+    capabilityKeys: [
+      "settings.plugins.capability.interactive",
+      "settings.plugins.capability.read",
+    ],
     mark: IconBrandChrome,
     tone: "text-amber-600 dark:text-amber-400",
     summaryKey: "settings.plugins.catalog.devtools",
@@ -217,7 +251,10 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: true,
     categoryKey: "settings.plugins.category.data",
-    capabilityKeys: ["settings.plugins.capability.read", "settings.plugins.capability.write"],
+    capabilityKeys: [
+      "settings.plugins.capability.read",
+      "settings.plugins.capability.write",
+    ],
     mark: IconChartBar,
     tone: "text-teal-600 dark:text-teal-400",
     summaryKey: "settings.plugins.catalog.analytics",
@@ -234,7 +271,10 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: false,
     categoryKey: "settings.plugins.category.design",
-    capabilityKeys: ["settings.plugins.capability.read", "settings.plugins.capability.network"],
+    capabilityKeys: [
+      "settings.plugins.capability.read",
+      "settings.plugins.capability.network",
+    ],
     mark: IconBrandFigma,
     tone: "text-violet-600 dark:text-violet-400",
     summaryKey: "settings.plugins.catalog.figma",
@@ -251,7 +291,11 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: false,
     categoryKey: "settings.plugins.category.productivity",
-    capabilityKeys: ["settings.plugins.capability.read", "settings.plugins.capability.write", "settings.plugins.capability.network"],
+    capabilityKeys: [
+      "settings.plugins.capability.read",
+      "settings.plugins.capability.write",
+      "settings.plugins.capability.network",
+    ],
     mark: IconLayoutKanban,
     tone: "text-indigo-600 dark:text-indigo-400",
     summaryKey: "settings.plugins.catalog.linear",
@@ -268,7 +312,11 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: false,
     categoryKey: "settings.plugins.category.productivity",
-    capabilityKeys: ["settings.plugins.capability.read", "settings.plugins.capability.write", "settings.plugins.capability.network"],
+    capabilityKeys: [
+      "settings.plugins.capability.read",
+      "settings.plugins.capability.write",
+      "settings.plugins.capability.network",
+    ],
     mark: IconBrandNotion,
     tone: "text-slate-700 dark:text-slate-300",
     summaryKey: "settings.plugins.catalog.notion",
@@ -285,7 +333,11 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: false,
     categoryKey: "settings.plugins.category.productivity",
-    capabilityKeys: ["settings.plugins.capability.read", "settings.plugins.capability.write", "settings.plugins.capability.network"],
+    capabilityKeys: [
+      "settings.plugins.capability.read",
+      "settings.plugins.capability.write",
+      "settings.plugins.capability.network",
+    ],
     mark: IconBrandSlack,
     tone: "text-rose-600 dark:text-rose-400",
     summaryKey: "settings.plugins.catalog.slack",
@@ -302,7 +354,10 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: false,
     categoryKey: "settings.plugins.category.data",
-    capabilityKeys: ["settings.plugins.capability.read", "settings.plugins.capability.write"],
+    capabilityKeys: [
+      "settings.plugins.capability.read",
+      "settings.plugins.capability.write",
+    ],
     mark: IconDatabase,
     tone: "text-blue-600 dark:text-blue-400",
     summaryKey: "settings.plugins.catalog.postgres",
@@ -319,7 +374,10 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: false,
     categoryKey: "settings.plugins.category.devtools",
-    capabilityKeys: ["settings.plugins.capability.interactive", "settings.plugins.capability.terminal"],
+    capabilityKeys: [
+      "settings.plugins.capability.interactive",
+      "settings.plugins.capability.terminal",
+    ],
     mark: IconBrandDocker,
     tone: "text-cyan-600 dark:text-cyan-400",
     summaryKey: "settings.plugins.catalog.docker",
@@ -336,7 +394,10 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: false,
     categoryKey: "settings.plugins.category.devtools",
-    capabilityKeys: ["settings.plugins.capability.read", "settings.plugins.capability.network"],
+    capabilityKeys: [
+      "settings.plugins.capability.read",
+      "settings.plugins.capability.network",
+    ],
     mark: IconBug,
     tone: "text-purple-600 dark:text-purple-400",
     summaryKey: "settings.plugins.catalog.sentry",
@@ -353,7 +414,10 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: false,
     categoryKey: "settings.plugins.category.devtools",
-    capabilityKeys: ["settings.plugins.capability.interactive", "settings.plugins.capability.terminal"],
+    capabilityKeys: [
+      "settings.plugins.capability.interactive",
+      "settings.plugins.capability.terminal",
+    ],
     mark: IconTestPipe,
     tone: "text-green-600 dark:text-green-400",
     summaryKey: "settings.plugins.catalog.playwright",
@@ -370,7 +434,11 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "public",
     featured: false,
     categoryKey: "settings.plugins.category.productivity",
-    capabilityKeys: ["settings.plugins.capability.read", "settings.plugins.capability.write", "settings.plugins.capability.network"],
+    capabilityKeys: [
+      "settings.plugins.capability.read",
+      "settings.plugins.capability.write",
+      "settings.plugins.capability.network",
+    ],
     mark: IconTicket,
     tone: "text-blue-700 dark:text-blue-400",
     summaryKey: "settings.plugins.catalog.jira",
@@ -404,7 +472,10 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "personal",
     featured: true,
     categoryKey: "settings.plugins.category.devtools",
-    capabilityKeys: ["settings.plugins.capability.interactive", "settings.plugins.capability.terminal"],
+    capabilityKeys: [
+      "settings.plugins.capability.interactive",
+      "settings.plugins.capability.terminal",
+    ],
     mark: IconRocket,
     tone: "text-orange-700 dark:text-orange-400",
     summaryKey: "settings.plugins.catalog.deploybot",
@@ -421,7 +492,10 @@ export const PLUGIN_CATALOG: PluginEntry[] = [
     collection: "personal",
     featured: false,
     categoryKey: "settings.plugins.category.design",
-    capabilityKeys: ["settings.plugins.capability.read", "settings.plugins.capability.write"],
+    capabilityKeys: [
+      "settings.plugins.capability.read",
+      "settings.plugins.capability.write",
+    ],
     mark: IconPalette,
     tone: "text-pink-600 dark:text-pink-400",
     summaryKey: "settings.plugins.catalog.tokens",

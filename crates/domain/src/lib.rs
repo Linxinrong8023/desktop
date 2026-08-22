@@ -1,18 +1,17 @@
+mod agent_cli;
 mod agent_definition;
-mod artifact;
+mod agent_ref;
 mod audit_fields;
 mod error;
+mod git_cleanup;
 mod ids;
+mod namespace;
+mod plugin;
 mod project;
-mod project_work_context;
 mod session;
 mod session_title;
 mod skill;
-mod spec;
 mod task;
-mod task_diff_comment;
-mod virtual_entry;
-mod virtual_folder;
 mod workflow;
 mod workflow_run;
 mod worktree;
@@ -20,29 +19,30 @@ mod worktree;
 #[cfg(test)]
 mod tests;
 
+pub use agent_cli::AgentCli;
 pub use agent_definition::AgentDefinition;
-pub use artifact::Artifact;
+pub use agent_ref::AgentRef;
 pub use audit_fields::AuditFields;
 pub use error::DomainModelError;
-pub use ids::{
-    AgentDefinitionId, ArtifactId, ProjectId, ProjectSpecSourceOverrideId, ProjectWorkContextId,
-    SessionId, SkillId, TaskDiffCommentId, TaskId, VirtualEntryId, VirtualFolderId, WorkflowId,
-    WorkflowNodeRunId, WorkflowRunId, WorkflowSnapshotId, WorktreeId,
+pub use git_cleanup::{
+    GitCleanupJob, GitCleanupJobState, MAX_CLEANUP_JOB_ERROR_CHARS, WorktreeProvisioningLease,
+    truncate_cleanup_error,
 };
+pub use ids::{
+    AgentDefinitionId, GitCleanupJobId, PluginId, ProjectId, SessionId, SkillId, TaskId,
+    WorkflowId, WorkflowNodeRunId, WorkflowRunId, WorkflowSnapshotId, WorktreeId,
+    WorktreeProvisioningLeaseId,
+};
+pub use namespace::Namespace;
+pub use plugin::{PluginEnabledState, PluginState};
 pub use project::Project;
-pub use project_work_context::{ProjectWorkContext, ProjectWorkContextSurface};
-pub use session::{AgentCli, HistoryState, Session, SessionStatus};
+pub use session::{HistoryState, Session, SessionStatus};
 pub use session_title::{MAX_SESSION_TITLE_CHARS, SessionTitle, SessionTitleError};
 pub use skill::{
-    Skill, SkillDescriptionError, SkillNameError, validate_skill_description, validate_skill_name,
+    BACKUP_DIR_NAME, JOURNAL_DIR_NAME, STAGING_DIR_NAME, Skill, SkillDescriptionError,
+    SkillNameError, validate_skill_description, validate_skill_name,
 };
-pub use spec::{ProjectSpecSourceOverride, SpecSourceVisibility, SpecWorkflow};
-pub use task::{Task, TaskStatus, TaskType};
-pub use task_diff_comment::{
-    TaskDiffAnchor, TaskDiffComment, TaskDiffCommentKind, TaskDiffSide, TaskDiffThreadStatus,
-};
-pub use virtual_entry::{VirtualEntry, VirtualEntryKind};
-pub use virtual_folder::VirtualFolder;
+pub use task::{Task, TaskType};
 pub use workflow::{
     CreatedWorkflow, Workflow, WorkflowDetail, WorkflowSnapshot, WorkflowSummary, WorkflowVersion,
 };

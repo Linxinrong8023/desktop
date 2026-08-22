@@ -1,17 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type {
-  AgentCli,
-  Project,
-  Session,
-  Task,
-  TaskStatus,
-  TaskWorkspaceMode,
-} from "@ora/contracts";
+import type { Project, Session, Task, TaskWorkspaceMode } from "@ora/contracts";
+import type { KnownAgentCli } from "../../features/chat/model-catalog";
 import { useContractsClient } from "../../contracts-client-context";
-import { clientId } from "../client-id";
 import { queryKeys } from "./query-keys";
 import { useWorkspaceSelectionStore } from "../stores/workspace-selection-store";
 import { useUiStore } from "../stores/ui-store";
+import { useComposerInputStore } from "../stores/composer-input-store";
+import { useDraftSessionsStore } from "../stores/draft-sessions-store";
+import { startSessionDraft } from "../session-drafts";
 import { useChatStore } from "../../chat-store-context";
 
 type QueryClient = ReturnType<typeof useQueryClient>;
@@ -21,7 +17,7 @@ function readCache<T>(queryClient: QueryClient, key: readonly string[]): T[] {
   return (queryClient.getQueryData(key) as T[] | undefined) ?? [];
 }
 
-/** Creates a project and selects it once the server confirms the id. */
+/** Creates a project and selects it once the backend confirms the id. */
 export function useCreateProject() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
@@ -36,12 +32,12 @@ export function useCreateProject() {
         project,
       ]);
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-      useWorkspaceSelectionStore.getState().selectProject(project.id);
+      startSessionDraft({ projectId: project.id, taskId: null });
     },
   });
 }
 
-/** Renames a project and refreshes the project list. */
+/** Renames a project and patches the project list so the sidebar label updates immediately. */
 export function useUpdateProject() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
@@ -50,7 +46,12 @@ export function useUpdateProject() {
       client.project
         .update({ projectId: project.id, name })
         .then((response) => response.project),
-    onSuccess: () => {
+    onSuccess: (project) => {
+      queryClient.setQueryData<Project[]>(queryKeys.projects, (current) =>
+        (current ?? []).map((candidate) =>
+          candidate.id === project.id ? { ...project } : candidate,
+        ),
+      );
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     },
   });
@@ -67,18 +68,46 @@ export function useDeleteProject() {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      const selection = useWorkspaceSelectionStore.getState().selection;
+      const tasks = readCache<Task>(queryClient, queryKeys.tasks);
+      const taskIds = new Set(
+        tasks
+          .filter((task) => task.projectId === projectId)
+          .map((task) => task.id),
+      );
+      const sessions = readCache<Session>(queryClient, queryKeys.sessions);
+      const sessionIds = sessions
+        .filter((session) => taskIds.has(session.taskId))
+        .map((session) => session.id);
+      useComposerInputStore
+        .getState()
+        .clearKeys([
+          ...sessionIds,
+          ...[...taskIds].map((taskId) => `task:${taskId}`),
+        ]);
+      useDraftSessionsStore.getState().clearReturnToForSessions(sessionIds);
+      useDraftSessionsStore.getState().removeForProject(projectId);
+      const store = useWorkspaceSelectionStore.getState();
+      const selection = store.selection;
       if (selection.projectId === projectId) {
         // Pick the next surviving project from the stale cache; invalidate already triggered refetch.
         const projects = readCache<Project>(queryClient, queryKeys.projects);
         const next = projects.find((project) => project.id !== projectId);
-        useWorkspaceSelectionStore.getState().setProject(next?.id ?? null);
+        // setProject resyncs createFocus to the new selection. Preserve a
+        // create-focus the user pointed at a different surviving project so New
+        // chat still follows their last click, matching applyRestoredSelection.
+        const focusBefore = store.createFocus;
+        store.setProject(next?.id ?? null);
+        if (focusBefore !== null && focusBefore.projectId !== projectId) {
+          store.setCreateFocus(focusBefore);
+        }
+      } else {
+        store.clearCreateFocusForProject(projectId);
       }
     },
   });
 }
 
-/** Creates a task under a project and selects it once the server confirms the id. */
+/** Creates a task under a project and selects it once the backend confirms the id. */
 export function useCreateTask() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
@@ -86,18 +115,16 @@ export function useCreateTask() {
     mutationFn: ({
       projectId,
       title,
-      status,
       workspaceMode,
       baseBranch,
     }: {
       projectId: string;
       title: string;
-      status: TaskStatus;
       workspaceMode?: TaskWorkspaceMode;
       baseBranch?: string;
     }) =>
       client.task
-        .create({ projectId, title, status, workspaceMode, baseBranch })
+        .create({ projectId, title, workspaceMode, baseBranch })
         .then((response) => response.task),
     onSuccess: (task) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
@@ -110,9 +137,7 @@ export function useCreateTask() {
         queryClient.invalidateQueries({
           queryKey: queryKeys.projectBranches(task.projectId),
         });
-        useWorkspaceSelectionStore
-          .getState()
-          .selectTask(task.id, task.projectId);
+        startSessionDraft({ projectId: task.projectId, taskId: task.id });
       }
       // Reveal the new row. Expanding here rather than reacting to the selection
       // keeps a plain row click free to collapse what it just selected.
@@ -121,24 +146,21 @@ export function useCreateTask() {
   });
 }
 
-/** Replaces a task's fields and refreshes the task list. */
+/** Replaces a task's fields and patches the task list so the sidebar label updates immediately. */
 export function useUpdateTask() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      task,
-      title,
-      status,
-    }: {
-      task: Task;
-      title: string;
-      status: TaskStatus;
-    }) =>
+    mutationFn: ({ task, title }: { task: Task; title: string }) =>
       client.task
-        .update({ taskId: task.id, title, status })
+        .update({ taskId: task.id, title })
         .then((response) => response.task),
-    onSuccess: () => {
+    onSuccess: (task) => {
+      queryClient.setQueryData<Task[]>(queryKeys.tasks, (current) =>
+        (current ?? []).map((candidate) =>
+          candidate.id === task.id ? { ...task } : candidate,
+        ),
+      );
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
     },
   });
@@ -154,11 +176,28 @@ export function useDeleteTask() {
     onSuccess: (_void, { taskId }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      const selection = useWorkspaceSelectionStore.getState().selection;
+      const sessions = readCache<Session>(queryClient, queryKeys.sessions);
+      const sessionIds = sessions
+        .filter((session) => session.taskId === taskId)
+        .map((session) => session.id);
+      useComposerInputStore
+        .getState()
+        .clearKeys([...sessionIds, `task:${taskId}`]);
+      useDraftSessionsStore.getState().clearReturnToForSessions(sessionIds);
+      useDraftSessionsStore.getState().removeForTask(taskId);
+      const store = useWorkspaceSelectionStore.getState();
+      const selection = store.selection;
       if (selection.taskId === taskId) {
-        useWorkspaceSelectionStore
-          .getState()
-          .clearTaskSelection(selection.projectId ?? "");
+        // clearTaskSelection resyncs createFocus to the project. Preserve a
+        // create-focus the user pointed at a different surviving task so New
+        // chat still follows their last click, matching applyRestoredSelection.
+        const focusBefore = store.createFocus;
+        store.clearTaskSelection(selection.projectId ?? "");
+        if (focusBefore !== null && focusBefore.taskId !== taskId) {
+          store.setCreateFocus(focusBefore);
+        }
+      } else {
+        store.clearCreateFocusForTask(taskId);
       }
     },
   });
@@ -181,12 +220,11 @@ export function useCreateSession() {
       agentCli,
     }: {
       taskId: string;
-      agentCli: AgentCli;
+      agentCli: KnownAgentCli;
     }) => {
       const warmed = await client.session.warm({
         target: { type: "task", taskId },
-        agentCli,
-        clientId: clientId(),
+        agentRef: agentCli,
       });
       const response = await client.session.attach({
         sessionId: warmed.sessionId,
@@ -195,7 +233,9 @@ export function useCreateSession() {
       queryClient.removeQueries({
         queryKey: queryKeys.warmSession({ type: "task", taskId }, agentCli),
       });
-      chatStore.getState().setConfigOptions(response.session.id, warmed.configOptions);
+      chatStore
+        .getState()
+        .setConfigOptions(response.session.id, warmed.configOptions);
       return response.session;
     },
     onSuccess: (session) => {
@@ -231,7 +271,9 @@ export function useResumeSessionHistory() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
-      client.session.resumeHistory({ sessionId }).then((response) => response.session),
+      client.session
+        .resumeHistory({ sessionId })
+        .then((response) => response.session),
     onSuccess: (session) => {
       queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
         (current ?? []).map((candidate) =>
@@ -252,10 +294,35 @@ export function useDeleteSession() {
       client.session.delete({ sessionId }),
     onSuccess: (_void, { sessionId }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+      useComposerInputStore.getState().clear(sessionId);
+      useDraftSessionsStore.getState().clearReturnToForSessions([sessionId]);
+      useDraftSessionsStore.getState().removeForSessions([sessionId]);
       const selection = useWorkspaceSelectionStore.getState().selection;
       if (selection.sessionId === sessionId) {
         useWorkspaceSelectionStore.getState().clearSessionSelection();
       }
+    },
+  });
+}
+
+/** Persists a user-edited session title and patches the sessions list cache. */
+export function useRenameSession() {
+  const client = useContractsClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) =>
+      client.session
+        .rename({ sessionId, title })
+        .then((response) => response.session),
+    onSuccess: (session) => {
+      // Replace with a new object so React Query cannot structural-share the
+      // previous cache entry when the transport returns the same session reference.
+      queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
+        (current ?? []).map((candidate) =>
+          candidate.id === session.id ? { ...session } : candidate,
+        ),
+      );
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
     },
   });
 }

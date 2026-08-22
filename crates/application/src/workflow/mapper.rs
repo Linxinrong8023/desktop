@@ -6,6 +6,7 @@ use ora_domain::{
 pub(crate) fn map_workflow(workflow: Workflow) -> ora_contracts::Workflow {
     ora_contracts::Workflow {
         id: workflow.id.to_string(),
+        namespace: workflow.namespace.to_string(),
         name: workflow.name,
         published_snapshot_id: workflow.published_snapshot_id.map(|id| id.to_string()),
         created_at: workflow.audit_fields.created_at,
@@ -29,6 +30,7 @@ pub(crate) fn map_snapshot(snapshot: WorkflowSnapshot) -> ora_contracts::Workflo
 pub(crate) fn map_workflow_summary(summary: WorkflowSummary) -> ora_contracts::WorkflowSummary {
     ora_contracts::WorkflowSummary {
         id: summary.id,
+        namespace: summary.namespace.to_string(),
         name: summary.name,
         published_version: summary.published_version,
         created_at: summary.created_at,

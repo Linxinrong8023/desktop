@@ -142,7 +142,8 @@
 }
 
 /* Keep source feedback restrained; the strong ring belongs to the actual drop target. */
-.workflow-flow .workflow-port.connectingfrom:not(.workflow-port-candidate)::before {
+.workflow-flow
+  .workflow-port.connectingfrom:not(.workflow-port-candidate)::before {
   box-shadow:
     0 0 0 1px var(--background),
     0 0 0 3px color-mix(in oklch, var(--ring) 16%, transparent);
@@ -172,7 +173,9 @@
 }
 
 .workflow-flow .workflow-connection-preview[data-status="valid"] {
-  filter: drop-shadow(0 0 4px color-mix(in oklch, var(--ring) 35%, transparent));
+  filter: drop-shadow(
+    0 0 4px color-mix(in oklch, var(--ring) 35%, transparent)
+  );
 }
 
 .workflow-flow .react-flow__pane {

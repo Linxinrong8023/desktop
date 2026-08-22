@@ -8,12 +8,13 @@
 //! asynchronous caller carries out, which keeps the reuse, invalidation and
 //! replay rules testable without a running agent.
 
-use ora_contracts::WarmSessionTarget;
-use ora_contracts::acp::session_config_options::{
+use super::WarmOwner;
+use agent_client_protocol_schema::v1::AvailableCommand;
+use agent_client_protocol_schema::v1::{
     SessionConfigId, SessionConfigOption, SessionConfigOptionValue,
 };
-use ora_contracts::acp::slash_command::AvailableCommand;
-use ora_domain::{AgentCli, SessionId};
+use ora_contracts::WarmSessionTarget;
+use ora_domain::{AgentRef, SessionId};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -34,17 +35,12 @@ const MAX_LIVE_ENTRIES: usize = 16;
 /// bound exists to cap unbounded growth rather than to reclaim meaningful memory.
 const MAX_ENTRIES: usize = 64;
 
-/// Identifies the chat surface a warm session belongs to.
-///
-/// `client_id` is part of the identity because one backend can serve several
-/// clients. Two browser tabs showing the same selection must not receive the
-/// same provider session, or the first tab to attach would take the other's
-/// conversation.
+/// Identifies the Desktop or workflow surface a warm session belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) struct WarmKey {
     pub target: WarmSessionTarget,
-    pub agent_cli: AgentCli,
-    pub client_id: String,
+    pub agent_ref: AgentRef,
+    pub owner: WarmOwner,
 }
 
 /// A provider session that is currently registered on a live connection.
@@ -130,7 +126,7 @@ pub(super) enum ClaimDecision {
 /// A provider session that is no longer referenced and should be released.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReleasedSession {
-    pub agent_cli: AgentCli,
+    pub agent_ref: AgentRef,
     pub agent_session_id: String,
     pub generation: u64,
 }
@@ -139,7 +135,7 @@ pub(super) struct ReleasedSession {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct AttachedWarm {
     pub session_id: SessionId,
-    pub agent_cli: AgentCli,
+    pub agent_ref: AgentRef,
     pub agent_session_id: String,
     pub cwd: PathBuf,
     pub available_commands: Vec<AvailableCommand>,
@@ -196,7 +192,7 @@ pub(super) enum Install {
 pub(super) enum ConfigTarget {
     /// The warm session is live; the agent can be asked directly.
     Live {
-        agent_cli: AgentCli,
+        agent_ref: AgentRef,
         agent_session_id: String,
     },
     /// The warm session is cold. The choice is recorded and replayed on rebuild,
@@ -262,7 +258,7 @@ impl WarmPool {
         };
         let attached = AttachedWarm {
             session_id: entry.session_id.clone(),
-            agent_cli: entry.key.agent_cli,
+            agent_ref: entry.key.agent_ref.clone(),
             agent_session_id: live.agent_session_id.clone(),
             cwd: entry.cwd.clone(),
             available_commands: entry.available_commands.clone(),
@@ -366,7 +362,7 @@ impl WarmPool {
         let entry = &self.entries[index];
         Some(match &entry.live {
             Some(live) => ConfigTarget::Live {
-                agent_cli: entry.key.agent_cli,
+                agent_ref: entry.key.agent_ref.clone(),
                 agent_session_id: live.agent_session_id.clone(),
             },
             None => ConfigTarget::Deferred,
@@ -426,7 +422,7 @@ impl WarmPool {
         };
         let attached = AttachedWarm {
             session_id: entry.session_id.clone(),
-            agent_cli: entry.key.agent_cli,
+            agent_ref: entry.key.agent_ref.clone(),
             agent_session_id: live.agent_session_id.clone(),
             cwd: entry.cwd.clone(),
             available_commands: entry.available_commands.clone(),
@@ -498,7 +494,7 @@ impl WarmPool {
         let index = self.index_of(session_id)?;
         let entry = &self.entries[index];
         Some(RebuildPlan {
-            agent_cli: entry.key.agent_cli,
+            agent_ref: entry.key.agent_ref.clone(),
             cwd: entry.cwd.clone(),
             replay: entry.desired_config.clone().into_iter().collect(),
         })
@@ -509,9 +505,9 @@ impl WarmPool {
     /// A CLI that crashed and restarted leaves behind identifiers that no longer
     /// resolve. The entries survive as cold so the identifiers clients hold keep
     /// working; only the dead provider sessions are dropped.
-    pub(super) fn invalidate_generation(&mut self, agent_cli: AgentCli, generation: u64) {
+    pub(super) fn invalidate_generation(&mut self, agent_ref: &AgentRef, generation: u64) {
         for entry in &mut self.entries {
-            if entry.key.agent_cli == agent_cli
+            if entry.key.agent_ref == *agent_ref
                 && entry
                     .live
                     .as_ref()
@@ -617,9 +613,9 @@ impl WarmPool {
 
     /// Detaches an entry's provider session and reports it for release.
     fn release_live(&mut self, index: usize) -> Option<ReleasedSession> {
-        let agent_cli = self.entries[index].key.agent_cli;
+        let agent_ref = self.entries[index].key.agent_ref.clone();
         self.entries[index].live.take().map(|live| ReleasedSession {
-            agent_cli,
+            agent_ref,
             agent_session_id: live.agent_session_id,
             generation: live.generation,
         })
@@ -635,7 +631,7 @@ impl WarmPool {
 /// What a cold warm session needs before it can serve a prompt.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct RebuildPlan {
-    pub agent_cli: AgentCli,
+    pub agent_ref: AgentRef,
     pub cwd: PathBuf,
     pub replay: Vec<(SessionConfigId, SessionConfigOptionValue)>,
 }
@@ -647,24 +643,33 @@ mod tests {
         MAX_ENTRIES, MAX_LIVE_ENTRIES, RebuildPlan, ReleasedSession, Reservation, WarmDecision,
         WarmKey, WarmPool,
     };
-    use ora_contracts::WarmSessionTarget;
-    use ora_contracts::acp::session_config_options::{
+    use crate::agent_runtime::WarmOwner;
+    use agent_client_protocol_schema::v1::{
         SessionConfigOption, SessionConfigOptionValue, SessionConfigSelectOption,
     };
+    use ora_contracts::WarmSessionTarget;
     use ora_domain::{AgentCli, SessionId};
     use pretty_assertions::assert_eq;
     use std::path::{Path, PathBuf};
 
     const GENERATION: u64 = 1;
 
-    /// Builds a key for one task-scoped chat surface.
-    fn key(task_id: &str, client_id: &str) -> WarmKey {
+    /// Builds a key for one task-scoped warm-session owner.
+    fn key(task_id: &str, owner_name: &str) -> WarmKey {
+        let owner = match owner_name {
+            "interactive" | "client-1" => WarmOwner::Interactive,
+            "workflow-node" | "client-2" => WarmOwner::WorkflowNode {
+                run_id: "run-1".to_string(),
+                node_id: "node-1".to_string(),
+            },
+            other => panic!("unknown warm owner {other}"),
+        };
         WarmKey {
             target: WarmSessionTarget::Task {
                 task_id: task_id.to_string(),
             },
-            agent_cli: AgentCli::OpenCode,
-            client_id: client_id.to_string(),
+            agent_ref: AgentCli::Nga.agent_ref(),
+            owner,
         }
     }
 
@@ -723,9 +728,9 @@ mod tests {
         );
     }
 
-    /// Verifies two clients on the same selection never share one provider session.
+    /// Verifies interactive and workflow owners on one selection never share a provider session.
     #[test]
-    fn isolates_warm_sessions_per_client() {
+    fn isolates_warm_sessions_per_owner() {
         let mut pool = WarmPool::default();
         let first = warm(
             &mut pool,
@@ -777,7 +782,7 @@ mod tests {
                     replay: vec![],
                 }),
                 Some(ReleasedSession {
-                    agent_cli: AgentCli::OpenCode,
+                    agent_ref: AgentCli::Nga.agent_ref(),
                     agent_session_id: "agent-session-1".to_string(),
                     generation: GENERATION,
                 }),
@@ -792,7 +797,7 @@ mod tests {
         let key = key("task-1", "client-1");
         let session_id = warm(&mut pool, &key, Path::new("/repo"), 0, "session-1");
 
-        pool.invalidate_generation(AgentCli::OpenCode, GENERATION + 1);
+        pool.invalidate_generation(&AgentCli::Nga.agent_ref(), GENERATION + 1);
         let (decision, released) = pool.lookup(&key, Path::new("/repo"), GENERATION + 1, 5, || {
             SessionId::new("unused")
         });
@@ -823,7 +828,7 @@ mod tests {
             Some(model_options("smart")),
         );
 
-        pool.invalidate_generation(AgentCli::OpenCode, GENERATION + 1);
+        pool.invalidate_generation(&AgentCli::Nga.agent_ref(), GENERATION + 1);
         let (decision, _) = pool.lookup(&key, Path::new("/repo"), GENERATION + 1, 5, || {
             SessionId::new("unused")
         });
@@ -844,7 +849,7 @@ mod tests {
         let mut pool = WarmPool::default();
         let key = key("task-1", "client-1");
         let session_id = warm(&mut pool, &key, Path::new("/repo"), 0, "session-1");
-        pool.invalidate_generation(AgentCli::OpenCode, GENERATION + 1);
+        pool.invalidate_generation(&AgentCli::Nga.agent_ref(), GENERATION + 1);
 
         assert_eq!(
             pool.config_target(&session_id, 5),
@@ -867,7 +872,7 @@ mod tests {
             (
                 vec![],
                 Some(ConfigTarget::Live {
-                    agent_cli: AgentCli::OpenCode,
+                    agent_ref: AgentCli::Nga.agent_ref(),
                     agent_session_id: "agent-session-1".to_string(),
                 }),
             )
@@ -891,7 +896,7 @@ mod tests {
         assert_eq!(
             pool.evict(),
             vec![ReleasedSession {
-                agent_cli: AgentCli::OpenCode,
+                agent_ref: AgentCli::Nga.agent_ref(),
                 agent_session_id: "agent-session-0".to_string(),
                 generation: GENERATION,
             }]
@@ -919,7 +924,7 @@ mod tests {
         assert_eq!(
             pool.evict(),
             vec![ReleasedSession {
-                agent_cli: AgentCli::OpenCode,
+                agent_ref: AgentCli::Nga.agent_ref(),
                 agent_session_id: "agent-session-1".to_string(),
                 generation: GENERATION,
             }]
@@ -961,7 +966,7 @@ mod tests {
             ),
             (
                 Some(RebuildPlan {
-                    agent_cli: AgentCli::OpenCode,
+                    agent_ref: AgentCli::Nga.agent_ref(),
                     cwd: PathBuf::from("/repo"),
                     replay: vec![],
                 }),
@@ -1009,7 +1014,7 @@ mod tests {
     }
 
     /// Verifies a deleted target takes its warm sessions with it, across every
-    /// client that had one open, while leaving other surfaces untouched.
+    /// owner that had one open, while leaving other surfaces untouched.
     #[test]
     fn discards_every_warm_session_for_a_deleted_target() {
         let mut pool = WarmPool::default();
@@ -1049,12 +1054,12 @@ mod tests {
             (
                 vec![
                     ReleasedSession {
-                        agent_cli: AgentCli::OpenCode,
+                        agent_ref: AgentCli::Nga.agent_ref(),
                         agent_session_id: "agent-session-1".to_string(),
                         generation: GENERATION,
                     },
                     ReleasedSession {
-                        agent_cli: AgentCli::OpenCode,
+                        agent_ref: AgentCli::Nga.agent_ref(),
                         agent_session_id: "agent-session-2".to_string(),
                         generation: GENERATION,
                     },
@@ -1084,7 +1089,7 @@ mod tests {
             (
                 vec![],
                 Some(ConfigTarget::Live {
-                    agent_cli: AgentCli::OpenCode,
+                    agent_ref: AgentCli::Nga.agent_ref(),
                     agent_session_id: "agent-session-1".to_string(),
                 }),
             )
@@ -1109,7 +1114,7 @@ mod tests {
             (
                 Reservation::Held(AttachedWarm {
                     session_id,
-                    agent_cli: AgentCli::OpenCode,
+                    agent_ref: AgentCli::Nga.agent_ref(),
                     agent_session_id: "agent-session-1".to_string(),
                     cwd: PathBuf::from("/repo"),
                     available_commands: vec![],
@@ -1162,7 +1167,7 @@ mod tests {
             (
                 ClaimDecision::Held(AttachedWarm {
                     session_id,
-                    agent_cli: AgentCli::OpenCode,
+                    agent_ref: AgentCli::Nga.agent_ref(),
                     agent_session_id: "agent-session-1".to_string(),
                     cwd: PathBuf::from("/repo"),
                     available_commands: vec![],
@@ -1217,7 +1222,7 @@ mod tests {
             SessionConfigOptionValue::value_id("smart"),
             Some(model_options("smart")),
         );
-        pool.invalidate_generation(AgentCli::OpenCode, GENERATION + 1);
+        pool.invalidate_generation(&AgentCli::Nga.agent_ref(), GENERATION + 1);
 
         let (decision, _) =
             pool.lookup_and_reserve(&key, Path::new("/repo"), GENERATION + 1, 5, || {
@@ -1261,7 +1266,7 @@ mod tests {
             (
                 Install::Refused,
                 Some(ConfigTarget::Live {
-                    agent_cli: AgentCli::OpenCode,
+                    agent_ref: AgentCli::Nga.agent_ref(),
                     agent_session_id: "agent-session-1".to_string(),
                 }),
             )
@@ -1294,7 +1299,7 @@ mod tests {
             (
                 Install::Refused,
                 Some(ConfigTarget::Live {
-                    agent_cli: AgentCli::OpenCode,
+                    agent_ref: AgentCli::Nga.agent_ref(),
                     agent_session_id: "agent-session-1".to_string(),
                 }),
             )
@@ -1321,7 +1326,7 @@ mod tests {
                 Reservation::NeedsRebuild,
                 Reservation::Held(AttachedWarm {
                     session_id,
-                    agent_cli: AgentCli::OpenCode,
+                    agent_ref: AgentCli::Nga.agent_ref(),
                     agent_session_id: "agent-session-1".to_string(),
                     cwd: PathBuf::from("/repo/old"),
                     available_commands: vec![],
@@ -1375,7 +1380,7 @@ mod tests {
             pool.reserve_for_attach(&session_id, Path::new("/repo")),
             Reservation::Held(AttachedWarm {
                 session_id,
-                agent_cli: AgentCli::OpenCode,
+                agent_ref: AgentCli::Nga.agent_ref(),
                 agent_session_id: "agent-session-1".to_string(),
                 cwd: PathBuf::from("/repo"),
                 available_commands: vec![],
@@ -1396,7 +1401,7 @@ mod tests {
             SessionConfigOptionValue::value_id("smart"),
             None,
         );
-        pool.invalidate_generation(AgentCli::OpenCode, GENERATION + 1);
+        pool.invalidate_generation(&AgentCli::Nga.agent_ref(), GENERATION + 1);
 
         assert_eq!(
             (
@@ -1406,7 +1411,7 @@ mod tests {
             (
                 Reservation::NeedsRebuild,
                 Some(RebuildPlan {
-                    agent_cli: AgentCli::OpenCode,
+                    agent_ref: AgentCli::Nga.agent_ref(),
                     cwd: PathBuf::from("/repo"),
                     replay: vec![("model".into(), SessionConfigOptionValue::value_id("smart"),)],
                 }),
@@ -1441,7 +1446,7 @@ mod tests {
             ),
             (
                 Install::Accepted(Some(ReleasedSession {
-                    agent_cli: AgentCli::OpenCode,
+                    agent_ref: AgentCli::Nga.agent_ref(),
                     agent_session_id: "agent-session-1".to_string(),
                     generation: GENERATION,
                 })),

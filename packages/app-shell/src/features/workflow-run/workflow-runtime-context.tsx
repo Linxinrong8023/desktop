@@ -26,7 +26,10 @@ export function WorkflowRuntimeProvider({
     if (runtimeOverride !== undefined) {
       return runtimeOverride;
     }
-    const locale = i18n.resolvedLanguage === "en-US" ? "en-US" as const : "zh-CN" as const;
+    const locale =
+      i18n.resolvedLanguage === "en-US"
+        ? ("en-US" as const)
+        : ("zh-CN" as const);
     return createMemoryWorkflowRuntime({ locale });
     // Process-lifetime store: locale must not recreate Maps / engines.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional

@@ -43,21 +43,19 @@ fn bootstraps_empty_database_with_default_catalog() {
         load_table_names(database.connection()),
         vec![
             "agents".to_string(),
-            "artifacts".to_string(),
+            "git_cleanup_jobs".to_string(),
             "migrations".to_string(),
-            "project_spec_source_overrides".to_string(),
-            "project_work_contexts".to_string(),
+            "plugin_state".to_string(),
             "projects".to_string(),
             "sessions".to_string(),
             "skills".to_string(),
-            "task_diff_comments".to_string(),
             "tasks".to_string(),
-            "virtual_entries".to_string(),
-            "virtual_folders".to_string(),
+            "user_config".to_string(),
             "workflow_node_runs".to_string(),
             "workflow_runs".to_string(),
             "workflow_snapshots".to_string(),
             "workflows".to_string(),
+            "worktree_provisioning_leases".to_string(),
             "worktrees".to_string(),
         ]
     );
@@ -77,48 +75,127 @@ fn bootstraps_empty_database_with_default_catalog() {
     );
 }
 
-/// Verifies session lifecycle and display-title columns are installed and rolled back predictably.
+/// Verifies user configuration has the Issue-specified schema and rolls back independently.
 #[test]
-fn manages_session_columns_lifecycle() {
+fn manages_user_config_schema_lifecycle() {
     let temp_dir = TempDir::new().unwrap();
-    let database_path = temp_dir.path().join("session-history.sqlite3");
+    let database_path = temp_dir.path().join("user-config.sqlite3");
     let catalog = default_migration_catalog().unwrap();
-    let migrations = [
-        "0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009",
-    ]
-    .map(|version| {
-        catalog
-            .migration(version)
-            .cloned()
-            .unwrap_or_else(|| panic!("missing migration {version}"))
-    });
+    let migrations = catalog
+        .target_versions()
+        .iter()
+        .map(|version| catalog.migration(version).cloned().unwrap())
+        .collect::<Vec<_>>();
 
-    bootstrap_file_database(&database_path, catalog, 1_700_000_000_000);
-
+    bootstrap_file_database(&database_path, catalog, 100);
     let connection = Connection::open(&database_path).unwrap();
-    assert!(
-        load_table_column_names(&connection, "sessions")
-            .contains(&"history_degraded_reason".to_string())
+    let columns = connection
+        .prepare("PRAGMA table_info(user_config)")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>("name")?,
+                row.get::<_, String>("type")?,
+                row.get::<_, i64>("notnull")? != 0,
+                row.get::<_, i64>("pk")? != 0,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        columns,
+        vec![
+            ("key".to_string(), "TEXT".to_string(), false, true),
+            ("value".to_string(), "TEXT".to_string(), true, false),
+        ]
     );
-    assert!(load_table_column_names(&connection, "sessions").contains(&"title".to_string()));
+    assert_eq!(table_exists(&connection, "projects"), true);
     drop(connection);
 
     let rolled_back = MigrationCatalog::with_target_versions(
-        migrations.to_vec(),
-        vec!["0001", "0002", "0003", "0004"],
+        migrations,
+        vec!["0001", "0002", "0003", "0004", "0005"],
     )
     .unwrap();
-    bootstrap_file_database(&database_path, rolled_back, 1_700_000_000_100);
-
+    bootstrap_file_database(&database_path, rolled_back, 200);
     let connection = Connection::open(&database_path).unwrap();
-    assert!(
-        !load_table_column_names(&connection, "sessions")
-            .contains(&"history_degraded_reason".to_string())
-    );
-    assert!(!load_table_column_names(&connection, "sessions").contains(&"title".to_string()));
+
+    assert_eq!(table_exists(&connection, "user_config"), false);
+    assert_eq!(table_exists(&connection, "projects"), true);
 }
 
-/// Verifies the catalog creates ID-keyed schema without name indexes and removes it during rollback.
+/// Verifies every namespaced catalog table assigns local ownership when callers omit it.
+#[test]
+fn catalog_namespaces_default_to_local() {
+    let catalog = default_migration_catalog().unwrap();
+    let database = with_trace_logging(|| {
+        DatabaseBootstrapper::new(FixedTimestampSource { now: 1 })
+            .bootstrap(&DatabaseLocation::in_memory(), &catalog)
+            .unwrap()
+    });
+    let connection = database.connection();
+
+    for table_name in ["skills", "agents", "workflows"] {
+        let description_column = if table_name == "workflows" {
+            String::new()
+        } else {
+            ", description".to_string()
+        };
+        let description_value = if table_name == "workflows" {
+            String::new()
+        } else {
+            ", 'description'".to_string()
+        };
+        connection
+            .execute(
+                &format!(
+                    "INSERT INTO {table_name} (id, name{description_column}, created_at, updated_at, is_deleted) VALUES ('id', 'name'{description_value}, 1, 1, 0)"
+                ),
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    &format!("SELECT namespace FROM {table_name} WHERE id = 'id'"),
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "local"
+        );
+    }
+}
+
+/// Verifies session lifecycle and display-title columns are part of the compressed base schema.
+#[test]
+fn includes_session_columns_in_base_schema() {
+    let catalog = default_migration_catalog().unwrap();
+    let database = with_trace_logging(|| {
+        DatabaseBootstrapper::new(FixedTimestampSource { now: 1 })
+            .bootstrap(&DatabaseLocation::in_memory(), &catalog)
+            .unwrap()
+    });
+
+    assert_eq!(
+        load_table_column_names(database.connection(), "sessions"),
+        vec![
+            "id".to_string(),
+            "task_id".to_string(),
+            "title".to_string(),
+            "agent_cli".to_string(),
+            "agent_session_id".to_string(),
+            "history_degraded_reason".to_string(),
+            "status".to_string(),
+            "created_at".to_string(),
+            "updated_at".to_string(),
+            "is_deleted".to_string(),
+        ]
+    );
+}
+
+/// Verifies the catalog creates ID-keyed skill and agent schema and removes it during rollback.
 #[test]
 fn manages_skill_and_agent_definition_schema_lifecycle() {
     let temp_dir = TempDir::new().unwrap();
@@ -138,17 +215,26 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
 
     let connection = Connection::open(&database_path).unwrap();
     for table_name in ["skills", "agents"] {
-        let mut expected_columns = vec![
+        let expected_columns = vec![
             "id".to_string(),
+            "namespace".to_string(),
             "name".to_string(),
             "description".to_string(),
-            "created_at".to_string(),
-            "updated_at".to_string(),
-            "is_deleted".to_string(),
         ];
-        if table_name == "agents" {
-            expected_columns.push("content".to_string());
-        }
+        let expected_columns = if table_name == "agents" {
+            [expected_columns, vec!["content".to_string()]].concat()
+        } else {
+            expected_columns
+        };
+        let expected_columns = [
+            expected_columns,
+            vec![
+                "created_at".to_string(),
+                "updated_at".to_string(),
+                "is_deleted".to_string(),
+            ],
+        ]
+        .concat();
         assert_eq!(
             load_table_column_names(&connection, table_name),
             expected_columns
@@ -165,16 +251,37 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
         connection
             .execute(
                 &format!(
-                    "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                     VALUES (?1, ?2, ?3, ?4, ?5, 0)"
+                    "INSERT INTO {table_name} (id, namespace, name, description, created_at, updated_at, is_deleted)\n                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)"
                 ),
-                params!["second", "opencode", "OpenCode duplicate", 2_i64, 2_i64],
+                params![
+                    "second",
+                    "ora.plugin",
+                    "opencode",
+                    "OpenCode duplicate",
+                    2_i64,
+                    2_i64
+                ],
             )
             .unwrap();
+        let duplicate_name = connection.execute(
+            &format!(
+                "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                 VALUES (?1, ?2, ?3, ?4, ?5, 0)"
+            ),
+            params!["duplicate-name", "OPENCODE", "Duplicate name", 3_i64, 3_i64],
+        );
+        assert_eq!(
+            matches!(
+                duplicate_name,
+                Err(rusqlite::Error::SqliteFailure(error, _))
+                    if error.code == ErrorCode::ConstraintViolation
+            ),
+            true
+        );
         let duplicate_id = connection.execute(
             &format!(
                 "INSERT INTO {table_name} (id, name, description, created_at, updated_at, is_deleted)\n                 VALUES (?1, ?2, ?3, ?4, ?5, 0)"
             ),
-            params!["first", "different-name", "Duplicate ID", 3_i64, 3_i64],
+            params!["first", "different-name", "Duplicate ID", 4_i64, 4_i64],
         );
 
         assert_eq!(
@@ -205,7 +312,7 @@ fn manages_skill_and_agent_definition_schema_lifecycle() {
 
     drop(connection);
     let rollback_catalog =
-        MigrationCatalog::with_target_versions(migrations.to_vec(), vec!["0001", "0002"]).unwrap();
+        MigrationCatalog::with_target_versions(migrations.to_vec(), vec!["0001"]).unwrap();
     bootstrap_file_database(&database_path, rollback_catalog, 1_700_000_000_100);
 
     let connection = Connection::open(&database_path).unwrap();

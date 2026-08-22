@@ -1,5 +1,4 @@
 use crate::BoxRepositorySource;
-use ora_domain::{TaskDiffComment, TaskDiffCommentId, TaskId};
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -104,62 +103,6 @@ pub enum TaskGitWriterError {
 
 impl TaskGitWriterError {
     /// Wraps a Git failure without flattening its `Error::source()` chain.
-    pub fn operation_failed(error: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self::OperationFailed(Box::new(error))
-    }
-}
-
-/// Supplies persistence operations for root diff discussions and replies.
-///
-/// Implementations must return only visible comments and preserve their stable creation order.
-pub trait TaskDiffCommentRepository {
-    /// Persists one new root discussion or reply.
-    fn create_comment(
-        &self,
-        comment: TaskDiffComment,
-    ) -> Result<TaskDiffComment, TaskDiffCommentRepositoryError>;
-
-    /// Loads one visible comment by identifier.
-    fn find_comment(
-        &self,
-        comment_id: &TaskDiffCommentId,
-    ) -> Result<Option<TaskDiffComment>, TaskDiffCommentRepositoryError>;
-
-    /// Lists every visible discussion message for one task.
-    fn list_comments(
-        &self,
-        task_id: &TaskId,
-    ) -> Result<Vec<TaskDiffComment>, TaskDiffCommentRepositoryError>;
-
-    /// Persists a root discussion status replacement.
-    fn update_comment(
-        &self,
-        comment: TaskDiffComment,
-    ) -> Result<TaskDiffComment, TaskDiffCommentRepositoryError>;
-}
-
-/// Supplies identifiers for newly created diff comments and replies.
-pub trait TaskDiffCommentIdGenerator {
-    /// Produces a fresh comment identifier.
-    fn generate_comment_id(&self) -> TaskDiffCommentId;
-}
-
-/// Captures comment persistence failures without leaking database-specific errors.
-#[derive(Debug, Error)]
-pub enum TaskDiffCommentRepositoryError {
-    /// Indicates that comment persistence failed below the application port.
-    #[error("task diff comment repository operation failed")]
-    OperationFailed(#[source] BoxRepositorySource),
-    /// Classifies an invalid comment row or request without exposing database details.
-    #[error("invalid task diff comment: {0}")]
-    Invalid(String),
-    /// Classifies a comment write that conflicts with stored state.
-    #[error("task diff comment conflicts with stored state: {0}")]
-    Conflict(String),
-}
-
-impl TaskDiffCommentRepositoryError {
-    /// Wraps a persistence failure without flattening its `Error::source()` chain.
     pub fn operation_failed(error: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::OperationFailed(Box::new(error))
     }

@@ -17,10 +17,10 @@ Keep these stacks separate — shared chrome only where noted.
    **run** workspace after deploy. Consumes `@ora/workflow-runtime` via React
    context; owns Theater / Overview / hooks only.
 
-| | Settings RF | OpenSpec / `workflow-store` | `workflow-run` | `@ora/workflow-runtime` |
-| --- | --- | --- | --- | --- |
-| Owns | Definition edit, deploy entry | Spec stepper state | Theater UI + context | Ports, memory engine, events |
-| Must not | Drive live run Theater | Mutate `GraphWorkflowRun` | Reuse settings `WorkflowCanvas` | Own React / Theater |
+|          | Settings RF                   | OpenSpec / `workflow-store` | `workflow-run`                  | `@ora/workflow-runtime`      |
+| -------- | ----------------------------- | --------------------------- | ------------------------------- | ---------------------------- |
+| Owns     | Definition edit, deploy entry | Spec stepper state          | Theater UI + context            | Ports, memory engine, events |
+| Must not | Drive live run Theater        | Mutate `GraphWorkflowRun`   | Reuse settings `WorkflowCanvas` | Own React / Theater          |
 
 ## Responsibilities
 
@@ -45,6 +45,12 @@ Keep these stacks separate — shared chrome only where noted.
     permission / clarify and conversation share one action cluster. Activating it
     keeps the card shell/header stable and morphs the body into a compact node
     conversation that reuses the full chat bubble and Markdown renderer.
+    Completing an interactive node keeps its action visibly busy through the
+    backend transition and run-detail refresh, then moves the open dock to the
+    first active successor in the same stable path order. If a completion
+    releases parallel successors, the earliest carousel/path item opens.
+    An open non-interactive session follows the same successor selection when
+    its running node reaches a terminal state, without requiring an action.
     User input and formal Agent messages stay visible; thoughts and tool calls
     remain available behind one collapsed activity disclosure. The inspector
     therefore does not duplicate runtime input/output; it remains the
@@ -112,17 +118,17 @@ Keep these stacks separate — shared chrome only where noted.
   the run — not a single node session. Stage-scoped Diff is deferred until a
   session-level Git Diff API (or turn-level filter) exists; `nodeStates.sessionId`
   is projected for that follow-up.
-- **Open location (Desktop)**: the run header reuses `LocationActionsButton`
+- **Open location**: the run header reuses `LocationActionsButton`
   (File Manager / Terminal / VS Code / Copy Path). Prefer
   `GetWorkflowRunResponse.taskId` so opens target the run worktree; fall back to
-  the project root until that id is available. Hidden on Web (`unsupported`).
+  the project root until that id is available.
 - Lists: react-query via `queryKeys.workflowMounts` /
   `workflowMountsByDefinition` / `workflowRuns`.
 - Runtime: `WorkflowRuntimeProvider` in `AppShell` injects
   `@ora/workflow-runtime` (`createMemoryWorkflowRuntime` today).
-  Web/Desktop hosts can supply `AppShell.workflowRuntime`; the future production
-  adapter will wrap the repository-wide generated contracts transport (HTTP +
-  NDJSON on Web, Tauri commands + channels on Desktop).
+  The Desktop AppShell can supply `AppShell.workflowRuntime`; the future
+  production adapter will wrap the repository-wide generated contracts client
+  over Tauri commands and channels.
   `useGraphWorkflowRunLiveSync` patches run caches via `runs.watch`.
   Per-run UI side effects (artifacts cache, HITL toast, result-act focus)
   share one cursor-aware `runs.subscribe` inside `useGraphWorkflowRunLive`.
@@ -173,7 +179,11 @@ Keep these stacks separate — shared chrome only where noted.
   prompt may list every open gate so the user can jump (expanded HITL collapses
   when focus leaves a waiting act). Collapse is respected across later run ticks.
   Esc collapses HITL first; a second Esc returns Overview. Submit payload keys
-  match `field.name`. The focused card conversation shows node input, Agent
+  match `field.name`. Text / textarea fields reuse the chat `ComposerEditor`
+  (Enter submits, Shift+Enter newline) without chat attachments or `@` / `/`
+  menus. Drafts store `documentPlainText` and reload as the same nodes so a
+  Theater remount does not flash raw `**` / `#` markers. The focused card
+  conversation shows node input, Agent
   messages, and submitted HITL answers (mock approval gates also append a short
   assistant ack so the session visibly updates after submit); the inspector
   remains available without duplicating that transcript.
@@ -183,20 +193,28 @@ Keep these stacks separate — shared chrome only where noted.
 
 ## Node conversation integration
 
-- `WorkflowRunLiveSnapshot.conversation` is a filtered presentation projection,
-  not raw session history. `node_conversation_item_upserted` supports visible
-  user/Agent messages plus secondary activity items while preserving cursor
-  replay semantics.
+- `WorkflowRunLiveSnapshot.conversation` remains a lightweight presentation projection used for
+  run-level indicators. Opening a stage card resolves the node state's opaque `sessionId`, loads
+  that session through the shared chat store, and renders the ordinary `ChatView` transcript.
 - The projection follows the formal chat stream contract: backend adapters must
   deliver one run's events in cursor/sequence order and keep item IDs stable.
   The frontend applies incremental id-based upserts and does not globally re-sort
   conversation items.
-- Each node state exposes an opaque `sessionId`; conversation items repeat that
-  identity so a future HTTP/NDJSON adapter can map the run node to its real
-  session.
+- Each node state exposes an opaque `sessionId`; conversation items repeat that identity for
+  projection correlation, while the stage session surface uses the identifier directly.
 - The memory engine creates deterministic node session IDs, mock user/Agent
   messages, and collapsed thought/tool activity. Production adapters can feed
   raw activity into the projection without exposing it by default.
+- Interactive and non-interactive agent nodes share the same session loading and transcript
+  rendering. Only interactive nodes expose the composer and explicit completion action; read-only
+  nodes retain the return-to-summary action without creating a second conversation renderer.
+- A running interactive node stops through the ordinary Session prompt-cancellation control, so
+  the workflow-owned automatic first turn and later user turns have the same UI semantics. The
+  cancelled Session remains open and the node returns to awaiting input.
+- Production binds a node's Session before preparing its automatic prompt so cancellation can
+  always clean it up. While that node remains running, the dock retries an empty attachment-seeded
+  replay until the first prompt appears, so automatic successor navigation cannot become stuck on
+  the initial chat surface.
 - Only the focused stage card can enter conversation mode. Parallel peers keep
   stable carousel geometry. The session dock stays available while embedded HITL
   is open: it sits inside the HITL action cluster (collapsed: beside the warm
@@ -207,7 +225,11 @@ Keep these stacks separate — shared chrome only where noted.
   the workspace so Overview ↔ Theater remounts restore the same session view.
   Opening a session also pins that act and wins over auto-follow: live-pin
   release and artifact reveal cannot steal the stage, and Theater always shows
-  the session node until the reader closes the dock or picks another path node.
+  the session node until the reader closes the dock, picks another path node, or
+  an automatic node finishes and advances the dock to its first active successor.
+  Node conversation reuses `MessageBubble` / `MarkdownMessage` **outside**
+  task `MessageList`, so it does not receive chat inline artifact links. Those
+  links belong to the task review chat, not the Theater card.
 
 ## Demo path checklist
 

@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { PlatformProvider } from "@ora/platform";
-import type { ReactNode } from "react";
+import { PlatformProvider } from "../../platform";
+import { useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { AppI18nProvider } from "../../i18n/i18n";
 import { createStubPlatform } from "../../test/stub-platform";
@@ -13,9 +13,11 @@ vi.mock("./task-diff-view", () => ({
   TaskDiffView: ({
     toolbar,
     fileRequest,
+    onFileNotFound,
   }: {
     toolbar?: ReactNode;
-    fileRequest?: { path: string; requestId: number };
+    fileRequest?: { path: string; requestId: number; line?: number };
+    onFileNotFound?: (path: string, line?: number) => void;
   }) => (
     <section aria-label="Task diff">
       <header data-diff-toolbar>
@@ -23,6 +25,14 @@ vi.mock("./task-diff-view", () => ({
         {toolbar}
       </header>
       <span data-testid="requested-file">{fileRequest?.path}</span>
+      <span data-testid="requested-line">{fileRequest?.line ?? ""}</span>
+      <button
+        type="button"
+        data-testid="simulate-not-found"
+        onClick={() => onFileNotFound?.("src/missing.ts", 10)}
+      >
+        Simulate Not Found
+      </button>
     </section>
   ),
 }));
@@ -32,13 +42,20 @@ vi.mock("../files/workspace-review-files-panel", () => ({
     toolbar,
     taskId,
     projectId,
+    fileRequest,
   }: {
     toolbar?: ReactNode;
     taskId?: string;
     projectId: string;
+    fileRequest?: { path: string; requestId: number; line?: number };
   }) => (
     <section aria-label="Files panel" data-testid="files-panel">
       <span data-testid="files-target">{taskId ?? projectId}</span>
+      <span data-testid="files-request">
+        {fileRequest === undefined
+          ? ""
+          : `${fileRequest.path}:${fileRequest.line ?? ""}`}
+      </span>
       {toolbar}
     </section>
   ),
@@ -48,9 +65,39 @@ vi.mock("../files/workspace-review-files-panel", () => ({
 function OpenChangedFileButton() {
   const navigation = useTaskChangesNavigation();
   return (
-    <button type="button" onClick={() => navigation?.openFile("src/main.ts")}>
+    <button type="button" onClick={() => navigation?.openDiff("src/main.ts")}>
       Open changed file
     </button>
+  );
+}
+
+/** Requests a workspace file preview the way inline referenced links do. */
+function OpenWorkspaceFileButton() {
+  const navigation = useTaskChangesNavigation();
+  return (
+    <button
+      type="button"
+      onClick={() => navigation?.openWorkspaceFile("src/lib.ts", 8, 1)}
+    >
+      Open workspace file
+    </button>
+  );
+}
+
+/** Models workspace-owned UI state that must survive opening the review panel. */
+function StatefulWorkspace() {
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const navigation = useTaskChangesNavigation();
+  return (
+    <main>
+      <button type="button" onClick={() => setInspectorOpen(true)}>
+        Open inspector
+      </button>
+      <span>{inspectorOpen ? "Inspector open" : "Inspector closed"}</span>
+      <button type="button" onClick={() => navigation?.openDiff("src/main.ts")}>
+        Open changed file
+      </button>
+    </main>
   );
 }
 
@@ -58,7 +105,6 @@ const taskContext = {
   kind: "task" as const,
   taskId: "task-1",
   projectId: "project-1",
-  projectRootPath: "C:/project",
 };
 
 describe("responsiveReviewWidth", () => {
@@ -94,7 +140,9 @@ describe("WorkspaceReviewLayout", () => {
     );
 
     expect(
-      screen.getByRole("group", { name: /工作区审查面板|Workspace review panels/ }).parentElement,
+      screen.getByRole("group", {
+        name: /工作区审查面板|Workspace review panels/,
+      }).parentElement,
     ).toHaveClass("right-4", "top-2");
   });
 
@@ -117,7 +165,9 @@ describe("WorkspaceReviewLayout", () => {
       screen.getByRole("button", { name: "Commit" }),
     );
     expect(toolbar).toContainElement(
-      screen.getByRole("group", { name: /工作区审查面板|Workspace review panels/ }),
+      screen.getByRole("group", {
+        name: /工作区审查面板|Workspace review panels/,
+      }),
     );
     expect(
       screen.getByRole("button", {
@@ -140,8 +190,62 @@ describe("WorkspaceReviewLayout", () => {
 
     await user.click(screen.getByRole("button", { name: "Open changed file" }));
 
-    expect(screen.getByRole("region", { name: "Task diff" })).toBeInTheDocument();
-    expect(screen.getByTestId("requested-file")).toHaveTextContent("src/main.ts");
+    expect(
+      screen.getByRole("region", { name: "Task diff" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("requested-file")).toHaveTextContent(
+      "src/main.ts",
+    );
+  });
+
+  it("opens the Files panel and forwards a workspace file request with a line", async () => {
+    const user = userEvent.setup();
+    render(
+      <PlatformProvider adapter={createStubPlatform()}>
+        <AppI18nProvider>
+          <WorkspaceReviewLayout context={taskContext}>
+            <OpenWorkspaceFileButton />
+          </WorkspaceReviewLayout>
+        </AppI18nProvider>
+      </PlatformProvider>,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Open workspace file" }),
+    );
+
+    expect(
+      screen.getByRole("region", { name: "Files panel" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("files-request")).toHaveTextContent(
+      "src/lib.ts:8",
+    );
+  });
+
+  it("preserves workspace state when opening Changes", async () => {
+    const user = userEvent.setup();
+    render(
+      <PlatformProvider adapter={createStubPlatform()}>
+        <AppI18nProvider>
+          <WorkspaceReviewLayout
+            context={taskContext}
+            preserveWorkspaceOnReviewOpen
+          >
+            <StatefulWorkspace />
+          </WorkspaceReviewLayout>
+        </AppI18nProvider>
+      </PlatformProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open inspector" }));
+    expect(screen.getByText("Inspector open")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open changed file" }));
+
+    expect(screen.getByText("Inspector open")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Task diff" }),
+    ).toBeInTheDocument();
   });
 
   it("shows only Files for a project review context", async () => {
@@ -149,17 +253,25 @@ describe("WorkspaceReviewLayout", () => {
     render(
       <PlatformProvider adapter={createStubPlatform()}>
         <AppI18nProvider>
-          <WorkspaceReviewLayout context={{ kind: "project", projectId: "project-1", projectRootPath: "C:/project" }}>
+          <WorkspaceReviewLayout
+            context={{ kind: "project", projectId: "project-1" }}
+          >
             <main>Project</main>
           </WorkspaceReviewLayout>
         </AppI18nProvider>
       </PlatformProvider>,
     );
 
-    expect(screen.queryByRole("button", { name: /变更|Changes/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /文件|Files/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /变更|Changes/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /文件|Files/ }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /文件|Files/ }));
-    expect(screen.getByRole("region", { name: "Files panel" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Files panel" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps the files panel open and remounts it for a compatible target change", async () => {
@@ -167,7 +279,9 @@ describe("WorkspaceReviewLayout", () => {
     const { rerender } = render(
       <PlatformProvider adapter={createStubPlatform()}>
         <AppI18nProvider>
-          <WorkspaceReviewLayout context={{ kind: "project", projectId: "project-1", projectRootPath: "C:/project" }}>
+          <WorkspaceReviewLayout
+            context={{ kind: "project", projectId: "project-1" }}
+          >
             <main>Project</main>
           </WorkspaceReviewLayout>
         </AppI18nProvider>
@@ -188,7 +302,7 @@ describe("WorkspaceReviewLayout", () => {
     expect(screen.getByTestId("files-target")).toHaveTextContent("task-1");
   });
 
-  it("closes a task-only Changes panel when switching to a project", async () => {
+  it("switches an open Changes panel to Files when entering project context", async () => {
     const user = userEvent.setup();
     const { rerender } = render(
       <PlatformProvider adapter={createStubPlatform()}>
@@ -200,19 +314,39 @@ describe("WorkspaceReviewLayout", () => {
       </PlatformProvider>,
     );
     await user.click(screen.getByRole("button", { name: /变更|Changes/ }));
-    expect(screen.getByRole("region", { name: "Task diff" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Task diff" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /显示或隐藏变更文件目录|Show or hide changed file tree/,
+      }),
+    ).toBeInTheDocument();
 
     rerender(
       <PlatformProvider adapter={createStubPlatform()}>
         <AppI18nProvider>
-          <WorkspaceReviewLayout context={{ kind: "project", projectId: "project-1", projectRootPath: "C:/project" }}>
+          <WorkspaceReviewLayout
+            context={{ kind: "project", projectId: "project-1" }}
+          >
             <main>Project</main>
           </WorkspaceReviewLayout>
         </AppI18nProvider>
       </PlatformProvider>,
     );
-    expect(screen.queryByRole("region", { name: "Task diff" })).not.toBeInTheDocument();
-    expect(screen.getByText("Project")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Task diff" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("files-panel")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: /显示或隐藏变更文件目录|Show or hide changed file tree/,
+      }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /文件|Files/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("notifies when the review panel opens or closes", async () => {
@@ -221,7 +355,10 @@ describe("WorkspaceReviewLayout", () => {
     render(
       <PlatformProvider adapter={createStubPlatform()}>
         <AppI18nProvider>
-          <WorkspaceReviewLayout context={taskContext} onOpenChange={onOpenChange}>
+          <WorkspaceReviewLayout
+            context={taskContext}
+            onOpenChange={onOpenChange}
+          >
             <main>Workspace</main>
           </WorkspaceReviewLayout>
         </AppI18nProvider>
@@ -229,15 +366,108 @@ describe("WorkspaceReviewLayout", () => {
     );
 
     await user.click(
-      within(screen.getByRole("group", { name: /工作区审查面板|Workspace review panels/ }))
-        .getByRole("button", { name: /^变更$|^Changes$/ }),
+      within(
+        screen.getByRole("group", {
+          name: /工作区审查面板|Workspace review panels/,
+        }),
+      ).getByRole("button", { name: /^变更$|^Changes$/ }),
     );
     expect(onOpenChange).toHaveBeenCalledWith(true);
 
     await user.click(
-      within(screen.getByRole("group", { name: /工作区审查面板|Workspace review panels/ }))
-        .getByRole("button", { name: /^变更$|^Changes$/ }),
+      within(
+        screen.getByRole("group", {
+          name: /工作区审查面板|Workspace review panels/,
+        }),
+      ).getByRole("button", { name: /^变更$|^Changes$/ }),
     );
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("falls back to the Files panel when a requested file is not found in the diff", async () => {
+    const user = userEvent.setup();
+    render(
+      <PlatformProvider adapter={createStubPlatform()}>
+        <AppI18nProvider>
+          <WorkspaceReviewLayout context={taskContext}>
+            <OpenChangedFileButton />
+          </WorkspaceReviewLayout>
+        </AppI18nProvider>
+      </PlatformProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open changed file" }));
+    expect(
+      screen.getByRole("region", { name: "Task diff" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("simulate-not-found"));
+    expect(screen.getByTestId("files-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("files-request")).toHaveTextContent(
+      "src/missing.ts:10",
+    );
+  });
+
+  it("routes openDiff to Files when the review context has no task", async () => {
+    const user = userEvent.setup();
+    render(
+      <PlatformProvider adapter={createStubPlatform()}>
+        <AppI18nProvider>
+          <WorkspaceReviewLayout
+            context={{ kind: "project", projectId: "project-1" }}
+          >
+            <OpenChangedFileButton />
+          </WorkspaceReviewLayout>
+        </AppI18nProvider>
+      </PlatformProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open changed file" }));
+    expect(screen.getByTestId("files-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("files-request")).toHaveTextContent(
+      "src/main.ts:",
+    );
+    expect(
+      screen.queryByRole("region", { name: "Task diff" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("drops a previous task's file request when switching tasks", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <PlatformProvider adapter={createStubPlatform()}>
+        <AppI18nProvider>
+          <WorkspaceReviewLayout context={taskContext}>
+            <OpenWorkspaceFileButton />
+          </WorkspaceReviewLayout>
+        </AppI18nProvider>
+      </PlatformProvider>,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Open workspace file" }),
+    );
+    expect(screen.getByTestId("files-request")).toHaveTextContent(
+      "src/lib.ts:8",
+    );
+
+    rerender(
+      <PlatformProvider adapter={createStubPlatform()}>
+        <AppI18nProvider>
+          <WorkspaceReviewLayout
+            context={{
+              kind: "task",
+              taskId: "task-2",
+              projectId: "project-1",
+            }}
+          >
+            <OpenWorkspaceFileButton />
+          </WorkspaceReviewLayout>
+        </AppI18nProvider>
+      </PlatformProvider>,
+    );
+
+    expect(screen.getByTestId("files-target")).toHaveTextContent("task-2");
+    expect(screen.getByTestId("files-request").textContent).toBe("");
   });
 });

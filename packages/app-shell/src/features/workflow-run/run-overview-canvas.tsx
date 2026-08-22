@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, type MutableRefObject, type RefObject } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  type MutableRefObject,
+  type RefObject,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   Background,

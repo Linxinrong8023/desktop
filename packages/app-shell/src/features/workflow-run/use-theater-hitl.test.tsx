@@ -7,7 +7,10 @@ import {
   type GraphWorkflowRun,
 } from "@ora/workflow-runtime";
 import { createMemoryWorkflowRuntime } from "@ora/workflow-runtime/memory";
-import { createMockClient, createMockClientState } from "../../test/mock-client";
+import {
+  createMockClient,
+  createMockClientState,
+} from "../../test/mock-client";
 import {
   createHookWrapper,
   createTestQueryClient,
@@ -27,23 +30,32 @@ function waitingRun(id: string, requestId: string): GraphWorkflowRun {
     nodeStates: Object.fromEntries(
       definition.nodes.map((node) => [
         node.id,
-        { status: node.id === "understand" ? "awaiting_input" as const : "idle" as const },
+        {
+          status:
+            node.id === "understand"
+              ? ("awaiting_input" as const)
+              : ("idle" as const),
+        },
       ]),
     ),
-    openHitls: [{
-      id: requestId,
-      runId: id,
-      nodeId: "understand",
-      schema: {
-        kind: "clarify",
-        title: "Clarify",
-        fields: [{ name: "answer", type: "text", label: "Answer", required: true }],
+    openHitls: [
+      {
+        id: requestId,
+        runId: id,
+        nodeId: "understand",
+        schema: {
+          kind: "clarify",
+          title: "Clarify",
+          fields: [
+            { name: "answer", type: "text", label: "Answer", required: true },
+          ],
+        },
+        blocking: true,
+        policy: "wait",
+        status: "open",
+        createdAt: "2026-08-04T12:00:00+08:00",
       },
-      blocking: true,
-      policy: "wait",
-      status: "open",
-      createdAt: "2026-08-04T12:00:00+08:00",
-    }],
+    ],
     createdAt: "2026-08-04T12:00:00+08:00",
     updatedAt: "2026-08-04T12:00:00+08:00",
   };
@@ -62,12 +74,19 @@ describe("useTheaterHitl", () => {
     const first = waitingRun("run-1", "hitl-1");
     const second = waitingRun("run-2", "hitl-2");
     const onFocusNode = vi.fn();
-    const initialProps: { run: GraphWorkflowRun; focusNodeId: string | null } = {
-      run: first,
-      focusNodeId: "understand",
-    };
+    const initialProps: { run: GraphWorkflowRun; focusNodeId: string | null } =
+      {
+        run: first,
+        focusNodeId: "understand",
+      };
     const { result, rerender, unmount } = renderHook(
-      ({ run, focusNodeId }: { run: GraphWorkflowRun; focusNodeId: string | null }) =>
+      ({
+        run,
+        focusNodeId,
+      }: {
+        run: GraphWorkflowRun;
+        focusNodeId: string | null;
+      }) =>
         useTheaterHitl({
           run,
           focusNodeId,

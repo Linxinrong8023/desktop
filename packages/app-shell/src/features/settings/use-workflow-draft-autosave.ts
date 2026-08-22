@@ -51,7 +51,9 @@ export function useWorkflowDraftAutosave({
   const generationRef = useRef(0);
   const dirtyRef = useRef(false);
   const inFlightRef = useRef<Promise<SaveAttemptResult> | null>(null);
-  const runSaveRef = useRef<() => Promise<SaveAttemptResult>>(async () => "noop");
+  const runSaveRef = useRef<() => Promise<SaveAttemptResult>>(
+    async () => "noop",
+  );
   const scheduleRef = useRef<() => void>(() => undefined);
 
   const clearTimer = useCallback(() => {
@@ -137,28 +139,31 @@ export function useWorkflowDraftAutosave({
     schedule();
   }, [schedule, setSaveStatus]);
 
-  const flush = useCallback(async (options?: { force?: boolean }): Promise<boolean> => {
-    clearTimer();
-    if (inFlightRef.current !== null) {
-      await inFlightRef.current;
-    }
-    // Manual save / workflow switch must write even when only the React Flow
-    // viewport changed, because pan/zoom never marks the draft dirty.
-    if (options?.force === true && enabledRef.current) {
-      dirtyRef.current = true;
-      generationRef.current += 1;
-    }
-    // Keep writing until pending edits are fully drained. A single stale attempt
-    // must not report success or navigation would drop newer local edits.
-    while (enabledRef.current && dirtyRef.current) {
+  const flush = useCallback(
+    async (options?: { force?: boolean }): Promise<boolean> => {
       clearTimer();
-      const result = await runSave();
-      if (result === "failed" || result === "skipped") {
-        return false;
+      if (inFlightRef.current !== null) {
+        await inFlightRef.current;
       }
-    }
-    return !dirtyRef.current;
-  }, [clearTimer, runSave]);
+      // Manual save / workflow switch must write even when only the React Flow
+      // viewport changed, because pan/zoom never marks the draft dirty.
+      if (options?.force === true && enabledRef.current) {
+        dirtyRef.current = true;
+        generationRef.current += 1;
+      }
+      // Keep writing until pending edits are fully drained. A single stale attempt
+      // must not report success or navigation would drop newer local edits.
+      while (enabledRef.current && dirtyRef.current) {
+        clearTimer();
+        const result = await runSave();
+        if (result === "failed" || result === "skipped") {
+          return false;
+        }
+      }
+      return !dirtyRef.current;
+    },
+    [clearTimer, runSave],
+  );
 
   const cancel = useCallback(() => {
     clearTimer();
@@ -188,15 +193,18 @@ export function useWorkflowDraftAutosave({
 
   // Best-effort persist on unmount so leaving the settings page does not drop
   // edits still inside the debounce window. Hard tab closes remain best-effort.
-  useEffect(() => () => {
-    clearTimer();
-    if (!dirtyRef.current) {
-      return;
-    }
-    // Swallow rejection: unmount must not leave an unhandled rejection on stderr
-    // after the suite already passed (run-with-clean-stderr treats that as fail).
-    void saveRef.current().catch(() => undefined);
-  }, [clearTimer]);
+  useEffect(
+    () => () => {
+      clearTimer();
+      if (!dirtyRef.current) {
+        return;
+      }
+      // Swallow rejection: unmount must not leave an unhandled rejection on stderr
+      // after the suite already passed (run-with-clean-stderr treats that as fail).
+      void saveRef.current().catch(() => undefined);
+    },
+    [clearTimer],
+  );
 
   return { status, markDirty, flush, cancel };
 }

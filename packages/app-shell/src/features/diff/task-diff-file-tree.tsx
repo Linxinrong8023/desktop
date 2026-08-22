@@ -41,7 +41,10 @@ export function TaskDiffFileTree({
   const { t } = useTranslation();
   const [filterOpen, setFilterOpen] = useState(false);
   const [filter, setFilter] = useState("");
-  const visibleFiles = useMemo(() => filterDiffFiles(files, filter), [files, filter]);
+  const visibleFiles = useMemo(
+    () => filterDiffFiles(files, filter),
+    [files, filter],
+  );
   const nodes = buildDiffFileTree(visibleFiles);
 
   return (
@@ -54,7 +57,9 @@ export function TaskDiffFileTree({
           {t("diff.files")}
         </span>
         <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">
-          {visibleFiles.length === files.length ? files.length : `${visibleFiles.length}/${files.length}`}
+          {visibleFiles.length === files.length
+            ? files.length
+            : `${visibleFiles.length}/${files.length}`}
         </span>
         <button
           type="button"
@@ -141,13 +146,19 @@ function DiffTreeNode({
           aria-expanded={expanded}
           onClick={() => setExpanded((current) => !current)}
         >
-          {expanded
-            ? <IconChevronDown className="size-3 shrink-0" />
-            : <IconChevronRight className="size-3 shrink-0" />}
-          {expanded
-            ? <IconFolderOpen className="size-3.5 shrink-0 text-amber-600/80" />
-            : <IconFolder className="size-3.5 shrink-0 text-amber-600/80" />}
-          <span className="truncate" title={node.path}>{node.name}</span>
+          {expanded ? (
+            <IconChevronDown className="size-3 shrink-0" />
+          ) : (
+            <IconChevronRight className="size-3 shrink-0" />
+          )}
+          {expanded ? (
+            <IconFolderOpen className="size-3.5 shrink-0 text-amber-600/80" />
+          ) : (
+            <IconFolder className="size-3.5 shrink-0 text-amber-600/80" />
+          )}
+          <span className="truncate" title={node.path}>
+            {node.name}
+          </span>
         </button>
         {expanded && (
           <div className="relative">
@@ -194,19 +205,29 @@ function DiffTreeNode({
 /** Uses familiar language and document glyphs while retaining a generic code fallback. */
 function DiffFileIcon({ path }: { path: string }) {
   const lastDot = path.lastIndexOf(".");
-  const extension = lastDot === -1 ? "" : path.slice(lastDot).toLocaleLowerCase();
+  const extension =
+    lastDot === -1 ? "" : path.slice(lastDot).toLocaleLowerCase();
   const className = "size-3.5 shrink-0";
-  if (extension === ".ts") return <IconFileTypeTs className={`${className} text-sky-600`} />;
-  if (extension === ".tsx") return <IconFileTypeTsx className={`${className} text-sky-600`} />;
-  if (extension === ".js") return <IconFileTypeJs className={`${className} text-amber-600`} />;
-  if (extension === ".jsx") return <IconFileTypeJsx className={`${className} text-amber-600`} />;
-  if (extension === ".rs") return <IconFileTypeRs className={`${className} text-orange-600`} />;
-  if (extension === ".css") return <IconFileTypeCss className={`${className} text-violet-600`} />;
-  if (extension === ".html") return <IconFileTypeHtml className={`${className} text-orange-600`} />;
-  if (extension === ".json") return <IconJson className={`${className} text-amber-600`} />;
+  if (extension === ".ts")
+    return <IconFileTypeTs className={`${className} text-sky-600`} />;
+  if (extension === ".tsx")
+    return <IconFileTypeTsx className={`${className} text-sky-600`} />;
+  if (extension === ".js")
+    return <IconFileTypeJs className={`${className} text-amber-600`} />;
+  if (extension === ".jsx")
+    return <IconFileTypeJsx className={`${className} text-amber-600`} />;
+  if (extension === ".rs")
+    return <IconFileTypeRs className={`${className} text-orange-600`} />;
+  if (extension === ".css")
+    return <IconFileTypeCss className={`${className} text-violet-600`} />;
+  if (extension === ".html")
+    return <IconFileTypeHtml className={`${className} text-orange-600`} />;
+  if (extension === ".json")
+    return <IconJson className={`${className} text-amber-600`} />;
   if (extension === ".md" || extension === ".mdx") {
     return <IconMarkdown className={`${className} text-sky-700`} />;
   }
-  if (extension === "") return <IconFile className={`${className} text-muted-foreground`} />;
+  if (extension === "")
+    return <IconFile className={`${className} text-muted-foreground`} />;
   return <IconFileCode className={`${className} text-muted-foreground`} />;
 }

@@ -1,4 +1,8 @@
-import type { acp, SessionPermissionRequest } from "@ora/contracts";
+import type * as acp from "@agentclientprotocol/sdk";
+import type {
+  SessionHistoryNotice,
+  SessionPermissionRequest,
+} from "@ora/contracts";
 
 /** Identifies who produced a rendered chat message. */
 export type ChatMessageRole = "user" | "assistant";
@@ -68,11 +72,7 @@ export interface ChatContent {
 
 /** One ordered item emitted by the agent during a response turn. */
 export type ChatTurnItem =
-  | ChatMessage
-  | ChatThought
-  | ChatPlan
-  | ChatToolCall
-  | ChatContent;
+  ChatMessage | ChatThought | ChatPlan | ChatToolCall | ChatContent;
 
 /** Describes the lifecycle of one user prompt and its agent response. */
 export type ChatTurnStatus = "streaming" | "completed" | "cancelled" | "failed";
@@ -114,6 +114,8 @@ export interface SessionConversation {
   configOptions: acp.SessionConfigOption[];
   /** Model switches recorded in this thread, oldest first. */
   modelChanges: ChatModelChange[];
+  /** Known holes in Ora's durable record reported by the latest successful replay. */
+  historyNotices: SessionHistoryNotice[];
   turns: ChatTurn[];
   availableCommands: acp.AvailableCommand[];
   sessionTitle: string | null;

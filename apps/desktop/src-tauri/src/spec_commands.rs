@@ -1,6 +1,7 @@
-use crate::commands::{forward_workspace_watch, register_contract_stream};
+use crate::commands::register_contract_stream;
 use crate::error::CommandError;
 use crate::state::DesktopState;
+use crate::stream_forwarding::forward_workspace_watch;
 use crate::workspace_files::workspace_file_backend_error;
 use ora_backend::{BackendError, RequestLifecycle, UuidRequestIdGenerator};
 use ora_contracts::*;
@@ -55,34 +56,6 @@ pub async fn read_spec(
             lifecycle.complete_success();
         })
         .map_err(|error| CommandError::from_backend_with_lifecycle(error, &lifecycle))
-}
-
-/// Validates one platform-selected specification source directory.
-#[tauri::command]
-pub async fn resolve_spec_source(
-    state: State<'_, DesktopState>,
-    request: ResolveSpecSourceRequest,
-) -> Result<ResolveSpecSourceResponse, CommandError> {
-    run_blocking(
-        "resolve_spec_source",
-        state.backend.clone(),
-        move |backend| backend.resolve_spec_source(request),
-    )
-    .await
-}
-
-/// Atomically replaces one project's specification source overrides.
-#[tauri::command]
-pub async fn update_project_spec_sources(
-    state: State<'_, DesktopState>,
-    request: UpdateProjectSpecSourcesRequest,
-) -> Result<UpdateProjectSpecSourcesResponse, CommandError> {
-    run_blocking(
-        "update_project_spec_sources",
-        state.backend.clone(),
-        move |backend| backend.update_project_spec_sources(request),
-    )
-    .await
 }
 
 /// Starts a specification watcher inside the existing exactly-once stream lifecycle.

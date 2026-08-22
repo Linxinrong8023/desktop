@@ -1,15 +1,14 @@
-pub mod acp;
 pub mod app_event;
 
 pub mod agent;
 pub mod agent_import;
+pub mod developer_mode;
 pub mod error;
 pub mod file_system;
-pub mod frontend;
 pub mod git;
 pub mod plugin;
 pub mod project;
-pub mod project_work_context;
+pub mod runtime_log_level;
 pub mod session;
 pub mod skill;
 pub mod skill_import;
@@ -22,13 +21,13 @@ pub use agent_import::*;
 pub use app_event::*;
 
 pub use agent::*;
+pub use developer_mode::*;
 pub use error::*;
 pub use file_system::*;
-pub use frontend::*;
 pub use git::*;
 pub use plugin::*;
 pub use project::*;
-pub use project_work_context::*;
+pub use runtime_log_level::*;
 pub use session::*;
 pub use skill::*;
 pub use skill_import::*;
@@ -50,15 +49,15 @@ pub fn export_typescript_bindings_to(
     let config = Config::new().with_out_dir(output_directory.as_ref());
     agent_import::export(&config)?;
 
-    acp::export(&config)?;
     app_event::export(&config)?;
     agent::export(&config)?;
+    developer_mode::export(&config)?;
     error::export(&config)?;
     file_system::export(&config)?;
     git::export(&config)?;
     plugin::export(&config)?;
     project::export(&config)?;
-    project_work_context::export(&config)?;
+    runtime_log_level::export(&config)?;
     session::export(&config)?;
     skill::export(&config)?;
     skill_import::export(&config)?;

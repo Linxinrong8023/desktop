@@ -9,14 +9,6 @@ export const taskBaseBranchNotFoundParamsSchema = z.object({
     branchName: z.string()
 });
 
-export const skillUploadTooLargeParamsSchema = z.object({
-    maxBytes: z.number()
-});
-
-export const skillUploadTooManyFilesParamsSchema = z.object({
-    maxFiles: z.number()
-});
-
 export const skillFolderConflictParamsSchema = z.object({
     name: z.string()
 });
@@ -66,13 +58,13 @@ export const contractErrorSchema = z.object({
         "code": z.literal("agent_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
+        "code": z.literal("plugin_not_found"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_disabled"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
         "code": z.literal("project_not_found"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("project_occupied"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("project_work_context_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("task_not_found"),
@@ -102,18 +94,6 @@ export const contractErrorSchema = z.object({
         "code": z.literal("task_diff_too_large"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("task_diff_stale"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("task_diff_comment_not_found"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("task_diff_comment_invalid"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("task_diff_comment_conflict"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
         "code": z.literal("session_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -138,9 +118,6 @@ export const contractErrorSchema = z.object({
         "code": z.literal("session_agent_unchanged"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("multiple_clients_unsupported"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
         "code": z.literal("permission_request_not_pending"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -159,25 +136,7 @@ export const contractErrorSchema = z.object({
         "code": z.literal("task_project_root_unavailable"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("file_system_path_not_absolute"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("file_system_path_not_directory"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
         "code": z.literal("file_system_path_not_found"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("file_system_path_permission_denied"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("spec_source_invalid"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("spec_source_outside_workspace"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("spec_source_workspace_root"),
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("spec_document_not_found"),
@@ -191,21 +150,6 @@ export const contractErrorSchema = z.object({
     }), z.object({
         "code": z.literal("open_location_failed"),
         "params": openLocationFailedParamsSchema
-    }), z.object({
-        "code": z.literal("skill_upload_empty"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("skill_upload_too_large"),
-        "params": skillUploadTooLargeParamsSchema
-    }), z.object({
-        "code": z.literal("skill_upload_too_many_files"),
-        "params": skillUploadTooManyFilesParamsSchema
-    }), z.object({
-        "code": z.literal("skill_upload_path_invalid"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("skill_upload_path_duplicate"),
-        "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("skill_manifest_missing"),
         "params": emptyErrorParamsSchema
@@ -288,6 +232,9 @@ export const contractErrorSchema = z.object({
         "code": z.literal("workflow_name_blank"),
         "params": emptyErrorParamsSchema
     }), z.object({
+        "code": z.literal("workflow_name_conflict"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
         "code": z.literal("workflow_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -352,6 +299,12 @@ export const contractErrorSchema = z.object({
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("workflow_run_not_editable"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_node_not_found"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_node_not_awaiting_input"),
         "params": emptyErrorParamsSchema
     })]));
 
@@ -392,13 +345,13 @@ export const publicErrorSchema = z.union([z.object({
         "code": z.literal("agent_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
+        "code": z.literal("plugin_not_found"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_disabled"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
         "code": z.literal("project_not_found"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("project_occupied"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("project_work_context_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("task_not_found"),
@@ -428,18 +381,6 @@ export const publicErrorSchema = z.union([z.object({
         "code": z.literal("task_diff_too_large"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("task_diff_stale"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("task_diff_comment_not_found"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("task_diff_comment_invalid"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("task_diff_comment_conflict"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
         "code": z.literal("session_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -464,9 +405,6 @@ export const publicErrorSchema = z.union([z.object({
         "code": z.literal("session_agent_unchanged"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("multiple_clients_unsupported"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
         "code": z.literal("permission_request_not_pending"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -485,25 +423,7 @@ export const publicErrorSchema = z.union([z.object({
         "code": z.literal("task_project_root_unavailable"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("file_system_path_not_absolute"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("file_system_path_not_directory"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
         "code": z.literal("file_system_path_not_found"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("file_system_path_permission_denied"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("spec_source_invalid"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("spec_source_outside_workspace"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("spec_source_workspace_root"),
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("spec_document_not_found"),
@@ -517,21 +437,6 @@ export const publicErrorSchema = z.union([z.object({
     }), z.object({
         "code": z.literal("open_location_failed"),
         "params": openLocationFailedParamsSchema
-    }), z.object({
-        "code": z.literal("skill_upload_empty"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("skill_upload_too_large"),
-        "params": skillUploadTooLargeParamsSchema
-    }), z.object({
-        "code": z.literal("skill_upload_too_many_files"),
-        "params": skillUploadTooManyFilesParamsSchema
-    }), z.object({
-        "code": z.literal("skill_upload_path_invalid"),
-        "params": emptyErrorParamsSchema
-    }), z.object({
-        "code": z.literal("skill_upload_path_duplicate"),
-        "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("skill_manifest_missing"),
         "params": emptyErrorParamsSchema
@@ -614,6 +519,9 @@ export const publicErrorSchema = z.union([z.object({
         "code": z.literal("workflow_name_blank"),
         "params": emptyErrorParamsSchema
     }), z.object({
+        "code": z.literal("workflow_name_conflict"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
         "code": z.literal("workflow_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -678,5 +586,11 @@ export const publicErrorSchema = z.union([z.object({
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("workflow_run_not_editable"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_node_not_found"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_node_not_awaiting_input"),
         "params": emptyErrorParamsSchema
     })]);

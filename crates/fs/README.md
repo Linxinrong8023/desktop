@@ -4,8 +4,12 @@
 
 ## Guarantees
 
-- Every caller supplies a workspace root, but all user paths must be relative to that root.
-- Roots and requested paths are canonicalized before containment checks, including symlink escape protection.
+- Path validation and containment come from `ora-utils::path` (`PortableRelativePath`,
+  `CanonicalPathRoot`); this crate applies them to workspace roots and does not maintain local
+  path validators. Roots and existing requested paths are canonicalized before containment
+  checks, including static symlink escape protection. These path-based checks do not protect
+  against a concurrently replaced symlink between validation and use; callers handling actively
+  hostile directories need a handle-relative filesystem design.
 - File reads are bounded and reject binary or invalid UTF-8 content.
 - Search runs through the injected `ora-process` runner, making ripgrep execution replaceable in tests.
 - Native watcher events are normalized into workspace-relative changes and can be debounced by the caller.

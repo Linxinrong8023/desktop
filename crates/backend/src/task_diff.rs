@@ -1,24 +1,17 @@
-use crate::clock::SystemClock;
 use crate::error::{BackendError, ErrorClassification};
 use crate::task::resolve_task_cwd;
 use ora_application::{
-    CommitTaskChangesHandler, CreateTaskDiffCommentHandler, GitTaskDiffReader, GitTaskGitWriter,
-    ListTaskDiffCommentsHandler, ProjectRepository, PushTaskBranchHandler, ReadTaskDiffRequest,
-    ReadTaskDiffScope, ReplyTaskDiffCommentHandler, SetTaskDiffCommentStatusHandler,
-    TaskDiffReader, TaskDiffReaderError, TaskRepository, UuidTaskDiffCommentIdGenerator,
-    WorktreeRepository, task_diff_id,
+    CommitTaskChangesHandler, GitTaskDiffReader, GitTaskGitWriter, ProjectRepository,
+    PushTaskBranchHandler, ReadTaskDiffRequest, ReadTaskDiffScope, TaskDiffReader,
+    TaskDiffReaderError, TaskRepository, WorktreeRepository,
 };
 use ora_contracts::{
-    CommitTaskChangesRequest, CommitTaskChangesResponse, CreateTaskDiffCommentRequest,
-    CreateTaskDiffCommentResponse, GetTaskDiffRequest, GetTaskDiffResponse,
-    ListTaskDiffCommentsRequest, ListTaskDiffCommentsResponse, PushTaskBranchRequest,
-    PushTaskBranchResponse, ReplyTaskDiffCommentRequest, ReplyTaskDiffCommentResponse,
-    SetTaskDiffCommentStatusRequest, SetTaskDiffCommentStatusResponse, TaskDiffScope,
+    CommitTaskChangesRequest, CommitTaskChangesResponse, GetTaskDiffRequest, GetTaskDiffResponse,
+    PushTaskBranchRequest, PushTaskBranchResponse, TaskDiffScope,
 };
 use ora_contracts::{EmptyErrorParams, PublicError};
 use ora_db::{
-    RepositoryPool, SqliteProjectRepository, SqliteTaskDiffCommentRepository, SqliteTaskRepository,
-    SqliteWorktreeRepository,
+    RepositoryPool, SqliteProjectRepository, SqliteTaskRepository, SqliteWorktreeRepository,
 };
 use ora_domain::{Project, Task, TaskId};
 use std::path::PathBuf;
@@ -26,13 +19,22 @@ use std::path::PathBuf;
 /// Owns task-scoped Git review operations shared by the Web and Desktop adapters.
 pub(crate) struct TaskDiffApi {
     pool: RepositoryPool,
-    clock: SystemClock,
+    git_cleanup: crate::git_cleanup::GitCleanupHandle,
+    relative_path_base: PathBuf,
 }
 
 impl TaskDiffApi {
-    /// Builds the shared task diff API from durable repositories and the system clock.
-    pub(crate) fn new(pool: RepositoryPool, clock: SystemClock) -> Self {
-        Self { pool, clock }
+    /// Builds the shared task diff API from durable repositories and Git cleanup.
+    pub(crate) fn new(
+        pool: RepositoryPool,
+        git_cleanup: crate::git_cleanup::GitCleanupHandle,
+        relative_path_base: PathBuf,
+    ) -> Self {
+        Self {
+            pool,
+            git_cleanup,
+            relative_path_base,
+        }
     }
 
     /// Computes a diff from the exact directory used as the task's agent session cwd.
@@ -40,10 +42,13 @@ impl TaskDiffApi {
         &self,
         request: GetTaskDiffRequest,
     ) -> Result<GetTaskDiffResponse, BackendError> {
+        // Shared use lease: physical cleanup of this task's checkout waits for
+        // this read instead of removing the directory underneath it.
+        let _worktree_use = self.git_cleanup.shared_worktree_use(&request.task_id);
         let task_id = TaskId::new(request.task_id.clone());
         let task = self.load_task(&task_id)?;
         let project = self.load_project(&task)?;
-        let cwd = resolve_task_cwd(&self.pool, &task_id)?;
+        let cwd = resolve_task_cwd(&self.pool, &task_id, &self.relative_path_base)?;
 
         if let Some(worktree_id) = task.worktree_id.as_ref() {
             let worktree = SqliteWorktreeRepository::new(self.pool.clone())
@@ -75,12 +80,10 @@ impl TaskDiffApi {
                     scope: map_diff_scope(request.scope),
                 })
                 .map_err(map_diff_reader_error)?;
-            let diff_id = task_diff_id(base_commit_id, &snapshot.head_commit_id, &snapshot.patch);
 
             return Ok(GetTaskDiffResponse {
                 base_commit_id: base_commit_id.to_string(),
                 head_commit_id: snapshot.head_commit_id,
-                diff_id,
                 patch: snapshot.patch,
             });
         }
@@ -96,12 +99,10 @@ impl TaskDiffApi {
         // Direct-chat tasks intentionally follow the main checkout. HEAD is resolved
         // per read so their review surface mirrors Codex's current working-tree view.
         let base_commit_id = snapshot.head_commit_id.clone();
-        let diff_id = task_diff_id(&base_commit_id, &snapshot.head_commit_id, &snapshot.patch);
 
         Ok(GetTaskDiffResponse {
             base_commit_id,
             head_commit_id: snapshot.head_commit_id,
-            diff_id,
             patch: snapshot.patch,
         })
     }
@@ -111,6 +112,8 @@ impl TaskDiffApi {
         &self,
         request: CommitTaskChangesRequest,
     ) -> Result<CommitTaskChangesResponse, BackendError> {
+        // Shared use lease: see get_diff; commits must not lose the checkout mid-write.
+        let _worktree_use = self.git_cleanup.shared_worktree_use(&request.task_id);
         let (task, project, worktree_path) = self.worktree_context(&request.task_id)?;
         CommitTaskChangesHandler::new(
             SqliteTaskRepository::new(self.pool.clone()),
@@ -130,6 +133,8 @@ impl TaskDiffApi {
         &self,
         request: PushTaskBranchRequest,
     ) -> Result<PushTaskBranchResponse, BackendError> {
+        // Shared use lease: see get_diff; pushes read the checkout's branch state.
+        let _worktree_use = self.git_cleanup.shared_worktree_use(&request.task_id);
         let (task, project, worktree_path) = self.worktree_context(&request.task_id)?;
         PushTaskBranchHandler::new(
             SqliteTaskRepository::new(self.pool.clone()),
@@ -140,72 +145,6 @@ impl TaskDiffApi {
         .handle(PushTaskBranchRequest {
             task_id: task.id.to_string(),
         })
-        .map_err(BackendError::from)
-    }
-
-    /// Lists every persisted discussion message for one visible task.
-    pub(crate) fn list_comments(
-        &self,
-        request: ListTaskDiffCommentsRequest,
-    ) -> Result<ListTaskDiffCommentsResponse, BackendError> {
-        ListTaskDiffCommentsHandler::new(
-            SqliteTaskRepository::new(self.pool.clone()),
-            SqliteTaskDiffCommentRepository::new(self.pool.clone()),
-        )
-        .handle(request)
-        .map_err(BackendError::from)
-    }
-
-    /// Creates an anchored discussion for an isolated task worktree snapshot.
-    pub(crate) fn create_comment(
-        &self,
-        request: CreateTaskDiffCommentRequest,
-    ) -> Result<CreateTaskDiffCommentResponse, BackendError> {
-        let (task, project, worktree_path) = self.worktree_context(&request.task_id)?;
-        CreateTaskDiffCommentHandler::new(
-            SqliteTaskRepository::new(self.pool.clone()),
-            SqliteWorktreeRepository::new(self.pool.clone()),
-            GitTaskDiffReader::new(PathBuf::from(project.root_path)),
-            SqliteTaskDiffCommentRepository::new(self.pool.clone()),
-            UuidTaskDiffCommentIdGenerator::new(),
-            self.clock,
-            worktree_path,
-        )
-        .handle(CreateTaskDiffCommentRequest {
-            task_id: task.id.to_string(),
-            scope: request.scope,
-            anchor: request.anchor,
-            body: request.body,
-        })
-        .map_err(BackendError::from)
-    }
-
-    /// Adds one reply beneath an existing task diff discussion.
-    pub(crate) fn reply_comment(
-        &self,
-        request: ReplyTaskDiffCommentRequest,
-    ) -> Result<ReplyTaskDiffCommentResponse, BackendError> {
-        ReplyTaskDiffCommentHandler::new(
-            SqliteTaskRepository::new(self.pool.clone()),
-            SqliteTaskDiffCommentRepository::new(self.pool.clone()),
-            UuidTaskDiffCommentIdGenerator::new(),
-            self.clock,
-        )
-        .handle(request)
-        .map_err(BackendError::from)
-    }
-
-    /// Resolves or reopens one root task diff discussion.
-    pub(crate) fn set_comment_status(
-        &self,
-        request: SetTaskDiffCommentStatusRequest,
-    ) -> Result<SetTaskDiffCommentStatusResponse, BackendError> {
-        SetTaskDiffCommentStatusHandler::new(
-            SqliteTaskRepository::new(self.pool.clone()),
-            SqliteTaskDiffCommentRepository::new(self.pool.clone()),
-            self.clock,
-        )
-        .handle(request)
         .map_err(BackendError::from)
     }
 
@@ -249,7 +188,7 @@ impl TaskDiffApi {
             ));
         }
         let project = self.load_project(&task)?;
-        let cwd = resolve_task_cwd(&self.pool, &task_id)?;
+        let cwd = resolve_task_cwd(&self.pool, &task_id, &self.relative_path_base)?;
         Ok((task, project, cwd))
     }
 }
@@ -287,27 +226,33 @@ fn task_diff_internal(source: impl std::error::Error + Send + Sync + 'static) ->
 mod tests {
     use crate::{Backend, BackendPaths};
     use ora_contracts::{
-        CreateProjectRequest, CreateTaskRequest, GetTaskDiffRequest, TaskDiffScope, TaskStatus,
+        CreateProjectRequest, CreateTaskRequest, GetTaskDiffRequest, TaskDiffScope,
         TaskWorkspaceMode,
     };
+    use ora_test_support::GitTestScaffold;
     use std::fs;
     use std::path::Path;
-    use std::process::Command;
     use tempfile::TempDir;
 
     /// Verifies direct-chat edits are read from the same project root used by the agent.
     #[test]
     fn captures_agent_changes_from_project_root_tasks() {
         let temporary = TempDir::new().expect("create temporary backend directory");
-        let repository_root = temporary.path().join("repository");
-        initialize_repository(&repository_root);
+        let scaffold = GitTestScaffold::new("backend-task-diff-project-root")
+            .expect("create Git test scaffold");
+        scaffold
+            .write_file(scaffold.repo_path(), "README.md", "ora backend test\n")
+            .expect("write repository seed file");
+        scaffold
+            .stage_all_and_commit("initial")
+            .expect("create repository seed commit");
+        let repository_root = scaffold.repo_path();
         let backend = open_backend(&temporary);
         let project_id = create_project(&backend, &repository_root);
         let task = backend
             .create_task(CreateTaskRequest {
                 project_id,
                 title: "Direct chat".to_string(),
-                status: TaskStatus::Todo,
                 workspace_mode: Some(TaskWorkspaceMode::ProjectRoot),
                 base_branch: None,
             })
@@ -335,15 +280,21 @@ mod tests {
     #[test]
     fn captures_agent_changes_from_worktree_tasks() {
         let temporary = TempDir::new().expect("create temporary backend directory");
-        let repository_root = temporary.path().join("repository");
-        initialize_repository(&repository_root);
+        let scaffold =
+            GitTestScaffold::new("backend-task-diff-worktree").expect("create Git test scaffold");
+        scaffold
+            .write_file(scaffold.repo_path(), "README.md", "ora backend test\n")
+            .expect("write repository seed file");
+        scaffold
+            .stage_all_and_commit("initial")
+            .expect("create repository seed commit");
+        let repository_root = scaffold.repo_path();
         let backend = open_backend(&temporary);
         let project_id = create_project(&backend, &repository_root);
         let task = backend
             .create_task(CreateTaskRequest {
                 project_id,
                 title: "Isolated task".to_string(),
-                status: TaskStatus::Todo,
                 workspace_mode: Some(TaskWorkspaceMode::Worktree),
                 base_branch: Some("main".to_string()),
             })
@@ -371,8 +322,11 @@ mod tests {
     fn open_backend(temporary: &TempDir) -> Backend {
         Backend::open(BackendPaths {
             database_path: temporary.path().join("ora.sqlite3"),
+            data_directory: temporary.path().to_path_buf(),
+            deno_path: std::path::PathBuf::from("deno"),
             worktree_root: temporary.path().join("worktrees"),
             home_directory: temporary.path().to_path_buf(),
+            relative_path_base: temporary.path().to_path_buf(),
             sessions_root: temporary.path().join("sessions"),
             skills_root: temporary.path().join("atoms").join("skills"),
             ripgrep_path: std::path::PathBuf::from("rg"),
@@ -391,31 +345,5 @@ mod tests {
             .expect("create project")
             .project
             .id
-    }
-
-    /// Initializes a repository with one commit so both workspace modes can produce diffs.
-    fn initialize_repository(repository_root: &Path) {
-        fs::create_dir_all(repository_root).expect("create repository root");
-        run_git(repository_root, &["init", "--initial-branch=main"]);
-        run_git(repository_root, &["config", "user.name", "Ora Tests"]);
-        run_git(
-            repository_root,
-            &["config", "user.email", "ora-tests@example.com"],
-        );
-        fs::write(repository_root.join("README.md"), "ora backend test\n")
-            .expect("write repository seed file");
-        run_git(repository_root, &["add", "README.md"]);
-        run_git(repository_root, &["commit", "-m", "initial"]);
-    }
-
-    /// Runs one required Git setup command for the repository fixture.
-    fn run_git(repository_root: &Path, arguments: &[&str]) {
-        let status = Command::new("git")
-            .current_dir(repository_root)
-            .args(arguments)
-            .status()
-            .unwrap_or_else(|error| panic!("failed to start git {arguments:?}: {error}"));
-
-        assert!(status.success(), "git {arguments:?} failed with {status}");
     }
 }

@@ -17,6 +17,7 @@ ora-contracts = { workspace = true }
 ora-domain = { workspace = true }
 ora-logging = { workspace = true }
 ora-skill-package = { workspace = true }
+ora-utils = { workspace = true }
 petgraph = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -29,6 +30,7 @@ uuid = { workspace = true }
 [dev-dependencies]
 flate2 = { workspace = true }
 ora-logging = { workspace = true }
+ora-test-support = { workspace = true }
 pretty_assertions = { workspace = true }
 tar = { workspace = true }
 tempfile = { workspace = true }

@@ -3,12 +3,11 @@ use crate::project::Clock;
 use crate::workflow_run::engine::graph::{GraphError, WorkflowGraph, WorkflowGraphNode};
 use crate::workflow_run::engine::node_type::NodeType;
 use crate::workflow_run::engine::ports::{
-    AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, FileChange, NodeRunToStart,
-    RestartWorkflowRunResult, StartWorkflowRunResult, UpdateWorkflowRunInputResult,
+    AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, FileChange,
+    NodeRunToStart, RestartWorkflowRunResult, StartWorkflowRunResult, UpdateWorkflowRunInputResult,
     WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository,
 };
 use ora_domain::{WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRunId};
-use serde::Deserialize;
 use std::collections::HashSet;
 use thiserror::Error;
 
@@ -35,7 +34,7 @@ pub trait NodeExecutor {
 /// The backend session driver invokes this when an agent node's session finishes; callbacks MUST
 /// be routed through the run's serial executor so state transitions stay serial.
 pub trait WorkflowRunCallback: Send + Sync {
-    /// Reports a successful node completion with its accumulated conversation, stop reason, and
+    /// Reports a successful node completion with its final assistant output, stop reason, and
     /// incremental file changes.
     fn complete_node(
         &self,
@@ -83,13 +82,6 @@ pub enum EngineError {
     Repository(#[from] RepositoryError),
 }
 
-/// One message in a node-run conversation array.
-#[derive(Debug, Deserialize)]
-struct ConversationEntry {
-    role: String,
-    text: String,
-}
-
 /// Drives one workflow run through start/cancel/restart and the reactive DAG scheduler.
 ///
 /// The engine is synchronous and stateless: every command recomputes the completed, in-flight,
@@ -105,12 +97,7 @@ pub struct WorkflowRunEngine<R, E, G, C> {
 
 impl<R, E, G, C> WorkflowRunEngine<R, E, G, C> {
     /// Builds an engine from its ports.
-    pub fn new(
-        repository: R,
-        node_executor: E,
-        node_run_id_generator: G,
-        clock: C,
-    ) -> Self {
+    pub fn new(repository: R, node_executor: E, node_run_id_generator: G, clock: C) -> Self {
         Self {
             repository,
             node_executor,
@@ -170,8 +157,9 @@ where
         }
     }
 
-    /// Cancels a running run. Stopping the running sessions is orchestrated by the backend before
-    /// this commits the `Cancelled` transition.
+    /// Cancels a running run. The backend orchestrates stopping the run's live sessions around
+    /// this; the `Cancelled` transition is committed here, and a late session stop makes the
+    /// executor's in-flight callbacks no-ops against the already-cancelled node runs.
     pub fn cancel(&self, run_id: &WorkflowRunId) -> Result<CancelWorkflowRunResult, EngineError> {
         let now = self.clock.now_timestamp_millis();
         Ok(self.repository.cancel_run(run_id, now)?)
@@ -236,6 +224,13 @@ where
         }
     }
 
+    /// Resumes scheduling for a `Running` run left with no active node by a crash between a node
+    /// completion and its successor scheduling. Recomputes the ready set from persisted state:
+    /// either a ready successor is dispatched or the drained run is finished.
+    pub fn resume(&self, run_id: &WorkflowRunId) -> Result<(), EngineError> {
+        self.run_schedule(run_id)
+    }
+
     /// Runs one reactive scheduling pass: complete in-flight control nodes, dispatch ready nodes,
     /// and finish the run once the graph is drained.
     fn run_schedule(&self, run_id: &WorkflowRunId) -> Result<(), EngineError> {
@@ -254,8 +249,13 @@ where
                     && matches!(node.node_type, NodeType::Start | NodeType::Output)
                 {
                     let output = control_node_output(&graph, node, &node_runs, &context);
-                    self.repository
-                        .complete_node(&node_run.id, Some(output), None, Vec::new(), now)?;
+                    self.repository.complete_node(
+                        &node_run.id,
+                        Some(output),
+                        None,
+                        Vec::new(),
+                        now,
+                    )?;
                 }
             }
 
@@ -267,7 +267,14 @@ where
                 .collect();
             let in_flight: HashSet<&str> = node_runs
                 .iter()
-                .filter(|node_run| node_run.status == WorkflowNodeStatus::Running)
+                .filter(|node_run| {
+                    matches!(
+                        node_run.status,
+                        // An awaiting (interactive) node is still in flight: it blocks its
+                        // successors and must not be re-dispatched until it completes.
+                        WorkflowNodeStatus::Running | WorkflowNodeStatus::Pending
+                    )
+                })
                 .map(|node_run| node_run.node_id.as_str())
                 .collect();
             let ready: Vec<&WorkflowGraphNode> = graph
@@ -335,7 +342,7 @@ fn control_node_output(
                             node_run.node_id == predecessor.id
                                 && node_run.status == WorkflowNodeStatus::Succeeded
                         })
-                        .map(|node_run| last_assistant_message(node_run.output.as_deref()))
+                        .and_then(|node_run| node_run.output.clone())
                         .unwrap_or_default()
                 })
                 .collect::<Vec<String>>();
@@ -346,7 +353,7 @@ fn control_node_output(
 }
 
 /// Computes the run output written at finish: the last output node's output, or the last
-/// completed agent's final assistant message when the graph has no output node.
+/// completed agent's output when the graph has no output node.
 fn compute_run_output(node_runs: &[WorkflowNodeRun]) -> Option<String> {
     let succeeded: Vec<&WorkflowNodeRun> = node_runs
         .iter()
@@ -363,7 +370,7 @@ fn compute_run_output(node_runs: &[WorkflowNodeRun]) -> Option<String> {
         .iter()
         .filter(|node_run| node_run.node_type == "agent")
         .max_by_key(|node_run| node_run.finished_at.unwrap_or(0));
-    last_agent.map(|node_run| last_assistant_message(node_run.output.as_deref()))
+    last_agent.and_then(|node_run| node_run.output.clone())
 }
 
 /// Computes the scalar input recorded on a node run when it starts.
@@ -376,19 +383,4 @@ fn node_input(node: &WorkflowGraphNode, context: &ExecutionContext) -> Option<St
             .map(|config| config.prompt.clone()),
         NodeType::Output | NodeType::Prompt | NodeType::Condition | NodeType::Tool => None,
     }
-}
-
-/// Extracts the final assistant message from a node conversation array.
-fn last_assistant_message(output: Option<&str>) -> String {
-    let Some(output) = output else {
-        return String::new();
-    };
-    let Ok(conversation) = serde_json::from_str::<Vec<ConversationEntry>>(output) else {
-        return String::new();
-    };
-    conversation
-        .iter()
-        .rev()
-        .find_map(|entry| (entry.role == "assistant").then_some(entry.text.clone()))
-        .unwrap_or_default()
 }

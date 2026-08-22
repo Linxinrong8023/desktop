@@ -1,7 +1,7 @@
 use crate::RepositoryError;
 use ora_domain::{
-    CreatedWorkflow, Workflow, WorkflowDetail, WorkflowId, WorkflowSnapshot, WorkflowSnapshotId,
-    WorkflowSummary, WorkflowVersion,
+    CreatedWorkflow, Namespace, Workflow, WorkflowDetail, WorkflowId, WorkflowSnapshot,
+    WorkflowSnapshotId, WorkflowSummary, WorkflowVersion,
 };
 
 /// Describes the outcome of deleting a snapshot while preserving aggregate invariants.
@@ -82,6 +82,13 @@ pub trait WorkflowRepository {
 
     /// Loads one visible workflow by identifier.
     fn find_workflow(&self, workflow_id: &WorkflowId) -> Result<Option<Workflow>, RepositoryError>;
+
+    /// Loads one visible workflow by namespace and ASCII case-insensitive name.
+    fn find_workflow_by_name(
+        &self,
+        namespace: &Namespace,
+        name: &str,
+    ) -> Result<Option<Workflow>, RepositoryError>;
 
     /// Loads a workflow together with its draft and currently published snapshot.
     fn get_workflow_detail(

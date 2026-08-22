@@ -20,24 +20,28 @@ export function WorkflowConnectionLine({
   connectionLineStyle,
   connectionStatus,
 }: ConnectionLineComponentProps) {
-  const {
-    connectionCandidateEndpoint,
-    connectionCandidateNodeId,
-  } = useWorkflowConnectionState();
+  const { connectionCandidateEndpoint, connectionCandidateNodeId } =
+    useWorkflowConnectionState();
   const { getInternalNode } = useReactFlow();
-  const candidateNode = connectionCandidateNodeId === null
-    || connectionCandidateNodeId === undefined
-    ? undefined
-    : getInternalNode(connectionCandidateNodeId);
-  const target = candidateNode !== undefined
-    && connectionCandidateEndpoint !== null
-    && connectionCandidateEndpoint !== undefined
-    ? {
-        x: candidateNode.internals.positionAbsolute.x
-          + (connectionCandidateEndpoint === "source" ? WORKFLOW_NODE_WIDTH : 0),
-        y: candidateNode.internals.positionAbsolute.y + WORKFLOW_NODE_ANCHOR_Y,
-      }
-    : { x: toX, y: toY };
+  const candidateNode =
+    connectionCandidateNodeId === null ||
+    connectionCandidateNodeId === undefined
+      ? undefined
+      : getInternalNode(connectionCandidateNodeId);
+  const target =
+    candidateNode !== undefined &&
+    connectionCandidateEndpoint !== null &&
+    connectionCandidateEndpoint !== undefined
+      ? {
+          x:
+            candidateNode.internals.positionAbsolute.x +
+            (connectionCandidateEndpoint === "source"
+              ? WORKFLOW_NODE_WIDTH
+              : 0),
+          y:
+            candidateNode.internals.positionAbsolute.y + WORKFLOW_NODE_ANCHOR_Y,
+        }
+      : { x: toX, y: toY };
   const [path] = getBezierPath({
     sourceX: fromX,
     sourceY: fromY,

@@ -2,3 +2,8 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+
+# Downloaded locally or in CI; the platform-specific Deno executable is not
+# committed to the repository.
+/binaries/*
+!/binaries/.gitkeep

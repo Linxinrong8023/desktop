@@ -4,7 +4,10 @@ import { createChatStore } from "@ora/chat";
 import { createMockWorkflow } from "@ora/workflow-mock";
 import { normalizeWorkflowDefinition } from "@ora/workflow-runtime";
 import { createMemoryWorkflowRuntime } from "@ora/workflow-runtime/memory";
-import { createMockClient, createMockClientState } from "../../test/mock-client";
+import {
+  createMockClient,
+  createMockClientState,
+} from "../../test/mock-client";
 import {
   createTestQueryClient,
   renderHookWithClient,
@@ -37,14 +40,17 @@ describe("useGraphWorkflowRunLive", () => {
     await act(async () => runtime.runs.cancel(run.id));
 
     expect(onRunFinished).toHaveBeenCalledOnce();
-    await waitFor(() => expect(result.current.data?.cursor).not.toBe(initialCursor));
+    await waitFor(() =>
+      expect(result.current.data?.cursor).not.toBe(initialCursor),
+    );
     unmount();
 
     const onRemountedRunFinished = vi.fn();
     const remounted = renderHookWithClient(
-      () => useGraphWorkflowRunLive(run.id, {
-        onRunFinished: onRemountedRunFinished,
-      }),
+      () =>
+        useGraphWorkflowRunLive(run.id, {
+          onRunFinished: onRemountedRunFinished,
+        }),
       client,
       queryClient,
       chatStore,

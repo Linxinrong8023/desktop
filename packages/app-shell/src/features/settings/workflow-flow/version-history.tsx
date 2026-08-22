@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconCircleCheck, IconHistory, IconSearch, IconTrash } from "@tabler/icons-react";
+import {
+  IconCircleCheck,
+  IconHistory,
+  IconSearch,
+  IconTrash,
+} from "@tabler/icons-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,16 +51,20 @@ export function WorkflowVersionHistory({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<MockWorkflowVersion | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<MockWorkflowVersion | null>(
+    null,
+  );
 
   const normalizedQuery = query.trim().toLowerCase();
   const draftTitle = t("settings.workflow.currentDraft");
-  const draftSubtitle = draftUpdatedAt !== undefined
-    ? `${t("settings.workflow.editableDraft")} · ${draftUpdatedAt}`
-    : t("settings.workflow.editableDraft");
-  const showDraft = normalizedQuery === ""
-    || draftTitle.toLowerCase().includes(normalizedQuery)
-    || draftSubtitle.toLowerCase().includes(normalizedQuery);
+  const draftSubtitle =
+    draftUpdatedAt !== undefined
+      ? `${t("settings.workflow.editableDraft")} · ${draftUpdatedAt}`
+      : t("settings.workflow.editableDraft");
+  const showDraft =
+    normalizedQuery === "" ||
+    draftTitle.toLowerCase().includes(normalizedQuery) ||
+    draftSubtitle.toLowerCase().includes(normalizedQuery);
 
   const visibleVersions = useMemo(() => {
     if (normalizedQuery === "") {
@@ -67,9 +76,10 @@ export function WorkflowVersionHistory({
     });
   }, [normalizedQuery, versions]);
 
-  const previewIsActive = previewedVersion !== null
-    && activeVersion !== null
-    && previewedVersion.version === activeVersion;
+  const previewIsActive =
+    previewedVersion !== null &&
+    activeVersion !== null &&
+    previewedVersion.version === activeVersion;
 
   return (
     <div className="absolute right-48 top-3 z-40">
@@ -96,7 +106,9 @@ export function WorkflowVersionHistory({
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 p-0">
           <div className="flex items-center justify-between border-b border-border px-3 py-2.5">
-            <h3 className="text-sm font-semibold">{t("settings.workflow.versionHistory")}</h3>
+            <h3 className="text-sm font-semibold">
+              {t("settings.workflow.versionHistory")}
+            </h3>
           </div>
           <div className="border-b border-border px-2 py-2">
             <div className="relative">
@@ -120,18 +132,23 @@ export function WorkflowVersionHistory({
               />
             ) : null}
             {visibleVersions.map((version) => {
-              const isActive = activeVersion !== null && version.version === activeVersion;
+              const isActive =
+                activeVersion !== null && version.version === activeVersion;
               return (
                 <div key={version.version} className="group relative">
                   <VersionItem
                     selected={previewedVersion?.version === version.version}
                     title={version.version}
-                    subtitle={isActive
-                      ? `${t("settings.workflow.activeVersion")} · ${version.createdAt}`
-                      : `${t("settings.workflow.publishedVersion")} · ${version.createdAt}`}
-                    badge={isActive
-                      ? t("settings.workflow.activeVersion")
-                      : undefined}
+                    subtitle={
+                      isActive
+                        ? `${t("settings.workflow.activeVersion")} · ${version.createdAt}`
+                        : `${t("settings.workflow.publishedVersion")} · ${version.createdAt}`
+                    }
+                    badge={
+                      isActive
+                        ? t("settings.workflow.activeVersion")
+                        : undefined
+                    }
                     trailingAction={!isActive}
                     onClick={() => onPreviewVersion(version)}
                   />
@@ -247,12 +264,17 @@ function VersionItem({
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="min-w-0 truncate text-xs font-medium">{title}</span>
         {badge !== undefined ? (
-          <Badge variant="secondary" className="h-4 shrink-0 px-1.5 text-[9px] font-medium">
+          <Badge
+            variant="secondary"
+            className="h-4 shrink-0 px-1.5 text-[9px] font-medium"
+          >
             {badge}
           </Badge>
         ) : null}
       </span>
-      <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{subtitle}</span>
+      <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
+        {subtitle}
+      </span>
     </button>
   );
 }

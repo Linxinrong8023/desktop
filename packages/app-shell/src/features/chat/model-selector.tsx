@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
-import type { AgentCli } from "@ora/contracts";
+import type { KnownAgentCli } from "./model-catalog";
 import {
   Button,
   DropdownMenu,
@@ -16,21 +16,29 @@ import { useSettingsStore } from "../../state/stores/settings-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
 import { useSessions } from "../../state/hooks/use-sessions";
 import { useSetSessionConfig } from "../../state/hooks/use-session-config";
-import { useWarmSession, warmTargetKey } from "../../state/hooks/use-warm-session";
+import {
+  useWarmSession,
+  warmTargetKey,
+} from "../../state/hooks/use-warm-session";
 import { useTargetAgentCli } from "../../state/hooks/use-target-agent-cli";
-import { usePendingAgentStore, usePendingSwitch } from "../../state/stores/pending-agent-store";
+import { useAvailableAgentClis } from "../../state/hooks/use-available-agent-clis";
+import {
+  usePendingAgentStore,
+  usePendingSwitch,
+} from "../../state/stores/pending-agent-store";
 import { useAgentModelStore } from "../../state/stores/agent-model-store";
 import { currentValueName, findModelOption, selectableValues } from "@ora/chat";
-import { AGENT_CLI_LABELS, AGENT_CLI_ORDER } from "./model-catalog";
+import { AGENT_CLI_LABELS } from "./model-catalog";
 import { ProviderLogo } from "./provider-logos";
 
 /**
  * The composer's agent and model picker.
  *
- * Both lists describe the session the composer will send into. Which CLIs exist
- * is static; which models are available is whatever that CLI reported for this
- * session, so the model list has three states rather than two — still arriving,
- * genuinely offering no choice, or a real set to pick from.
+ * Both lists describe the session the composer will send into. Which agents exist
+ * is whatever this installation can actually reach; which models are available is
+ * whatever the chosen agent reported for this session, so the model list has three
+ * states rather than two — still arriving, genuinely offering no choice, or a real
+ * set to pick from.
  *
  * With a session selected, choosing a different CLI moves that conversation onto
  * it rather than only changing the default for the next one. Ora owns the
@@ -55,15 +63,27 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
   // a candidate has to be compared against to decide whether picking it is a move
   // at all — the resolved agent below cannot answer that, since it already
   // reports whatever move is pending.
-  const boundSession = sessions.find((session) => session.id === selection.sessionId);
+  const boundSession = sessions.find(
+    (session) => session.id === selection.sessionId,
+  );
   const targetKey = warmTargetKey(selection);
-  const setPickedForTarget = usePendingAgentStore((state) => state.setPendingAgent);
-  const setPendingSwitch = usePendingAgentStore((state) => state.setPendingSwitch);
-  const clearPendingSwitch = usePendingAgentStore((state) => state.clearPendingSwitch);
+  const setPickedForTarget = usePendingAgentStore(
+    (state) => state.setPendingAgent,
+  );
+  const setPendingSwitch = usePendingAgentStore(
+    (state) => state.setPendingSwitch,
+  );
+  const clearPendingSwitch = usePendingAgentStore(
+    (state) => state.clearPendingSwitch,
+  );
   const pendingSwitch = usePendingSwitch(selection.sessionId);
   // Resolved centrally so this and the composer cannot disagree: they share one
   // warm-session query key, and the CLI is part of that key.
   const agentCli = useTargetAgentCli(selection);
+  // Which agents the runtime actually reports reaching here. An agent whose CLI
+  // is absent, or whose plugin package was disabled or uninstalled, drops out of
+  // the list rather than being offered and then failing on the first message.
+  const availableAgentClis = useAvailableAgentClis();
 
   // Shares the workspace's warm-session query key, so this is a cache read
   // rather than a second provider session.
@@ -75,11 +95,14 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
   // session here instead would advertise the outgoing agent's model as the
   // incoming agent's.
   const activeSessionId =
-    warmSession.sessionId ?? (pendingSwitch === undefined ? selection.sessionId : null);
+    warmSession.sessionId ??
+    (pendingSwitch === undefined ? selection.sessionId : null);
   // Selected narrowly rather than as one conversation object, so a streaming
   // turn does not re-render the picker on every token.
   const liveOptions = useStore(chatStore, (state) =>
-    activeSessionId === null ? undefined : state.conversations[activeSessionId]?.configOptions,
+    activeSessionId === null
+      ? undefined
+      : state.conversations[activeSessionId]?.configOptions,
   );
   const isReplayingHistory = useStore(chatStore, (state) =>
     activeSessionId === null
@@ -129,7 +152,11 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
 
   const activeLabel = modelOption
     ? currentValueName(modelOption)
-    : t(isLoadingModels ? "chat.modelSelector.loading" : "chat.modelSelector.placeholder");
+    : t(
+        isLoadingModels
+          ? "chat.modelSelector.loading"
+          : "chat.modelSelector.placeholder",
+      );
 
   /**
    * A persisted session records a move onto the chosen CLI, to be performed by
@@ -149,11 +176,11 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
    * happened yet — this only points the surface at it. The list below settles
    * when that answers, which is why the menu is still open to see it.
    */
-  const selectAgent = (candidate: AgentCli) => {
+  const selectAgent = (candidate: KnownAgentCli) => {
     if (candidate === agentCli) return;
     updateSettings({ agentCli: candidate });
     if (boundSession !== undefined) {
-      if (candidate === boundSession.agentCli) {
+      if (candidate === boundSession.agentRef) {
         clearPendingSwitch(boundSession.id);
       } else {
         setPendingSwitch(boundSession.id, candidate);
@@ -186,7 +213,9 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
           />
         }
       >
-        {agentCli && <ProviderLogo agentCli={agentCli} className="size-3.5 shrink-0" />}
+        {agentCli && (
+          <ProviderLogo agentCli={agentCli} className="size-3.5 shrink-0" />
+        )}
         {/* The CLI name is width-animated in via a 0fr → 1fr grid so the
             button grows smoothly on hover instead of snapping wider. */}
         <span className="grid grid-cols-[0fr] opacity-0 transition-all duration-200 group-hover/model:grid-cols-[1fr] group-hover/model:opacity-100 group-aria-expanded/model:grid-cols-[1fr] group-aria-expanded/model:opacity-100">
@@ -195,16 +224,24 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
           </span>
         </span>
         <span className="whitespace-nowrap">{activeLabel}</span>
-        {setSessionConfig.isPending || isSettling
-          ? <IconLoader2 className="size-3 shrink-0 animate-spin opacity-50" aria-hidden="true" />
-          : <IconChevronDown className="size-3 shrink-0 opacity-50" aria-hidden="true" />}
+        {setSessionConfig.isPending || isSettling ? (
+          <IconLoader2
+            className="size-3 shrink-0 animate-spin opacity-50"
+            aria-hidden="true"
+          />
+        ) : (
+          <IconChevronDown
+            className="size-3 shrink-0 opacity-50"
+            aria-hidden="true"
+          />
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="top" className="w-56">
         <DropdownMenuGroup className="p-1">
           <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
             {t("chat.modelSelector.agent")}
           </DropdownMenuLabel>
-          {AGENT_CLI_ORDER.map((candidate) => (
+          {availableAgentClis.map((candidate) => (
             <DropdownMenuItem
               key={candidate}
               className="gap-1.5 rounded-sm px-2 py-1.5 text-xs"
@@ -215,7 +252,9 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
             >
               <ProviderLogo agentCli={candidate} className="size-3.5" />
               {AGENT_CLI_LABELS[candidate]}
-              {candidate === agentCli && <IconCheck className="ml-auto size-4" />}
+              {candidate === agentCli && (
+                <IconCheck className="ml-auto size-4" />
+              )}
             </DropdownMenuItem>
           ))}
         </DropdownMenuGroup>
@@ -224,14 +263,21 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
             {t("chat.modelSelector.model")}
             {isUpdatingModels && (
               <span className="inline-flex items-center gap-1 text-muted-foreground/70">
-                <IconLoader2 className="size-3 animate-spin" aria-hidden="true" />
+                <IconLoader2
+                  className="size-3 animate-spin"
+                  aria-hidden="true"
+                />
                 {t("chat.modelSelector.updating")}
               </span>
             )}
           </DropdownMenuLabel>
           {modelOption === null ? (
             <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-              {t(isLoadingModels ? "chat.modelSelector.loading" : "chat.modelSelector.empty")}
+              {t(
+                isLoadingModels
+                  ? "chat.modelSelector.loading"
+                  : "chat.modelSelector.empty",
+              )}
             </p>
           ) : (
             selectableValues(modelOption).map((value) => (
@@ -242,9 +288,10 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
                 onClick={() => selectModel(value.value)}
               >
                 {value.name}
-                {modelOption.type === "select" && value.value === modelOption.currentValue && (
-                  <IconCheck className="ml-auto size-4" />
-                )}
+                {modelOption.type === "select" &&
+                  value.value === modelOption.currentValue && (
+                    <IconCheck className="ml-auto size-4" />
+                  )}
               </DropdownMenuItem>
             ))
           )}

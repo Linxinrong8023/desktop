@@ -20,7 +20,9 @@ export interface DashboardEndpoint {
  * the Desktop app via a Tauri `get_dashboard_url` invoke; injected so the
  * app-shell stays transport-agnostic and unit-testable without Tauri.
  */
-export type DashboardResolver = (sessionId: string) => Promise<DashboardEndpoint>;
+export type DashboardResolver = (
+  sessionId: string,
+) => Promise<DashboardEndpoint>;
 
 /**
  * Resolves the standalone token-comparison dashboard iframe endpoint. This mode

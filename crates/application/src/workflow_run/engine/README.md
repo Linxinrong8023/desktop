@@ -8,14 +8,15 @@ real Ora session.
 
 - **Graph parsing and topology** (`graph.rs`, `node_type.rs`): deserialize a frozen React Flow
   document into a validated `petgraph` DAG, validate structural invariants, and answer topology
-  queries (successors/predecessors, transitive closures, ready set, reachability).
-- **Engine persistence port** (`ports.rs`, later phases): the `WorkflowRunEngineRepository` trait
-  that the run engine uses, implemented in `ora-db`.
+  queries (full topological order, successors/predecessors, transitive closures, ready set,
+  reachability).
+- **Engine persistence port** (`ports.rs`): the `WorkflowRunEngineRepository` trait that the run
+  engine uses, implemented in `ora-db`.
 - **Worktree initializer port** (`ports.rs`): the `WorkflowRunWorktreeInitializer` trait that the
   deploy flow calls to validate roles and materialize skills into a run worktree's initial state.
-- **Run engine** (`engine.rs`, later phases): `start`/`cancel`/`restart` use cases, reactive DAG
-  scheduling under a per-run serial executor, and the `NodeExecutor` port that hands agent
-  execution to `ora-backend`.
+- **Run engine** (`engine.rs`): `start`/`cancel`/`restart` use cases, reactive DAG scheduling under
+  a per-run serial executor, and the `NodeExecutor` port. `ora-backend` implements that port as
+  `WorkflowRunNodeExecutor` and wires it in `Backend::open`.
 
 ## Non-responsibilities
 
@@ -28,8 +29,17 @@ real Ora session.
 
 ## Public boundary
 
-Exported from `workflow_run::engine`: `WorkflowGraph`, `WorkflowGraphNode`, `AgentConfig`,
-`AgentExecutor`, `AgentSkill`, `NodeType`, `GraphError`, `UnknownNodeType`.
+Exported from `workflow_run::engine`: `WorkflowRunEngine`, `WorkflowRunControlHandler`,
+`NodeExecutor`, `WorkflowRunCallback`, `WorkflowRunEngineRepository`, `WorkflowGraph`,
+`WorkflowGraphNode`, `AgentConfig`, `AgentExecutor`, `AgentSkill`, `NodeType`, `GraphError`,
+`UnknownNodeType`.
+
+## Module interactions
+
+`ora-backend` implements `NodeExecutor` as `WorkflowRunNodeExecutor` and `WorkflowRunCallback` as
+`WorkflowRunEngineCallback`, composing both in `build_workflow_run_engine` during `Backend::open`.
+`ora-db` implements `WorkflowRunEngineRepository`. Agent-node sessions are a live path, not a
+test-only stub.
 
 ## Key invariants
 
@@ -38,8 +48,10 @@ Exported from `workflow_run::engine`: `WorkflowGraph`, `WorkflowGraphNode`, `Age
   one start node; all three are rejected at parse time with a `GraphError` variant.
 - Rust identifiers use `node_type` (aligned with `workflow_node_runs.node_type`); the wire source
   is React Flow's `data.kind`, read through a serde rename.
-- Transitive closures are ordered by topological rank (upstream first), giving agent prompt
-  assembly a stable input lineage.
+- Full-graph order and transitive closures use the same topological rank (upstream first), giving
+  agent prompt assembly a stable panorama and input lineage.
+- An agent node's `output` is its final assistant text. Complete conversation history belongs to
+  the Ora session and is never duplicated into `workflow_node_runs`.
 
 ## Failure semantics
 

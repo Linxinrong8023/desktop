@@ -9,22 +9,20 @@ use ora_application::{
     ActivateVersionResult, AdvanceWorkflowRunResult, AgentDefinitionRepository,
     CancelWorkflowRunResult, Clock, DeleteSnapshotResult, DeleteWorkflowResult,
     DeleteWorkflowRunResult, EngineError, ExecutionContext, NodeExecutor, NodeRunToStart, NodeType,
-    ProjectRepository, ProjectSpecSourceOverrideRepository, ProjectWorkContextRepository,
-    PublishSnapshotResult, RepositoryError, RestartWorkflowRunResult, RollbackDraftResult,
-    SessionRepository, SkillRepository, StartWorkflowRunResult,
-    TaskRepository, UpdateWorkflowRunInputResult, WorkflowGraphNode,
-    WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunControlHandler, WorkflowRunEngine,
-    WorkflowRunEngineRepository, WorkflowRunRepository, WorkflowValidationError, WorktreeRepository,
+    ProjectRepository, PublishSnapshotResult, RepositoryError, RestartWorkflowRunResult,
+    RollbackDraftResult, SessionRepository, SkillRepository, StartWorkflowRunResult,
+    TaskRepository, UpdateWorkflowRunInputResult, WorkflowGraphNode, WorkflowNodeRunIdGenerator,
+    WorkflowRepository, WorkflowRunControlHandler, WorkflowRunCreateOutcome, WorkflowRunEngine,
+    WorkflowRunEngineRepository, WorkflowRunRepository, WorkflowValidationError,
+    WorktreeRepository,
 };
 use ora_contracts::{StartWorkflowRunRequest, WorkflowRunStatus as ContractRunStatus};
 use ora_domain::{
-    AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Project, ProjectId,
-    ProjectSpecSourceOverride, ProjectSpecSourceOverrideId, ProjectWorkContext,
-    ProjectWorkContextId, ProjectWorkContextSurface, Session, SessionId, SessionStatus,
-    SessionTitle, Skill, SkillId, SpecSourceVisibility, SpecWorkflow, Task, TaskId, TaskStatus,
+    AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, HistoryState, Namespace, Project,
+    ProjectId, Session, SessionId, SessionStatus, SessionTitle, Skill, SkillId, Task, TaskId,
     Workflow, WorkflowId, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRun, WorkflowRunDetail,
     WorkflowRunId, WorkflowRunStatus, WorkflowRunSummary, WorkflowSnapshot, WorkflowSnapshotId,
-    Worktree, WorktreeActivity, WorktreeBaseline, WorktreeId,
+    Worktree, WorktreeActivity, WorktreeBaseline, WorktreeId, WorktreeProvisioningLeaseId,
 };
 use ora_logging::with_trace_logging;
 use pretty_assertions::assert_eq;
@@ -33,114 +31,14 @@ use tempfile::TempDir;
 use crate::{
     CascadeDeleteOutcome, DatabaseBootstrapper, DatabaseError, DatabaseLocation, RepositoryPool,
     SqliteAgentDefinitionRepository, SqliteCascadeRepository, SqliteProjectRepository,
-    SqliteProjectSpecSourceOverrideRepository, SqliteProjectWorkContextRepository,
     SqliteSessionRepository, SqliteSkillRepository, SqliteTaskRepository, SqliteWorkflowRepository,
     SqliteWorkflowRunEngineRepository, SqliteWorkflowRunRepository, SqliteWorktreeRepository,
     TimestampSource, default_migration_catalog,
 };
 
-/// Verifies source replacement is atomic at the collection boundary and hides prior rows.
+/// Verifies catalog repositories scope duplicate names by namespace and hide soft-deleted rows.
 #[test]
-fn project_spec_source_repository_replaces_active_configuration() {
-    let (_temp_dir, pool) = bootstrapped_repository_pool();
-    let project_repository = SqliteProjectRepository::new(pool.clone());
-    let repository = SqliteProjectSpecSourceOverrideRepository::new(pool);
-    let project_id = ProjectId::new("project-specs");
-    project_repository
-        .create_project(Project::new(
-            project_id.clone(),
-            "Specs",
-            "C:/project",
-            AuditFields::new(1, 1, false),
-        ))
-        .unwrap();
-    let initial = ProjectSpecSourceOverride::new(
-        ProjectSpecSourceOverrideId::new("source-1"),
-        project_id.clone(),
-        "openspec/specs",
-        SpecWorkflow::OpenSpec,
-        SpecSourceVisibility::Enabled,
-        AuditFields::new(2, 2, false),
-    );
-    repository
-        .replace_spec_source_overrides(&project_id, vec![initial.clone()], 2)
-        .unwrap();
-    let conflicting_replacement = ProjectSpecSourceOverride::new(
-        ProjectSpecSourceOverrideId::new("source-1"),
-        project_id.clone(),
-        "docs/specs",
-        SpecWorkflow::Custom {
-            name: "Custom".to_string(),
-        },
-        SpecSourceVisibility::Enabled,
-        AuditFields::new(3, 3, false),
-    );
-    assert!(
-        repository
-            .replace_spec_source_overrides(&project_id, vec![conflicting_replacement], 3)
-            .is_err()
-    );
-    assert_eq!(
-        repository.list_spec_source_overrides(&project_id).unwrap(),
-        vec![initial]
-    );
-    let replacement = ProjectSpecSourceOverride::new(
-        ProjectSpecSourceOverrideId::new("source-2"),
-        project_id.clone(),
-        "docs/plans",
-        SpecWorkflow::Superpowers,
-        SpecSourceVisibility::Disabled,
-        AuditFields::new(3, 3, false),
-    );
-
-    assert_eq!(
-        repository
-            .replace_spec_source_overrides(&project_id, vec![replacement.clone()], 3)
-            .unwrap(),
-        vec![replacement.clone()]
-    );
-    assert_eq!(
-        repository.list_spec_source_overrides(&project_id).unwrap(),
-        vec![replacement]
-    );
-}
-
-/// Verifies migration constraints keep custom workflow names and built-in columns consistent.
-#[test]
-fn project_spec_source_schema_rejects_invalid_workflow_columns() {
-    let (_temp_dir, pool) = bootstrapped_repository_pool();
-    SqliteProjectRepository::new(pool.clone())
-        .create_project(Project::new(
-            ProjectId::new("project-spec-constraints"),
-            "Specs",
-            "C:/project",
-            AuditFields::new(1, 1, false),
-        ))
-        .unwrap();
-
-    for (id, workflow_kind, custom_name) in [
-        ("missing-custom-name", "custom", None),
-        ("unexpected-built-in-name", "open_spec", Some("OpenSpec")),
-    ] {
-        assert!(
-            pool.with_connection(|connection| {
-                connection.execute(
-                    "INSERT INTO project_spec_source_overrides (
-                        id, project_id, relative_path, workflow_kind, custom_name, visibility,
-                        created_at, updated_at, is_deleted
-                     ) VALUES (?1, 'project-spec-constraints', ?1, ?2, ?3, 'enabled', 1, 1, 0)",
-                    rusqlite::params![id, workflow_kind, custom_name],
-                )?;
-                Ok(())
-            })
-            .is_err()
-        );
-    }
-}
-
-/// Verifies catalog repositories use stable identifiers and hide soft-deleted rows.
-#[test]
-fn catalog_repositories_support_id_based_crud_and_allow_duplicate_names() {
+fn catalog_repositories_support_id_based_crud_and_namespaced_names() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     let skill_repository = SqliteSkillRepository::new(pool.clone());
     let agent_repository = SqliteAgentDefinitionRepository::new(pool);
@@ -159,8 +57,10 @@ fn catalog_repositories_support_id_based_crud_and_allow_duplicate_names() {
             .unwrap(),
         created_agent.clone()
     );
-    let earlier_skill = skill("skill-0", "review", "Builds", 0, 0, false);
-    let earlier_agent = agent("agent-0", "opencode", "Assists", 0, 0, false);
+    let mut earlier_skill = skill("skill-0", "review", "Builds", 0, 0, false);
+    earlier_skill.namespace = Namespace::new("ora.plugin").unwrap();
+    let mut earlier_agent = agent("agent-0", "opencode", "Assists", 0, 0, false);
+    earlier_agent.namespace = Namespace::new("ora.plugin").unwrap();
     skill_repository
         .create_skill(earlier_skill.clone())
         .unwrap();
@@ -174,6 +74,18 @@ fn catalog_repositories_support_id_based_crud_and_allow_duplicate_names() {
     assert_eq!(
         agent_repository.list_agent_definitions().unwrap(),
         vec![earlier_agent.clone(), created_agent.clone()]
+    );
+    assert_eq!(
+        skill_repository
+            .find_skill_by_name(&Namespace::local(), "REVIEW")
+            .unwrap(),
+        Some(created_skill.clone())
+    );
+    assert_eq!(
+        skill_repository
+            .find_skill_by_name(&earlier_skill.namespace, "REVIEW")
+            .unwrap(),
+        Some(earlier_skill.clone())
     );
     let renamed_skill = skill("skill-1", "reviewer", "Reviews code", 1, 2, false);
     let renamed_agent = agent("agent-1", "reviewer-agent", "Reviews code", 1, 2, false);
@@ -227,6 +139,49 @@ fn catalog_repositories_support_id_based_crud_and_allow_duplicate_names() {
     );
 }
 
+/// Verifies workflow names are unique case-insensitively within each visible namespace.
+#[test]
+fn workflow_repository_scopes_visible_name_uniqueness_by_namespace() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let repository = SqliteWorkflowRepository::new(pool);
+    let (mut local, local_draft) = workflow_with_draft("local-workflow", "{}", 1);
+    local.name = "Review".to_string();
+    repository
+        .create_workflow(local.clone(), local_draft)
+        .unwrap();
+
+    let (mut duplicate, duplicate_draft) = workflow_with_draft("duplicate", "{}", 2);
+    duplicate.name = "REVIEW".to_string();
+    assert!(
+        repository
+            .create_workflow(duplicate, duplicate_draft)
+            .is_err()
+    );
+
+    let (mut plugin, plugin_draft) = workflow_with_draft("plugin-workflow", "{}", 3);
+    plugin.namespace = Namespace::new("ora.plugin").unwrap();
+    plugin.name = "review".to_string();
+    repository
+        .create_workflow(plugin.clone(), plugin_draft)
+        .unwrap();
+    assert_eq!(
+        repository
+            .find_workflow_by_name(&plugin.namespace, "REVIEW")
+            .unwrap(),
+        Some(plugin)
+    );
+
+    assert_eq!(
+        repository.soft_delete_workflow(&local.id, 4).unwrap(),
+        DeleteWorkflowResult::Deleted
+    );
+    let (mut replacement, replacement_draft) = workflow_with_draft("replacement", "{}", 5);
+    replacement.name = "review".to_string();
+    repository
+        .create_workflow(replacement, replacement_draft)
+        .unwrap();
+}
+
 /// Verifies lifecycle commands cannot use another workflow's snapshot as their source.
 #[test]
 fn workflow_repository_rejects_cross_workflow_lifecycle_targets() {
@@ -274,6 +229,7 @@ fn workflow_repository_rejects_cross_workflow_lifecycle_targets() {
             .expect("workflow B remains visible"),
         Workflow::new(
             workflow_b.id.clone(),
+            Namespace::local(),
             "Workflow workflow-b",
             Some(snapshot_b.id.clone()),
             AuditFields::new(20, 40, /*is_deleted*/ false),
@@ -699,6 +655,7 @@ fn workflow_repository_snapshot_in_use_guard_yields_to_draft_and_active() {
 #[test]
 fn workflow_run_repository_creates_and_reads_run() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
+    ensure_project(&pool, "project-1");
     let workflow_repository = SqliteWorkflowRepository::new(pool.clone());
     let run_repository = SqliteWorkflowRunRepository::new(pool.clone());
 
@@ -737,7 +694,6 @@ fn workflow_run_repository_creates_and_reads_run() {
         task_id.clone(),
         ProjectId::new("project-1"),
         "Workflow workflow-a 30",
-        TaskStatus::Todo,
         run_id.clone(),
         worktree_id.clone(),
         AuditFields::new(30, 30, /*is_deleted*/ false),
@@ -746,6 +702,7 @@ fn workflow_run_repository_creates_and_reads_run() {
         worktree_id.clone(),
         task_id.clone(),
         Some("ora/task-1".to_string()),
+        None,
         WorktreeBaseline::recorded("base-commit").unwrap(),
         WorktreeActivity::Active,
         AuditFields::new(30, 30, /*is_deleted*/ false),
@@ -753,9 +710,14 @@ fn workflow_run_repository_creates_and_reads_run() {
 
     assert_eq!(
         run_repository
-            .create_run(run.clone(), task.clone(), worktree.clone())
+            .create_run(
+                run.clone(),
+                task.clone(),
+                worktree.clone(),
+                &WorktreeProvisioningLeaseId::new("lease-absent"),
+            )
             .unwrap(),
-        run.clone()
+        WorkflowRunCreateOutcome::Created(Box::new(run.clone()))
     );
     assert_eq!(run_repository.find_run(&run_id).unwrap(), Some(run.clone()));
     assert_eq!(
@@ -763,6 +725,7 @@ fn workflow_run_repository_creates_and_reads_run() {
         Some(WorkflowRunDetail {
             run: run.clone(),
             name: "Workflow workflow-a 30".to_string(),
+            project_id: ProjectId::new("project-1"),
             task_id: task_id.clone(),
             nodes: Vec::new(),
         })
@@ -777,6 +740,7 @@ fn workflow_run_repository_creates_and_reads_run() {
             project_id: ProjectId::new("project-1"),
             workflow_id: workflow.id.clone(),
             status: WorkflowRunStatus::Pending,
+            has_awaiting_node: false,
             started_at: None,
             finished_at: None,
             created_at: 30,
@@ -790,12 +754,35 @@ fn workflow_run_repository_creates_and_reads_run() {
             project_id: ProjectId::new("project-1"),
             workflow_id: workflow.id.clone(),
             status: WorkflowRunStatus::Pending,
+            has_awaiting_node: false,
             started_at: None,
             finished_at: None,
             created_at: 30,
         }]
     );
     assert_eq!(run_repository.list_node_runs(&run_id).unwrap(), Vec::new());
+}
+
+/// Verifies a run with an awaiting (`Pending`) node lists with the awaiting-node flag set, so the
+/// sidebar can derive `awaitingInput` without loading node data.
+#[test]
+fn workflow_run_repository_reports_awaiting_node_on_list() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    pool.with_connection(|connection| {
+        connection.execute(
+            "INSERT INTO workflow_node_runs (id, run_id, node_id, node_type, status, created_at, updated_at, is_deleted)
+             VALUES ('node-1', ?1, 'a', 'agent', 0, 30, 30, 0)",
+            rusqlite::params![run_id.as_ref()],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    let summaries = SqliteWorkflowRunRepository::new(pool)
+        .list_runs_by_project(&ProjectId::new("project-1"))
+        .unwrap();
+    assert_eq!(summaries[0].has_awaiting_node, true);
 }
 
 /// Verifies the run row must exist before a task can reference it under enforced foreign keys.
@@ -808,8 +795,8 @@ fn workflow_run_repository_requires_run_row_before_task_row() {
 
     let result = pool.with_connection(|connection| {
         connection.execute(
-            "INSERT INTO tasks (id, project_id, title, status, type, workflow_run_id, created_at, updated_at, is_deleted)
-             VALUES ('task-orphan', 'project-1', 'orphan', 0, 1, 'run-missing', 1, 1, 0)",
+            "INSERT INTO tasks (id, project_id, title, type, workflow_run_id, created_at, updated_at, is_deleted)
+             VALUES ('task-orphan', 'project-1', 'orphan', 1, 'run-missing', 1, 1, 0)",
             [],
         )?;
         Ok(())
@@ -825,6 +812,8 @@ fn workflow_run_repository_requires_run_row_before_task_row() {
 fn create_pending_run_fixture(pool: &RepositoryPool) -> (WorkflowRunId, TaskId, WorktreeId) {
     let workflow_repository = SqliteWorkflowRepository::new(pool.clone());
     let run_repository = SqliteWorkflowRunRepository::new(pool.clone());
+    // create_run re-validates project visibility, so the owning project must exist.
+    ensure_project(pool, "project-1");
     let (workflow, draft) = workflow_with_draft("workflow-a", "{\"nodes\":[]}", 10);
     workflow_repository
         .create_workflow(workflow.clone(), draft.clone())
@@ -860,7 +849,6 @@ fn create_pending_run_fixture(pool: &RepositoryPool) -> (WorkflowRunId, TaskId, 
         task_id.clone(),
         ProjectId::new("project-1"),
         "Workflow workflow-a 30",
-        TaskStatus::Todo,
         run_id.clone(),
         worktree_id.clone(),
         AuditFields::new(30, 30, /*is_deleted*/ false),
@@ -869,12 +857,39 @@ fn create_pending_run_fixture(pool: &RepositoryPool) -> (WorkflowRunId, TaskId, 
         worktree_id.clone(),
         task_id.clone(),
         Some("ora/task-1".to_string()),
+        None,
         WorktreeBaseline::recorded("base-commit").unwrap(),
         WorktreeActivity::Active,
         AuditFields::new(30, 30, /*is_deleted*/ false),
     );
-    run_repository.create_run(run, task, worktree).unwrap();
+    run_repository
+        .create_run(
+            run,
+            task,
+            worktree,
+            &WorktreeProvisioningLeaseId::new("lease-absent"),
+        )
+        .unwrap();
     (run_id, task_id, worktree_id)
+}
+
+/// Inserts a visible project row when a fixture needs an owning project.
+fn ensure_project(pool: &RepositoryPool, project_id: &str) {
+    let repository = SqliteProjectRepository::new(pool.clone());
+    if repository
+        .find_project(&ProjectId::new(project_id))
+        .unwrap()
+        .is_none()
+    {
+        repository
+            .create_project(Project::new(
+                ProjectId::new(project_id),
+                "Fixture project",
+                "/tmp/fixture-project",
+                AuditFields::new(1, 1, false),
+            ))
+            .unwrap();
+    }
 }
 
 /// Builds the node-run descriptor for a run's `start` node.
@@ -1163,7 +1178,13 @@ fn engine_repository_completes_a_node_and_advances_current_nodes() {
     // A late or duplicate callback is rejected idempotently.
     assert_eq!(
         repository
-            .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, Vec::new(), 42)
+            .complete_node(
+                &WorkflowNodeRunId::new("node-start"),
+                None,
+                None,
+                Vec::new(),
+                42
+            )
             .unwrap(),
         AdvanceWorkflowRunResult::NotRunning
     );
@@ -1179,7 +1200,13 @@ fn engine_repository_starts_ready_nodes_and_tracks_them() {
         .start_run(&run_id, &start_node_run(None), 40)
         .unwrap();
     repository
-        .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, Vec::new(), 41)
+        .complete_node(
+            &WorkflowNodeRunId::new("node-start"),
+            None,
+            None,
+            Vec::new(),
+            41,
+        )
         .unwrap();
 
     repository
@@ -1221,6 +1248,147 @@ fn engine_repository_binds_a_node_run_to_its_session() {
     assert_eq!(
         node_runs[0].session_id.as_ref().map(ToString::to_string),
         Some("session-1".to_string())
+    );
+}
+
+/// Verifies a node that is `Pending` (an awaiting interactive node) completes the same way a
+/// running one does and is removed from `current_nodes`.
+#[test]
+fn engine_repository_completes_a_pending_node() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
+    // Force the node into the awaiting (`Pending`) state an interactive node holds.
+    pool.with_connection(|connection| {
+        connection.execute(
+            "UPDATE workflow_node_runs SET status = 0 WHERE id = ?1",
+            rusqlite::params!["node-start"],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(
+        repository
+            .complete_node(
+                &WorkflowNodeRunId::new("node-start"),
+                Some("conversation".to_string()),
+                Some("end_turn".to_string()),
+                Vec::new(),
+                41,
+            )
+            .unwrap(),
+        AdvanceWorkflowRunResult::Advanced
+    );
+    let node_runs = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap();
+    assert_eq!(node_runs[0].status, WorkflowNodeStatus::Succeeded);
+    let run = SqliteWorkflowRunRepository::new(pool)
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.state.as_deref(), Some("{\"current_nodes\":[]}"));
+}
+
+/// Verifies a node run is found by its bound session id, and an unknown session is absent.
+#[test]
+fn engine_repository_finds_node_run_by_session_id() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
+    repository
+        .set_node_run_session_id(
+            &WorkflowNodeRunId::new("node-start"),
+            &SessionId::new("session-1"),
+            41,
+        )
+        .unwrap();
+
+    let found = repository
+        .find_node_run_by_session_id(&SessionId::new("session-1"))
+        .unwrap();
+    assert_eq!(found.unwrap().id.as_ref(), "node-start");
+    assert_eq!(
+        repository
+            .find_node_run_by_session_id(&SessionId::new("session-unknown"))
+            .unwrap(),
+        None
+    );
+}
+
+/// Verifies the guarded status flip an interactive node uses to park and resume between turns.
+#[test]
+fn engine_repository_transitions_node_run_status() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
+
+    // Running → Pending: the node's first turn ended and it now awaits human input.
+    assert_eq!(
+        repository
+            .transition_node_run_status(
+                &WorkflowNodeRunId::new("node-start"),
+                WorkflowNodeStatus::Running,
+                WorkflowNodeStatus::Pending,
+                41,
+            )
+            .unwrap(),
+        AdvanceWorkflowRunResult::Advanced
+    );
+    // Pending → Running: a human follow-up turn begins.
+    assert_eq!(
+        repository
+            .transition_node_run_status(
+                &WorkflowNodeRunId::new("node-start"),
+                WorkflowNodeStatus::Pending,
+                WorkflowNodeStatus::Running,
+                42,
+            )
+            .unwrap(),
+        AdvanceWorkflowRunResult::Advanced
+    );
+    // After the node completes, a stale flip back to `Pending` must be a clean no-op.
+    repository
+        .complete_node(
+            &WorkflowNodeRunId::new("node-start"),
+            None,
+            None,
+            Vec::new(),
+            43,
+        )
+        .unwrap();
+    assert_eq!(
+        repository
+            .transition_node_run_status(
+                &WorkflowNodeRunId::new("node-start"),
+                WorkflowNodeStatus::Running,
+                WorkflowNodeStatus::Pending,
+                44,
+            )
+            .unwrap(),
+        AdvanceWorkflowRunResult::NotRunning
+    );
+    // A missing node reports NotFound.
+    assert_eq!(
+        repository
+            .transition_node_run_status(
+                &WorkflowNodeRunId::new("node-missing"),
+                WorkflowNodeStatus::Running,
+                WorkflowNodeStatus::Pending,
+                45,
+            )
+            .unwrap(),
+        AdvanceWorkflowRunResult::NotFound
     );
 }
 
@@ -1286,7 +1454,13 @@ fn engine_repository_finish_run_succeeds() {
         .start_run(&run_id, &start_node_run(None), 40)
         .unwrap();
     repository
-        .complete_node(&WorkflowNodeRunId::new("node-start"), None, None, Vec::new(), 41)
+        .complete_node(
+            &WorkflowNodeRunId::new("node-start"),
+            None,
+            None,
+            Vec::new(),
+            41,
+        )
         .unwrap();
 
     repository
@@ -1416,12 +1590,36 @@ fn engine_repository_updates_pending_run_input() {
     assert_eq!(run.input.as_deref(), Some("kickoff"));
 
     // Once started, the input is frozen.
-    repository.start_run(&run_id, &start_node_run(None), 41).unwrap();
+    repository
+        .start_run(&run_id, &start_node_run(None), 41)
+        .unwrap();
     assert_eq!(
         repository
             .update_run_input(&run_id, Some("late".to_string()), 42)
             .unwrap(),
         UpdateWorkflowRunInputResult::NotEditable
+    );
+}
+
+/// Verifies a terminal run's kickoff input is editable again so a re-run can change it.
+#[test]
+fn engine_repository_updates_terminal_run_input() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
+    assert_eq!(
+        repository.cancel_run(&run_id, 41).unwrap(),
+        CancelWorkflowRunResult::Cancelled
+    );
+    // A cancelled (terminal) run is editable again, preparing the next execution.
+    assert_eq!(
+        repository
+            .update_run_input(&run_id, Some("rerun".to_string()), 42)
+            .unwrap(),
+        UpdateWorkflowRunInputResult::Updated
     );
 }
 
@@ -1541,6 +1739,82 @@ fn engine_repository_fail_orphaned_node_runs_is_idempotent_and_preserves_anchor(
     );
 }
 
+/// Verifies the boot sweep preserves a run whose in-flight nodes are all awaiting (`Pending`).
+#[test]
+fn engine_repository_fail_orphaned_preserves_an_awaiting_run() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
+    // Park the node at `Pending`: an interactive node awaiting human input.
+    repository
+        .transition_node_run_status(
+            &WorkflowNodeRunId::new("node-start"),
+            WorkflowNodeStatus::Running,
+            WorkflowNodeStatus::Pending,
+            41,
+        )
+        .unwrap();
+
+    repository
+        .fail_orphaned_node_runs(&[run_id.clone()], 50)
+        .unwrap();
+    let run = SqliteWorkflowRunRepository::new(pool.clone())
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Running);
+    assert_eq!(run.error, None);
+    let node_runs = SqliteWorkflowRunRepository::new(pool)
+        .list_node_runs(&run_id)
+        .unwrap();
+    assert_eq!(node_runs[0].status, WorkflowNodeStatus::Pending);
+}
+
+/// Verifies the boot sweep fails EVERY non-terminal node, awaiting ones included, once any node
+/// in the run was actively generating (`Running`) at restart.
+#[test]
+fn engine_repository_fail_orphaned_fails_every_node_when_one_is_generating() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_fixture(&pool);
+    let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    repository
+        .start_run(&run_id, &start_node_run(None), 40)
+        .unwrap();
+    repository
+        .start_ready_nodes(&run_id, &[agent_node_run("node-a", "a")], 41)
+        .unwrap();
+    // The agent node awaits input while the start node is still marked running.
+    repository
+        .transition_node_run_status(
+            &WorkflowNodeRunId::new("node-a"),
+            WorkflowNodeStatus::Running,
+            WorkflowNodeStatus::Pending,
+            42,
+        )
+        .unwrap();
+
+    repository
+        .fail_orphaned_node_runs(&[run_id.clone()], 50)
+        .unwrap();
+    let run = SqliteWorkflowRunRepository::new(pool.clone())
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Failed);
+    let node_runs = SqliteWorkflowRunRepository::new(pool)
+        .list_node_runs(&run_id)
+        .unwrap();
+    assert_eq!(node_runs.len(), 2);
+    assert!(
+        node_runs
+            .iter()
+            .all(|node_run| node_run.status == WorkflowNodeStatus::Failed)
+    );
+}
+
 /// Records every agent dispatch so tests can drive completion and assert fan-out.
 #[derive(Clone, Default)]
 struct RecordingNodeExecutor {
@@ -1575,6 +1849,19 @@ impl WorkflowNodeRunIdGenerator for SequenceNodeRunIdGenerator {
     }
 }
 
+/// A thread-safe, cloneable ascending id generator for concurrent scheduling tests.
+#[derive(Clone, Default)]
+struct ConcurrentNodeRunIdGenerator {
+    next: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl WorkflowNodeRunIdGenerator for ConcurrentNodeRunIdGenerator {
+    fn generate_node_run_id(&self) -> WorkflowNodeRunId {
+        let current = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        WorkflowNodeRunId::new(format!("node-{current}"))
+    }
+}
+
 /// A deterministic clock for engine scheduling tests.
 #[derive(Clone, Copy)]
 struct FixedClock {
@@ -1600,6 +1887,8 @@ fn create_pending_run_with_graph(
 ) -> (WorkflowRunId, TaskId, WorktreeId) {
     let workflow_repository = SqliteWorkflowRepository::new(pool.clone());
     let run_repository = SqliteWorkflowRunRepository::new(pool.clone());
+    // create_run re-validates project visibility, so the owning project must exist.
+    ensure_project(pool, "project-1");
     let (workflow, draft) = workflow_with_draft("workflow-engine", graph_json, 10);
     workflow_repository
         .create_workflow(workflow.clone(), draft.clone())
@@ -1635,7 +1924,6 @@ fn create_pending_run_with_graph(
         task_id.clone(),
         ProjectId::new("project-1"),
         "Workflow workflow-engine 30",
-        TaskStatus::Todo,
         run_id.clone(),
         worktree_id.clone(),
         AuditFields::new(30, 30, /*is_deleted*/ false),
@@ -1644,11 +1932,19 @@ fn create_pending_run_with_graph(
         worktree_id.clone(),
         task_id.clone(),
         Some("ora/task-1".to_string()),
+        None,
         WorktreeBaseline::recorded("base-commit").unwrap(),
         WorktreeActivity::Active,
         AuditFields::new(30, 30, /*is_deleted*/ false),
     );
-    run_repository.create_run(run, task, worktree).unwrap();
+    run_repository
+        .create_run(
+            run,
+            task,
+            worktree,
+            &WorktreeProvisioningLeaseId::new("lease-absent"),
+        )
+        .unwrap();
     (run_id, task_id, worktree_id)
 }
 
@@ -1694,11 +1990,6 @@ fn unreachable_graph() -> &'static str {
     ],"edges":[{"source":"start","target":"a"}]}"#
 }
 
-/// Builds a one-turn assistant conversation array used as an agent node output.
-fn assistant_conversation(text: &str) -> String {
-    serde_json::json!([{ "role": "assistant", "text": text }]).to_string()
-}
-
 /// Verifies the engine runs a linear chain to `Succeeded`, executing control nodes synchronously
 /// and driving the agent node through the executor.
 #[test]
@@ -1741,11 +2032,236 @@ fn engine_runs_a_linear_chain_to_success() {
         .complete_node(
             &run_id,
             &agent_run.id,
-            Some(assistant_conversation("done")),
+            Some("done".to_string()),
             Some("end_turn".to_string()),
             Vec::new(),
         )
         .unwrap();
+    let run = SqliteWorkflowRunRepository::new(pool)
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Succeeded);
+    assert_eq!(run.output.as_deref(), Some("done"));
+}
+
+/// Verifies an awaiting (`Pending`) node stays in flight: a scheduling wave must neither
+/// re-dispatch it nor finish the run, and completing it unblocks its successors.
+#[test]
+fn engine_keeps_an_awaiting_node_in_flight() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, fan_in_graph());
+    let executor = RecordingNodeExecutor::default();
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool.clone()),
+        executor.clone(),
+        SequenceNodeRunIdGenerator::default(),
+        FixedClock::new(40),
+    );
+    assert_eq!(
+        engine.start(&run_id).unwrap(),
+        StartWorkflowRunResult::Started
+    );
+
+    // Both branches are dispatched; pause the left one (interactive) at `Pending`.
+    let node_runs = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap();
+    let left = node_runs
+        .iter()
+        .find(|node_run| node_run.node_id == "l")
+        .unwrap()
+        .clone();
+    let right = node_runs
+        .iter()
+        .find(|node_run| node_run.node_id == "r")
+        .unwrap()
+        .clone();
+    let engine_repo = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    assert_eq!(
+        engine_repo
+            .transition_node_run_status(
+                &left.id,
+                WorkflowNodeStatus::Running,
+                WorkflowNodeStatus::Pending,
+                41,
+            )
+            .unwrap(),
+        AdvanceWorkflowRunResult::Advanced
+    );
+
+    // The right branch finishes; the wave must not re-dispatch the awaiting left node and must
+    // not finish the run while it is still in flight.
+    let before = executor.dispatched.lock().unwrap().len();
+    engine
+        .complete_node(
+            &run_id,
+            &right.id,
+            Some("right done".to_string()),
+            Some("end_turn".to_string()),
+            Vec::new(),
+        )
+        .unwrap();
+    assert_eq!(executor.dispatched.lock().unwrap().len(), before);
+    let run = SqliteWorkflowRunRepository::new(pool.clone())
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Running);
+    let left_after = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap()
+        .into_iter()
+        .find(|node_run| node_run.node_id == "l")
+        .unwrap();
+    assert_eq!(left_after.status, WorkflowNodeStatus::Pending);
+
+    // Completing the awaiting node unblocks `merge`, which is dispatched and stays in flight.
+    engine
+        .complete_node(
+            &run_id,
+            &left_after.id,
+            Some("left done".to_string()),
+            Some("end_turn".to_string()),
+            Vec::new(),
+        )
+        .unwrap();
+    assert_eq!(executor.dispatched.lock().unwrap().len(), before + 1);
+    let run = SqliteWorkflowRunRepository::new(pool)
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Running);
+}
+
+/// Verifies that serializing two concurrent predecessor completions behind one per-run gate
+/// dispatches the merged successor exactly once (#5). The gate mirrors the backend's per-run
+/// lock; without it, two scheduling waves could each see `merge` as ready and dispatch it twice.
+#[test]
+fn engine_serialized_concurrent_completion_dispatches_successor_once() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, fan_in_graph());
+    let executor = RecordingNodeExecutor::default();
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool.clone()),
+        executor.clone(),
+        ConcurrentNodeRunIdGenerator::default(),
+        FixedClock::new(40),
+    );
+    assert_eq!(
+        engine.start(&run_id).unwrap(),
+        StartWorkflowRunResult::Started
+    );
+
+    let node_runs = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap();
+    let left = node_runs
+        .iter()
+        .find(|node_run| node_run.node_id == "l")
+        .unwrap()
+        .id
+        .clone();
+    let right = node_runs
+        .iter()
+        .find(|node_run| node_run.node_id == "r")
+        .unwrap()
+        .id
+        .clone();
+
+    let gate = Arc::new(Mutex::new(()));
+    let barrier = Arc::new(Barrier::new(2));
+
+    let run_id_left = run_id.clone();
+    let left_engine = engine.clone();
+    let left_gate = gate.clone();
+    let left_barrier = barrier.clone();
+    let left_handle = thread::spawn(move || {
+        left_barrier.wait();
+        let _guard = left_gate.lock().unwrap();
+        left_engine
+            .complete_node(
+                &run_id_left,
+                &left,
+                Some("left done".to_string()),
+                Some("end_turn".to_string()),
+                Vec::new(),
+            )
+            .unwrap();
+    });
+
+    let run_id_right = run_id.clone();
+    let right_engine = engine.clone();
+    let right_gate = gate.clone();
+    let right_barrier = barrier.clone();
+    let right_handle = thread::spawn(move || {
+        right_barrier.wait();
+        let _guard = right_gate.lock().unwrap();
+        right_engine
+            .complete_node(
+                &run_id_right,
+                &right,
+                Some("right done".to_string()),
+                Some("end_turn".to_string()),
+                Vec::new(),
+            )
+            .unwrap();
+    });
+
+    left_handle.join().unwrap();
+    right_handle.join().unwrap();
+
+    let merge_dispatches = executor
+        .dispatched
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, node_id)| node_id == "merge")
+        .count();
+    assert_eq!(merge_dispatches, 1);
+}
+
+/// Verifies that resuming a `Running` run whose nodes are all terminal (the crash window between a
+/// node completion and its successor scheduling) dispatches the successor and finishes the run (#6).
+#[test]
+fn engine_resume_finishes_a_stalled_running_run() {
+    let (_temp_dir, pool) = bootstrapped_repository_pool();
+    let (run_id, _, _) = create_pending_run_with_graph(&pool, linear_graph());
+    let engine = WorkflowRunEngine::new(
+        SqliteWorkflowRunEngineRepository::new(pool.clone()),
+        RecordingNodeExecutor::default(),
+        SequenceNodeRunIdGenerator::default(),
+        FixedClock::new(40),
+    );
+    assert_eq!(
+        engine.start(&run_id).unwrap(),
+        StartWorkflowRunResult::Started
+    );
+
+    // Complete the agent at the repository level, skipping the scheduling wave: this reproduces a
+    // crash between the node's completion commit and its successor dispatch.
+    let node_runs = SqliteWorkflowRunRepository::new(pool.clone())
+        .list_node_runs(&run_id)
+        .unwrap();
+    let agent = node_runs.iter().find(|n| n.node_id == "a").unwrap();
+    SqliteWorkflowRunEngineRepository::new(pool.clone())
+        .complete_node(
+            &agent.id,
+            Some("done".to_string()),
+            Some("end_turn".to_string()),
+            Vec::new(),
+            41,
+        )
+        .unwrap();
+
+    let run = SqliteWorkflowRunRepository::new(pool.clone())
+        .find_run(&run_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Running);
+
+    engine.resume(&run_id).unwrap();
+
     let run = SqliteWorkflowRunRepository::new(pool)
         .find_run(&run_id)
         .unwrap()
@@ -1847,10 +2363,10 @@ fn engine_dispatches_parallel_branches_concurrently() {
         .id
         .clone();
     engine
-        .complete_node(&run_id, &left, Some(assistant_conversation("left")), None, Vec::new())
+        .complete_node(&run_id, &left, Some("left".to_string()), None, Vec::new())
         .unwrap();
     engine
-        .complete_node(&run_id, &right, Some(assistant_conversation("right")), None, Vec::new())
+        .complete_node(&run_id, &right, Some("right".to_string()), None, Vec::new())
         .unwrap();
     let dispatched: Vec<String> = executor
         .dispatched
@@ -1872,7 +2388,7 @@ fn engine_dispatches_parallel_branches_concurrently() {
         .complete_node(
             &run_id,
             &merge.id,
-            Some(assistant_conversation("merged")),
+            Some("merged".to_string()),
             None,
             Vec::new(),
         )
@@ -1937,7 +2453,7 @@ fn engine_restarts_a_finished_run() {
         .complete_node(
             &run_id,
             &agent_run.id,
-            Some(assistant_conversation("done")),
+            Some("done".to_string()),
             None,
             Vec::new(),
         )
@@ -2131,6 +2647,7 @@ fn workflow_with_draft(id: &str, graph: &str, created_at: i64) -> (Workflow, Wor
     let workflow_id = WorkflowId::new(id);
     let workflow = Workflow::new(
         workflow_id.clone(),
+        Namespace::local(),
         format!("Workflow {id}"),
         /*published_snapshot_id*/ None,
         AuditFields::new(created_at, created_at, /*is_deleted*/ false),
@@ -2178,6 +2695,7 @@ fn skill(
 ) -> Skill {
     Skill::new(
         SkillId::new(id),
+        Namespace::local(),
         name,
         description,
         AuditFields::new(created_at, updated_at, is_deleted),
@@ -2195,6 +2713,7 @@ fn agent(
 ) -> AgentDefinition {
     AgentDefinition::new(
         AgentDefinitionId::new(id),
+        Namespace::local(),
         name,
         description,
         "",
@@ -2260,12 +2779,6 @@ fn project_repository_supports_crud_and_soft_delete() {
         Some(created_project.clone())
     );
     assert_eq!(
-        repository
-            .find_project_by_name(&created_project.name)
-            .unwrap(),
-        Some(created_project.clone())
-    );
-    assert_eq!(
         repository.list_projects().unwrap(),
         vec![created_project.clone()]
     );
@@ -2287,147 +2800,12 @@ fn project_repository_supports_crud_and_soft_delete() {
     );
     assert_eq!(
         repository
-            .find_project_by_name(&updated_project.name)
-            .unwrap(),
-        Some(updated_project.clone())
-    );
-    assert_eq!(
-        repository
             .soft_delete_project(&updated_project.id, /*deleted_at*/ 30)
             .unwrap(),
         true
     );
     assert_eq!(repository.find_project(&updated_project.id).unwrap(), None);
-    assert_eq!(
-        repository
-            .find_project_by_name(&updated_project.name)
-            .unwrap(),
-        None
-    );
     assert_eq!(repository.list_projects().unwrap(), Vec::<Project>::new());
-}
-
-/// Verifies the SQLite-backed project repository can load one visible project by exact name.
-#[test]
-fn project_repository_finds_visible_project_by_name() {
-    let (_temp_dir, pool) = bootstrapped_repository_pool();
-    let repository = SqliteProjectRepository::new(pool);
-    let project = Project::new(
-        ProjectId::new("project-1"),
-        "Ora",
-        "/tmp/ora",
-        AuditFields::new(14, 14, false),
-    );
-
-    repository.create_project(project.clone()).unwrap();
-
-    assert_eq!(
-        repository.find_project_by_name("Ora").unwrap(),
-        Some(project)
-    );
-    assert_eq!(repository.find_project_by_name("Missing").unwrap(), None);
-}
-
-/// Verifies the SQLite-backed project repository hides soft-deleted rows during name-based lookup.
-#[test]
-fn project_repository_ignores_soft_deleted_projects_during_name_lookup() {
-    let (_temp_dir, pool) = bootstrapped_repository_pool();
-    let repository = SqliteProjectRepository::new(pool);
-    let project = Project::new(
-        ProjectId::new("project-1"),
-        "Ora",
-        "/tmp/ora",
-        AuditFields::new(15, 15, false),
-    );
-
-    repository.create_project(project.clone()).unwrap();
-    repository
-        .soft_delete_project(&project.id, /*deleted_at*/ 16)
-        .unwrap();
-
-    assert_eq!(repository.find_project_by_name("Ora").unwrap(), None);
-}
-
-/// Verifies the SQLite-backed project work context repository preserves lease-aware rows and cleanup.
-#[test]
-fn project_work_context_repository_supports_active_lookup_and_cleanup() {
-    let (_temp_dir, pool) = bootstrapped_repository_pool();
-    let repository = SqliteProjectWorkContextRepository::new(pool);
-    let created_context = ProjectWorkContext::new(
-        ProjectWorkContextId::new("context-1"),
-        ProjectWorkContextSurface::Tauri,
-        "window-1",
-        ProjectId::new("project-1"),
-        120,
-        10,
-        10,
-    );
-
-    assert_eq!(
-        repository
-            .create_project_work_context(created_context.clone())
-            .unwrap(),
-        created_context.clone()
-    );
-    assert_eq!(
-        repository
-            .find_project_work_context(ProjectWorkContextSurface::Tauri, "window-1")
-            .unwrap(),
-        Some(created_context.clone())
-    );
-    assert_eq!(
-        repository
-            .find_active_project_work_context_for_project(&created_context.project_id, 100)
-            .unwrap(),
-        Some(created_context.clone())
-    );
-    assert_eq!(
-        repository
-            .find_active_project_work_context_for_project(&created_context.project_id, 120)
-            .unwrap(),
-        None
-    );
-
-    let updated_context = ProjectWorkContext::new(
-        created_context.id.clone(),
-        created_context.surface,
-        created_context.window_id.clone(),
-        ProjectId::new("project-2"),
-        240,
-        created_context.created_at,
-        40,
-    );
-
-    assert_eq!(
-        repository
-            .update_project_work_context(updated_context.clone())
-            .unwrap(),
-        updated_context.clone()
-    );
-    assert_eq!(
-        repository
-            .find_active_project_work_context_for_project(&ProjectId::new("project-2"), 200)
-            .unwrap(),
-        Some(updated_context.clone())
-    );
-    assert_eq!(
-        repository
-            .delete_expired_project_work_contexts(200)
-            .unwrap(),
-        0
-    );
-    assert_eq!(
-        repository
-            .delete_project_work_context(ProjectWorkContextSurface::Tauri, "window-1")
-            .unwrap(),
-        true
-    );
-    assert_eq!(
-        repository
-            .find_project_work_context(ProjectWorkContextSurface::Tauri, "window-1")
-            .unwrap(),
-        None
-    );
 }
 
 /// Verifies the SQLite-backed task repository preserves CRUD snapshots and hides soft-deleted rows.
@@ -2439,7 +2817,6 @@ fn task_repository_supports_crud_and_soft_delete() {
         TaskId::new("task-1"),
         ProjectId::new("project-1"),
         "Wire the pool",
-        TaskStatus::Todo,
         Some(WorktreeId::new("worktree-1")),
         AuditFields::new(11, 11, false),
     );
@@ -2458,7 +2835,6 @@ fn task_repository_supports_crud_and_soft_delete() {
         created_task.id.clone(),
         created_task.project_id.clone(),
         "Wire the repository pool",
-        TaskStatus::Doing,
         None,
         AuditFields::new(11, 21, false),
     );
@@ -2501,7 +2877,6 @@ fn session_repository_supports_crud_and_soft_delete() {
             TaskId::new("task-1"),
             ProjectId::new("project-1"),
             "Test sessions",
-            TaskStatus::Todo,
             None,
             AuditFields::new(11, 11, false),
         ))
@@ -2509,7 +2884,7 @@ fn session_repository_supports_crud_and_soft_delete() {
     let created_session = Session::new(
         SessionId::new("session-1"),
         TaskId::new("task-1"),
-        AgentCli::OpenCode,
+        AgentCli::Claude.agent_ref(),
         "provider-1",
         SessionStatus::Running,
         AuditFields::new(12, 12, false),
@@ -2530,7 +2905,7 @@ fn session_repository_supports_crud_and_soft_delete() {
                 .map_err(crate::DatabaseError::from)
         })
         .unwrap(),
-        "ora-space.opencode"
+        "ora-space.claude"
     );
     assert_eq!(
         repository.find_session(&created_session.id).unwrap(),
@@ -2544,7 +2919,7 @@ fn session_repository_supports_crud_and_soft_delete() {
     let updated_session = Session::new(
         created_session.id.clone(),
         created_session.task_id.clone(),
-        created_session.agent_cli,
+        created_session.agent_ref.clone(),
         created_session.agent_session_id.clone(),
         SessionStatus::Stopped,
         AuditFields::new(12, 22, false),
@@ -2592,9 +2967,15 @@ fn session_repository_updates_do_not_overwrite_unrelated_columns() {
     assert_eq!(titled, expected_titled);
 
     let rebound = repository
-        .update_session_binding(&session_id, AgentCli::Nga, "provider-2", /*now*/ 41)
+        .update_session_binding(
+            &session_id,
+            AgentCli::Nga.agent_ref(),
+            "provider-2",
+            /*now*/ 41,
+        )
         .unwrap();
-    let expected_rebound = expected_titled.with_binding(AgentCli::Nga, "provider-2", 41);
+    let expected_rebound =
+        expected_titled.with_binding(AgentCli::Nga.agent_ref(), "provider-2", 41);
     assert_eq!(rebound, expected_rebound);
 
     let running = repository
@@ -2615,7 +2996,7 @@ fn session_repository_updates_do_not_overwrite_unrelated_columns() {
 
 /// Verifies switching agents rewrites the provider binding while the conversation keeps its identity.
 #[test]
-fn session_repository_rebinds_a_session_to_another_agent_cli() {
+fn session_repository_rebinds_a_session_to_another_agent() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     insert_cascade_fixture(&pool, SessionStatus::Stopped);
     let repository = SqliteSessionRepository::new(pool);
@@ -2624,16 +3005,17 @@ fn session_repository_rebinds_a_session_to_another_agent_cli() {
         .unwrap()
         .expect("fixture session");
 
-    let rebound =
-        existing
-            .clone()
-            .with_binding(AgentCli::Nga, "provider-2", /*updated_at*/ 40);
+    let rebound = existing.clone().with_binding(
+        AgentCli::Nga.agent_ref(),
+        "provider-2",
+        /*updated_at*/ 40,
+    );
 
     assert_eq!(
         repository
             .update_session_binding(
                 &rebound.id,
-                rebound.agent_cli,
+                rebound.agent_ref.clone(),
                 &rebound.agent_session_id,
                 /*now*/ 40,
             )
@@ -2699,7 +3081,7 @@ fn session_repository_rejects_soft_deleted_task() {
     let session = Session::new(
         SessionId::new("session-after-delete"),
         TaskId::new("task-1"),
-        AgentCli::OpenCode,
+        AgentCli::Claude.agent_ref(),
         "provider-after-delete",
         SessionStatus::Running,
         AuditFields::new(21, 21, false),
@@ -2721,6 +3103,7 @@ fn worktree_repository_supports_crud_and_soft_delete() {
         WorktreeId::new("worktree-1"),
         TaskId::new("task-1"),
         Some("feature/db-pool".to_string()),
+        Some("/worktrees/task-1".to_string()),
         ora_domain::WorktreeBaseline::recorded("base-commit").unwrap(),
         WorktreeActivity::Inactive,
         AuditFields::new(13, 13, false),
@@ -2744,6 +3127,7 @@ fn worktree_repository_supports_crud_and_soft_delete() {
     let updated_worktree = Worktree::new(
         created_worktree.id.clone(),
         created_worktree.task_id.clone(),
+        None,
         None,
         ora_domain::WorktreeBaseline::recorded("updated-base-commit").unwrap(),
         WorktreeActivity::Active,
@@ -2791,14 +3175,13 @@ fn repository_pool_composes_all_repository_adapters() {
         TaskId::new("task-1"),
         project.id.clone(),
         "Implement pool composition",
-        TaskStatus::Todo,
         Some(WorktreeId::new("worktree-1")),
         AuditFields::new(41, 41, false),
     );
     let session = Session::new(
         SessionId::new("session-1"),
         task.id.clone(),
-        AgentCli::OpenCode,
+        AgentCli::Claude.agent_ref(),
         "provider-1",
         SessionStatus::Running,
         AuditFields::new(42, 42, false),
@@ -2807,6 +3190,7 @@ fn repository_pool_composes_all_repository_adapters() {
         WorktreeId::new("worktree-1"),
         task.id.clone(),
         Some("feature/composition".to_string()),
+        None,
         ora_domain::WorktreeBaseline::recorded("base-commit").unwrap(),
         WorktreeActivity::Active,
         AuditFields::new(43, 43, false),
@@ -2856,7 +3240,7 @@ fn task_cascade_delete_is_atomic_and_does_not_require_git() {
         repository.delete_task(&TaskId::new("task-1"), 20).unwrap(),
         CascadeDeleteOutcome::ActiveSession
     );
-    assert_eq!(cascade_flags(&pool), (0, 0, 0, 0, 0, 1));
+    assert_eq!(cascade_flags(&pool), (0, 0, 0, 0));
     pool.with_connection(|connection| {
         connection.execute(
             "UPDATE sessions SET status = ?1 WHERE id = 'session-1'",
@@ -2870,12 +3254,12 @@ fn task_cascade_delete_is_atomic_and_does_not_require_git() {
         repository.delete_task(&TaskId::new("task-1"), 30).unwrap(),
         CascadeDeleteOutcome::Deleted
     );
-    assert_eq!(cascade_flags(&pool), (0, 1, 1, 1, 0, 1));
+    assert_eq!(cascade_flags(&pool), (0, 1, 1, 1));
 }
 
-/// Verifies project deletion removes its transient lease and soft-deletes the full Ora aggregate.
+/// Verifies project deletion soft-deletes the full Ora aggregate without touching external state.
 #[test]
-fn project_cascade_delete_removes_work_context_without_touching_external_state() {
+fn project_cascade_delete_soft_deletes_aggregate_without_touching_external_state() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
     insert_cascade_fixture(&pool, SessionStatus::Stopped);
     let repository = SqliteCascadeRepository::new(pool.clone());
@@ -2886,7 +3270,7 @@ fn project_cascade_delete_removes_work_context_without_touching_external_state()
             .unwrap(),
         CascadeDeleteOutcome::Deleted
     );
-    assert_eq!(cascade_flags(&pool), (1, 1, 1, 1, 1, 0));
+    assert_eq!(cascade_flags(&pool), (1, 1, 1, 1));
 }
 
 /// Inserts one complete aggregate using only Ora-owned rows, deliberately without Git fixtures.
@@ -2894,19 +3278,11 @@ fn insert_cascade_fixture(pool: &RepositoryPool, session_status: SessionStatus) 
     pool.with_connection(|connection| {
         connection.execute_batch(
             "INSERT INTO projects VALUES ('project-1', 'Ora', '/not/a/repository', 1, 1, 0);
-             INSERT INTO tasks (id, project_id, title, status, worktree_id, created_at, updated_at, is_deleted)
-             VALUES ('task-1', 'project-1', 'Task', 0, 'worktree-1', 1, 1, 0);
+             INSERT INTO tasks (id, project_id, title, worktree_id, created_at, updated_at, is_deleted)
+             VALUES ('task-1', 'project-1', 'Task', 'worktree-1', 1, 1, 0);
              INSERT INTO worktrees (
                  id, task_id, branch_name, is_active, created_at, updated_at, is_deleted, base_commit_id
-             ) VALUES ('worktree-1', 'task-1', 'ora/task-1', 1, 1, 1, 0, 'base-commit');
-             INSERT INTO project_work_contexts VALUES ('context-1', 'web', 'main', 'project-1', 100, 1, 1);",
-        )?;
-        connection.execute(
-            "INSERT INTO project_spec_source_overrides (
-                id, project_id, relative_path, workflow_kind, custom_name, visibility,
-                created_at, updated_at, is_deleted
-             ) VALUES ('source-1', 'project-1', 'docs/specs', 'custom', 'Custom', 'enabled', 1, 1, 0)",
-            [],
+             ) VALUES ('worktree-1', 'task-1', 'ora/task-1', 1, 1, 1, 0, 'base-commit');",
         )?;
         // Columns are named rather than positional so a later schema addition
         // does not silently shift this fixture's values into the wrong ones.
@@ -2920,8 +3296,8 @@ fn insert_cascade_fixture(pool: &RepositoryPool, session_status: SessionStatus) 
     .unwrap();
 }
 
-/// Reads all aggregate deletion markers plus the remaining transient work-context count.
-fn cascade_flags(pool: &RepositoryPool) -> (i64, i64, i64, i64, i64, i64) {
+/// Reads all aggregate deletion markers touched by a cascade.
+fn cascade_flags(pool: &RepositoryPool) -> (i64, i64, i64, i64) {
     pool.with_connection(|connection| {
         Ok((
             connection.query_row(
@@ -2944,14 +3320,6 @@ fn cascade_flags(pool: &RepositoryPool) -> (i64, i64, i64, i64, i64, i64) {
                 [],
                 |row| row.get(0),
             )?,
-            connection.query_row(
-                "SELECT is_deleted FROM project_spec_source_overrides WHERE id = 'source-1'",
-                [],
-                |row| row.get(0),
-            )?,
-            connection.query_row("SELECT COUNT(*) FROM project_work_contexts", [], |row| {
-                row.get(0)
-            })?,
         ))
     })
     .unwrap()
@@ -2977,7 +3345,7 @@ fn project_repository_reports_sqlite_failures() {
     );
 }
 
-/// Verifies task repositories translate invalid persisted status values into application-owned errors.
+/// Verifies task repositories translate invalid persisted type values into application-owned errors.
 #[test]
 fn task_repository_reports_row_mapping_failures() {
     let (_temp_dir, pool) = bootstrapped_repository_pool();
@@ -2989,7 +3357,7 @@ fn task_repository_reports_row_mapping_failures() {
         repository
             .find_task(&TaskId::new("task-invalid"))
             .unwrap_err(),
-        "domain model error: invalid task status value: 99",
+        "domain model error: invalid task type value: 99",
     );
 }
 
@@ -3056,11 +3424,11 @@ fn database_path(temp_dir: &TempDir) -> PathBuf {
     temp_dir.path().join("repository.sqlite3")
 }
 
-/// Inserts one task row with an invalid status integer for row-mapping error coverage.
+/// Inserts one task row with an invalid type integer for row-mapping error coverage.
 fn insert_invalid_task_row(pool: &RepositoryPool) {
     pool.with_connection(|connection| {
         connection.execute(
-            "INSERT INTO tasks (id, project_id, title, status, worktree_id, created_at, updated_at, is_deleted)
+            "INSERT INTO tasks (id, project_id, title, type, worktree_id, created_at, updated_at, is_deleted)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 "task-invalid",
@@ -3088,7 +3456,7 @@ fn insert_invalid_session_row(pool: &RepositoryPool) {
             rusqlite::params![
                 "session-invalid",
                 "task-1",
-                AgentCli::OpenCode.database_value(),
+                AgentCli::Claude.agent_ref().as_str(),
                 "provider-invalid",
                 99,
                 61,

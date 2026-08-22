@@ -11,6 +11,7 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
+agent-client-protocol-schema = { workspace = true }
 gitlancer = { workspace = true }
 ora-acp = { workspace = true }
 ora-application = { workspace = true }
@@ -20,9 +21,15 @@ ora-domain = { workspace = true }
 ora-fs = { workspace = true }
 ora-history = { workspace = true }
 ora-logging = { workspace = true }
+ora-plugin-lifecycle = { workspace = true }
+ora-plugin-manager = { workspace = true }
+ora-plugin-runtime = { workspace = true }
+ora-plugin-registry = { workspace = true }
 ora-process = { workspace = true }
+ora-runtime-settings = { workspace = true }
 ora-scheduler = { workspace = true }
 ora-skill-package = { workspace = true }
+ora-utils = { workspace = true, features = ["http-reqwest"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 similar = { workspace = true }
@@ -35,5 +42,6 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+ora-test-support = { workspace = true }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
