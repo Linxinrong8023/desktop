@@ -1,26 +1,26 @@
 # workflow-run
 
-Product UI for **graph workflow runs** attached to projects (sibling to tasks
-in the workspace tree). Host/Run ports and the memory mock engine live in
+Product UI for **graph workflow runs** executed inside project Workspaces
+(sibling to task projections in the workspace tree). Host/Run ports and the memory mock engine live in
 [`@ora/workflow-runtime`](../../../../workflow-runtime/README.md).
 
 ## Three surfaces (D5.2 boundaries)
 
 Keep these stacks separate — shared chrome only where noted.
 
-1. **Settings React Flow editor** — definition authoring and **Deploy to project**.
-   Owns catalog / reconnect / delete and the library graph. Not this module’s
-   canvas.
+1. **Settings React Flow editor** — definition authoring and publishing only.
+   Owns catalog / reconnect / delete and the library graph. It does not choose
+   execution location or create runs.
 2. **OpenSpec stepper + `workflow-store`** — Spec-mode composer workflow.
    Must **not** write `GraphWorkflowRun` or share run state with Theater.
-3. **This module (`GraphWorkflowRun` Theater / Overview)** — project-level
-   **run** workspace after deploy. Consumes `@ora/workflow-runtime` via React
+3. **This module (`GraphWorkflowRun` Theater / Overview)** — a run bound to the
+   Workspace selected from a project or Task row. Consumes `@ora/workflow-runtime` via React
    context; owns Theater / Overview / hooks only.
 
-|          | Settings RF                   | OpenSpec / `workflow-store` | `workflow-run`                  | `@ora/workflow-runtime`      |
-| -------- | ----------------------------- | --------------------------- | ------------------------------- | ---------------------------- |
-| Owns     | Definition edit, deploy entry | Spec stepper state          | Theater UI + context            | Ports, memory engine, events |
-| Must not | Drive live run Theater        | Mutate `GraphWorkflowRun`   | Reuse settings `WorkflowCanvas` | Own React / Theater          |
+|          | Settings RF                 | OpenSpec / `workflow-store` | `workflow-run`                  | `@ora/workflow-runtime`      |
+| -------- | --------------------------- | --------------------------- | ------------------------------- | ---------------------------- |
+| Owns     | Definition edit and publish | Spec stepper state          | Run creation + Theater context  | Ports, memory engine, events |
+| Must not | Drive live run Theater      | Mutate `GraphWorkflowRun`   | Reuse settings `WorkflowCanvas` | Own React / Theater          |
 
 ## Responsibilities
 
@@ -88,7 +88,8 @@ Keep these stacks separate — shared chrome only where noted.
   session-demo + validation).
 - Does not own OpenSpec Spec-mode state.
 - Does not own Task Diff rendering (reuses `WorkspaceReviewLayout` /
-  `TaskDiffView` from chat); only supplies the run-task `taskId` context.
+  `TaskDiffView` from chat); the run review surface is scoped to its Workspace
+  and does not infer ownership through a Task.
 - Does not implement session-scoped Diff for Theater stage mode yet.
 - Does not reuse settings `WorkflowCanvas` (no catalog / reconnect / delete).
 - Does not implement HITL timeout (always waits for submit; `HitlTimeoutPolicy`
@@ -97,31 +98,27 @@ Keep these stacks separate — shared chrome only where noted.
 - Kickoff remains optional free text on create; schema Kickoff UI can reuse
   `WorkflowFieldForm` later.
 
-## Mount vs run (product invariant)
+## Workspace run invariant
 
-- **Mount**: at most one `(projectId, definitionId)`. Remount refreshes the
-  stored definition snapshot. Many projects may mount the same definition.
-- **Run**: every successful deploy creates a **new** `GraphWorkflowRun` under
-  the project (sidebar lists runs, not mounts).
-- First deploy = mount + first run; later deploy to the same project = refresh
-  mount + another run (UI copy distinguishes the two).
+- Every picker selection creates a new run against one explicit `workspaceId`.
+- Project rows target their Main Workspace; Task rows target their Isolated Workspace.
+- Run creation never asks for a branch and never provisions another worktree.
 
 ## Interactions
 
-- Deploy (settings): searchable project picker, then mount upsert + create
-  run, select that run, and close settings. Kickoff input belongs in the main
-  workspace UI later (`create` / path policy already accept `kickoffInput`).
+- Run workflow (sidebar): the project or Task plus menu freezes the target
+  Workspace before opening the workflow picker, then creates and selects the run.
 - Selection: `useWorkspaceSelectionStore.selectWorkflowRun`.
 - **Changes / Diff**: the run workspace wraps Theater and Overview in the same
-  `WorkspaceReviewLayout` used by chat. Scope is the run-task worktree
-  (`GetWorkflowRunResponse.taskId` → `TaskDiffView`), i.e. all file changes for
-  the run — not a single node session. Stage-scoped Diff is deferred until a
-  session-level Git Diff API (or turn-level filter) exists; `nodeStates.sessionId`
-  is projected for that follow-up.
+  `WorkspaceReviewLayout` used by chat. The run owns no implicit Task or
+  worktree, so the current generic Workspace review surface does not infer a
+  task diff. Stage-scoped Diff is deferred until a session-level Git Diff API
+  (or turn-level filter) exists; `nodeStates.sessionId` is projected for that
+  follow-up.
 - **Open location**: the run header reuses `LocationActionsButton`
-  (File Manager / Terminal / VS Code / Copy Path). Prefer
-  `GetWorkflowRunResponse.taskId` so opens target the run worktree; fall back to
-  the project root until that id is available.
+  (File Manager / Terminal / VS Code / Copy Path). It resolves the run's
+  Workspace location directly; non-local Workspace adapters remain responsible
+  for providing a future remote surface.
 - Lists: react-query via `queryKeys.workflowMounts` /
   `workflowMountsByDefinition` / `workflowRuns`.
 - Runtime: `WorkflowRuntimeProvider` in `AppShell` injects
@@ -233,9 +230,9 @@ Keep these stacks separate — shared chrome only where noted.
 
 ## Demo path checklist
 
-Manual smoke after deploy (mock runtime; no browser e2e required):
+Manual smoke after creating a run (mock runtime; no browser e2e required):
 
-1. Settings → Deploy to project → sidebar shows a new Run.
+1. Project/Task plus → Run workflow → sidebar shows a new Run.
 2. Start → Theater advances along the path.
 3. Outcomes appear → act inspector / path badge counts.
 4. Prompt node HITL → submit and continue.

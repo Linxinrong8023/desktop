@@ -13,6 +13,8 @@ describe("useInstallPlugin", () => {
     state.availablePlugins.push({
       id: "official/weather",
       name: "weather",
+      title: "Weather",
+      kind: "agent",
       namespace: "official",
       version: "1.2.0",
       description: "Weather",
@@ -31,7 +33,8 @@ describe("useInstallPlugin", () => {
       state.installedPlugins.find((item) => item.id === "official/weather"),
     ).toMatchObject({
       id: "official/weather",
-      packageName: "official/weather",
+      namespace: "official",
+      name: "weather",
       displayName: "weather",
       version: "1.2.0",
     });

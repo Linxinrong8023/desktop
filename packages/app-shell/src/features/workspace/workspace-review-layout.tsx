@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -29,11 +30,24 @@ import {
 } from "../diff/task-diff-view";
 import { TaskChangesNavigationProvider } from "../diff/task-changes-navigation";
 import { WorkspaceReviewFilesPanel } from "../files/workspace-review-files-panel";
-import type { WorkspaceFileRequest } from "../files/workspace-files-view";
+import type {
+  WorkspaceDirectoryRequest,
+  WorkspaceArtifactRequest,
+  WorkspaceFileRequest,
+} from "../files/workspace-files-view";
+import { SurfaceHost } from "../surface/surface-host";
+import { usePlatform } from "../../platform";
+import { useSurfaceStore } from "../../state/stores/surface-store";
 import {
   animatePanelWidth,
   cancelPanelWidthAnimation,
 } from "../../lib/panel-motion";
+import { usePersistHydrated } from "../../state/hooks/use-persist-hydrated";
+import {
+  buildReviewFilePersist,
+  reviewContextKey,
+  useReviewStore,
+} from "../../state/stores/review-store";
 import {
   DEFAULT_REVIEW_WIDTH,
   MAX_REVIEW_WIDTH,
@@ -61,7 +75,7 @@ interface WorkspaceReviewLayoutProps {
   preserveWorkspaceOnReviewOpen?: boolean;
 }
 
-type ReviewPanel = "changes" | "files";
+type ReviewPanel = "changes" | "files" | "surface";
 
 /** Hosts every workspace review surface while preserving Ora's established panel interaction. */
 export function WorkspaceReviewLayout({
@@ -71,23 +85,41 @@ export function WorkspaceReviewLayout({
   preserveWorkspaceOnReviewOpen = false,
 }: WorkspaceReviewLayoutProps) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const { surfaces } = usePlatform();
+  const sidePanelInstance = useSurfaceStore((s) => s.sidePanelInstance);
+  // A surface already occupying the slot (e.g. the view remounted) opens at once.
+  const [open, setOpen] = useState(sidePanelInstance !== null);
   const [expanded, setExpanded] = useState(false);
   const [closing, setClosing] = useState(false);
   const [viewType, setViewType] = useState<TaskDiffViewType>("unified");
   const [fileTreeOpen, setFileTreeOpen] = useState(true);
-  const [panel, setPanel] = useState<ReviewPanel>("files");
+  const [panel, setPanel] = useState<ReviewPanel>(
+    sidePanelInstance === null ? "files" : "surface",
+  );
   const [fileRequest, setFileRequest] = useState<
     TaskDiffFileRequest | undefined
   >();
   const [workspaceFileRequest, setWorkspaceFileRequest] = useState<
     WorkspaceFileRequest | undefined
   >();
+  const [reviewFilePath, setReviewFilePath] = useState<string | undefined>();
+  const [workspaceDirectoryRequest, setWorkspaceDirectoryRequest] = useState<
+    WorkspaceDirectoryRequest | undefined
+  >();
+  const [workspaceArtifactRequest, setWorkspaceArtifactRequest] = useState<
+    WorkspaceArtifactRequest | undefined
+  >();
   const [previousContextKind, setPreviousContextKind] = useState(context.kind);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRequestSequence = useRef(0);
   const workspaceFileRequestSequence = useRef(0);
+  const workspaceDirectoryRequestSequence = useRef(0);
+  const workspaceArtifactRequestSequence = useRef(0);
   const onOpenChangeRef = useRef(onOpenChange);
+  /** Mirrors `panel`/`open` for the surface-store subscription, which runs outside render. */
+  const panelStateRef = useRef({ panel, open });
+  /** Set while this layout itself releases the slot, so the subscription ignores its own write. */
+  const releasingSurfaceRef = useRef(false);
   const skipOpenNotifyRef = useRef(true);
   const panelRef = useRef<ResizablePanelHandle | null>(null);
   const panelAnimationRef = useRef<number | null>(null);
@@ -100,22 +132,143 @@ export function WorkspaceReviewLayout({
   /** Host whose width drives the responsive opening width. */
   const contentRef = useRef<HTMLDivElement | null>(null);
   const taskId = context.kind === "task" ? context.taskId : undefined;
-  const contextKey =
-    context.kind === "none"
-      ? "none"
-      : context.kind === "project"
-        ? `project:${context.projectId}`
-        : `task:${context.taskId}`;
+  const contextKey = reviewContextKey(context) ?? "none";
   const [previousContextKey, setPreviousContextKey] = useState(contextKey);
+  const [restoredForContextKey, setRestoredForContextKey] = useState<
+    string | null
+  >(null);
+  const reviewHydrated = usePersistHydrated(useReviewStore.persist);
+  const reviewHydratedRef = useRef(reviewHydrated);
+
+  useEffect(() => {
+    reviewHydratedRef.current = reviewHydrated;
+  }, [reviewHydrated]);
 
   // Keep the latest open-change listener for effect notifications.
   useEffect(() => {
     onOpenChangeRef.current = onOpenChange;
+    panelStateRef.current = { panel, open };
   });
 
   const setReviewOpen = useCallback((next: boolean) => {
     setOpen((current) => (current === next ? current : next));
   }, []);
+
+  const rememberReviewFile = useCallback((path: string) => {
+    setReviewFilePath(path);
+  }, []);
+
+  const contextKind = context.kind;
+  const applyStoredPreviewForPanel = useCallback(
+    (panelToOpen: ReviewPanel) => {
+      if (contextKind === "none") return;
+      // A surface panel shows a native plugin webview, not a file; it has no
+      // stored preview to replay.
+      if (panelToOpen === "surface") return;
+      // Project review has no Changes surface; its file always lives under Files.
+      const openPanel =
+        contextKind === "project" && panelToOpen === "changes"
+          ? "files"
+          : panelToOpen;
+      const saved = useReviewStore.getState().byContext[contextKey];
+      const savedFile = saved?.files[openPanel];
+      if (savedFile === undefined) return;
+
+      setReviewFilePath(savedFile.path);
+      if (openPanel === "changes" && contextKind === "task") {
+        fileRequestSequence.current += 1;
+        setFileRequest({
+          path: savedFile.path,
+          requestId: fileRequestSequence.current,
+          line: savedFile.line,
+        });
+      } else {
+        workspaceFileRequestSequence.current += 1;
+        setWorkspaceFileRequest({
+          path: savedFile.path,
+          requestId: workspaceFileRequestSequence.current,
+          line: savedFile.line,
+          column: savedFile.column,
+        });
+      }
+    },
+    [contextKey, contextKind],
+  );
+
+  const persistReviewLayout = useCallback(() => {
+    if (contextKind === "none" || !reviewHydratedRef.current) return;
+    if (restoredForContextKey !== contextKey) return;
+    // A surface panel cannot be restored from disk (its native instance dies
+    // with the process), so the snapshot keeps the last persistable panel.
+    if (panel === "surface") return;
+    const file = buildReviewFilePersist({
+      open,
+      panel,
+      reviewFilePath,
+      fileRequest,
+      workspaceFileRequest,
+    });
+    useReviewStore.getState().upsertContext(contextKey, {
+      open,
+      panel,
+      width: panelWidthRef.current,
+      // Store under the live panel so the other tab keeps its own selection.
+      ...(file !== undefined ? { files: { [panel]: file } } : {}),
+    });
+  }, [
+    contextKey,
+    contextKind,
+    fileRequest,
+    open,
+    panel,
+    restoredForContextKey,
+    reviewFilePath,
+    workspaceFileRequest,
+  ]);
+
+  useEffect(() => {
+    persistReviewLayout();
+  }, [persistReviewLayout]);
+
+  /* eslint-disable react-hooks/set-state-in-effect -- apply persisted review snapshot before paint so persist cannot clobber disk with the previous context's open state */
+  useLayoutEffect(() => {
+    if (!reviewHydrated || contextKind === "none") return;
+    // Restore is a one-shot per scope. Re-running would re-issue the stored file
+    // request on every parent render and revert open/tab gestures the user made
+    // after restore (layout effects observe the pre-commit store snapshot).
+    if (restoredForContextKey === contextKey) return;
+
+    setRestoredForContextKey(contextKey);
+
+    const saved = useReviewStore.getState().byContext[contextKey];
+    if (saved === undefined) return;
+
+    if (!saved.open) {
+      setReviewOpen(false);
+      return;
+    }
+
+    const panelToOpen =
+      contextKind === "project" && saved.panel === "changes"
+        ? "files"
+        : saved.panel;
+
+    panelWidthRef.current = saved.width;
+    panelCurrentWidthRef.current = saved.width;
+    panelWidthTouchedRef.current = true;
+
+    setPanel(panelToOpen);
+    setReviewOpen(true);
+    applyStoredPreviewForPanel(panelToOpen);
+  }, [
+    applyStoredPreviewForPanel,
+    contextKey,
+    contextKind,
+    restoredForContextKey,
+    reviewHydrated,
+    setReviewOpen,
+  ]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Notify the parent after paint so we never setState on the parent during this
   // layout's render (React forbids updating WorkflowRunWorkspace from here).
@@ -127,15 +280,31 @@ export function WorkspaceReviewLayout({
     onOpenChangeRef.current?.(open);
   }, [open]);
 
+  /**
+   * Releases the embedded surface occupying the slot, if any. The store is
+   * cleared synchronously so the `sidePanelInstance` effect never re-opens the
+   * panel before the host confirms with a `closed` event.
+   */
+  const releaseSurface = useCallback(() => {
+    const { sidePanelInstance: instance, setSidePanelInstance } =
+      useSurfaceStore.getState();
+    if (instance === null) return;
+    releasingSurfaceRef.current = true;
+    setSidePanelInstance(null);
+    releasingSurfaceRef.current = false;
+    void surfaces.close(instance).catch(() => undefined);
+  }, [surfaces]);
+
   /** Tears the review surface down after its closing slide (or at once when already collapsed). */
   const finalizeClose = useCallback(() => {
     if (closeTimer.current !== null) clearTimeout(closeTimer.current);
     closeTimer.current = null;
+    releaseSurface();
     setReviewOpen(false);
     setExpanded(false);
     setClosing(false);
     setViewType("unified");
-  }, [setReviewOpen]);
+  }, [releaseSurface, setReviewOpen]);
 
   const close = useCallback(() => {
     cancelPanelWidthAnimation(panelAnimationRef);
@@ -188,7 +357,8 @@ export function WorkspaceReviewLayout({
   // Parent notification happens via the `open` effect above — do not call onOpenChange here.
   if (context.kind !== previousContextKind) {
     setPreviousContextKind(context.kind);
-    if (context.kind === "none") {
+    // An embedded surface is context-independent, so it survives losing the task.
+    if (context.kind === "none" && panel !== "surface") {
       // A pending slide aborts itself once the panel leaves the tree.
       setOpen(false);
       setExpanded(false);
@@ -202,6 +372,15 @@ export function WorkspaceReviewLayout({
     // selected project or task changes so paths from the previous root vanish.
     setFileRequest(undefined);
     setWorkspaceFileRequest(undefined);
+    setReviewFilePath(undefined);
+    setExpanded(false);
+    setClosing(false);
+    const savedForContext = useReviewStore.getState().byContext[contextKey];
+    if (savedForContext !== undefined && !savedForContext.open) {
+      setOpen(false);
+    }
+    setWorkspaceDirectoryRequest(undefined);
+    setWorkspaceArtifactRequest(undefined);
     // Project review has no Changes surface; coerce so Files chrome matches content.
     if (context.kind === "project") setPanel("files");
   }
@@ -216,6 +395,45 @@ export function WorkspaceReviewLayout({
         line,
         column,
       });
+      setReviewFilePath(path);
+      setWorkspaceDirectoryRequest(undefined);
+      setWorkspaceArtifactRequest(undefined);
+      setPanel("files");
+      setReviewOpen(true);
+      if (panelAnimationRef.current !== null) slidePanelOpen();
+    },
+    [context.kind, setReviewOpen, slidePanelOpen],
+  );
+
+  const openWorkspaceDirectory = useCallback(
+    (path: string) => {
+      if (context.kind === "none") return;
+      workspaceDirectoryRequestSequence.current += 1;
+      setWorkspaceDirectoryRequest({
+        path,
+        requestId: workspaceDirectoryRequestSequence.current,
+      });
+      setWorkspaceFileRequest(undefined);
+      setWorkspaceArtifactRequest(undefined);
+      setPanel("files");
+      setReviewOpen(true);
+      if (panelAnimationRef.current !== null) slidePanelOpen();
+    },
+    [context.kind, setReviewOpen, slidePanelOpen],
+  );
+
+  const openWorkspaceArtifact = useCallback(
+    (path: string, line?: number, column?: number) => {
+      if (context.kind === "none") return;
+      workspaceArtifactRequestSequence.current += 1;
+      setWorkspaceArtifactRequest({
+        path,
+        requestId: workspaceArtifactRequestSequence.current,
+        line,
+        column,
+      });
+      setWorkspaceFileRequest(undefined);
+      setWorkspaceDirectoryRequest(undefined);
       setPanel("files");
       setReviewOpen(true);
       if (panelAnimationRef.current !== null) slidePanelOpen();
@@ -236,6 +454,7 @@ export function WorkspaceReviewLayout({
         requestId: fileRequestSequence.current,
         line,
       });
+      setReviewFilePath(path);
       setPanel("changes");
       setReviewOpen(true);
       // A close slide may still be in flight; switch it back to opening.
@@ -250,6 +469,29 @@ export function WorkspaceReviewLayout({
     if (!open) return;
     slidePanelOpen();
   }, [contextKey, open, slidePanelOpen]);
+
+  // The surface store owns the right slot: claiming it shows the surface panel,
+  // releasing it (host `closed` event, popout) collapses the panel again. The
+  // store is subscribed directly so state changes happen in its callback.
+  useEffect(
+    () =>
+      useSurfaceStore.subscribe((state, previous) => {
+        if (
+          releasingSurfaceRef.current ||
+          state.sidePanelInstance === previous.sidePanelInstance
+        )
+          return;
+        if (state.sidePanelInstance !== null) {
+          setPanel("surface");
+          setReviewOpen(true);
+          if (panelAnimationRef.current !== null) slidePanelOpen();
+          return;
+        }
+        const current = panelStateRef.current;
+        if (current.panel === "surface" && current.open) finalizeClose();
+      }),
+    [finalizeClose, setReviewOpen, slidePanelOpen],
+  );
 
   // Before the user picks a width, keep the panel matched to the window: maximizing
   // opens it wider, restoring snaps it narrower, without ever fighting a drag.
@@ -296,8 +538,17 @@ export function WorkspaceReviewLayout({
   const selectPanel = (next: ReviewPanel) => {
     if (open && panel === next) close();
     else {
+      const switching = panel !== next;
+      if (switching) {
+        setReviewFilePath(undefined);
+        setFileRequest(undefined);
+        setWorkspaceFileRequest(undefined);
+      }
+      // Changes/Files take the slot over, so the embedded surface must go.
+      if (panel === "surface") releaseSurface();
       setPanel(next);
       setReviewOpen(true);
+      applyStoredPreviewForPanel(next);
       // A close slide may still be in flight; switch it back to opening.
       if (panelAnimationRef.current !== null) slidePanelOpen();
     }
@@ -385,7 +636,15 @@ export function WorkspaceReviewLayout({
   );
 
   const panelContent =
-    context.kind === "none" ? null : panel === "changes" &&
+    panel === "surface" ? (
+      sidePanelInstance === null ? null : (
+        <SurfaceHost
+          key={sidePanelInstance}
+          instance={sidePanelInstance}
+          toolbar={context.kind === "none" ? undefined : controls}
+        />
+      )
+    ) : context.kind === "none" ? null : panel === "changes" &&
       context.kind === "task" ? (
       <TaskDiffView
         key={context.taskId}
@@ -396,6 +655,7 @@ export function WorkspaceReviewLayout({
         toolbar={controls}
         onFileTreeOpenChange={setFileTreeOpen}
         onFileNotFound={openWorkspaceFile}
+        onPreviewPathChange={rememberReviewFile}
       />
     ) : (
       <WorkspaceReviewFilesPanel
@@ -404,14 +664,21 @@ export function WorkspaceReviewLayout({
         taskId={context.kind === "task" ? context.taskId : undefined}
         toolbar={controls}
         fileRequest={workspaceFileRequest}
+        onPreviewPathChange={rememberReviewFile}
+        directoryRequest={workspaceDirectoryRequest}
+        artifactRequest={workspaceArtifactRequest}
       />
     );
 
   // Keep the primary workspace under the same panel for the lifetime of a review
   // context. Switching from a bare child to this group would remount the workspace
   // when Changes opens and discard local UI state such as the workflow inspector.
+  // The group also stays mounted while open (even under the expanded overlay) so
+  // the review panel keeps its settled width; only its content yields to the
+  // overlay to avoid mounting the same diff/file surface twice.
+  const hasPanelHost = context.kind !== "none" || panel === "surface";
   const workspaceContent =
-    context.kind === "none" || (!open && !preserveWorkspaceOnReviewOpen) ? (
+    !hasPanelHost || (!open && !preserveWorkspaceOnReviewOpen) ? (
       children
     ) : (
       <ResizablePanelGroup
@@ -452,6 +719,17 @@ export function WorkspaceReviewLayout({
             else if (size.inPixels >= MIN_REVIEW_WIDTH) {
               panelWidthTouchedRef.current = true;
               panelWidthRef.current = size.inPixels;
+              // Same gate as persistReviewLayout: before this scope has been
+              // restored, upsertContext would seed a fresh entry from defaults
+              // (open: false) for a panel the user currently has open.
+              if (
+                reviewHydratedRef.current &&
+                restoredForContextKey === contextKey
+              ) {
+                useReviewStore.getState().upsertContext(contextKey, {
+                  width: size.inPixels,
+                });
+              }
             }
           }}
         >
@@ -464,6 +742,8 @@ export function WorkspaceReviewLayout({
     <TaskChangesNavigationProvider
       onOpenDiff={openDiff}
       onOpenWorkspaceFile={openWorkspaceFile}
+      onOpenWorkspaceDirectory={openWorkspaceDirectory}
+      onOpenWorkspaceArtifact={openWorkspaceArtifact}
     >
       <div className="relative flex min-h-0 min-w-0 flex-1">
         {context.kind !== "none" && !open && (
@@ -478,7 +758,7 @@ export function WorkspaceReviewLayout({
           >
             {workspaceContent}
           </div>
-          {context.kind !== "none" && open && expanded && (
+          {hasPanelHost && open && expanded && (
             <>
               <button
                 type="button"

@@ -281,6 +281,44 @@ describe("useWorkspaceSelectionStore", () => {
     ).toBe("s1");
   });
 
+  it("keeps pre-hydration navigation when async rehydrate completes", async () => {
+    window.localStorage.setItem(
+      WORKSPACE_SELECTION_STORAGE_KEY,
+      JSON.stringify({
+        state: {
+          selection: {
+            projectId: "p1",
+            taskId: "t1",
+            sessionId: "s-old",
+            workflowRunId: null,
+            draftId: null,
+          },
+          pendingRestore: null,
+        },
+        version: 0,
+      }),
+    );
+    useWorkspaceSelectionStore.setState({
+      selection: empty,
+      pendingRestore: {
+        projectId: "p1",
+        taskId: "t1",
+        sessionId: "s-old",
+        workflowRunId: null,
+        draftId: null,
+      },
+      createFocus: null,
+    });
+    useWorkspaceSelectionStore.getState().selectSession("s-new", "t1", "p1");
+
+    await useWorkspaceSelectionStore.persist.rehydrate();
+
+    expect(useWorkspaceSelectionStore.getState().selection.sessionId).toBe(
+      "s-new",
+    );
+    expect(useWorkspaceSelectionStore.getState().pendingRestore).toBeNull();
+  });
+
   it("sanitizes illegal session+draft combos on rehydrate", async () => {
     window.localStorage.setItem(
       WORKSPACE_SELECTION_STORAGE_KEY,
@@ -311,7 +349,50 @@ describe("useWorkspaceSelectionStore", () => {
   it("falls back to empty pendingRestore when persisted JSON is corrupt", async () => {
     window.localStorage.setItem(WORKSPACE_SELECTION_STORAGE_KEY, "{not json");
     await useWorkspaceSelectionStore.persist.rehydrate();
+    expect(useWorkspaceSelectionStore.persist.hasHydrated()).toBe(true);
     expect(useWorkspaceSelectionStore.getState().selection).toEqual(empty);
+    expect(useWorkspaceSelectionStore.getState().pendingRestore).toBeNull();
+  });
+
+  it("lets navigation cancel a staged restore candidate", () => {
+    useWorkspaceSelectionStore.setState({
+      selection: empty,
+      pendingRestore: {
+        projectId: "p1",
+        taskId: "t1",
+        sessionId: "s1",
+        workflowRunId: null,
+        draftId: null,
+      },
+    });
+    useWorkspaceSelectionStore.getState().selectSession("s-new", "t1", "p1");
+    expect(useWorkspaceSelectionStore.getState().selection.sessionId).toBe(
+      "s-new",
+    );
+    expect(useWorkspaceSelectionStore.getState().pendingRestore).toBeNull();
+  });
+
+  it("commitRestoredSelection applies the candidate and clears pendingRestore", () => {
+    useWorkspaceSelectionStore.setState({
+      selection: empty,
+      pendingRestore: {
+        projectId: "p1",
+        taskId: "t1",
+        sessionId: "s1",
+        workflowRunId: null,
+        draftId: null,
+      },
+    });
+    useWorkspaceSelectionStore.getState().commitRestoredSelection({
+      projectId: "p1",
+      taskId: "t1",
+      sessionId: "s1",
+      workflowRunId: null,
+      draftId: null,
+    });
+    expect(useWorkspaceSelectionStore.getState().selection.sessionId).toBe(
+      "s1",
+    );
     expect(useWorkspaceSelectionStore.getState().pendingRestore).toBeNull();
   });
 
@@ -396,7 +477,7 @@ describe("useWorkspaceSelectionStore", () => {
     });
   });
 
-  it("does not persist createFocus across rehydrate", async () => {
+  it("never writes createFocus to disk", async () => {
     useWorkspaceSelectionStore
       .getState()
       .setCreateFocus({ projectId: "p1", taskId: "t1" });
@@ -404,13 +485,30 @@ describe("useWorkspaceSelectionStore", () => {
     expect(raw).not.toBeNull();
     expect(raw!).not.toContain("createFocus");
 
+    // Rehydrate must not resurrect a focus from disk — there is none to read.
+    useWorkspaceSelectionStore.setState({
+      selection: empty,
+      pendingRestore: null,
+      createFocus: null,
+    });
+    await useWorkspaceSelectionStore.persist.rehydrate();
+    expect(useWorkspaceSelectionStore.getState().createFocus).toBeNull();
+  });
+
+  it("keeps a pre-hydration tree click's createFocus", async () => {
+    // A tree row click before hydration sets only createFocus; selection stays
+    // empty. Async rehydrate must not discard that gesture — restore relies on
+    // it still being there when it commits.
     useWorkspaceSelectionStore.setState({
       selection: empty,
       pendingRestore: null,
       createFocus: { projectId: "p1", taskId: "t1" },
     });
     await useWorkspaceSelectionStore.persist.rehydrate();
-    expect(useWorkspaceSelectionStore.getState().createFocus).toBeNull();
+    expect(useWorkspaceSelectionStore.getState().createFocus).toEqual({
+      projectId: "p1",
+      taskId: "t1",
+    });
   });
 
   it("setCreateFocus is a no-op when the focus is unchanged", () => {

@@ -21,6 +21,16 @@ export const translationResources = {
     "errors.agent_not_found": "未找到该 Agent。",
     "errors.plugin_not_found": "未找到该插件。",
     "errors.plugin_disabled": "请先启用该插件，再进行激活。",
+    "errors.plugin_configuration_declaration_invalid": "插件的配置声明无效。",
+    "errors.plugin_configuration_not_declared": "该插件没有声明配置。",
+    "errors.configuration_revision_conflict":
+      "配置已被其他操作更新，请重新加载后再保存。",
+    "errors.plugin_configuration_declaration_changed":
+      "插件配置声明已变更，请重新加载。",
+    "errors.configuration_load_failed": "插件配置数据无法读取或写入。",
+    "errors.plugin_configuration_validation": "一个或多个配置值无效。",
+    "errors.plugin_configuration_recovery_not_required":
+      "当前配置数据无需恢复。",
     "errors.workflow_name_conflict": "已存在同名工作流。",
     "errors.project_not_found": "未找到该项目。",
     "errors.task_not_found": "未找到该任务。",
@@ -45,8 +55,8 @@ export const translationResources = {
     "errors.permission_option_invalid": "所选权限选项无效。",
     "errors.prompt_empty": "消息不能为空。",
     "errors.prompt_too_large": "消息内容过大。",
+    "errors.workspace_unavailable": "工作区当前不可用。",
     "errors.task_worktree_unavailable": "任务工作树当前不可用。",
-    "errors.task_project_root_unavailable": "任务项目目录当前不可用。",
     "errors.file_system_path_not_found": "所选路径不存在。",
     "errors.spec_document_not_found":
       "该 Spec 文档已不存在或不再属于自动发现目录。",
@@ -143,6 +153,7 @@ export const translationResources = {
     "sidebar.newTask": "新建工作树任务",
     "sidebar.newDirectChat": "新建任务",
     "sidebar.createInProject": "在此项目中新建",
+    "sidebar.createInTask": "在此任务中新建",
     "sidebar.newWorkflow": "运行工作流",
     "sidebar.searchWorkflows": "搜索工作流模板",
     "sidebar.noWorkflows": "暂无已发布的工作流。",
@@ -313,47 +324,14 @@ export const translationResources = {
     "workflowRun.status.succeeded": "成功",
     "workflowRun.status.failed": "失败",
     "workflowRun.status.cancelled": "已取消",
-    "workflowRun.deployAction": "部署到项目",
-    "workflowRun.deployTitle": "部署工作流到项目",
-    "workflowRun.deployDescription":
-      "将“{{name}}”部署到项目：创建一次待启动的运行，需提供一个运行名称。",
-    "workflowRun.deployPickWorkflow": "请先选择一个工作流。",
-    "workflowRun.deployProject": "目标项目",
-    "workflowRun.deployProjectEmpty": "请选择项目",
-    "workflowRun.deployProjectSearch": "搜索项目",
-    "workflowRun.deployProjectEmptySearch": "未找到项目",
-    "workflowRun.deployRunName": "运行名称",
-    "workflowRun.deployRunNamePlaceholder": "输入运行名称",
-    "workflowRun.deployRunNamePlaceholderWithDefault": "默认：{{name}}",
-    "workflowRun.deployBaseBranch": "基础分支",
-    "workflowRun.deployBaseBranchSearch": "搜索分支",
-    "workflowRun.deployBaseBranchEmpty": "请选择基础分支",
-    "workflowRun.deployBaseBranchEmptySearch": "未找到分支",
-    "workflowRun.deployBaseBranchLoading": "正在加载分支…",
-    "workflowRun.deployBaseBranchLoadingHint": "正在从仓库枚举分支，请稍候。",
-    "workflowRun.deployBaseBranchRefreshing": "正在同步最新分支…",
-    "workflowRun.deployBaseBranchRefresh": "刷新分支列表",
-    "workflowRun.deployBaseBranchUnavailable": "该项目没有可用的基础分支。",
-    "workflowRun.deployRequiredRunName": "请填写运行名称。",
-    "workflowRun.deployRequiredProject": "请选择目标项目。",
-    "workflowRun.deployRequiredBaseBranch": "请选择基础分支。",
-    "workflowRun.deployGroupHasRuns": "已有运行 · 再部署将创建新运行",
-    "workflowRun.deployGroupOther": "其他项目",
-    "workflowRun.deployHintDeploy": "将在该项目下创建一个新运行。",
-    "workflowRun.deployConfirm": "部署",
-    "workflowRun.deploying": "部署中…",
-    "workflowRun.deployFailed": "部署失败。",
-    "workflowRun.deployNoPublishedSnapshot":
-      "该工作流还没有已发布的快照，请先发布。",
-    "workflowRun.deployAutoPublished":
-      "已自动发布版本 {{version}}，可继续部署到项目。",
-    "workflowRun.startTitle": "启动工作流",
-    "workflowRun.startDescription":
-      "从本项目已挂载的工作流中选择一个并开始运行。",
-    "workflowRun.startEmptyMounts":
-      "此项目还没有挂载的工作流。请先在设置 → 工作流中「部署到项目」。",
-    "workflowRun.startDefinition": "已挂载工作流",
-    "workflowRun.startDefinitionPlaceholder": "选择工作流…",
+    "workflowRun.runPickWorkflow": "请先选择一个工作流。",
+    "workflowRun.runName": "运行名称",
+    "workflowRun.runNamePlaceholder": "输入运行名称",
+    "workflowRun.runNamePlaceholderWithDefault": "默认：{{name}}",
+    "workflowRun.runInWorkspaceDescription":
+      "将在当前工作区中创建“{{name}}”的工作流运行。",
+    "workflowRun.createRun": "创建运行",
+    "workflowRun.runRequiredName": "请填写运行名称。",
     "workflowRun.kickoffInput": "启动输入（可选）",
     "workflowRun.kickoffPlaceholder": "例如：审查当前分支的未提交改动",
     "workflowRun.startConfirm": "启动",
@@ -503,7 +481,7 @@ export const translationResources = {
     "settings.workflow.activateVersion": "设为生效版本",
     "settings.workflow.activateVersionSuccess": "已将 {{version}} 设为生效版本",
     "settings.workflow.previewingActiveVersion":
-      "这是当前生效的版本，部署会使用它。",
+      "这是当前生效的版本，运行工作流时会使用它。",
     "settings.workflow.restoreVersion": "恢复到此版本",
     "settings.workflow.save": "保存",
     "settings.workflow.saving": "保存中…",
@@ -688,6 +666,7 @@ export const translationResources = {
     "settings.skills.deleteDescription":
       "该技能将从可用命令中移除，此操作无法撤销。",
     "settings.skills.unavailable": "不可用",
+    "settings.skills.pluginDisabled": "已禁用",
     "settings.skills.unavailableTitle": "“{{name}}”的技能包已丢失",
     "settings.skills.unavailableDescription":
       "这个技能还在列表里，但本地文件找不到了。请删除，或重新上传同名技能包。",
@@ -730,36 +709,23 @@ export const translationResources = {
     "settings.skills.importReason.stale_conflict":
       "目标技能已变化，请重新导入。",
     "settings.skills.importReason.unknown": "导入失败。",
-    "settings.skills.marketplacesTitle": "Skill 市场",
-    "settings.skills.marketplacesDescription":
-      "从公开市场发现 Skill，或在企业内网接入组织专属能力。",
-    "settings.skills.marketplaceTitle": "SkillHub 技能市场",
-    "settings.skills.marketplaceDescription":
-      "浏览真实 SkillHub 市场；下载 ZIP 后，Ora 会自动校验并安装 Skill。",
-    "settings.skills.marketplacePublicBadge": "公开市场",
-    "settings.skills.marketplaceOpen": "打开技能市场",
-    "settings.skills.marketplaceOpening": "正在打开…",
-    "settings.skills.marketplaceConnectionFailed":
-      "无法打开技能市场或读取下载状态，请重试。",
-    "settings.skills.marketplaceDownloading": "正在下载 {{fileName}}…",
-    "settings.skills.marketplaceSavedTo": "保存位置",
-    "settings.skills.marketplaceOpenFolderFailed": "无法打开 Skill 下载目录。",
-    "settings.skills.marketplaceDownloadFailed":
-      "下载失败，请在技能市场中重试。",
-    "settings.skills.marketplaceInstalling":
-      "已下载 {{fileName}}，正在自动安装…",
-    "settings.skills.marketplaceInstallReview":
-      "{{fileName}} 需要确认冲突或无效候选项。",
-    "settings.skills.marketplaceInstalled": "已自动安装 {{count}} 个 Skill。",
-    "settings.skills.marketplaceInstallIncomplete":
-      "{{fileName}} 未能完整安装，请查看处理结果。",
-    "settings.skills.marketplaceInstallFailed": "无法安装 {{fileName}}。",
-    "settings.skills.marketplaceInstallReviewed": "Skill 安装处理已完成。",
-    "settings.skills.huaweiTitle": "华为 Skill Market",
-    "settings.skills.huaweiDescription":
-      "浏览华为内部 Skill 市场，发现并接入企业专属 Skill；连接华为内网后即可打开。",
-    "settings.skills.huaweiBadge": "企业内网",
-    "settings.skills.huaweiOpen": "打开内网 Skill Market",
+    "surface.launcher": "扩展面板",
+    "surface.reload": "重新加载",
+    "surface.popout": "在新窗口打开",
+    "surface.close": "关闭",
+    "surface.failed": "无法加载：{{reason}}",
+    "surface.retry": "重试",
+    "surface.downloaded": "已下载 {{fileName}}",
+    "surface.downloadFailed": "下载失败：{{fileName}}",
+    "surface.downloadChoiceTitle": "插件下载",
+    "surface.downloadChoiceDescription":
+      "{{origin}} 提供了文件 {{fileName}}（{{size}}），请选择处理方式。",
+    "surface.downloadImportSkill": "导入为技能",
+    "surface.downloadSaveAs": "另存为…",
+    "surface.downloadDismiss": "忽略",
+    "surface.downloadActionFailed": "下载处理失败",
+    "surface.openDirectory": "打开目录",
+    "surface.openFailed": "无法打开扩展面板",
     "settings.plugins.title": "插件",
     "settings.plugins.description":
       "在你常用的工具中与 Ora Agent 协作。插件目录为原型数据，安装状态不会持久化。",
@@ -769,8 +735,42 @@ export const translationResources = {
     "settings.plugins.noneInstalled": "尚未安装任何插件。",
     "settings.plugins.manageInstalled": "管理插件",
     "settings.plugins.manageDescription": "启用、停用或卸载已安装的插件。",
+    "settings.plugins.configuration.configure": "配置",
+    "settings.plugins.configuration.back": "返回插件管理",
+    "settings.plugins.configuration.description":
+      "此界面由插件声明生成。保存后配置会在所有工作区共享。",
+    "settings.plugins.configuration.needsConfiguration": "需要配置",
+    "settings.plugins.configuration.unavailableBadge": "配置不可用",
+    "settings.plugins.invalidDeclaration": "配置声明无效",
+    "settings.plugins.configuration.default": "默认值",
+    "settings.plugins.configuration.notSet": "未设置",
+    "settings.plugins.configuration.useDefault": "使用默认值",
+    "settings.plugins.configuration.on": "开启",
+    "settings.plugins.configuration.off": "关闭",
+    "settings.plugins.configuration.resetField": "重置此项",
+    "settings.plugins.configuration.save": "保存",
+    "settings.plugins.configuration.saved": "已保存",
+    "settings.plugins.configuration.saveFailed": "保存配置失败",
+    "settings.plugins.configuration.resetAll": "全部重置",
+    "settings.plugins.configuration.resetTitle": "重置所有配置？",
+    "settings.plugins.configuration.resetDescription":
+      "所有显式覆盖值将被移除，声明中的默认值仍会生效。",
+    "settings.plugins.configuration.unsavedTitle": "保存配置更改？",
+    "settings.plugins.configuration.unsavedDescription":
+      "离开前请选择保存、放弃或取消。",
+    "settings.plugins.configuration.discard": "放弃",
+    "settings.plugins.configuration.unavailable":
+      "配置数据无法读取。恢复会先保留损坏文件的备份，再重置覆盖值。",
+    "settings.plugins.configuration.recover": "备份并恢复",
+    "settings.plugins.configuration.reload": "重新加载",
+    "settings.plugins.configuration.reloadRequired":
+      "配置已在其他位置更新。重新加载会保留当前草稿，并以最新配置作为保存基线。",
+    "settings.plugins.configuration.recoverTitle": "备份损坏配置并恢复？",
+    "settings.plugins.configuration.storedValueInvalid":
+      "已保存的值与当前声明不兼容。保存新值或重置此项以修复。",
     "settings.plugins.scanInstalled": "扫描已安装插件",
     "settings.plugins.syncMarketplace": "同步插件市场",
+    "settings.plugins.syncFailed": "同步插件市场失败。",
     "settings.plugins.neverSynced": "尚未同步",
     "settings.plugins.lastSynced": "上次同步：{{time}}",
     "settings.plugins.syncing": "同步中…",
@@ -788,9 +788,18 @@ export const translationResources = {
     "settings.plugins.empty": "没有匹配的插件。",
     "settings.plugins.install": "安装",
     "settings.plugins.uninstall": "卸载",
+    "settings.plugins.uninstallTitle": "卸载“{{name}}”？",
+    "settings.plugins.uninstallDescription":
+      "插件进程会先停止，然后移除已安装的代码。",
+    "settings.plugins.deleteConfigurationData": "同时删除配置数据（推荐）",
     "settings.plugins.installing": "安装中",
     "settings.plugins.cancel": "取消",
     "settings.plugins.installFailed": "安装失败",
+    "settings.plugins.uninstallFailed": "卸载失败",
+    "settings.plugins.import": "导入插件",
+    "settings.plugins.importSuccess": "插件已导入。",
+    "settings.plugins.importFailed": "导入失败",
+    "settings.plugins.pathSelectionError": "无法选择插件文件。",
     "settings.plugins.uninstalling": "卸载中",
     "settings.plugins.runtimeFailing": "运行失败",
     "settings.plugins.viewDetails": "查看详情",
@@ -1016,9 +1025,6 @@ export const translationResources = {
     "dialog.createWorktree": "创建工作树任务",
     "dialog.worktreeDescription": "Agent 在独立工作树中专注处理一项任务",
     "dialog.editTask": "编辑任务",
-    "dialog.workspaceMode": "工作区模式",
-    "dialog.workspaceModeWorktree": "工作树（Git 分支）",
-    "dialog.workspaceModeProjectRoot": "直接对话（项目根目录）",
     "dialog.worktreeRequiresGitRepository":
       "该目录不是 Git 仓库。请在 Git 仓库下创建 worktree 模式任务。",
     "dialog.saveTask": "保存任务",
@@ -1046,7 +1052,7 @@ export const translationResources = {
       "仅删除该会话记录；项目目录本身不受影响，此操作无法撤销。",
     "delete.sessionDescription": "该 Agent 会话将被永久删除，此操作无法撤销。",
     "delete.workflowRunDescription":
-      "将删除此次工作流运行及其任务的 Git 工作树和 ora/* 分支；未提交的修改将永久丢失。若仍在进行中，会先取消再删除；同项目下其他运行不受影响。",
+      "将删除此次工作流运行、节点记录及其节点创建的会话；共享工作区以及项目中的其他会话和运行不受影响。",
     "delete.deleting": "删除中…",
     "delete.failed": "无法删除，请先停止正在运行的会话。",
     "delete.runningSession": "直聊会话仍在停止，请稍后再试。",
@@ -1118,15 +1124,14 @@ export const translationResources = {
     "files.resultsTruncated": "结果过多，仅显示前 500 条。",
     "files.largeFilePlainText": "文件较大，已关闭语法高亮以保持流畅。",
     "files.resizePanel": "调整文件资源管理器宽度",
-    "files.addLineSelectionToChat":
-      "加入 AI 对话（第 {{startLine}}-{{endLine}} 行）",
-    "files.lineSelectionAdded":
-      "已将第 {{startLine}}-{{endLine}} 行加入 AI 对话",
-    "files.lineSelectionNeedsChat": "请先打开一个对话，再把选区加入提示词",
     "files.selectLine": "选择第 {{line}} 行",
+    "files.quoteLineToChat": "引用第 {{line}} 行到 AI 对话",
+    "files.lineSelectionNeedsChat": "请先打开一个对话，再把选区加入提示词",
     "diff.fileTree": "变更文件目录",
     "diff.toggleFileTree": "显示或隐藏变更文件目录",
     "diff.expandPanel": "宽屏展开变更面板",
+    "diff.quoteLineToChat": "引用第 {{line}} 行到 AI 对话",
+    "diff.selectLine": "选择第 {{line}} 行",
     "diff.restorePanel": "还原变更面板",
     "diff.expandedPanel": "宽屏变更面板",
     "diff.closeExpandedPanel": "收起宽屏变更面板",
@@ -1175,6 +1180,7 @@ export const translationResources = {
     "chat.add": "添加",
     "chat.attachments": "附件",
     "chat.removeAttachment": "移除附件 {{fileName}}",
+    "chat.removeFileReference": "移除文件引用 {{name}}",
     "chat.agentMode": "Agent",
     "chat.chatMode": "问答",
     "chat.local": "本地",
@@ -1351,6 +1357,7 @@ export const translationResources = {
     "chat.turnDiff.viewerStats": "增加 {{additions}} 行，删除 {{deletions}} 行",
     "chat.fileLink.previewInFiles": "在文件中预览",
     "chat.fileLink.aria": "打开文件 {{path}}",
+    "chat.fileLink.pathAria": "打开路径 {{path}}",
     "chat.unsupportedContent": "暂不支持显示 {{type}} 内容",
     "chat.content.generatedImage": "Agent 生成的图片",
     "chat.content.previewImage": "预览图片 {{name}}",
@@ -1374,6 +1381,7 @@ export const translationResources = {
     "chat.pickProjectAndBranch": "请先选择项目和分支，然后开始对话",
     "chat.pickTask": "请先选择或创建一个任务，然后开始对话",
     "chat.pickProject": "请先选择或创建一个项目，然后开始对话",
+    "chat.pickAgent": "请先选择一个 Agent，然后开始对话",
     "chat.copy": "复制",
     "chat.copyCode": "复制代码",
     "chat.codeCopied": "代码已复制",
@@ -1436,6 +1444,20 @@ export const translationResources = {
     "errors.agent_not_found": "The agent was not found.",
     "errors.plugin_not_found": "The plugin was not found.",
     "errors.plugin_disabled": "Enable the plugin before activating it.",
+    "errors.plugin_configuration_declaration_invalid":
+      "The plugin configuration declaration is invalid.",
+    "errors.plugin_configuration_not_declared":
+      "This plugin does not declare configuration.",
+    "errors.configuration_revision_conflict":
+      "Configuration changed elsewhere. Reload before saving.",
+    "errors.plugin_configuration_declaration_changed":
+      "The plugin configuration declaration changed. Reload it.",
+    "errors.configuration_load_failed":
+      "Plugin configuration data could not be read or written.",
+    "errors.plugin_configuration_validation":
+      "One or more configuration values are invalid.",
+    "errors.plugin_configuration_recovery_not_required":
+      "Configuration recovery is not required.",
     "errors.workflow_name_conflict":
       "A workflow with this name already exists.",
     "errors.project_not_found": "The project was not found.",
@@ -1472,9 +1494,8 @@ export const translationResources = {
       "The selected permission option is invalid.",
     "errors.prompt_empty": "The message cannot be empty.",
     "errors.prompt_too_large": "The message is too large.",
+    "errors.workspace_unavailable": "The workspace is unavailable.",
     "errors.task_worktree_unavailable": "The task worktree is unavailable.",
-    "errors.task_project_root_unavailable":
-      "The task project directory is unavailable.",
     "errors.file_system_path_not_found": "The selected path was not found.",
     "errors.spec_document_not_found":
       "The Spec document no longer exists or is outside the automatically detected sources.",
@@ -1595,6 +1616,7 @@ export const translationResources = {
     "sidebar.newTask": "New worktree task",
     "sidebar.newDirectChat": "New task",
     "sidebar.createInProject": "Create in this project",
+    "sidebar.createInTask": "Create in this task",
     "sidebar.newWorkflow": "Run workflow",
     "sidebar.searchWorkflows": "Search workflow templates",
     "sidebar.noWorkflows": "No published workflows yet.",
@@ -1773,49 +1795,14 @@ export const translationResources = {
     "workflowRun.status.succeeded": "Succeeded",
     "workflowRun.status.failed": "Failed",
     "workflowRun.status.cancelled": "Cancelled",
-    "workflowRun.deployAction": "Deploy to project",
-    "workflowRun.deployTitle": "Deploy workflow to project",
-    "workflowRun.deployDescription":
-      "Deploy “{{name}}” to a project: create a pending run with a required name.",
-    "workflowRun.deployPickWorkflow": "Select a workflow first.",
-    "workflowRun.deployProject": "Target project",
-    "workflowRun.deployProjectEmpty": "Please select a project",
-    "workflowRun.deployProjectSearch": "Search projects",
-    "workflowRun.deployProjectEmptySearch": "No projects found",
-    "workflowRun.deployRunName": "Run name",
-    "workflowRun.deployRunNamePlaceholder": "Enter a run name",
-    "workflowRun.deployRunNamePlaceholderWithDefault": "Default: {{name}}",
-    "workflowRun.deployBaseBranch": "Base branch",
-    "workflowRun.deployBaseBranchSearch": "Search branches",
-    "workflowRun.deployBaseBranchEmpty": "Select a base branch",
-    "workflowRun.deployBaseBranchEmptySearch": "No branches found",
-    "workflowRun.deployBaseBranchLoading": "Loading branches…",
-    "workflowRun.deployBaseBranchLoadingHint":
-      "Enumerating branches from the repository. This may take a moment.",
-    "workflowRun.deployBaseBranchRefreshing": "Syncing latest branches…",
-    "workflowRun.deployBaseBranchRefresh": "Refresh branch list",
-    "workflowRun.deployBaseBranchUnavailable":
-      "This project has no available base branches.",
-    "workflowRun.deployRequiredRunName": "Enter a run name.",
-    "workflowRun.deployRequiredProject": "Select a target project.",
-    "workflowRun.deployRequiredBaseBranch": "Select a base branch.",
-    "workflowRun.deployGroupHasRuns": "Has runs · deploy creates a new run",
-    "workflowRun.deployGroupOther": "Other projects",
-    "workflowRun.deployHintDeploy": "Creates a new run under this project.",
-    "workflowRun.deployConfirm": "Deploy",
-    "workflowRun.deploying": "Deploying…",
-    "workflowRun.deployFailed": "Deploy failed.",
-    "workflowRun.deployNoPublishedSnapshot":
-      "This workflow has no published snapshot yet. Publish it first.",
-    "workflowRun.deployAutoPublished":
-      "Published version {{version}} automatically. Continue deploying to a project.",
-    "workflowRun.startTitle": "Start workflow",
-    "workflowRun.startDescription":
-      "Pick a workflow already mounted on this project and start a run.",
-    "workflowRun.startEmptyMounts":
-      "This project has no mounted workflows yet. Deploy one from Settings → Workflow.",
-    "workflowRun.startDefinition": "Mounted workflow",
-    "workflowRun.startDefinitionPlaceholder": "Choose a workflow…",
+    "workflowRun.runPickWorkflow": "Select a workflow first.",
+    "workflowRun.runName": "Run name",
+    "workflowRun.runNamePlaceholder": "Enter a run name",
+    "workflowRun.runNamePlaceholderWithDefault": "Default: {{name}}",
+    "workflowRun.runInWorkspaceDescription":
+      "Creates a run of “{{name}}” in the current workspace.",
+    "workflowRun.createRun": "Create run",
+    "workflowRun.runRequiredName": "Enter a run name.",
     "workflowRun.kickoffInput": "Kickoff input (optional)",
     "workflowRun.kickoffPlaceholder":
       "e.g. Review uncommitted changes on this branch",
@@ -1978,7 +1965,7 @@ export const translationResources = {
     "settings.workflow.activateVersionSuccess":
       "Made {{version}} the active version",
     "settings.workflow.previewingActiveVersion":
-      "This is the active version used by deploy.",
+      "This is the active version used when a workflow runs.",
     "settings.workflow.restoreVersion": "Restore this version",
     "settings.workflow.save": "Save",
     "settings.workflow.saving": "Saving…",
@@ -2170,6 +2157,7 @@ export const translationResources = {
     "settings.skills.deleteDescription":
       "This skill will be removed from available commands. This cannot be undone.",
     "settings.skills.unavailable": "Unavailable",
+    "settings.skills.pluginDisabled": "Disabled",
     "settings.skills.unavailableTitle":
       "The “{{name}}” skill package is missing",
     "settings.skills.unavailableDescription":
@@ -2220,40 +2208,23 @@ export const translationResources = {
     "settings.skills.importReason.stale_conflict":
       "The target skill changed. Import it again.",
     "settings.skills.importReason.unknown": "Import failed.",
-    "settings.skills.marketplacesTitle": "Skill marketplaces",
-    "settings.skills.marketplacesDescription":
-      "Discover public skills or connect organization-specific capabilities on an enterprise network.",
-    "settings.skills.marketplaceTitle": "SkillHub marketplace",
-    "settings.skills.marketplaceDescription":
-      "Browse the live SkillHub marketplace. Ora validates and installs downloaded ZIP archives automatically.",
-    "settings.skills.marketplacePublicBadge": "Public",
-    "settings.skills.marketplaceOpen": "Open marketplace",
-    "settings.skills.marketplaceOpening": "Opening...",
-    "settings.skills.marketplaceConnectionFailed":
-      "Unable to open the skill marketplace or read download status. Try again.",
-    "settings.skills.marketplaceDownloading": "Downloading {{fileName}}...",
-    "settings.skills.marketplaceSavedTo": "Saved to",
-    "settings.skills.marketplaceOpenFolderFailed":
-      "Could not open the Skill download folder.",
-    "settings.skills.marketplaceDownloadFailed":
-      "Download failed. Try again in the marketplace.",
-    "settings.skills.marketplaceInstalling":
-      "Downloaded {{fileName}}. Installing automatically...",
-    "settings.skills.marketplaceInstallReview":
-      "{{fileName}} needs conflict or invalid-candidate review.",
-    "settings.skills.marketplaceInstalled":
-      "Automatically installed {{count}} skills.",
-    "settings.skills.marketplaceInstallIncomplete":
-      "{{fileName}} was not fully installed. Review the results.",
-    "settings.skills.marketplaceInstallFailed":
-      "Could not install {{fileName}}.",
-    "settings.skills.marketplaceInstallReviewed":
-      "Skill installation processing completed.",
-    "settings.skills.huaweiTitle": "Huawei Skill Market",
-    "settings.skills.huaweiDescription":
-      "Browse Huawei's internal Skill Market to discover and connect enterprise skills. Huawei internal network access is required.",
-    "settings.skills.huaweiBadge": "Enterprise",
-    "settings.skills.huaweiOpen": "Open internal Skill Market",
+    "surface.launcher": "Surfaces",
+    "surface.reload": "Reload",
+    "surface.popout": "Open in new window",
+    "surface.close": "Close",
+    "surface.failed": "Failed to load: {{reason}}",
+    "surface.retry": "Retry",
+    "surface.downloaded": "Downloaded {{fileName}}",
+    "surface.downloadFailed": "Download failed: {{fileName}}",
+    "surface.downloadChoiceTitle": "Plugin download",
+    "surface.downloadChoiceDescription":
+      "{{origin}} provided {{fileName}} ({{size}}). Choose what to do with it.",
+    "surface.downloadImportSkill": "Import as skill",
+    "surface.downloadSaveAs": "Save as…",
+    "surface.downloadDismiss": "Dismiss",
+    "surface.downloadActionFailed": "The download action failed",
+    "surface.openDirectory": "Open folder",
+    "surface.openFailed": "Could not open the surface",
     "settings.plugins.title": "Plugins",
     "settings.plugins.description":
       "Work with Ora agents inside the tools you already use. The catalog is prototype data and install state is not persisted.",
@@ -2264,8 +2235,45 @@ export const translationResources = {
     "settings.plugins.manageInstalled": "Manage plugins",
     "settings.plugins.manageDescription":
       "Enable, disable, or uninstall the plugins you have installed.",
+    "settings.plugins.configuration.configure": "Configure",
+    "settings.plugins.configuration.back": "Back to plugin manager",
+    "settings.plugins.configuration.description":
+      "This host-rendered configuration is shared across workspaces after saving.",
+    "settings.plugins.configuration.needsConfiguration": "Needs Configuration",
+    "settings.plugins.configuration.unavailableBadge":
+      "Configuration unavailable",
+    "settings.plugins.invalidDeclaration": "Invalid configuration declaration",
+    "settings.plugins.configuration.default": "Default",
+    "settings.plugins.configuration.notSet": "Not set",
+    "settings.plugins.configuration.useDefault": "Use default",
+    "settings.plugins.configuration.on": "On",
+    "settings.plugins.configuration.off": "Off",
+    "settings.plugins.configuration.resetField": "Reset field",
+    "settings.plugins.configuration.save": "Save",
+    "settings.plugins.configuration.saved": "Saved",
+    "settings.plugins.configuration.saveFailed": "Failed to save configuration",
+    "settings.plugins.configuration.resetAll": "Reset All",
+    "settings.plugins.configuration.resetTitle": "Reset all configuration?",
+    "settings.plugins.configuration.resetDescription":
+      "All explicit overrides will be removed. Declaration defaults remain effective.",
+    "settings.plugins.configuration.unsavedTitle":
+      "Save configuration changes?",
+    "settings.plugins.configuration.unsavedDescription":
+      "Choose Save, Discard, or Cancel before leaving.",
+    "settings.plugins.configuration.discard": "Discard",
+    "settings.plugins.configuration.unavailable":
+      "Configuration data cannot be read. Recovery backs up the damaged file before resetting overrides.",
+    "settings.plugins.configuration.recover": "Back up and recover",
+    "settings.plugins.configuration.reload": "Reload",
+    "settings.plugins.configuration.reloadRequired":
+      "Configuration changed elsewhere. Reload keeps this draft and uses the latest configuration as the save baseline.",
+    "settings.plugins.configuration.recoverTitle":
+      "Back up damaged configuration and recover?",
+    "settings.plugins.configuration.storedValueInvalid":
+      "The saved value is incompatible with the current declaration. Save a replacement or reset this field.",
     "settings.plugins.scanInstalled": "Scan installed plugins",
     "settings.plugins.syncMarketplace": "Sync plugin marketplace",
+    "settings.plugins.syncFailed": "Failed to sync the plugin marketplace.",
     "settings.plugins.neverSynced": "Never synced",
     "settings.plugins.lastSynced": "Last synced: {{time}}",
     "settings.plugins.syncing": "Syncing?",
@@ -2283,9 +2291,19 @@ export const translationResources = {
     "settings.plugins.empty": "No matching plugins.",
     "settings.plugins.install": "Install",
     "settings.plugins.uninstall": "Uninstall",
+    "settings.plugins.uninstallTitle": "Uninstall {{name}}?",
+    "settings.plugins.uninstallDescription":
+      "The plugin process will stop before installed code is removed.",
+    "settings.plugins.deleteConfigurationData":
+      "Also delete configuration data (recommended)",
     "settings.plugins.installing": "Installing",
     "settings.plugins.cancel": "Cancel",
     "settings.plugins.installFailed": "Install failed",
+    "settings.plugins.uninstallFailed": "Uninstall failed",
+    "settings.plugins.import": "Import plugin",
+    "settings.plugins.importSuccess": "Plugin imported.",
+    "settings.plugins.importFailed": "Import failed",
+    "settings.plugins.pathSelectionError": "Unable to select a plugin file.",
     "settings.plugins.uninstalling": "Uninstalling",
     "settings.plugins.runtimeFailing": "Runtime failed",
     "settings.plugins.viewDetails": "View details",
@@ -2557,9 +2575,6 @@ export const translationResources = {
     "dialog.worktreeDescription":
       "Make agent focus on one task in an isolated worktree.",
     "dialog.editTask": "Edit task",
-    "dialog.workspaceMode": "Workspace mode",
-    "dialog.workspaceModeWorktree": "Worktree (Git branch)",
-    "dialog.workspaceModeProjectRoot": "Direct chat (project root)",
     "dialog.worktreeRequiresGitRepository":
       "This directory is not a Git repository. Choose a Git repository to create a worktree task.",
     "dialog.saveTask": "Save task",
@@ -2590,7 +2605,7 @@ export const translationResources = {
     "delete.sessionDescription":
       "This agent session will be permanently deleted. This cannot be undone.",
     "delete.workflowRunDescription":
-      "This workflow run and its task's Git worktree and ora/* branch will be deleted; uncommitted changes will be permanently lost. If it is still active it is cancelled first; other runs in the same project are unaffected.",
+      "This workflow run, its node records, and sessions created for its nodes will be deleted. The shared workspace and other sessions or runs in the project are unaffected.",
     "delete.deleting": "Deleting...",
     "delete.failed": "Unable to delete. Stop any running session first.",
     "delete.runningSession":
@@ -2667,16 +2682,15 @@ export const translationResources = {
     "files.largeFilePlainText":
       "Large file: syntax highlighting is disabled for smoother viewing.",
     "files.resizePanel": "Resize file explorer",
-    "files.addLineSelectionToChat":
-      "Add lines {{startLine}}-{{endLine}} to AI chat",
-    "files.lineSelectionAdded":
-      "Added lines {{startLine}}-{{endLine}} to AI chat",
+    "files.selectLine": "Select line {{line}}",
+    "files.quoteLineToChat": "Quote line {{line}} to AI chat",
     "files.lineSelectionNeedsChat":
       "Open a chat first, then add the selection to the prompt",
-    "files.selectLine": "Select line {{line}}",
     "diff.fileTree": "Changed file tree",
     "diff.toggleFileTree": "Show or hide changed file tree",
     "diff.expandPanel": "Expand changes panel",
+    "diff.quoteLineToChat": "Quote line {{line}} to AI chat",
+    "diff.selectLine": "Select line {{line}}",
     "diff.restorePanel": "Restore changes panel",
     "diff.expandedPanel": "Expanded changes panel",
     "diff.closeExpandedPanel": "Close expanded changes panel",
@@ -2727,6 +2741,7 @@ export const translationResources = {
     "chat.add": "Add",
     "chat.attachments": "Attachments",
     "chat.removeAttachment": "Remove attachment {{fileName}}",
+    "chat.removeFileReference": "Remove file reference {{name}}",
     "chat.agentMode": "Agent",
     "chat.chatMode": "Chat",
     "chat.local": "Local",
@@ -2933,6 +2948,7 @@ export const translationResources = {
       "{{additions}} lines added, {{deletions}} removed",
     "chat.fileLink.previewInFiles": "Preview in Files",
     "chat.fileLink.aria": "Open file {{path}}",
+    "chat.fileLink.pathAria": "Open path {{path}}",
     "chat.unsupportedContent": "Unsupported {{type}} content",
     "chat.content.generatedImage": "Agent-generated image",
     "chat.content.previewImage": "Preview image {{name}}",
@@ -2957,6 +2973,7 @@ export const translationResources = {
     "chat.pickProjectAndBranch": "Pick a project and branch to start chatting",
     "chat.pickTask": "Pick or create a task before starting a chat",
     "chat.pickProject": "Pick or create a project before starting a chat",
+    "chat.pickAgent": "Pick an agent before starting a chat",
     "chat.copy": "Copy",
     "chat.copyCode": "Copy code",
     "chat.codeCopied": "Code copied",

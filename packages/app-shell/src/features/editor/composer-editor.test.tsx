@@ -8,6 +8,7 @@ import {
   documentPlainText,
 } from "@ora/editor/composer";
 import { PlatformProvider } from "@ora/app-shell/platform";
+import { appI18n } from "../../i18n/i18n-instance";
 import { ComposerEditor, type ComposerEditorHandle } from "./composer-editor";
 import { createStubPlatform } from "../../test/stub-platform";
 
@@ -40,6 +41,36 @@ describe("ComposerEditor", () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(composerText(textbox)).toMatch(/first/);
     expect(composerText(textbox)).toMatch(/second/);
+  });
+
+  it("moves the caret forward across consecutive Shift+Enter newlines", async () => {
+    const user = userEvent.setup();
+    render(<ComposerEditor ariaLabel="Message" onSubmit={vi.fn()} />);
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+
+    await user.click(textbox);
+    await user.keyboard("first");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    await user.keyboard("last");
+
+    expect(composerText(textbox)).toBe("first\n\n\nlast");
+  });
+
+  it("preserves line breaks when plain multiline text is pasted", async () => {
+    const user = userEvent.setup();
+    render(<ComposerEditor ariaLabel="Message" onSubmit={vi.fn()} />);
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+
+    await user.click(textbox);
+    await user.paste(
+      "first plain line\nsecond plain line\n\n\nthird plain line",
+    );
+
+    expect(composerText(textbox)).toBe(
+      "first plain line\nsecond plain line\n\n\nthird plain line",
+    );
   });
 
   it("turns a markdown heading prefix into a heading node", async () => {
@@ -107,6 +138,148 @@ describe("ComposerEditor", () => {
     expect(chip).toHaveAttribute("data-end-line", "12");
     expect(chip).toHaveAttribute("title", "src/app.ts:4-12");
     expect(composerText(textbox)).toContain("`src/app.ts:4-12`");
+    expect(textbox.textContent).toContain("app.ts");
+    expect(textbox.textContent).toContain("L4-12");
+  });
+
+  it("paints file chips inside a spanning text selection", async () => {
+    const user = userEvent.setup();
+    const editorRef = createRef<ComposerEditorHandle>();
+    render(
+      <ComposerEditor ref={editorRef} ariaLabel="Message" onSubmit={vi.fn()} />,
+    );
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+
+    act(() => {
+      editorRef.current?.insertFileChips([{ path: "src/app.ts" }]);
+    });
+    await waitFor(() =>
+      expect(textbox.querySelector("[data-composer-file]")).not.toBeNull(),
+    );
+
+    await user.click(textbox);
+    await user.keyboard("{Control>}a{/Control}");
+
+    await waitFor(() =>
+      expect(textbox.querySelector("[data-chip-selected]")).not.toBeNull(),
+    );
+  });
+
+  it("steps the caret across a file chip instead of node-selecting it", async () => {
+    const user = userEvent.setup();
+    const editorRef = createRef<ComposerEditorHandle>();
+    render(
+      <ComposerEditor ref={editorRef} ariaLabel="Message" onSubmit={vi.fn()} />,
+    );
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+
+    act(() => {
+      editorRef.current?.insertFileChips([{ path: "src/app.ts" }]);
+    });
+    await waitFor(() =>
+      expect(textbox.querySelector("[data-composer-file]")).not.toBeNull(),
+    );
+
+    await user.click(textbox);
+    act(() => {
+      editorRef.current?.focus({ at: "start" });
+    });
+    await user.keyboard("{ArrowRight}");
+    // A NodeSelection would have no caret, and the next keystroke would
+    // replace the chip instead of typing after it.
+    expect(textbox.querySelector(".ProseMirror-selectednode")).toBeNull();
+
+    await user.keyboard("after");
+    expect(textbox.querySelector("[data-composer-file]")).not.toBeNull();
+    expect(composerText(textbox)).toBe("`src/app.ts`after ");
+  });
+
+  it("removes a file chip through its hover remove control", async () => {
+    const user = userEvent.setup();
+    const editorRef = createRef<ComposerEditorHandle>();
+    render(
+      <ComposerEditor ref={editorRef} ariaLabel="Message" onSubmit={vi.fn()} />,
+    );
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+
+    act(() => {
+      editorRef.current?.insertFileChips([
+        { path: "src/app.ts" },
+        { path: "src/other.ts" },
+      ]);
+    });
+    await waitFor(() =>
+      expect(textbox.querySelectorAll("[data-composer-file]")).toHaveLength(2),
+    );
+
+    const remove = screen.getByRole("button", {
+      name: appI18n.t("chat.removeFileReference", { name: "app.ts" }),
+    });
+    await user.click(remove);
+
+    await waitFor(() => expect(composerText(textbox)).toBe("`src/other.ts` "));
+    expect(
+      screen.queryByRole("button", {
+        name: appI18n.t("chat.removeFileReference", { name: "app.ts" }),
+      }),
+    ).toBeNull();
+  });
+
+  it("serializes quoted snippets as citation fences for the agent", async () => {
+    const editorRef = createRef<ComposerEditorHandle>();
+    render(
+      <ComposerEditor ref={editorRef} ariaLabel="Message" onSubmit={vi.fn()} />,
+    );
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+
+    act(() => {
+      editorRef.current?.insertFileChips([
+        {
+          path: "src/app.ts",
+          startLine: 4,
+          endLine: 5,
+          snippet: "const a = 1;\nconst b = 2;",
+        },
+      ]);
+    });
+
+    await waitFor(() =>
+      expect(textbox.querySelector("[data-composer-file]")).not.toBeNull(),
+    );
+    expect(composerText(textbox)).toContain("```4:5:src/app.ts");
+    expect(composerText(textbox)).toContain("const a = 1;");
+    expect(textbox.textContent).toContain("L4-5");
+  });
+
+  it("serializes diff-gutter quotes as unified diff fences for the agent", async () => {
+    const editorRef = createRef<ComposerEditorHandle>();
+    render(
+      <ComposerEditor ref={editorRef} ariaLabel="Message" onSubmit={vi.fn()} />,
+    );
+    const textbox = screen.getByRole("textbox", { name: "Message" });
+
+    act(() => {
+      editorRef.current?.insertFileChips([
+        {
+          path: "src/example.ts",
+          startLine: 1,
+          endLine: 2,
+          snippet: " keep\n+new line",
+          origin: "diff",
+          diffSide: "new",
+        },
+      ]);
+    });
+
+    await waitFor(() =>
+      expect(textbox.querySelector("[data-composer-file]")).not.toBeNull(),
+    );
+    expect(composerText(textbox)).toContain(
+      "diff --git a/src/example.ts b/src/example.ts",
+    );
+    expect(composerText(textbox)).toContain("quoted from git diff (new side)");
+    expect(composerText(textbox)).toContain("+new line");
+    expect(textbox.textContent).toContain("L1-2");
   });
 
   it("replaceDocument restores chips from TipTap JSON without markdown round-trip", async () => {
@@ -258,6 +431,58 @@ describe("ComposerEditor", () => {
     expect(paragraph?.child(2).isText).toBe(true);
     expect(paragraph?.child(2).text).toBe(" ");
     expect(documentPlainText(editor.state.doc)).toBe("`hack.svg` `copy.svg` ");
+    editor.destroy();
+  });
+
+  it("collapses the separator space when a later quote is its own command", () => {
+    const editor = new Editor({
+      extensions: createComposerExtensions({ placeholder: "Type" }),
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph" }],
+      },
+    });
+
+    // Every gutter click arrives as a separate insertComposerFiles call with the
+    // caret parked at the end, which is the only way to reach the
+    // separator-collapse branch. Doing that work on a nested chain dispatched a
+    // second transaction mid-command and left the outer one stale, so this call
+    // threw *after* the chip had landed.
+    editor.commands.insertComposerFiles([{ path: "first.ts" }]);
+    editor.commands.focus("end");
+    expect(() =>
+      editor.commands.insertComposerFiles([{ path: "second.ts" }]),
+    ).not.toThrow();
+
+    const paragraph = editor.state.doc.firstChild;
+    expect(paragraph?.childCount).toBe(3);
+    expect(paragraph?.child(0).attrs.path).toBe("first.ts");
+    expect(paragraph?.child(1).attrs.path).toBe("second.ts");
+    expect(paragraph?.child(2).text).toBe(" ");
+    expect(documentPlainText(editor.state.doc)).toBe("`first.ts` `second.ts` ");
+    editor.destroy();
+  });
+
+  it("collapses the separator space when a quote follows a prompt token", () => {
+    const editor = new Editor({
+      extensions: createComposerExtensions({ placeholder: "Type" }),
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph" }],
+      },
+    });
+
+    editor.commands.setPromptToken("command", "review");
+    editor.commands.focus("end");
+    expect(() =>
+      editor.commands.insertComposerFiles([{ path: "after-token.ts" }]),
+    ).not.toThrow();
+
+    const paragraph = editor.state.doc.firstChild;
+    expect(paragraph?.childCount).toBe(3);
+    expect(paragraph?.child(0).type.name).toBe("promptToken");
+    expect(paragraph?.child(1).attrs.path).toBe("after-token.ts");
+    expect(paragraph?.child(2).text).toBe(" ");
     editor.destroy();
   });
 

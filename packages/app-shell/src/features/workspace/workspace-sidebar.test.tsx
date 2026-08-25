@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   LocalTransportError,
+  type ContractsClient,
   type Project,
   type Session,
   type Task,
@@ -43,35 +44,24 @@ import { WorkspaceSidebar } from "./workspace-sidebar";
 const USER = { name: "Eric", email: "eric@example.com" };
 // Deliberately not "Ora": the sidebar header renders that as the product mark,
 // so a project of the same name makes every text query ambiguous.
-const PROJECT: Project = { id: "p1", name: "Ora Desktop", rootPath: "/ora" };
+const PROJECT: Project = { id: "p1", name: "Ora Desktop" };
 const TASK: Task = {
   id: "t1",
   projectId: "p1",
+  workspaceId: "workspace-t1",
   title: "Refactor",
-  workspaceMode: "worktree",
-  type: "default",
-  workflowRunId: null,
 };
 const SESSION: Session = {
   id: "s1",
-  taskId: "t1",
+  workspaceId: "workspace-t1",
   agentRef: "ora-space.opencode",
   status: "running",
   title: null,
   historyState: { type: "writable" },
 };
-// A direct (project-root) chat: its task carries workspaceMode "project_root".
-const DIRECT_TASK: Task = {
-  id: "t-direct",
-  projectId: "p1",
-  title: "Direct chat",
-  workspaceMode: "project_root",
-  type: "default",
-  workflowRunId: null,
-};
 const DIRECT_SESSION: Session = {
   id: "s-direct",
-  taskId: "t-direct",
+  workspaceId: "workspace-p1",
   agentRef: "ora-space.opencode",
   status: "running",
   title: null,
@@ -202,8 +192,10 @@ beforeEach(() => {
   });
   useDraftSessionsStore.getState().clear();
   useUiStore.setState({
+    sidebarCollapsed: false,
     expandedProjects: new Set(),
     expandedTasks: new Set(),
+    treeExpansionBootstrapped: false,
     dialog: null,
     deleteTarget: null,
   });
@@ -313,7 +305,6 @@ describe("WorkspaceSidebar", () => {
     const other: Project = {
       id: "p2",
       name: "Other App",
-      rootPath: "/other",
     };
     const state = workspaceWithOneSession();
     state.projects = [PROJECT, other];
@@ -385,25 +376,22 @@ describe("WorkspaceSidebar", () => {
     );
   });
 
-  it("keeps New chat visible when the selected chat is a direct (project-root) chat", async () => {
+  it("keeps New chat visible when the selected chat belongs to the main workspace", async () => {
     const user = userEvent.setup();
     const state = createMockClientState();
     state.projects = [PROJECT];
-    state.tasks = [DIRECT_TASK];
+    state.tasks = [];
     state.sessions = [DIRECT_SESSION];
-    // Selecting the direct chat syncs createFocus to its project-root task id.
+    // Ordinary sessions select the project directly because they have no Task.
     useWorkspaceSelectionStore
       .getState()
-      .selectSession(DIRECT_SESSION.id, DIRECT_TASK.id, PROJECT.id);
+      .selectSessionBeforeTask(DIRECT_SESSION.id, PROJECT.id);
     renderSidebar(state);
 
     await user.click(
       await screen.findByRole("button", { name: /新建对话|New chat/ }),
     );
 
-    // The project-root task id must demote to a direct (project-level) draft so
-    // the row renders under the project instead of being orphaned in the
-    // worktree-draft map, which the project-root branch never renders.
     expect(useWorkspaceSelectionStore.getState().selection).toMatchObject({
       projectId: PROJECT.id,
       taskId: null,
@@ -475,7 +463,7 @@ describe("WorkspaceSidebar", () => {
     );
   });
 
-  it("starts a muted draft from the worktree plus, not the row click", async () => {
+  it("starts a muted draft from the Workspace create menu", async () => {
     const user = userEvent.setup();
     useWorkspaceSelectionStore
       .getState()
@@ -485,8 +473,11 @@ describe("WorkspaceSidebar", () => {
     await waitFor(() => expect(treeRow(TASK.title)).not.toBeNull());
     await user.click(
       within(treeRowShell(TASK.title)).getByRole("button", {
-        name: /^新建会话$|^New session$/,
+        name: /在此任务中新建|Create in this task/,
       }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: /^新建任务$|^New task$/ }),
     );
 
     expect(useWorkspaceSelectionStore.getState().selection).toMatchObject({
@@ -508,8 +499,11 @@ describe("WorkspaceSidebar", () => {
     await waitFor(() => expect(treeRow(NEW_SESSION_LABEL)).not.toBeNull());
     await user.click(
       within(treeRowShell(TASK.title)).getByRole("button", {
-        name: /^新建会话$|^New session$/,
+        name: /在此任务中新建|Create in this task/,
       }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: /^新建任务$|^New task$/ }),
     );
     expect(treeRow(NEW_SESSION_LABEL)).not.toBeNull();
 
@@ -531,8 +525,11 @@ describe("WorkspaceSidebar", () => {
     await waitFor(() => expect(treeRow(TASK.title)).not.toBeNull());
     await user.click(
       within(treeRowShell(TASK.title)).getByRole("button", {
-        name: /^新建会话$|^New session$/,
+        name: /在此任务中新建|Create in this task/,
       }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: /^新建任务$|^New task$/ }),
     );
     const draftId = useWorkspaceSelectionStore.getState().selection.draftId!;
     act(() => {
@@ -671,17 +668,9 @@ describe("WorkspaceSidebar", () => {
   it("collects every descendant session when deleting a project", async () => {
     const user = userEvent.setup();
     const state = workspaceWithOneSession();
-    state.tasks.push({
-      id: "t2",
-      projectId: PROJECT.id,
-      title: "Direct chat",
-      workspaceMode: "project_root",
-      type: "default",
-      workflowRunId: null,
-    });
     state.sessions.push({
       id: "s2",
-      taskId: "t2",
+      workspaceId: "workspace-p1",
       agentRef: "ora-space.opencode",
       status: "running",
       title: null,
@@ -702,7 +691,7 @@ describe("WorkspaceSidebar", () => {
       kind: "project",
       id: PROJECT.id,
       name: PROJECT.name,
-      sessionIds: ["s1", "s2"],
+      sessionIds: ["s2", "s1"],
     });
   });
 
@@ -768,7 +757,7 @@ describe("WorkspaceSidebar", () => {
         snapshotId: "snap1",
         name: "Review bot",
         status: "pending",
-        taskId: "wt1",
+        workspaceId: "workspace-wt1",
         createdAt: 0n,
         updatedAt: 0n,
       },
@@ -804,7 +793,7 @@ describe("WorkspaceSidebar", () => {
     });
   });
 
-  it("opens deploy dialog state when a workflow template is chosen", async () => {
+  it("opens run dialog state when a workflow template is chosen", async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     const state = workspaceWithOneSession();
     state.workflows = [
@@ -835,10 +824,41 @@ describe("WorkspaceSidebar", () => {
     await user.click(await screen.findByRole("button", { name: "Deploy bot" }));
 
     expect(useUiStore.getState().dialog).toEqual({
-      kind: "deployWorkflow",
+      kind: "runWorkflow",
       projectId: PROJECT.id,
+      workspaceId: "workspace-p1",
       workflowId: "wf1",
       workflowName: "Deploy bot",
+    });
+  });
+
+  it("targets the Task Workspace when a workflow is chosen from its plus menu", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    const state = workspaceWithOneSession();
+    state.workflows = [mockPublishedWorkflow("wf1", "Task review")];
+    renderSidebar(state);
+
+    await waitFor(() => expect(treeRow(TASK.title)).not.toBeNull());
+    await user.click(
+      within(treeRowShell(TASK.title)).getByRole("button", {
+        name: /在此任务中新建|Create in this task/,
+      }),
+    );
+    await user.hover(
+      await screen.findByRole("button", {
+        name: /运行工作流|Run workflow/,
+      }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Task review" }),
+    );
+
+    expect(useUiStore.getState().dialog).toEqual({
+      kind: "runWorkflow",
+      projectId: PROJECT.id,
+      workspaceId: TASK.workspaceId,
+      workflowId: "wf1",
+      workflowName: "Task review",
     });
   });
 
@@ -1117,15 +1137,25 @@ describe("WorkspaceSidebar", () => {
   it("renames a workflow run from the context menu without opening a dialog", async () => {
     const user = userEvent.setup();
     const state = workspaceWithOneSession();
+    const baseClient = createMockClient(state);
+    const renameCalls: string[] = [];
+    const client: ContractsClient = {
+      ...baseClient,
+      workflowRun: {
+        ...baseClient.workflowRun,
+        rename: async (request, options) => {
+          renameCalls.push(request.name);
+          return baseClient.workflowRun.rename(request, options);
+        },
+      },
+    };
     state.tasks = [
       TASK,
       {
         id: "wt1",
         projectId: PROJECT.id,
-        title: "Review bot",
-        workspaceMode: "worktree",
-        type: "workflow",
-        workflowRunId: "run1",
+        workspaceId: "workspace-wt1",
+        title: "Workflow host",
       },
     ];
     state.workflowRuns = [
@@ -1136,12 +1166,12 @@ describe("WorkspaceSidebar", () => {
         snapshotId: "snap1",
         name: "Review bot",
         status: "pending",
-        taskId: "wt1",
+        workspaceId: "workspace-wt1",
         createdAt: 0n,
         updatedAt: 0n,
       },
     ];
-    renderSidebar(state);
+    renderSidebar(state, undefined, client);
 
     await waitFor(() => expect(treeRow("Review bot")).not.toBeNull());
     await user.pointer({
@@ -1157,9 +1187,11 @@ describe("WorkspaceSidebar", () => {
     const input = await screen.findByRole("textbox", {
       name: /重命名|Rename/,
     });
-    fireEvent.change(input, { target: { value: "Review bot v2" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    await user.clear(input);
+    await user.type(input, "Review bot v2");
+    await user.keyboard("{Enter}");
 
+    await waitFor(() => expect(renameCalls).toEqual(["Review bot v2"]));
     await waitFor(() =>
       expect(state.workflowRuns[0]?.name).toBe("Review bot v2"),
     );
@@ -1205,17 +1237,185 @@ describe("WorkspaceSidebar", () => {
     expect(treeRow(TASK.title)).not.toBeNull();
   });
 
-  // The Collapsible holds the panel just long enough to animate out, then drops
-  // it, so a collapsed branch costs nothing once the close has finished.
-  it("unmounts a collapsed branch instead of leaving it hidden in the DOM", async () => {
+  // First collapse unmounts; after a reopen, collapse hides instead of remounting.
+  it("unmounts on the first collapse and retains after a reopen", async () => {
     const user = userEvent.setup();
     renderSidebar(workspaceWithOneSession());
 
     await waitFor(() => expect(treeRow(TASK.title)).not.toBeNull());
 
     await user.click(screen.getByText(PROJECT.name));
+    expect(treeRow(TASK.title)).toBeNull();
+    expect(screen.queryByText(TASK.title)).toBeNull();
 
-    await waitFor(() => expect(screen.queryByText(TASK.title)).toBeNull());
+    await user.click(screen.getByText(PROJECT.name));
+    await waitFor(() => expect(treeRow(TASK.title)).not.toBeNull());
+
+    await user.click(screen.getByText(PROJECT.name));
+    expect(treeRow(TASK.title)).toBeNull();
+    expect(screen.getByText(TASK.title).closest("[hidden]")).not.toBeNull();
+  });
+
+  it("keeps a previously collapsed project collapsed after hydrate", async () => {
+    useUiStore.setState({
+      expandedProjects: new Set(),
+      expandedTasks: new Set(),
+      treeExpansionBootstrapped: true,
+    });
+    renderSidebar(workspaceWithOneSession());
+
+    await waitFor(() => expect(treeRow(PROJECT.name)).not.toBeNull());
+    expect(treeRow(TASK.title)).toBeNull();
+    expect(useUiStore.getState().expandedProjects.has(PROJECT.id)).toBe(false);
+  });
+
+  it("does not re-expand a collapsed project when restoring its selected session", async () => {
+    useUiStore.setState({
+      expandedProjects: new Set(),
+      expandedTasks: new Set(),
+      treeExpansionBootstrapped: true,
+    });
+    useWorkspaceSelectionStore.setState({
+      selection: {
+        projectId: null,
+        taskId: null,
+        sessionId: null,
+        workflowRunId: null,
+        draftId: null,
+      },
+      pendingRestore: {
+        projectId: PROJECT.id,
+        taskId: TASK.id,
+        sessionId: SESSION.id,
+        workflowRunId: null,
+        draftId: null,
+      },
+      createFocus: null,
+    });
+    renderSidebar(workspaceWithOneSession());
+
+    await waitFor(() =>
+      expect(useWorkspaceSelectionStore.getState().selection.sessionId).toBe(
+        SESSION.id,
+      ),
+    );
+    expect(treeRow(TASK.title)).toBeNull();
+    expect(useUiStore.getState().expandedProjects.has(PROJECT.id)).toBe(false);
+    expect(treeRowShell(PROJECT.name).dataset.selectionHint).toBe("true");
+  });
+
+  it("bubbles selection hint to collapsed ancestors and clears it on expand", async () => {
+    const user = userEvent.setup();
+    useUiStore.setState({
+      expandedProjects: new Set([PROJECT.id]),
+      expandedTasks: new Set([TASK.id]),
+      treeExpansionBootstrapped: true,
+    });
+    useWorkspaceSelectionStore
+      .getState()
+      .selectSession(SESSION.id, TASK.id, PROJECT.id);
+    renderSidebar(workspaceWithOneSession());
+
+    await waitFor(() => expect(treeRow(NEW_SESSION_LABEL)).not.toBeNull());
+    expect(treeRowShell(PROJECT.name).dataset.selectionHint).toBeUndefined();
+    expect(treeRowShell(TASK.title).dataset.selectionHint).toBeUndefined();
+
+    await user.click(screen.getByText(TASK.title));
+    expect(useUiStore.getState().expandedTasks.has(TASK.id)).toBe(false);
+    expect(treeRow(NEW_SESSION_LABEL)).toBeNull();
+    expect(treeRowShell(TASK.title).dataset.selectionHint).toBe("true");
+    expect(treeRowShell(PROJECT.name).dataset.selectionHint).toBeUndefined();
+    expect(useWorkspaceSelectionStore.getState().selection.sessionId).toBe(
+      SESSION.id,
+    );
+
+    await user.click(screen.getByText(PROJECT.name));
+    expect(useUiStore.getState().expandedProjects.has(PROJECT.id)).toBe(false);
+    expect(treeRow(TASK.title)).toBeNull();
+    expect(treeRowShell(PROJECT.name).dataset.selectionHint).toBe("true");
+    expect(useWorkspaceSelectionStore.getState().selection.sessionId).toBe(
+      SESSION.id,
+    );
+
+    await user.click(screen.getByText(PROJECT.name));
+    await waitFor(() => expect(treeRow(TASK.title)).not.toBeNull());
+    expect(treeRowShell(PROJECT.name).dataset.selectionHint).toBeUndefined();
+    expect(treeRowShell(TASK.title).dataset.selectionHint).toBe("true");
+
+    await user.click(screen.getByText(TASK.title));
+    await waitFor(() => expect(treeRow(NEW_SESSION_LABEL)).not.toBeNull());
+    expect(treeRowShell(TASK.title).dataset.selectionHint).toBeUndefined();
+  });
+
+  it("does not show a selection hint when the project itself is selected", async () => {
+    useUiStore.setState({
+      expandedProjects: new Set(),
+      expandedTasks: new Set(),
+      treeExpansionBootstrapped: true,
+    });
+    useWorkspaceSelectionStore.getState().selectProject(PROJECT.id);
+    renderSidebar(workspaceWithOneSession());
+
+    await waitFor(() => expect(treeRow(PROJECT.name)).not.toBeNull());
+    expect(treeRowShell(PROJECT.name).dataset.selectionHint).toBeUndefined();
+    expect(
+      treeRowShell(PROJECT.name).className.includes("bg-sidebar-accent "),
+    ).toBe(true);
+  });
+
+  it("does not seal first-run bootstrap when the tree query fails", async () => {
+    const state = workspaceWithOneSession();
+    const client = createMockClient(state);
+    vi.spyOn(client.project, "list").mockRejectedValue(
+      new LocalTransportError("tauri_invoke_failure", "projects unavailable"),
+    );
+    renderSidebar(state, undefined, client);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/projects unavailable|调用失败|tauri/i),
+      ).toBeTruthy(),
+    );
+    expect(useUiStore.getState().treeExpansionBootstrapped).toBe(false);
+    expect(useUiStore.getState().expandedProjects.size).toBe(0);
+  });
+
+  it("keeps a staged session restore when the sessions query fails", async () => {
+    useWorkspaceSelectionStore.setState({
+      selection: {
+        projectId: null,
+        taskId: null,
+        sessionId: null,
+        workflowRunId: null,
+        draftId: null,
+      },
+      pendingRestore: {
+        projectId: PROJECT.id,
+        taskId: TASK.id,
+        sessionId: SESSION.id,
+        workflowRunId: null,
+        draftId: null,
+      },
+      createFocus: null,
+    });
+    const state = workspaceWithOneSession();
+    const client = createMockClient(state);
+    vi.spyOn(client.session, "list").mockRejectedValue(
+      new LocalTransportError("tauri_invoke_failure", "sessions unavailable"),
+    );
+    renderSidebar(state, undefined, client);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/sessions unavailable|调用失败|tauri/i),
+      ).toBeTruthy(),
+    );
+    expect(
+      useWorkspaceSelectionStore.getState().pendingRestore?.sessionId,
+    ).toBe(SESSION.id);
+    expect(
+      useWorkspaceSelectionStore.getState().selection.sessionId,
+    ).toBeNull();
   });
 
   // Matches the working-indicator aria-label in either shipped locale.
@@ -1232,22 +1432,12 @@ describe("WorkspaceSidebar", () => {
   it("uses the same circle chat icon for direct chats and worktree sessions", async () => {
     const state = createMockClientState();
     state.projects = [PROJECT];
-    state.tasks = [
-      TASK,
-      {
-        id: "t2",
-        projectId: PROJECT.id,
-        title: "Direct chat",
-        workspaceMode: "project_root",
-        type: "default",
-        workflowRunId: null,
-      },
-    ];
+    state.tasks = [TASK];
     state.sessions = [
       SESSION,
       {
         id: "s2",
-        taskId: "t2",
+        workspaceId: "workspace-p1",
         agentRef: "ora-space.opencode",
         status: "running",
         title: "Direct chat",
@@ -1257,11 +1447,10 @@ describe("WorkspaceSidebar", () => {
     renderSidebar(state);
 
     await waitFor(() => expect(treeRow("Direct chat")).not.toBeNull());
-    expect(screen.getByLabelText(/直聊任务|Direct chat task/)).not.toBeNull();
     expect(
       screen.getByLabelText(/Git 工作树任务|Git worktree task/),
     ).not.toBeNull();
-    expect(screen.getByLabelText(/^会话$|^Session$/)).not.toBeNull();
+    expect(screen.getAllByLabelText(/^会话$|^Session$/)).toHaveLength(2);
   });
 
   it("uses the persisted session title and ignores chat metadata for the row label", async () => {

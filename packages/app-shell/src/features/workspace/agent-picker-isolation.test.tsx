@@ -26,28 +26,26 @@ import { WorkspaceSidebar } from "./workspace-sidebar";
 import { WorkspaceView } from "./workspace-view";
 
 const USER = { name: "Eric", email: "eric@example.com" };
-const PROJECT: Project = { id: "p1", name: "Ora Desktop", rootPath: "/ora" };
+const PROJECT: Project = { id: "p1", name: "Ora Desktop" };
 const TASK1: Task = {
   id: "t1",
   projectId: "p1",
+  workspaceId: "workspace-t1",
   title: "Task One",
-  workspaceMode: "worktree",
-  type: "default",
-  workflowRunId: null,
 };
 const TASK2: Task = {
   id: "t2",
   projectId: "p1",
+  workspaceId: "workspace-t2",
   title: "Task Two",
-  workspaceMode: "worktree",
-  type: "default",
-  workflowRunId: null,
 };
 
 beforeEach(() => {
   useWorkspaceSelectionStore.getState().clearSelection();
   useDraftSessionsStore.getState().clear();
-  useSettingsStore.setState({ settings: DEFAULT_SETTINGS });
+  useSettingsStore.setState({
+    settings: { ...DEFAULT_SETTINGS, agentCli: "ora-space.opencode" },
+  });
   usePendingAgentStore.setState({ selections: {} });
 });
 
@@ -74,8 +72,8 @@ function renderWorkspace() {
 }
 
 /**
- * Opens a worktree's new-chat surface: expand the row, then click its hover
- * plus. Row click alone only toggles expand and does not select a composer.
+ * Opens a worktree's new-chat surface through that Task row's create menu.
+ * Row click alone only toggles expand and does not select a composer.
  */
 async function openTaskComposer(
   user: ReturnType<typeof userEvent.setup>,
@@ -87,8 +85,11 @@ async function openTaskComposer(
   await user.click(label);
   await user.click(
     within(row as HTMLElement).getByRole("button", {
-      name: /新建会话|New session/,
+      name: /在此任务中新建|Create in this task/,
     }),
+  );
+  await user.click(
+    await screen.findByRole("button", { name: /新建任务|New task/ }),
   );
 }
 

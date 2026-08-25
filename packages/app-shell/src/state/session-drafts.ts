@@ -1,6 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type { JSONContent } from "@tiptap/core";
-import type { TaskWorkspaceMode } from "@ora/contracts";
 import { useDraftSessionsStore } from "./stores/draft-sessions-store";
 import type { DraftScope } from "./stores/draft-sessions-store";
 import { useComposerInputStore } from "./stores/composer-input-store";
@@ -64,7 +63,13 @@ function base64ByteLength(data: string): number {
   return Math.max(0, Math.floor((compact.length * 3) / 4) - padding);
 }
 
-/** Expands the ancestors needed to keep a project-root or worktree draft visible. */
+/**
+ * Expands the ancestors needed to keep a project or worktree draft visible.
+ *
+ * Every caller runs a `select*` action first, and those clear `pendingRestore`,
+ * so by this point the user has explicitly navigated and owns the layout — no
+ * staged-restore guard is possible (or needed) here.
+ */
 function expandDraftScope(scope: DraftScope): void {
   useUiStore.getState().expandProject(scope.projectId);
   if (scope.taskId !== null) useUiStore.getState().expandTask(scope.taskId);
@@ -99,11 +104,7 @@ export function reparkDraftComposerContent(args: {
 /** Loaded tree shape `resolveNewChatScope` validates New-chat targets against. */
 type NewChatTree = {
   projects: readonly { id: string }[];
-  tasks: readonly {
-    id: string;
-    projectId: string;
-    workspaceMode: TaskWorkspaceMode;
-  }[];
+  tasks: readonly { id: string; projectId: string }[];
 };
 
 /**
@@ -114,10 +115,9 @@ type NewChatTree = {
  * when the workspace has no projects at all.
  *
  * When `tree` is provided, a create-focus or selection whose project vanished
- * is ignored, a missing worktree is demoted to project-root, and a project-root
- * task is demoted to a direct (project-level) draft. The sidebar only renders a
- * task-scoped draft under a worktree branch, so New chat must never keep a
- * project-root task id — that would create a draft no tree row can show.
+ * is ignored and a missing or mismatched task is demoted to a direct
+ * project-level draft. The sidebar only renders a task-scoped draft under a
+ * worktree branch, so New chat must never keep an orphaned task id.
  */
 export function resolveNewChatScope(
   createFocus: WorkspaceCreateFocus | null,
@@ -147,11 +147,10 @@ export function resolveNewChatScope(
 
 /**
  * Validates a {project, task} target against the loaded tree and returns the
- * draft scope New chat should create under. A missing/mismatched/project-root
- * task demotes to a project-root (direct) draft — worktree drafts render under
- * the task branch, so a project-root task id would orphan the row. Returns null
- * only when the project itself is gone, so the caller falls through to the next
- * preference instead of creating a draft under a deleted project.
+ * draft scope New chat should create under. A missing or mismatched task
+ * demotes to a project-level draft. Returns null only when the project itself
+ * is gone, so the caller falls through to the next preference instead of
+ * creating a draft under a deleted project.
  */
 function scopeDraftTarget(
   scope: { projectId: string; taskId: string | null },
@@ -163,11 +162,7 @@ function scopeDraftTarget(
   }
   if (scope.taskId === null) return scope;
   const task = tree.tasks.find((item) => item.id === scope.taskId);
-  if (
-    task === undefined ||
-    task.projectId !== scope.projectId ||
-    task.workspaceMode === "project_root"
-  ) {
+  if (task === undefined || task.projectId !== scope.projectId) {
     return { projectId: scope.projectId, taskId: null };
   }
   return scope;

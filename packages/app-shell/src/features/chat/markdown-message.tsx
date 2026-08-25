@@ -17,11 +17,16 @@ import {
   IconCopy,
 } from "@tabler/icons-react";
 import { Button, cn } from "@ora/ui";
-import type { Components } from "react-markdown";
-import ReactMarkdown from "react-markdown";
+import type { Components, UrlTransform } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { useTranslation } from "react-i18next";
 import remarkGfm from "remark-gfm";
 import type { BundledLanguage, ThemedTokenWithVariants } from "shiki";
+import {
+  prepareAssistantMessageMarkdown,
+  remarkSoftBreaks,
+} from "./assistant-message-markdown";
+import { ChatExternalLink } from "./chat-external-link";
 import { unwrapMarkdownDocument } from "./markdown-document";
 import { prepareStreamingMarkdown } from "./streaming-markdown";
 import {
@@ -37,6 +42,10 @@ import {
   prepareUserMessageMarkdown,
   remarkComposerHighlight,
 } from "./user-message-markdown";
+import {
+  fileQuoteMarkdownComponents,
+  remarkComposerFileQuote,
+} from "./user-message-file-quotes";
 
 interface MarkdownMessageProps {
   content: string;
@@ -54,6 +63,7 @@ interface MarkdownDocumentProps {
 
 const LANGUAGE_CLASS_PATTERN = /(?:^|\s)language-([^\s]+)/;
 const markdownRemarkPlugins = [remarkGfm];
+const messageRemarkPlugins = [remarkGfm, remarkSoftBreaks];
 const highlightedCodeCache = new Map<
   string,
   Promise<ThemedTokenWithVariants[][] | null>
@@ -100,15 +110,14 @@ interface StreamingRevealSpanProps extends ComponentPropsWithoutRef<"span"> {
 function createMarkdownComponents(density: MarkdownDensity): Components {
   const compact = density === "compact";
   return {
-    a: ({ children, ...props }) => (
-      <a
+    a: ({ children, href, ...props }) => (
+      <ChatExternalLink
         className="font-medium text-primary underline decoration-primary/45 underline-offset-4 transition-colors hover:decoration-primary focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-        rel="noopener noreferrer"
-        target="_blank"
+        href={href ?? ""}
         {...props}
       >
         {children}
-      </a>
+      </ChatExternalLink>
     ),
     blockquote: ({ children, ...props }) => (
       <blockquote
@@ -137,7 +146,7 @@ function createMarkdownComponents(density: MarkdownDensity): Components {
       <h1
         className={
           compact
-            ? "mb-1 mt-2 text-base font-semibold leading-6 first:mt-0"
+            ? "mb-2 mt-3 text-xl font-semibold leading-7 first:mt-0"
             : "mb-3 mt-6 text-2xl font-semibold leading-8 first:mt-0"
         }
         {...props}
@@ -313,7 +322,28 @@ function createMarkdownComponents(density: MarkdownDensity): Components {
 }
 
 const markdownComponents = createMarkdownComponents("default");
-const compactMarkdownComponents = createMarkdownComponents("compact");
+// Only the compact surface renders sent prompts, so only it turns quote fences
+// back into chips.
+const compactMarkdownComponents = {
+  ...createMarkdownComponents("compact"),
+  ...fileQuoteMarkdownComponents,
+};
+const compactRemarkPlugins = [
+  ...markdownRemarkPlugins,
+  remarkComposerHighlight,
+  remarkComposerFileQuote,
+];
+
+/**
+ * Preserves assistant link destinations for chat-link while keeping media URLs
+ * sanitized. A rejected media URL is dropped rather than emptied: `src=""` makes
+ * React warn and the browser refetch the page.
+ */
+const assistantUrlTransform: UrlTransform = (url, key, node) => {
+  if (node.tagName === "a" && key === "href") return url;
+  const transformed = defaultUrlTransform(url);
+  return transformed === "" ? undefined : transformed;
+};
 
 /** Stable `pre` override so index updates do not remount CodeBlock state. */
 function ChatMarkdownPreOverride({
@@ -346,13 +376,8 @@ export function MarkdownDocument({
         : { ...baseComponents, ...components },
     [baseComponents, components],
   );
-  const remarkPlugins = useMemo(
-    () =>
-      density === "compact"
-        ? [...markdownRemarkPlugins, remarkComposerHighlight]
-        : markdownRemarkPlugins,
-    [density],
-  );
+  const remarkPlugins =
+    density === "compact" ? compactRemarkPlugins : markdownRemarkPlugins;
   const parseable =
     density === "compact" ? prepareUserMessageMarkdown(content) : content;
   return (
@@ -397,11 +422,12 @@ export function MarkdownMessage({
     [chatLink],
   );
   const renderedMarkdown = useFrameBatchedMarkdown(markdown, streaming);
-  const parseableMarkdown = useMemo(
-    () =>
-      streaming ? prepareStreamingMarkdown(renderedMarkdown) : renderedMarkdown,
-    [renderedMarkdown, streaming],
-  );
+  const parseableMarkdown = useMemo(() => {
+    const completeMarkdown = streaming
+      ? prepareStreamingMarkdown(renderedMarkdown)
+      : renderedMarkdown;
+    return prepareAssistantMessageMarkdown(completeMarkdown);
+  }, [renderedMarkdown, streaming]);
   const [storedRevealState, setStoredRevealState] =
     useState<StreamingRevealState>(() => ({
       renderedLength: renderedMarkdown.length,
@@ -446,9 +472,10 @@ export function MarkdownMessage({
   const markdownBody = useMemo(
     () => (
       <ReactMarkdown
-        remarkPlugins={markdownRemarkPlugins}
+        remarkPlugins={messageRemarkPlugins}
         rehypePlugins={rehypePlugins}
         components={streaming ? streamingMarkdownComponents : markdownWithLinks}
+        urlTransform={chatLink === null ? undefined : assistantUrlTransform}
       >
         {parseableMarkdown}
       </ReactMarkdown>
@@ -459,6 +486,7 @@ export function MarkdownMessage({
       streaming,
       streamingMarkdownComponents,
       markdownWithLinks,
+      chatLink,
     ],
   );
 

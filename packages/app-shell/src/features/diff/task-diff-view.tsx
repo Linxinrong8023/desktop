@@ -16,7 +16,6 @@ import {
   Hunk,
   getChangeKey,
   type FileData,
-  type GutterOptions,
 } from "react-diff-view";
 import "react-diff-view/style/index.css";
 import "./task-diff-view.css";
@@ -60,6 +59,7 @@ import {
 import { countChanges, parseTaskDiffPatch } from "./task-diff-data";
 import { diffFilePath } from "./task-diff-file-tree-utils";
 import { TaskDiffFileTree } from "./task-diff-file-tree";
+import { useTaskDiffQuoteGutter } from "./task-diff-quote-gutter";
 import { TaskGitActions } from "./task-git-actions";
 import {
   animatePanelWidth,
@@ -83,6 +83,8 @@ interface TaskDiffViewProps {
   toolbar?: ReactNode;
   onFileTreeOpenChange: (open: boolean) => void;
   onFileNotFound?: (path: string, line?: number) => void;
+  /** Reports the file currently shown so review layout can persist it. */
+  onPreviewPathChange?: (path: string) => void;
 }
 
 export type TaskDiffViewType = "unified" | "split";
@@ -102,6 +104,7 @@ export function TaskDiffView({
   toolbar,
   onFileTreeOpenChange,
   onFileNotFound,
+  onPreviewPathChange,
 }: TaskDiffViewProps) {
   const { i18n, t } = useTranslation();
   const client = useContractsClient();
@@ -124,6 +127,26 @@ export function TaskDiffView({
   // Programmatic jumps (chat links, tree clicks) must not be overwritten by the
   // scroll spy: on mount it treats an empty viewport as "scrolled to the end".
   const suppressScrollSyncRef = useRef(false);
+  const onPreviewPathChangeRef = useRef(onPreviewPathChange);
+  /** Last path reported upward, so repeat notifications collapse to one call. */
+  const notifiedPreviewPathRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    onPreviewPathChangeRef.current = onPreviewPathChange;
+  });
+
+  /**
+   * Reports the previewed file to the review layout.
+   *
+   * Must stay callable from plain event/effect code only — never from a
+   * `setState` updater, which React may re-run and which must not touch another
+   * component's state.
+   */
+  const notifyPreviewPath = useCallback((path: string) => {
+    if (notifiedPreviewPathRef.current === path) return;
+    notifiedPreviewPathRef.current = path;
+    onPreviewPathChangeRef.current?.(path);
+  }, []);
 
   const files = useMemo(
     () =>
@@ -159,6 +182,23 @@ export function TaskDiffView({
     }
   }
 
+  useLayoutEffect(() => {
+    if (fileRequest === undefined || diffQuery.isLoading) return;
+    if (fileRequest.requestId !== appliedFileRequestId) return;
+    const matchingPath = filePaths.find((path) =>
+      pathsMatchForWorkspace(fileRequest.path, path),
+    );
+    if (matchingPath !== undefined) {
+      notifyPreviewPath(matchingPath);
+    }
+  }, [
+    appliedFileRequestId,
+    diffQuery.isLoading,
+    filePaths,
+    fileRequest,
+    notifyPreviewPath,
+  ]);
+
   /**
    * Scrolls the Diff viewport so `path` sits near the top.
    * Returns false when the panel has not laid out yet so callers can retry
@@ -185,13 +225,14 @@ export function TaskDiffView({
     (path: string, behavior: ScrollBehavior = "smooth") => {
       suppressScrollSyncRef.current = true;
       setSelectedFilePath(path);
+      notifyPreviewPath(path);
       if (scrollToPath(path, behavior)) return;
       requestAnimationFrame(() => {
         if (!scrollToPath(path, behavior))
           suppressScrollSyncRef.current = false;
       });
     },
-    [scrollToPath],
+    [notifyPreviewPath, scrollToPath],
   );
 
   useLayoutEffect(() => {
@@ -324,6 +365,9 @@ export function TaskDiffView({
             activePath = path;
           }
         }
+        // Notify outside the updater: updaters must be pure, and this one
+        // would otherwise setState on the parent review layout.
+        notifyPreviewPath(activePath);
         setSelectedFilePath((currentPath) =>
           currentPath === activePath ? currentPath : activePath,
         );
@@ -335,7 +379,7 @@ export function TaskDiffView({
       root.removeEventListener("scroll", updateActiveFile);
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [filePaths]);
+  }, [filePaths, notifyPreviewPath]);
 
   const commitChanges = useMutation({
     mutationFn: (message: string) =>
@@ -698,6 +742,7 @@ function TaskDiffFile({ file, viewType, targetLine }: TaskDiffFileProps) {
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(
     () => new Set(),
   );
+  const { renderGutter, quoteRootRef } = useTaskDiffQuoteGutter(file, viewType);
   const fileStats = useMemo(() => countChanges([file]), [file]);
   const jumpTarget =
     targetLine === undefined
@@ -720,6 +765,10 @@ function TaskDiffFile({ file, viewType, targetLine }: TaskDiffFileProps) {
   const renderSegments = useMemo(
     () => buildCollapsedDiffSegments(file.hunks, expandedBlocks),
     [expandedBlocks, file.hunks],
+  );
+  const selectedChanges = useMemo(
+    () => (jumpChangeKey === null ? [] : [jumpChangeKey]),
+    [jumpChangeKey],
   );
 
   useLayoutEffect(() => {
@@ -770,6 +819,10 @@ function TaskDiffFile({ file, viewType, targetLine }: TaskDiffFileProps) {
           </div>
         ) : (
           <div
+            ref={(node) => {
+              quoteRootRef.current = node;
+            }}
+            data-quote-root
             className={`ora-task-diff ora-task-diff--${viewType} ora-task-diff--${file.type} overflow-x-auto`}
           >
             {viewType === "split" && (
@@ -782,10 +835,8 @@ function TaskDiffFile({ file, viewType, targetLine }: TaskDiffFileProps) {
               viewType={viewType}
               diffType={file.type}
               hunks={file.hunks}
-              selectedChanges={jumpChangeKey === null ? [] : [jumpChangeKey]}
-              renderGutter={
-                viewType === "unified" ? renderSingleLineNumber : undefined
-              }
+              selectedChanges={selectedChanges}
+              renderGutter={renderGutter}
               optimizeSelection
             >
               {() =>
@@ -971,17 +1022,6 @@ function DiffMessage({ title, detail, action }: DiffMessageProps) {
       </div>
     </div>
   );
-}
-
-/** Shows one current line number for context rows while retaining old numbers for deletions. */
-function renderSingleLineNumber({
-  change,
-  side,
-  renderDefault,
-  wrapInAnchor,
-}: GutterOptions) {
-  if (change.type === "normal" && side === "old") return null;
-  return wrapInAnchor(renderDefault());
 }
 
 /** Chooses the path users expect for added, deleted, and renamed files. */

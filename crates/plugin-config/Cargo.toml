@@ -1,0 +1,24 @@
+[package]
+name = "ora-plugin-config"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "ora_plugin_config"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+ora-utils = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Security", "Win32_Security_Authorization"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

@@ -23,6 +23,17 @@ Tiptap preset and plain-text helpers for prompt boxes (chat composer, HITL).
   source extensions, dotfiles) and `$skill` tokens become chips on that text
   path; versions (`v1.0`), globs (`*.ts`), slash-command chips, and directory
   `kind` need TipTap JSON parking (chat composer) for a lossless round-trip.
+  Ranged quotes may carry a `snippet` attr so send expands to a
+  `start:end:path` citation fence; Diff-gutter quotes also set `origin: "diff"`
+  and expand to a mini `diff --git` patch with unified markers. A mixed
+  add/delete range is still one chip; `diffSide` is omitted and the body
+  carries `+/-/ `. The patch's hunk note names the quoted file lines
+  (`lines 2-40`) because the hunk counts describe the body, which is shorter
+  whenever a drag crossed a collapsed hunk. `parseComposerFileQuote` is the
+  inverse of both payloads: read-only surfaces only hold the sent text, so it
+  is what lets them rebuild the chip — including its label — from the fence
+  alone. Any other fence parses to null and stays a code block.
+  Path-only `@` mentions stay backtick paths.
   Inline code that contains backticks, and fenced blocks that contain a ` ``` `
   line, serialize with a longer CommonMark fence so parse cannot close early.
   `[label](javascript:…)` / `data:` / `vbscript:` / `file:` hrefs stay literal
@@ -43,6 +54,15 @@ Tiptap preset and plain-text helpers for prompt boxes (chat composer, HITL).
   empty quote lifts the quote instead of inserting another paragraph inside it.
   A trailing space after a fence info string also
   opens the fence.
+- Custom commands (`insertComposerFiles`, `setPromptToken`) compose through the
+  `commands.*` given to them so every step lands on the one transaction TipTap
+  opened for the call. A nested `editor.chain()…run()` inside a command commits
+  a second transaction while the outer one is still open; the outer transaction
+  is then applied to a state it was never built from and ProseMirror throws
+  `Applying a mismatched transaction` _after_ the content has already been
+  inserted. `insertComposerFiles` needs two steps whenever a quote lands right
+  behind an existing chip or token — it drops the separator space first so a
+  range selection cannot paint a caret-thin bar between adjacent atoms.
 - Prompt links open on pointerdown (not mouseup/`click`) so the first press
   leaves the editor instead of placing a caret. Desktop still routes through
   the host browser command; this preset only calls `window.open` when no
@@ -53,11 +73,11 @@ Tiptap preset and plain-text helpers for prompt boxes (chat composer, HITL).
 `COMPOSER_CAPABILITIES` is the supported surface. Anything else in the full-page
 kit (images, TOC, video, alignment) is out of scope.
 
-| Layer  | Nodes / marks                                                                                            |
-| ------ | -------------------------------------------------------------------------------------------------------- |
-| Blocks | paragraph, heading 1–6, blockquote, fenced code, bullet/ordered/task lists, `---`                        |
-| Marks  | bold, italic, underline, strike, inline code, highlight, link                                            |
-| Chips  | `composerFile` (chip), `promptToken` (mention); range selection paints chips via `composerChipSelection` |
+| Layer  | Nodes / marks                                                                                                                                                                                                                                                              |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Blocks | paragraph, heading 1–6, blockquote, fenced code, bullet/ordered/task lists, `---`                                                                                                                                                                                          |
+| Marks  | bold, italic, underline, strike, inline code, highlight, link                                                                                                                                                                                                              |
+| Chips  | `composerFile` (chip), `promptToken` (mention); drag-select snaps onto the chip under the pointer and paints `data-chip-selected` without a React re-render; ArrowLeft/ArrowRight step the caret across a chip instead of node-selecting it (a NodeSelection has no caret) |
 
 Replace a slot with `features: { link: false }` or `features: { link: MyLink }`
 and append extras via `extraExtensions`. Rendering stays CSS in the product shell

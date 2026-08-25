@@ -1,18 +1,33 @@
-//! Discovers installed Ora plugin packages and orchestrates new plugin installs.
+//! Discovers installed Ora plugin packages without executing plugin code, and orchestrates
+//! checksum-verified installs of new plugin releases.
 
 mod discovery;
 mod install;
 mod issue;
 mod logo;
+mod skill;
 mod validation;
+mod webview;
+mod workbench;
 
+#[cfg(test)]
+mod kind_tests;
 #[cfg(test)]
 mod tests;
 
-pub use install::{InstallError, Installer};
+pub use discovery::{MANIFEST_FILE_NAME, installed_root};
+pub use install::{InstallError, InstalledPackage, Installer};
 pub use issue::{PluginDiscoveryIssue, PluginDiscoveryIssueKind};
+pub use skill::{
+    InstalledSkill, InstalledSkillDescriptor, SKILL_ASSET_DIRECTORY, SKILL_MANIFEST_FILE_NAME,
+};
 pub use validation::{
-    InstalledPlugin, InstalledPluginAgent, PluginContribution, PluginEngines, PluginPackageType,
+    INSTALLED_ENTRYPOINT, InstalledPlugin, InstalledPluginAgent,
+    PluginConfigurationDeclarationValidity, PluginContribution,
+};
+pub use webview::InstalledWebviewDescriptor;
+pub use workbench::{
+    InstalledWorkbenchDescriptor, WORKBENCH_ASSET_DIRECTORY, WORKBENCH_PAGE_ENTRY,
 };
 
 use std::path::Path;

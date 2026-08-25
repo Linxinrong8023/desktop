@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Project, Session, Task, TaskWorkspaceMode } from "@ora/contracts";
+import type { Project, Session, Task, Workspace } from "@ora/contracts";
 import type { KnownAgentCli } from "../../features/chat/model-catalog";
 import { useContractsClient } from "../../contracts-client-context";
 import { queryKeys } from "./query-keys";
@@ -12,9 +12,30 @@ import { useChatStore } from "../../chat-store-context";
 
 type QueryClient = ReturnType<typeof useQueryClient>;
 
+/**
+ * How list caches should sync after a mutation.
+ *
+ * - `immediate`: patch and mark the list stale with an active refetch — use for
+ *   standalone deletes the user just confirmed.
+ * - `defer`: patch only; a parent cascade will invalidate once at the end so
+ *   N child deletes do not thrash the sidebar N times.
+ */
+export type WorkspaceListSync = "immediate" | "defer";
+
 /** Reads the cached projects, tasks, or sessions, returning [] while data is absent. */
 function readCache<T>(queryClient: QueryClient, key: readonly string[]): T[] {
   return (queryClient.getQueryData(key) as T[] | undefined) ?? [];
+}
+
+/** Marks list queries stale; `none` skips the active refetch that rebuilds every subscriber. */
+function invalidateWorkspaceLists(
+  queryClient: QueryClient,
+  keys: readonly (readonly string[])[],
+  refetchType: "active" | "none" = "active",
+): void {
+  for (const queryKey of keys) {
+    void queryClient.invalidateQueries({ queryKey, refetchType });
+  }
 }
 
 /** Creates a project and selects it once the backend confirms the id. */
@@ -22,9 +43,15 @@ export function useCreateProject() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ name, rootPath }: { name: string; rootPath: string }) =>
+    mutationFn: ({
+      name,
+      mainWorkspacePath,
+    }: {
+      name: string;
+      mainWorkspacePath: string;
+    }) =>
       client.project
-        .create({ name, rootPath })
+        .create({ name, mainWorkspacePath })
         .then((response) => response.project),
     onSuccess: (project) => {
       queryClient.setQueryData<Project[]>(queryKeys.projects, (current) => [
@@ -32,6 +59,7 @@ export function useCreateProject() {
         project,
       ]);
       queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      queryClient.invalidateQueries({ queryKey: queryKeys.workspaces });
       startSessionDraft({ projectId: project.id, taskId: null });
     },
   });
@@ -52,7 +80,12 @@ export function useUpdateProject() {
           candidate.id === project.id ? { ...project } : candidate,
         ),
       );
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      // Response already applied; mark stale without refetching every subscriber.
+      invalidateWorkspaceLists(
+        queryClient,
+        [queryKeys.projects],
+        /*refetchType*/ "none",
+      );
     },
   });
 }
@@ -65,19 +98,48 @@ export function useDeleteProject() {
     mutationFn: ({ projectId }: { projectId: string }) =>
       client.project.delete({ projectId }),
     onSuccess: (_void, { projectId }) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
       const tasks = readCache<Task>(queryClient, queryKeys.tasks);
       const taskIds = new Set(
         tasks
           .filter((task) => task.projectId === projectId)
           .map((task) => task.id),
       );
+      const workspaces = readCache<Workspace>(
+        queryClient,
+        queryKeys.workspaces,
+      );
+      const workspaceIds = new Set([
+        ...workspaces
+          .filter((workspace) => workspace.projectId === projectId)
+          .map((workspace) => workspace.id),
+        ...tasks
+          .filter((task) => task.projectId === projectId)
+          .map((task) => task.workspaceId),
+      ]);
       const sessions = readCache<Session>(queryClient, queryKeys.sessions);
       const sessionIds = sessions
-        .filter((session) => taskIds.has(session.taskId))
+        .filter((session) => workspaceIds.has(session.workspaceId))
         .map((session) => session.id);
+
+      // Optimistic scrub so the sidebar drops the branch before refetch settles.
+      queryClient.setQueryData<Project[]>(queryKeys.projects, (current) =>
+        (current ?? []).filter((project) => project.id !== projectId),
+      );
+      queryClient.setQueryData<Task[]>(queryKeys.tasks, (current) =>
+        (current ?? []).filter((task) => task.projectId !== projectId),
+      );
+      queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
+        (current ?? []).filter(
+          (session) => !workspaceIds.has(session.workspaceId),
+        ),
+      );
+      invalidateWorkspaceLists(queryClient, [
+        queryKeys.projects,
+        queryKeys.workspaces,
+        queryKeys.tasks,
+        queryKeys.sessions,
+      ]);
+
       useComposerInputStore
         .getState()
         .clearKeys([
@@ -89,7 +151,6 @@ export function useDeleteProject() {
       const store = useWorkspaceSelectionStore.getState();
       const selection = store.selection;
       if (selection.projectId === projectId) {
-        // Pick the next surviving project from the stale cache; invalidate already triggered refetch.
         const projects = readCache<Project>(queryClient, queryKeys.projects);
         const next = projects.find((project) => project.id !== projectId);
         // setProject resyncs createFocus to the new selection. Preserve a
@@ -115,30 +176,23 @@ export function useCreateTask() {
     mutationFn: ({
       projectId,
       title,
-      workspaceMode,
       baseBranch,
     }: {
       projectId: string;
       title: string;
-      workspaceMode?: TaskWorkspaceMode;
       baseBranch?: string;
     }) =>
       client.task
-        .create({ projectId, title, workspaceMode, baseBranch })
+        .create({ projectId, title, baseBranch })
         .then((response) => response.task),
     onSuccess: (task) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
-      // Worktrees preserve the original Task -> Session flow. A direct chat
-      // waits until its provider session is ready before changing selection,
-      // avoiding an intermediate task-only state in the composer.
-      if (task.workspaceMode === "worktree") {
-        // The backend created a new Ora branch, so the next worktree dialog
-        // must refetch before offering base branches.
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.projectBranches(task.projectId),
-        });
-        startSessionDraft({ projectId: task.projectId, taskId: task.id });
-      }
+      // The backend created a new Ora branch, so the next worktree dialog must
+      // refetch before offering base branches.
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.projectBranches(task.projectId),
+      });
+      startSessionDraft({ projectId: task.projectId, taskId: task.id });
       // Reveal the new row. Expanding here rather than reacting to the selection
       // keeps a plain row click free to collapse what it just selected.
       useUiStore.getState().expandProject(task.projectId);
@@ -161,7 +215,11 @@ export function useUpdateTask() {
           candidate.id === task.id ? { ...task } : candidate,
         ),
       );
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
+      invalidateWorkspaceLists(
+        queryClient,
+        [queryKeys.tasks],
+        /*refetchType*/ "none",
+      );
     },
   });
 }
@@ -173,13 +231,26 @@ export function useDeleteTask() {
   return useMutation({
     mutationFn: ({ taskId }: { taskId: string }) =>
       client.task.delete({ taskId }),
-    onSuccess: (_void, { taskId }) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+    onSuccess: ({ workspaceId }, { taskId }) => {
       const sessions = readCache<Session>(queryClient, queryKeys.sessions);
       const sessionIds = sessions
-        .filter((session) => session.taskId === taskId)
+        .filter((session) => session.workspaceId === workspaceId)
         .map((session) => session.id);
+
+      queryClient.setQueryData<Task[]>(queryKeys.tasks, (current) =>
+        (current ?? []).filter((task) => task.id !== taskId),
+      );
+      queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
+        (current ?? []).filter(
+          (session) => session.workspaceId !== workspaceId,
+        ),
+      );
+      invalidateWorkspaceLists(queryClient, [
+        queryKeys.workspaces,
+        queryKeys.tasks,
+        queryKeys.sessions,
+      ]);
+
       useComposerInputStore
         .getState()
         .clearKeys([...sessionIds, `task:${taskId}`]);
@@ -204,7 +275,7 @@ export function useDeleteTask() {
 }
 
 /**
- * Starts an additional session under an existing task and selects it.
+ * Starts an additional provider session inside an existing Workspace and selects it.
  *
  * A provider session is warmed and then persisted in one step because there is
  * no chat surface here to warm it in advance; the model can still be changed
@@ -216,22 +287,25 @@ export function useCreateSession() {
   const chatStore = useChatStore();
   return useMutation({
     mutationFn: async ({
-      taskId,
+      workspaceId,
       agentCli,
     }: {
-      taskId: string;
+      workspaceId: string;
       agentCli: KnownAgentCli;
     }) => {
       const warmed = await client.session.warm({
-        target: { type: "task", taskId },
+        target: { type: "workspace", workspaceId },
         agentRef: agentCli,
       });
       const response = await client.session.attach({
         sessionId: warmed.sessionId,
-        taskId,
+        workspaceId: warmed.workspaceId,
       });
       queryClient.removeQueries({
-        queryKey: queryKeys.warmSession({ type: "task", taskId }, agentCli),
+        queryKey: queryKeys.warmSession(
+          { type: "workspace", workspaceId: warmed.workspaceId },
+          agentCli,
+        ),
       });
       chatStore
         .getState()
@@ -243,16 +317,29 @@ export function useCreateSession() {
       // empty loaded conversation so WorkspaceView does not issue session/load.
       chatStore.getState().initializeSession(session.id);
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      // Recover the owning project from the task cache so selection stays consistent.
+      // Recover project/task projection only for tree placement; persistence still
+      // owns this session through its Workspace id.
       const tasks = readCache<Task>(queryClient, queryKeys.tasks);
-      const task = tasks.find((candidate) => candidate.id === session.taskId);
-      if (task) {
-        useWorkspaceSelectionStore
-          .getState()
-          .selectSession(session.id, task.id, task.projectId);
-        // Both ancestors, since the session sits two levels down.
-        useUiStore.getState().expandProject(task.projectId);
-        useUiStore.getState().expandTask(task.id);
+      const task = tasks.find(
+        (candidate) => candidate.workspaceId === session.workspaceId,
+      );
+      const workspace = readCache<Workspace>(
+        queryClient,
+        queryKeys.workspaces,
+      ).find((candidate) => candidate.id === session.workspaceId);
+      const projectId = workspace?.projectId ?? task?.projectId;
+      if (projectId !== undefined) {
+        if (task) {
+          useWorkspaceSelectionStore
+            .getState()
+            .selectSession(session.id, task.id, projectId);
+          useUiStore.getState().expandTask(task.id);
+        } else {
+          useWorkspaceSelectionStore
+            .getState()
+            .selectSessionBeforeTask(session.id, projectId);
+        }
+        useUiStore.getState().expandProject(projectId);
       }
     },
   });
@@ -290,10 +377,20 @@ export function useDeleteSession() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ sessionId }: { sessionId: string }) =>
-      client.session.delete({ sessionId }),
-    onSuccess: (_void, { sessionId }) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+    mutationFn: ({
+      sessionId,
+    }: {
+      sessionId: string;
+      /** Parent project/task cascades pass `defer` to avoid N list refetches. */
+      listSync?: WorkspaceListSync;
+    }) => client.session.delete({ sessionId }),
+    onSuccess: (_void, { sessionId, listSync = "immediate" }) => {
+      queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
+        (current ?? []).filter((session) => session.id !== sessionId),
+      );
+      if (listSync === "immediate") {
+        invalidateWorkspaceLists(queryClient, [queryKeys.sessions]);
+      }
       useComposerInputStore.getState().clear(sessionId);
       useDraftSessionsStore.getState().clearReturnToForSessions([sessionId]);
       useDraftSessionsStore.getState().removeForSessions([sessionId]);
@@ -322,7 +419,11 @@ export function useRenameSession() {
           candidate.id === session.id ? { ...session } : candidate,
         ),
       );
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+      invalidateWorkspaceLists(
+        queryClient,
+        [queryKeys.sessions],
+        /*refetchType*/ "none",
+      );
     },
   });
 }

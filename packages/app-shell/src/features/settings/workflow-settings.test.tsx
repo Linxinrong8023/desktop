@@ -105,14 +105,14 @@ function seedDemoWorkflows(state: MockClientState): void {
   });
 }
 
-/** Shell providers required by Deploy-to-project (runtime + react-query). */
+/** Shell providers required by workflow settings (runtime + react-query). */
 function renderSettings(
   ui: ReactElement = <WorkflowSettings />,
   state: MockClientState = createMockClientState(),
 ): RenderResult {
   seedDemoWorkflows(state);
   // Model discovery needs a project cwd so warmSession can report real model catalogs.
-  state.projects = [{ id: "p1", name: "Demo", rootPath: "/demo" }];
+  state.projects = [{ id: "p1", name: "Demo" }];
   // Live Agent/Skill catalogs consumed by the workflow inspector's selectors.
   state.agents = [
     {
@@ -170,6 +170,7 @@ function renderSettings(
       namespace: "local",
       name: "openspec-verify-change",
       description: "skill",
+      source: { kind: "local" } as const,
       availability: "available",
     },
     {
@@ -177,6 +178,7 @@ function renderSettings(
       namespace: "local",
       name: "openspec-archive-change",
       description: "skill",
+      source: { kind: "local" } as const,
       availability: "available",
     },
     {
@@ -184,6 +186,7 @@ function renderSettings(
       namespace: "local",
       name: "openspec-explore",
       description: "skill",
+      source: { kind: "local" } as const,
       availability: "available",
     },
     {
@@ -191,6 +194,7 @@ function renderSettings(
       namespace: "local",
       name: "cdase:sfmea_review",
       description: "skill",
+      source: { kind: "local" } as const,
       availability: "available",
     },
     {
@@ -198,6 +202,7 @@ function renderSettings(
       namespace: "local",
       name: "missing-skill",
       description: "skill",
+      source: { kind: "local" } as const,
       availability: "unavailable",
     },
   ];
@@ -268,7 +273,7 @@ describe("WorkflowSettings", () => {
     await act(() => appI18n.changeLanguage("zh-CN"));
   });
 
-  it("loads the mock graph and deploy control without an in-settings test run", async () => {
+  it("loads the mock graph without workflow execution controls in settings", async () => {
     renderSettings();
 
     expect(await screen.findByText("代码审查工作流")).toBeInTheDocument();
@@ -284,8 +289,8 @@ describe("WorkflowSettings", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "部署到项目" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "部署到项目" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "导出工作流" }),
     ).toBeInTheDocument();
@@ -339,7 +344,7 @@ describe("WorkflowSettings", () => {
       screen.queryByRole("button", { name: "设为生效版本" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText("这是当前生效的版本，部署会使用它。"),
+      screen.getByText("这是当前生效的版本，运行工作流时会使用它。"),
     ).toBeInTheDocument();
   }, 15_000);
 
@@ -922,6 +927,7 @@ describe("WorkflowSettings", () => {
         namespace: "local",
         name: "openspec-verify-change",
         description: "skill",
+        source: { kind: "local" } as const,
         availability: "available",
       },
     ];
@@ -1149,8 +1155,8 @@ describe("WorkflowSettings", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Deploy to project" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Deploy to project" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Test run" }),
     ).not.toBeInTheDocument();

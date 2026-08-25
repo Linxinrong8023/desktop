@@ -36,6 +36,7 @@ const tauriCommands = {
   createProject: "create_project",
   getProject: "get_project",
   listProjects: "list_projects",
+  listWorkspaces: "list_workspaces",
   listProjectBranches: "list_project_branches",
   updateProject: "update_project",
   deleteProject: "delete_project",
@@ -118,6 +119,9 @@ const tauriCommands = {
   listAvailablePlugins: "list_available_plugins",
   syncAvailablePlugins: "sync_available_plugins",
   listInstalledPlugins: "list_installed_plugins",
+  getPluginConfiguration: "get_plugin_configuration",
+  savePluginConfiguration: "save_plugin_configuration",
+  resetPluginConfiguration: "reset_plugin_configuration",
   scanPlugins: "scan_plugins",
   enablePlugin: "enable_plugin",
   disablePlugin: "disable_plugin",
@@ -125,6 +129,7 @@ const tauriCommands = {
   stopPlugin: "stop_plugin",
   uninstallPlugin: "uninstall_plugin",
   installPlugin: "install_plugin",
+  importPlugin: "import_plugin",
 
   // =============================================================================
   // gitIdentity
@@ -157,6 +162,7 @@ const tauriCommands = {
   listWorkflowRuns: "list_workflow_runs",
   listWorkflowRunsByWorkflow: "list_workflow_runs_by_workflow",
   listWorkflowNodeRuns: "list_workflow_node_runs",
+  renameWorkflowRun: "rename_workflow_run",
   deleteWorkflowRun: "delete_workflow_run",
   startWorkflowRun: "start_workflow_run",
   cancelWorkflowRun: "cancel_workflow_run",

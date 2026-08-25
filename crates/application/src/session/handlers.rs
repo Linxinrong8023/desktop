@@ -58,14 +58,14 @@ impl<Repository> ListSessionsHandler<Repository>
 where
     Repository: SessionRepository,
 {
-    /// Lists every visible session and maps each one into the shared contract view.
+    /// Lists user-created sessions without leaking workflow node execution sessions.
     pub fn handle(
         &self,
         _request: ListSessionsRequest,
     ) -> Result<ListSessionsResponse, ApplicationError> {
         let sessions = self
             .repository
-            .list_sessions()
+            .list_standalone_sessions()
             .map_err(ApplicationError::from_session_repository_error)?;
         Ok(ListSessionsResponse {
             sessions: sessions.into_iter().map(map_session).collect(),
@@ -212,6 +212,10 @@ mod tests {
             Ok(self.sessions.lock().unwrap().clone())
         }
 
+        fn list_standalone_sessions(&self) -> Result<Vec<Session>, RepositoryError> {
+            Ok(self.sessions.lock().unwrap().clone())
+        }
+
         fn update_session_title(
             &self,
             session_id: &SessionId,
@@ -305,7 +309,7 @@ mod tests {
             RenameSessionResponse {
                 session: ContractSession {
                     id: "s1".to_owned(),
-                    task_id: "t1".to_owned(),
+                    workspace_id: "workspace-1".to_owned(),
                     title: Some("Review auth".to_owned()),
                     agent_ref: "ora-space.nga".to_string(),
                     status: ContractSessionStatus::Running,
@@ -340,7 +344,7 @@ mod tests {
     fn sample_session() -> Session {
         Session::new(
             SessionId::new("s1"),
-            ora_domain::TaskId::new("t1"),
+            ora_domain::WorkspaceId::new("workspace-1"),
             AgentCli::Nga.agent_ref(),
             "provider-1",
             SessionStatus::Running,

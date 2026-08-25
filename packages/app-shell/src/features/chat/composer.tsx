@@ -96,6 +96,10 @@ interface ComposerProps {
    */
   isStreaming?: boolean;
   disabled?: boolean;
+  /** Allows the agent/model picker to remain actionable while message composition is blocked. */
+  modelSelectorDisabled?: boolean;
+  /** Session whose model configuration the selector should display. */
+  modelSelectorSessionId?: string;
   placeholder?: string;
   autoFocus?: boolean;
   skills?: Skill[];
@@ -134,6 +138,8 @@ export function Composer({
   isResponding,
   isStreaming = false,
   disabled = false,
+  modelSelectorDisabled = disabled,
+  modelSelectorSessionId,
   placeholder,
   autoFocus = false,
   skills = [],
@@ -212,17 +218,9 @@ export function Composer({
   // Bumped on every submit so an older send's reject cannot restore text over a
   // newer attempt (Stop during handshake, then type and send again).
   const submitGenerationRef = useRef(0);
-  const pendingFileContext = useComposerFileContextStore(
-    (state) => state.pendingByConversation[conversationKey],
+  const bindFileContextDelivery = useComposerFileContextStore(
+    (state) => state.bindDelivery,
   );
-  const consumeFileContext = useComposerFileContextStore(
-    (state) => state.consumeSelections,
-  );
-  const lastInjectedRequestId = useRef<number | null>(null);
-
-  useEffect(() => {
-    lastInjectedRequestId.current = null;
-  }, [conversationKey]);
 
   /** Keeps async attachment work and React state on the same latest array. */
   const replaceAttachments = useCallback((next: ImageAttachment[]) => {
@@ -279,6 +277,21 @@ export function Composer({
    */
   const syncedSurfaceRef = useRef<string | null>(null);
   if (syncedSurfaceRef.current !== conversationKey) {
+    const previousKey = syncedSurfaceRef.current;
+    // Park the surface we are leaving before adopting the new key. The editor
+    // still shows the old session until hydrate's microtask runs; without this,
+    // onTextChange would write that stale document onto the new session id.
+    if (previousKey !== null) {
+      const editor = editorRef.current;
+      if (editor !== null) {
+        useComposerInputStore.getState().setInput(previousKey, {
+          text: editor.getText(),
+          images: [...attachmentsRef.current],
+          doc: editor.getJSON(),
+        });
+      }
+    }
+    suppressPersistRef.current = true;
     syncedSurfaceRef.current = conversationKey;
     const parked = useComposerInputStore.getState().byKey[conversationKey];
     const draft =
@@ -365,49 +378,56 @@ export function Composer({
     // microtask and would wipe them.
     if (emptyPayload && previousKey === null) {
       hydratedConversationKey.current = key;
+      suppressPersistRef.current = false;
       return;
     }
 
     const generation = (hydrateGenerationRef.current += 1);
     pendingHydrateKeyRef.current = key;
     queueMicrotask(() => {
-      if (pendingHydrateKeyRef.current === key) {
-        pendingHydrateKeyRef.current = null;
+      try {
+        if (pendingHydrateKeyRef.current === key) {
+          pendingHydrateKeyRef.current = null;
+        }
+        if (hydrateGenerationRef.current !== generation) return;
+        if (conversationKeyRef.current !== key) return;
+        hydratedConversationKey.current = key;
+        applyComposerContent(text, images, doc);
+      } finally {
+        if (conversationKeyRef.current === key) {
+          suppressPersistRef.current = false;
+        }
       }
-      if (hydrateGenerationRef.current !== generation) return;
-      if (conversationKeyRef.current !== key) return;
-      hydratedConversationKey.current = key;
-      applyComposerContent(text, images, doc);
     });
   }, [applyComposerContent, conversationKey, draftId, selectedSessionId]);
 
+  // Quotes insert here directly. A pending store that the composer re-read on
+  // session switch / Strict Mode replayed chips the user had already deleted.
   useEffect(() => {
-    if (
-      pendingFileContext === undefined ||
-      pendingFileContext.id === lastInjectedRequestId.current
-    ) {
-      return;
-    }
-
-    const requestId = pendingFileContext.id;
-    const selections = pendingFileContext.selections;
-    const keyAtSchedule = conversationKey;
-    // Queue after hydrate's microtask (effects run top-to-bottom) so insert does
-    // not race replaceDocument and TipTap portal updates stay outside layout.
-    queueMicrotask(() => {
-      if (conversationKeyRef.current !== keyAtSchedule) return;
-      lastInjectedRequestId.current = requestId;
+    let active = true;
+    const unbind = bindFileContextDelivery(conversationKey, (selections) => {
+      if (!active) return;
+      const editor = editorRef.current;
+      // The child editor can remount while this Composer stays mounted, so the
+      // handle is not guaranteed here. Either way the quote has nowhere to go
+      // and is not re-queued (that is what replayed deleted chips before), so
+      // the user has to be told rather than left staring at an unchanged box.
+      if (editor === null) {
+        setAttachmentError(t("chat.fileContext.injectFailed"));
+        return;
+      }
       try {
-        editorRef.current?.insertFileChips(selections);
-        consumeFileContext(keyAtSchedule, requestId);
-        editorRef.current?.focus({ at: "end" });
+        editor.insertFileChips(selections);
+        editor.focus({ at: "end" });
       } catch {
-        lastInjectedRequestId.current = null;
-        consumeFileContext(keyAtSchedule, requestId);
         setAttachmentError(t("chat.fileContext.injectFailed"));
       }
     });
-  }, [consumeFileContext, conversationKey, pendingFileContext, t]);
+    return () => {
+      active = false;
+      unbind();
+    };
+  }, [bindFileContextDelivery, conversationKey, t]);
   const slashQuery = query.slashQuery;
   const atQuery = query.atQuery;
   const fileMentionEnabled =
@@ -990,7 +1010,12 @@ export function Composer({
             ref={rightControlsRef}
             className="flex shrink-0 items-center gap-2"
           >
-            {showModelSelector && <ModelSelector disabled={disabled} />}
+            {showModelSelector && (
+              <ModelSelector
+                disabled={modelSelectorDisabled}
+                sessionId={modelSelectorSessionId}
+              />
+            )}
             <Button
               size="icon"
               // A live turn always stops on click, whether it is still starting up

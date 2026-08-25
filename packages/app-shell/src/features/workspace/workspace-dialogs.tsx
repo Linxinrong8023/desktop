@@ -13,7 +13,7 @@ import {
 } from "@ora/ui";
 import { IconTrash } from "@tabler/icons-react";
 import { EntityDialog, type EntityField } from "./entity-dialog";
-import { DeployToProjectDialog } from "../workflow-run/deploy-to-project-dialog";
+import { RunWorkflowDialog } from "../workflow-run/run-workflow-dialog";
 import {
   useCreateProject,
   useDeleteProject,
@@ -48,9 +48,8 @@ export function WorkspaceDialogs() {
   const setDialog = useUiStore((s) => s.setDialog);
   const deleteTarget = useUiStore((s) => s.deleteTarget);
   const setDeleteTarget = useUiStore((s) => s.setDeleteTarget);
-  const deployDialog = dialog?.kind === "deployWorkflow" ? dialog : null;
-  const entityDialog =
-    dialog && dialog.kind !== "deployWorkflow" ? dialog : null;
+  const runWorkflowDialog = dialog?.kind === "runWorkflow" ? dialog : null;
+  const entityDialog = dialog && dialog.kind !== "runWorkflow" ? dialog : null;
 
   return (
     <>
@@ -60,14 +59,24 @@ export function WorkspaceDialogs() {
           onOpenChange={(open) => !open && setDialog(null)}
         />
       )}
-      <DeployToProjectDialog
-        open={deployDialog !== null}
+      <RunWorkflowDialog
+        open={runWorkflowDialog !== null}
         workflow={
-          deployDialog
-            ? { id: deployDialog.workflowId, name: deployDialog.workflowName }
+          runWorkflowDialog
+            ? {
+                id: runWorkflowDialog.workflowId,
+                name: runWorkflowDialog.workflowName,
+              }
             : null
         }
-        initialProjectId={deployDialog?.projectId ?? null}
+        target={
+          runWorkflowDialog
+            ? {
+                projectId: runWorkflowDialog.projectId,
+                workspaceId: runWorkflowDialog.workspaceId,
+              }
+            : null
+        }
         onOpenChange={(open) => !open && setDialog(null)}
       />
       <DeleteEntityDialog
@@ -104,7 +113,10 @@ function DeleteEntityDialog({
         // Project deletion has the same running-session guard as task deletion.
         // Stop and remove every descendant session before cascading the project.
         for (const sessionId of target.sessionIds) {
-          await deleteSession.mutateAsync({ sessionId });
+          await deleteSession.mutateAsync({
+            sessionId,
+            listSync: "defer",
+          });
         }
         await deleteProject.mutateAsync({ projectId: target.id });
       }
@@ -112,7 +124,10 @@ function DeleteEntityDialog({
         // The backend protects every task with a running provider session.
         // Stop and remove each child session before deleting either task mode.
         for (const sessionId of target.sessionIds) {
-          await deleteSession.mutateAsync({ sessionId });
+          await deleteSession.mutateAsync({
+            sessionId,
+            listSync: "defer",
+          });
         }
         await deleteTask.mutateAsync({ taskId: target.id });
       }
@@ -128,9 +143,7 @@ function DeleteEntityDialog({
     } catch (error) {
       setDeleteError(
         error instanceof RemoteContractError && error.code === "resource_in_use"
-          ? target.kind === "task" && target.workspaceMode === "project_root"
-            ? t("delete.runningSession")
-            : t("delete.failed")
+          ? t("delete.failed")
           : localizeContractError(error, t),
       );
     } finally {
@@ -149,12 +162,7 @@ function DeleteEntityDialog({
             {t("delete.title", { name: target?.name ?? "" })}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {target
-              ? target.kind === "task" &&
-                target.workspaceMode === "project_root"
-                ? t("delete.directTaskDescription")
-                : t(`delete.${target.kind}Description`)
-              : ""}
+            {target ? t(`delete.${target.kind}Description`) : ""}
           </AlertDialogDescription>
           {deleteError && (
             <p
@@ -189,7 +197,7 @@ function WorkspaceEntityDialog({
   dialog,
   onOpenChange,
 }: {
-  dialog: Exclude<DialogState, { kind: "deployWorkflow" }>;
+  dialog: Exclude<DialogState, { kind: "runWorkflow" }>;
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -227,7 +235,7 @@ function WorkspaceEntityDialog({
     submit = async (values) => {
       await createProject.mutateAsync({
         name: projectNameFromPath(values.rootPath!),
-        rootPath: values.rootPath!,
+        mainWorkspacePath: values.rootPath!,
       });
     };
   } else if (dialog.kind === "task") {
@@ -257,7 +265,6 @@ function WorkspaceEntityDialog({
       await createTask.mutateAsync({
         projectId: dialog.projectId,
         title: values.title!,
-        workspaceMode: "worktree",
         baseBranch: values.baseBranch!,
       });
     };
@@ -270,8 +277,9 @@ function WorkspaceEntityDialog({
     fields = [];
     submit = async () => {
       if (!dialog.entity) {
+        if (settingsAgentCli === null) throw new Error(t("chat.pickAgent"));
         await createSession.mutateAsync({
-          taskId: dialog.taskId,
+          workspaceId: dialog.workspaceId,
           agentCli: settingsAgentCli,
         });
       }

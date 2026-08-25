@@ -1,10 +1,13 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as acp from "@agentclientprotocol/sdk";
 import type { ChatTurn, SessionConversation } from "@ora/chat";
 import { createChatStore } from "@ora/chat";
 import type { GraphWorkflowNodeStatus } from "@ora/workflow-runtime";
+import { appI18n } from "../../i18n/i18n-instance";
+import { useAgentModelStore } from "../../state/stores/agent-model-store";
 import {
   createTestQueryClient,
   createHookWrapper,
@@ -19,13 +22,18 @@ const sessionId = "session-1";
 const runId = "run-1";
 const nodeId = "node-a";
 
+beforeEach(() => {
+  useAgentModelStore.setState({ known: {} });
+});
+
 /** A loaded, quiet conversation so the dock does not stream anything during the test. */
 function seededConversation(
   isResponding: boolean,
   turns: ChatTurn[] = [],
+  configOptions: acp.SessionConfigOption[] = [],
 ): SessionConversation {
   return {
-    configOptions: [],
+    configOptions,
     modelChanges: [],
     historyNotices: [],
     turns,
@@ -46,11 +54,14 @@ function renderDock(
   turns: ChatTurn[] = [],
   sessionActions?: ReactNode,
   onNodeCompleted?: (nodeId: string) => void,
+  configOptions: acp.SessionConfigOption[] = [],
 ) {
   const client = createMockClient(createMockClientState());
   const chatStore = createChatStore(client.session);
   chatStore.setState({
-    conversations: { [sessionId]: seededConversation(isResponding, turns) },
+    conversations: {
+      [sessionId]: seededConversation(isResponding, turns, configOptions),
+    },
   });
   render(
     <RunNodeSessionChat
@@ -97,6 +108,60 @@ describe("RunNodeSessionChat", () => {
         .querySelector("[data-placeholder]")
         ?.getAttribute("data-placeholder"),
     ).toMatch(/描述一个任务/);
+  });
+
+  it("keeps the node model visible when another session changes models", async () => {
+    const otherSessionOptions = createMockClientState().configOptions;
+    const nodeSessionOptions: acp.SessionConfigOption[] = [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "workflow/node-model",
+        options: [{ value: "workflow/node-model", name: "Workflow Model" }],
+      },
+    ];
+    useAgentModelStore.setState({
+      known: { "ora-space.opencode": otherSessionOptions },
+    });
+    renderDock(
+      "awaiting_input",
+      false,
+      [],
+      undefined,
+      undefined,
+      nodeSessionOptions,
+    );
+
+    const modelPicker = screen.getByRole("button", {
+      name: appI18n.t("chat.modelSelector.label"),
+    });
+    expect(modelPicker).toBeDisabled();
+    expect(modelPicker).toHaveTextContent("Workflow Model");
+
+    act(() =>
+      useAgentModelStore.setState({
+        known: {
+          "ora-space.opencode": [
+            {
+              id: "model",
+              name: "Model",
+              category: "model",
+              type: "select",
+              currentValue: "other/new-model",
+              options: [
+                { value: "other/new-model", name: "Other Session Model" },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    expect(modelPicker).toHaveTextContent("Workflow Model");
+
+    await userEvent.click(modelPicker);
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("places the shared conversation navigator inside the node session", () => {
@@ -344,8 +409,10 @@ describe("RunNodeSessionChat", () => {
         return {
           run: {
             id: runId,
+            workspaceId: "workspace-1",
             workflowId: "workflow-1",
             snapshotId: "snapshot-1",
+            name: "Run 1",
             status: "running",
             state: null,
             input: null,

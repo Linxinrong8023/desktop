@@ -63,6 +63,10 @@ export function createContractsClient(
       delete: (request, options) =>
         executeOperation("deleteProject", request, transport, options),
     },
+    workspace: {
+      list: (request, options) =>
+        executeOperation("listWorkspaces", request, transport, options),
+    },
     task: {
       create: (request, options) =>
         executeOperation("createTask", request, transport, options),
@@ -173,6 +177,12 @@ export function createContractsClient(
         executeOperation("syncAvailablePlugins", request, transport, options),
       listInstalled: (request, options) =>
         executeOperation("listInstalledPlugins", request, transport, options),
+      getConfiguration: (request, options) =>
+        executeOperation("getPluginConfiguration", request, transport, options),
+      saveConfiguration: (request, options) =>
+        executeOperation("savePluginConfiguration", request, transport, options),
+      resetConfiguration: (request, options) =>
+        executeOperation("resetPluginConfiguration", request, transport, options),
       scan: (request, options) =>
         executeOperation("scanPlugins", request, transport, options),
       enable: (request, options) =>
@@ -187,6 +197,8 @@ export function createContractsClient(
         executeOperation("uninstallPlugin", request, transport, options),
       install: (request, options) =>
         executeOperation("installPlugin", request, transport, options),
+      import: (request, options) =>
+        executeOperation("importPlugin", request, transport, options),
     },
     fileSystem: {
       listWorkspaceDirectory: (request, options) =>
@@ -278,6 +290,8 @@ export function createContractsClient(
         executeOperation("listWorkflowNodeRuns", request, transport, options),
       delete: (request, options) =>
         executeOperation("deleteWorkflowRun", request, transport, options),
+      rename: (request, options) =>
+        executeOperation("renameWorkflowRun", request, transport, options),
       start: (request, options) =>
         executeOperation("startWorkflowRun", request, transport, options),
       cancel: (request, options) =>

@@ -15,6 +15,15 @@ export const skillFolderConflictParamsSchema = z.object({
 
 export const openLocationTargetSchema = z.union([z.literal("explorer"), z.literal("terminal"), z.literal("vscode")]);
 
+export const pluginConfigurationFieldErrorSchema = z.object({
+    settingId: z.string(),
+    errorCode: z.string()
+});
+
+export const pluginConfigurationValidationParamsSchema = z.object({
+    fieldErrors: z.array(pluginConfigurationFieldErrorSchema)
+});
+
 export const openLocationFailedParamsSchema = z.object({
     target: openLocationTargetSchema
 });
@@ -62,6 +71,27 @@ export const contractErrorSchema = z.object({
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("plugin_disabled"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_configuration_declaration_invalid"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_configuration_not_declared"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("configuration_revision_conflict"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_configuration_declaration_changed"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("configuration_load_failed"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_configuration_validation"),
+        "params": pluginConfigurationValidationParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_configuration_recovery_not_required"),
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("project_not_found"),
@@ -130,10 +160,10 @@ export const contractErrorSchema = z.object({
         "code": z.literal("prompt_too_large"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("task_worktree_unavailable"),
+        "code": z.literal("workspace_unavailable"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("task_project_root_unavailable"),
+        "code": z.literal("task_worktree_unavailable"),
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("file_system_path_not_found"),
@@ -351,6 +381,27 @@ export const publicErrorSchema = z.union([z.object({
         "code": z.literal("plugin_disabled"),
         "params": emptyErrorParamsSchema
     }), z.object({
+        "code": z.literal("plugin_configuration_declaration_invalid"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_configuration_not_declared"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("configuration_revision_conflict"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_configuration_declaration_changed"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("configuration_load_failed"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_configuration_validation"),
+        "params": pluginConfigurationValidationParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_configuration_recovery_not_required"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
         "code": z.literal("project_not_found"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -417,10 +468,10 @@ export const publicErrorSchema = z.union([z.object({
         "code": z.literal("prompt_too_large"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("task_worktree_unavailable"),
+        "code": z.literal("workspace_unavailable"),
         "params": emptyErrorParamsSchema
     }), z.object({
-        "code": z.literal("task_project_root_unavailable"),
+        "code": z.literal("task_worktree_unavailable"),
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("file_system_path_not_found"),

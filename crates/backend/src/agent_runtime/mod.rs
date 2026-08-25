@@ -28,7 +28,7 @@ use title_acquisition::TitleAcquisition;
 
 use crate::clock::SystemClock;
 use crate::plugin::PluginApi;
-use crate::task::{resolve_project_cwd, resolve_task_cwd};
+use crate::task::resolve_workspace_cwd;
 use crate::{BackendError, ErrorClassification};
 use agent_client_protocol_schema::v1::AvailableCommand;
 use agent_client_protocol_schema::v1::ContentBlock;
@@ -49,14 +49,14 @@ use ora_contracts::{
 };
 use ora_db::{RepositoryPool, SqliteSessionRepository};
 use ora_domain::{
-    AgentRef, AuditFields, HistoryState, ProjectId, Session, SessionId, SessionStatus,
-    SessionTitle, TaskId,
+    AgentRef, AuditFields, HistoryState, Session, SessionId, SessionStatus, SessionTitle,
+    WorkspaceId,
 };
 use ora_history::{HistoryIntegrity, binding_needs_handoff, read_session_history};
 use ora_logging::{ora_debug, ora_warn};
 use ora_scheduler::Scheduler;
 use routing::{SessionChannel, SessionEvent};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -92,6 +92,8 @@ pub(crate) struct AgentRuntimeManager {
 struct ManagerInner {
     pool: RepositoryPool,
     actors: RwLock<HashMap<SessionId, RuntimeActorHandle>>,
+    /// Workflow sessions stay unpublished here until their durable node-run binding exists.
+    unpublished_workflow_sessions: RwLock<HashSet<SessionId>>,
     lifecycle: tokio::sync::Mutex<()>,
     next_operation_id: AtomicU64,
     connections: ConnectionSupervisors,
@@ -235,6 +237,7 @@ impl AgentRuntimeManager {
             inner: Arc::new(ManagerInner {
                 pool,
                 actors: RwLock::new(HashMap::new()),
+                unpublished_workflow_sessions: RwLock::new(HashSet::new()),
                 lifecycle: tokio::sync::Mutex::new(()),
                 next_operation_id: AtomicU64::new(1),
                 warm: WarmSessions::new(connections.clone(), clock),
@@ -270,6 +273,7 @@ impl AgentRuntimeManager {
         owner: WarmOwner,
     ) -> Result<WarmSessionResponse, BackendError> {
         let agent_ref = domain_agent_ref(request.agent_ref)?;
+        let workspace_id = self.resolve_warm_workspace_id(&request.target)?;
         let cwd = self.resolve_warm_cwd(&request.target)?;
         let key = WarmKey {
             target: request.target,
@@ -279,6 +283,7 @@ impl AgentRuntimeManager {
         let (session_id, config_options) = self.inner.warm.warm(key, cwd).await?;
         Ok(WarmSessionResponse {
             session_id: session_id.to_string(),
+            workspace_id: workspace_id.to_string(),
             config_options,
         })
     }
@@ -419,7 +424,7 @@ impl AgentRuntimeManager {
         acknowledged.await.map_err(|_error| runtime_unavailable())
     }
 
-    /// Persists one warm session against the Task that now owns it.
+    /// Persists one warm session against the Workspace that owns it.
     ///
     /// `warm.take` only reserves the warm session; it stays in the pool until
     /// `commit` below, which runs on the one path where the session is durably
@@ -432,8 +437,8 @@ impl AgentRuntimeManager {
         request: AttachSessionRequest,
     ) -> Result<AttachSessionResponse, BackendError> {
         let session_id = SessionId::new(request.session_id.as_str());
-        let task_id = TaskId::new(request.task_id);
-        let cwd = self.task_cwd(&task_id)?;
+        let workspace_id = WorkspaceId::new(request.workspace_id);
+        let cwd = self.workspace_cwd(&workspace_id)?;
         // The provider handshake a rebuild may need runs before the lifecycle
         // lock is taken, so attaching never blocks other sessions on the network.
         let reservation = self.inner.warm.take(&session_id, &cwd).await?;
@@ -451,7 +456,7 @@ impl AgentRuntimeManager {
             let now = self.inner.clock.now_timestamp_millis();
             let session = Session::new(
                 session_id.clone(),
-                task_id,
+                workspace_id,
                 agent_ref,
                 agent_session_id,
                 SessionStatus::Running,
@@ -499,6 +504,62 @@ impl AgentRuntimeManager {
         Ok(response)
     }
 
+    /// Attaches a workflow node Session while keeping it out of ordinary list snapshots.
+    pub(crate) async fn attach_workflow_node_session(
+        &self,
+        request: AttachSessionRequest,
+    ) -> Result<AttachSessionResponse, BackendError> {
+        let session_id = SessionId::new(request.session_id.as_str());
+        self.unpublished_workflow_sessions_write()?
+            .insert(session_id.clone());
+        let result = self.attach_session(request).await;
+        if result.is_err() {
+            self.unpublished_workflow_sessions_write()?
+                .remove(&session_id);
+        }
+        result
+    }
+
+    /// Captures workflow Sessions whose durable node-run binding is not visible yet.
+    pub(crate) fn unpublished_workflow_session_ids(&self) -> Result<HashSet<String>, BackendError> {
+        self.inner
+            .unpublished_workflow_sessions
+            .read()
+            .map(|sessions| sessions.iter().map(ToString::to_string).collect())
+            .map_err(|_poisoned| runtime_unavailable())
+    }
+
+    /// Publishes a workflow Session only after its node-run binding has committed.
+    pub(crate) fn publish_workflow_node_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), BackendError> {
+        self.unpublished_workflow_sessions_write()?
+            .remove(session_id);
+        Ok(())
+    }
+
+    /// Removes a workflow Session whose setup failed before any node-run binding was published.
+    pub(crate) async fn discard_unpublished_workflow_node_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(), BackendError> {
+        let is_unpublished = self
+            .inner
+            .unpublished_workflow_sessions
+            .read()
+            .map(|sessions| sessions.contains(session_id))
+            .map_err(|_poisoned| runtime_unavailable())?;
+        if !is_unpublished {
+            return Ok(());
+        }
+
+        self.delete_session(session_id.as_ref()).await?;
+        self.unpublished_workflow_sessions_write()?
+            .remove(session_id);
+        Ok(())
+    }
+
     /// Moves one existing conversation onto a different agent CLI.
     ///
     /// The binding comes from the warm pool, where the chosen CLI has been
@@ -530,8 +591,8 @@ impl AgentRuntimeManager {
         if let HistoryState::Degraded { .. } = session.history_state {
             return Err(history_degraded());
         }
-        let cwd = self.task_cwd(&session.task_id)?;
-        // Keyed by Task, the same way the picker warmed it: one warm session per
+        let cwd = self.workspace_cwd(&session.workspace_id)?;
+        // Keyed by Workspace, the same way the picker warmed it: one warm session per
         // chat surface and CLI, shared by every session under that Task rather
         // than one per conversation.
         let reservation = self
@@ -539,8 +600,8 @@ impl AgentRuntimeManager {
             .warm
             .claim(
                 WarmKey {
-                    target: WarmSessionTarget::Task {
-                        task_id: session.task_id.to_string(),
+                    target: WarmSessionTarget::Workspace {
+                        workspace_id: session.workspace_id.to_string(),
                     },
                     agent_ref: target.clone(),
                     owner: WarmOwner::Interactive,
@@ -764,18 +825,34 @@ impl AgentRuntimeManager {
     /// Derives the directory a warm session must be created against.
     fn resolve_warm_cwd(&self, target: &WarmSessionTarget) -> Result<PathBuf, BackendError> {
         match target {
-            WarmSessionTarget::Task { task_id } => self.task_cwd(&TaskId::new(task_id.as_str())),
-            WarmSessionTarget::ProjectRoot { project_id } => resolve_project_cwd(
-                &self.inner.pool,
-                &ProjectId::new(project_id.as_str()),
-                &self.inner.relative_path_base,
-            ),
+            WarmSessionTarget::Workspace { workspace_id } => {
+                self.workspace_cwd(&WorkspaceId::new(workspace_id.as_str()))
+            }
         }
     }
 
-    /// Resolves a task's execution directory against the bootstrap path base.
-    pub(crate) fn task_cwd(&self, task_id: &TaskId) -> Result<PathBuf, BackendError> {
-        resolve_task_cwd(&self.inner.pool, task_id, &self.inner.relative_path_base)
+    /// Resolves the direct Workspace identity returned alongside a warm provider session.
+    fn resolve_warm_workspace_id(
+        &self,
+        target: &WarmSessionTarget,
+    ) -> Result<WorkspaceId, BackendError> {
+        match target {
+            WarmSessionTarget::Workspace { workspace_id } => {
+                Ok(WorkspaceId::new(workspace_id.as_str()))
+            }
+        }
+    }
+
+    /// Resolves a workspace's execution directory without consulting a Task projection.
+    pub(crate) fn workspace_cwd(
+        &self,
+        workspace_id: &WorkspaceId,
+    ) -> Result<PathBuf, BackendError> {
+        resolve_workspace_cwd(
+            &self.inner.pool,
+            workspace_id,
+            &self.inner.relative_path_base,
+        )
     }
 
     /// Loads one session conversation, restoring or following its provider turn as needed.
@@ -963,7 +1040,7 @@ impl AgentRuntimeManager {
         session_id: &str,
     ) -> Result<SessionLocator, BackendError> {
         let session = self.find_session(session_id)?;
-        let cwd = self.task_cwd(&session.task_id)?;
+        let cwd = self.workspace_cwd(&session.workspace_id)?;
         Ok(SessionLocator {
             agent_session_id: session.agent_session_id.clone(),
             agent_ref: session.agent_ref.into(),
@@ -985,7 +1062,7 @@ impl AgentRuntimeManager {
         if let Some(handle) = self.lookup_actor(&session.id)? {
             return Ok(handle);
         }
-        let cwd = self.task_cwd(&session.task_id)?;
+        let cwd = self.workspace_cwd(&session.workspace_id)?;
         let connection = self.inner.connections.for_agent(&session.agent_ref)?;
         let mut opened = self.open_recorder(&session)?;
         let session = match opened.failure.take() {
@@ -1064,6 +1141,16 @@ impl AgentRuntimeManager {
     {
         self.inner
             .actors
+            .write()
+            .map_err(|_poisoned| runtime_unavailable())
+    }
+
+    /// Locks the unpublished workflow Session set for one ownership transition.
+    fn unpublished_workflow_sessions_write(
+        &self,
+    ) -> Result<std::sync::RwLockWriteGuard<'_, HashSet<SessionId>>, BackendError> {
+        self.inner
+            .unpublished_workflow_sessions
             .write()
             .map_err(|_poisoned| runtime_unavailable())
     }

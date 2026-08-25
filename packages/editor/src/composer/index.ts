@@ -32,7 +32,13 @@ export {
   ComposerMarkdownRevert,
   handleComposerMarkdownBackspace,
 } from "./composer-markdown-revert";
-export { ComposerChipSelection } from "./composer-chip-selection";
+export {
+  ComposerChipSelection,
+  chipCaretStep,
+  pinComposerChipSelection,
+  textSelectionForChipDrag,
+  chipRangeAt,
+} from "./composer-chip-selection";
 export { ComposerNewline } from "./composer-newline";
 export {
   resolveComposerEnter,
@@ -58,8 +64,12 @@ export {
 export { ComposerTaskItem } from "./composer-task-item";
 export {
   ComposerFile,
+  composerFileAttrsFromNode,
   composerFileAttrsFromUnknown,
+  composerFileChipTitle,
   composerFileLabel,
+  composerFileLineRangeLabel,
   composerFilePlainText,
 } from "./composer-file";
 export type { ComposerFileAttrs } from "./composer-file";
+export { parseComposerFileQuote } from "./composer-file-quote";

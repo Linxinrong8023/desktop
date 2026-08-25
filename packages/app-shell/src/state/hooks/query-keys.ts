@@ -8,6 +8,7 @@ import type { TaskDiffScope, WarmSessionTarget } from "@ora/contracts";
  */
 export const queryKeys = {
   projects: ["projects"] as const,
+  workspaces: ["workspaces"] as const,
   projectBranches: (projectId: string) =>
     ["project-branches", projectId] as const,
   tasks: ["tasks"] as const,
@@ -16,6 +17,8 @@ export const queryKeys = {
   skills: ["skills"] as const,
   availablePlugins: ["available-plugins"] as const,
   installedPlugins: ["installed-plugins"] as const,
+  pluginConfiguration: (pluginId: string) =>
+    ["plugin-configuration", pluginId] as const,
   developerMode: ["developer-mode"] as const,
   runtimeLogLevel: ["runtime-log-level"] as const,
   gitIdentity: ["gitIdentity"] as const,
@@ -31,6 +34,8 @@ export const queryKeys = {
   workflowArtifacts: (runId: string) => ["workflowArtifacts", runId] as const,
   agentRuntimeStatus: ["agentRuntimeStatus"] as const,
   taskWorkspace: (taskId: string) => ["task-workspace", taskId] as const,
+  workspaceCwd: (workspaceId: string) =>
+    ["workspace-cwd", workspaceId] as const,
   taskDiffs: (taskId: string) => ["task-diff", taskId] as const,
   taskDiff: (taskId: string, scope: TaskDiffScope) =>
     ["task-diff", taskId, scope] as const,
@@ -52,13 +57,16 @@ export const queryKeys = {
    * Mirrors the identity the backend keys warm sessions by, so two surfaces
    * never share one cache entry and revisiting a surface reuses its session.
    */
-  warmSession: (target: WarmSessionTarget | null, agentRef: string) =>
+  warmSession: (target: WarmSessionTarget | null, agentRef: string | null) =>
     [
       "warmSession",
+      agentRef ?? "none",
       target?.type ?? "none",
       targetId(target),
-      agentRef,
     ] as const,
+  /** Every warm-session query whose model catalog belongs to one agent. */
+  warmSessionsForAgent: (agentRef: string) =>
+    ["warmSession", agentRef] as const,
   specs: (projectId: string) => ["specs", projectId] as const,
   specCatalog: (projectId: string, targetKey: string) =>
     ["specs", projectId, "catalog", targetKey] as const,
@@ -69,8 +77,11 @@ export const queryKeys = {
 /** Extracts the identifier a warm target is scoped to, for cache-key purposes. */
 function targetId(target: WarmSessionTarget | null): string {
   if (target === null) return "";
-  return target.type === "task" ? target.taskId : target.projectId;
+  return target.workspaceId;
 }
 
 export type WorkspaceQueryKey =
-  readonly ["projects"] | readonly ["tasks"] | readonly ["sessions"];
+  | readonly ["projects"]
+  | readonly ["workspaces"]
+  | readonly ["tasks"]
+  | readonly ["sessions"];

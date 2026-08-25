@@ -1,4 +1,4 @@
-import { createElement, type ReactNode } from "react";
+import { createElement, StrictMode, type ReactNode } from "react";
 import {
   act,
   fireEvent,
@@ -33,7 +33,10 @@ import { ConversationNavigator } from "./conversation-navigator";
 import { MessageList } from "./message-list";
 import { ToolCallBlock } from "./tool-call-block";
 import { useComposerInputStore } from "../../state/stores/composer-input-store";
-import { useComposerFileContextStore } from "../../state/stores/composer-file-context-store";
+import {
+  resetComposerFileDeliveriesForTests,
+  useComposerFileContextStore,
+} from "../../state/stores/composer-file-context-store";
 import { useDraftSessionsStore } from "../../state/stores/draft-sessions-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
 import {
@@ -46,6 +49,15 @@ import { FILE_MENTION_DEBOUNCE_MS } from "./use-composer-file-mentions";
 
 function composerText(element: HTMLElement): string {
   return element.dataset.composerText ?? "";
+}
+
+/**
+ * A quote that fails to insert is reported as an alert banner, never thrown, so
+ * "the chip is in the document" is not proof the insert succeeded — a partially
+ * applied insert produces both. Every quote test asserts the banner is absent.
+ */
+function expectNoComposerInjectError(): void {
+  expect(screen.queryByRole("alert")).toBeNull();
 }
 
 /** Flushes conversation hydrate / chip-inject microtasks scheduled from effects. */
@@ -61,6 +73,7 @@ afterEach(() => {
   resetComposerSendAdoptionsForTests();
   useDraftSessionsStore.getState().clear();
   useComposerInputStore.getState().reset();
+  resetComposerFileDeliveriesForTests();
   useComposerFileContextStore.setState({ pendingByConversation: {} });
 });
 
@@ -399,6 +412,7 @@ describe("Composer", () => {
             namespace: "local",
             name: "code-review",
             description: "Review the current diff",
+            source: { kind: "local" } as const,
             availability: "available",
           },
         ]}
@@ -428,6 +442,7 @@ describe("Composer", () => {
             namespace: "local",
             name: "code-review",
             description: "Review the current diff",
+            source: { kind: "local" } as const,
             availability: "available",
           },
           {
@@ -435,6 +450,7 @@ describe("Composer", () => {
             namespace: "local",
             name: "missing-skill",
             description: "Lost package",
+            source: { kind: "local" } as const,
             availability: "unavailable",
           },
         ]}
@@ -562,6 +578,32 @@ describe("Composer", () => {
     });
     await flushComposerEffects();
     expect(composerText(textarea)).toBe("on B");
+  });
+
+  it("does not park the leaving session's editor onto the next session key before hydrate", async () => {
+    const user = userEvent.setup();
+    useComposerInputStore.getState().reset();
+    useWorkspaceSelectionStore
+      .getState()
+      .selectSession("session-a", "task-1", "project-1");
+
+    renderWithI18n(<Composer onSend={vi.fn()} isResponding={false} />);
+    const textarea = screen.getByRole("textbox");
+    await user.type(textarea, "content on A");
+
+    act(() => {
+      useWorkspaceSelectionStore
+        .getState()
+        .selectSession("session-b", "task-1", "project-1");
+    });
+
+    expect(useComposerInputStore.getState().byKey["session-a"]?.text).toBe(
+      "content on A",
+    );
+    expect(useComposerInputStore.getState().byKey["session-b"]).toBeUndefined();
+
+    await flushComposerEffects();
+    expect(composerText(textarea)).toBe("");
   });
 
   it("restores file and skill chips (not inline code) when switching sessions", async () => {
@@ -964,6 +1006,7 @@ describe("Composer", () => {
             namespace: "local",
             name: "code-review",
             description: "Review",
+            source: { kind: "local" } as const,
             availability: "available",
           },
         ]}
@@ -1093,6 +1136,7 @@ describe("Composer", () => {
     expect(
       useComposerFileContextStore.getState().pendingByConversation["session-a"],
     ).toBeUndefined();
+    expectNoComposerInjectError();
 
     act(() => {
       useWorkspaceSelectionStore
@@ -1119,12 +1163,98 @@ describe("Composer", () => {
       screen.getByRole("textbox").querySelector("[data-composer-file]"),
     ).toBeNull();
     expect(
-      useComposerFileContextStore.getState().pendingByConversation["session-a"]
-        ?.selections,
+      useComposerFileContextStore.getState().pendingByConversation["session-a"],
     ).toEqual([{ path: "src/queued-for-a.ts", startLine: 3, endLine: 3 }]);
     expect(
       useComposerFileContextStore.getState().pendingByConversation["session-b"],
     ).toBeUndefined();
+  });
+
+  it("injects each quoted range once under Strict Mode", async () => {
+    useComposerInputStore.getState().reset();
+    useComposerFileContextStore.setState({ pendingByConversation: {} });
+    useWorkspaceSelectionStore
+      .getState()
+      .selectSession("session-a", "task-1", "project-1");
+
+    renderWithI18n(
+      <StrictMode>
+        <Composer taskId="task-1" onSend={vi.fn()} isResponding={false} />
+      </StrictMode>,
+    );
+    const textarea = screen.getByRole("textbox");
+    await flushComposerEffects();
+
+    await act(async () => {
+      useComposerFileContextStore.getState().addSelection("session-a", {
+        path: "src/once.ts",
+        startLine: 4,
+        endLine: 6,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(
+        textarea.querySelectorAll("[data-composer-file='src/once.ts']"),
+      ).toHaveLength(1),
+    );
+    expect(
+      useComposerFileContextStore.getState().pendingByConversation["session-a"],
+    ).toBeUndefined();
+    expectNoComposerInjectError();
+  });
+
+  it("does not replay a prior quote when a second range is queued", async () => {
+    useComposerInputStore.getState().reset();
+    useComposerFileContextStore.setState({ pendingByConversation: {} });
+    useWorkspaceSelectionStore
+      .getState()
+      .selectSession("session-a", "task-1", "project-1");
+
+    renderWithI18n(
+      <Composer taskId="task-1" onSend={vi.fn()} isResponding={false} />,
+    );
+    const textarea = screen.getByRole("textbox");
+    await flushComposerEffects();
+
+    await act(async () => {
+      useComposerFileContextStore.getState().addSelection("session-a", {
+        path: "src/first.ts",
+        startLine: 1,
+        endLine: 1,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(
+        textarea.querySelector("[data-composer-file='src/first.ts']"),
+      ).not.toBeNull(),
+    );
+
+    await act(async () => {
+      useComposerFileContextStore.getState().addSelection("session-a", {
+        path: "src/second.ts",
+        startLine: 2,
+        endLine: 2,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(
+        textarea.querySelector("[data-composer-file='src/second.ts']"),
+      ).not.toBeNull(),
+    );
+    expect(
+      textarea.querySelectorAll("[data-composer-file='src/first.ts']"),
+    ).toHaveLength(1);
+    expect(
+      textarea.querySelectorAll("[data-composer-file='src/second.ts']"),
+    ).toHaveLength(1);
+    expectNoComposerInjectError();
   });
 
   it("does not restore an abandoned send over a newer submit on the same surface", async () => {

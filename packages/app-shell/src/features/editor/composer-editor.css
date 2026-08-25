@@ -311,10 +311,7 @@
   font-weight: 600;
   line-height: 1.4;
   cursor: default;
-  transition:
-    background-color 180ms ease,
-    border-color 180ms ease,
-    box-shadow 180ms ease;
+  transition: none;
 }
 
 .composer-chip-label {
@@ -347,42 +344,52 @@
 }
 
 /*
- * Cursor-style @ file mention: type icon keeps its own hue; basename uses a
- * bright teal ink — higher L / soft chroma for a clear, airy feel.
+ * Editing behaviour only. The chip's colours and layout live in the shared
+ * features/file-ref-chip.css so chat history renders the identical visual.
  */
 .composer-editor-shell .composer-file-ref {
-  --composer-file-ink: oklch(0.55 0.09 195);
-  display: inline-flex;
-  max-width: 14rem;
-  align-items: center;
-  gap: 0.28em;
-  /* Gap without a selectable text space (those paint as thin selection bars). */
-  margin: 0 0.2em;
-  vertical-align: baseline;
-  color: var(--composer-file-ink);
-  font-size: inherit;
-  font-weight: 500;
-  line-height: inherit;
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-user-drag: none;
 }
 
-.dark .composer-editor-shell .composer-file-ref {
-  /* Bright aqua on dark chrome; stays readable without neon glow. */
-  --composer-file-ink: oklch(0.82 0.1 195);
-}
-
-.composer-editor-shell .composer-file-ref-icon {
+/*
+ * Hover swaps the type icon for a remove control in the same 0.95em slot, so
+ * the chip keeps its width and the label never shifts under the pointer. Only
+ * the composer gets it: history chips render the same markup read-only.
+ */
+.composer-editor-shell .composer-file-ref-remove {
+  display: none;
   width: 0.95em;
   height: 0.95em;
   flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 0.2em;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
 }
 
-.composer-editor-shell .composer-file-ref-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.composer-editor-shell .composer-file-ref:hover .composer-file-ref-icon {
+  display: none;
+}
+
+.composer-editor-shell .composer-file-ref:hover .composer-file-ref-remove {
+  display: inline-flex;
+}
+
+.composer-editor-shell .composer-file-ref-remove:hover {
+  color: var(--destructive);
+}
+
+.composer-editor-shell .composer-file-ref-remove-glyph {
+  width: 100%;
+  height: 100%;
+  stroke-width: 2.5;
 }
 
 .composer-editor-shell .composer-file-ref::selection,
@@ -398,14 +405,22 @@
     color-mix(in oklch, var(--composer-file-ink) 35%, var(--ring));
 }
 
-/* Atom chips skip native ::selection; mirror a spanning TextSelection onto them.
- * React file chips put the decoration class on the outer node-view host; mentions
- * apply it on the mention span itself. */
-.composer-editor-shell .composer-chip-in-selection .composer-file-ref,
-.composer-editor-shell .composer-file-ref.composer-chip-in-selection {
-  border-radius: 0.2rem;
-  background: color-mix(in srgb, Highlight 58%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, Highlight 45%, transparent);
+/* Atom chips skip native ::selection. Range-select paints data-chip-selected
+ * imperatively so the highlight tracks the pointer without a React re-render.
+ * Match the platform Highlight wash — no outline, radius, or transition. */
+.composer-editor-shell [data-chip-selected].composer-file-ref,
+.composer-editor-shell [data-chip-selected] .composer-file-ref,
+.composer-editor-shell .composer-file-ref[data-chip-selected],
+.composer-editor-shell .composer-mention[data-chip-selected],
+.composer-editor-shell .composer-chip[data-chip-selected] {
+  border-radius: 0.12rem;
+  background: Highlight;
+  color: HighlightText;
+  box-shadow: none;
+}
+
+.composer-editor-shell [data-chip-selected] .composer-file-ref-range {
+  color: HighlightText;
 }
 
 /*
@@ -428,6 +443,7 @@
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-user-drag: none;
 }
 
 .dark .composer-mention {
@@ -444,11 +460,6 @@
 .composer-mention.ProseMirror-selectednode {
   box-shadow: 0 0 0 1px
     color-mix(in oklch, var(--composer-skill-ink) 40%, var(--ring));
-}
-
-.composer-editor-shell .composer-mention.composer-chip-in-selection {
-  background: color-mix(in srgb, Highlight 50%, var(--composer-skill-wash));
-  box-shadow: 0 0 0 1px color-mix(in srgb, Highlight 45%, transparent);
 }
 
 .composer-editor-shell .tiptap.is-editor-empty p.is-empty::before {

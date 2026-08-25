@@ -150,6 +150,8 @@ export function RunNodeSessionChat({
         availableCommands={conversation?.availableCommands ?? []}
         conversationNavigation={NODE_SESSION_CONVERSATION_NAVIGATION}
         disabled={composerDisabled}
+        modelSelectorDisabled
+        modelSelectorSessionId={sessionId}
         composerVisible={interactive}
         composerActions={
           active || sessionActions != null ? (

@@ -1,6 +1,8 @@
+use crate::webview::RawWebview;
+use crate::workbench::RawWorkbench;
 use crate::{
     HomepageUrl, InvalidFieldReason, ManifestError, ManifestField, PluginKind, PluginName,
-    PluginNamespace, ReleaseUrl, RepositoryUrl, Sha256Digest,
+    PluginNamespace, PluginWebview, PluginWorkbench, ReleaseUrl, RepositoryUrl, Sha256Digest,
 };
 use ora_utils::GitBranchName;
 use semver::{Version, VersionReq};
@@ -14,6 +16,7 @@ const SUPPORTED_RESOLVER: u64 = 1;
 pub struct PluginManifest {
     pub(crate) resolver: u64,
     pub(crate) name: PluginName,
+    pub(crate) title: String,
     pub(crate) namespace: PluginNamespace,
     pub(crate) kind: PluginKind,
     pub(crate) version: Version,
@@ -24,30 +27,26 @@ pub struct PluginManifest {
     pub(crate) sha256: Option<Sha256Digest>,
     pub(crate) head: Option<PluginHead>,
     pub(crate) dependencies: Option<PluginDependencies>,
+    pub(crate) workbench: Option<PluginWorkbench>,
+    pub(crate) webview: Option<PluginWebview>,
 }
 
 impl PluginManifest {
     /// Parses and validates one plugin release manifest from TOML text.
     ///
-    /// A release manifest is the marketplace form and must declare the download metadata
-    /// (`resolver`, `url`, `sha256`) needed to fetch and verify the package.
+    /// A release manifest is the marketplace form. It spells the name segment `identifier` like
+    /// an installed package and may carry the optional `url`/`sha256` download metadata.
     pub fn parse(source: &str) -> Result<Self, ManifestError> {
-        let raw: RawPluginManifest = toml::from_str(source).map_err(|source| {
-            let span = source.span();
-            ManifestError::InvalidToml { source, span }
-        })?;
+        let raw: RawPluginManifest = deserialize(source)?;
         let (metadata, resolver, url, sha256) = raw.into_parts();
-        Self::from_raw_parts(metadata, resolver, Some(url), Some(sha256))
+        Self::from_raw_parts(metadata, resolver, url, sha256)
     }
 
     /// Parses and validates an installed plugin's manifest (the `orax.toml` shipped inside a
     /// package). Installed manifests carry descriptive metadata only; the download-only `url` and
     /// `sha256` fields are optional, and an omitted `resolver` is accepted as the current version.
     pub fn parse_installed(source: &str) -> Result<Self, ManifestError> {
-        let raw: RawInstalledManifest = toml::from_str(source).map_err(|source| {
-            let span = source.span();
-            ManifestError::InvalidToml { source, span }
-        })?;
+        let raw: RawInstalledManifest = deserialize(source)?;
         let (metadata, resolver, url, sha256) = raw.into_parts();
         let resolver = resolver.unwrap_or(SUPPORTED_RESOLVER);
         Self::from_raw_parts(metadata, resolver, url, sha256)
@@ -55,6 +54,9 @@ impl PluginManifest {
 
     /// Applies every semantic validation rule to the values shared by both manifest forms,
     /// keeping the release and installed schemas on one validated domain model.
+    ///
+    /// Both forms spell the name segment `identifier`, so a rejected name always reports that
+    /// field.
     fn from_raw_parts(
         metadata: RawMetadata,
         resolver: u64,
@@ -67,7 +69,17 @@ impl PluginManifest {
 
         // Keep semantic conversion explicit so the first error follows schema declaration order.
         let name = PluginName::parse(&metadata.name)
-            .map_err(|reason| invalid_field(ManifestField::Name, reason.into()))?;
+            .map_err(|reason| invalid_field(ManifestField::Identifier, reason.into()))?;
+        // The display title is descriptive metadata; a manifest that omits it falls back to the
+        // identifier so a plugin never lacks a name to show.
+        let title = match metadata.title.as_deref() {
+            Some(value) => {
+                validate_text(value, TextPolicy::Title)
+                    .map_err(|reason| invalid_field(ManifestField::Title, reason))?;
+                value.to_owned()
+            }
+            None => name.as_str().to_owned(),
+        };
         let namespace = PluginNamespace::from_str(&metadata.namespace)
             .map_err(|reason| invalid_field(ManifestField::Namespace, reason.into()))?;
         let kind = PluginKind::from_str(&metadata.kind)
@@ -114,10 +126,13 @@ impl PluginManifest {
                     })
             })
             .transpose()?;
+        let (workbench, webview) =
+            validate_kind_sections(kind, metadata.workbench, metadata.webview)?;
 
         Ok(Self {
             resolver,
             name,
+            title,
             namespace,
             kind,
             version,
@@ -128,6 +143,8 @@ impl PluginManifest {
             sha256,
             head,
             dependencies,
+            workbench,
+            webview,
         })
     }
 
@@ -139,6 +156,11 @@ impl PluginManifest {
     /// Returns the complete plugin identifier.
     pub fn name(&self) -> &PluginName {
         &self.name
+    }
+
+    /// Returns the human-readable display title, falling back to the identifier when unset.
+    pub fn title(&self) -> &str {
+        &self.title
     }
 
     /// Returns the plugin source namespace.
@@ -198,6 +220,86 @@ impl PluginManifest {
     pub fn dependencies(&self) -> Option<&PluginDependencies> {
         self.dependencies.as_ref()
     }
+
+    /// Returns the `[workbench]` section; only a workbench-kind manifest may carry one.
+    ///
+    /// The section is optional even for that kind: a workbench plugin without page-callable
+    /// methods (a purely static page) simply omits it.
+    pub fn workbench(&self) -> Option<&PluginWorkbench> {
+        self.workbench.as_ref()
+    }
+
+    /// Returns the `[webview]` section, present exactly when `kind` is [`PluginKind::Webview`].
+    pub fn webview(&self) -> Option<&PluginWebview> {
+        self.webview.as_ref()
+    }
+}
+
+/// Deserializes one manifest form, keeping the TOML path of a structural failure.
+///
+/// `serde_path_to_error` is used instead of `toml::from_str` because nested sections such as
+/// `[[webview.downloads.rules]]` would otherwise report "unknown field" without saying which
+/// entry.
+fn deserialize<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T, ManifestError> {
+    let deserializer = toml::de::Deserializer::parse(source).map_err(|source| {
+        let span = source.span();
+        ManifestError::InvalidToml {
+            source: Box::new(source),
+            span,
+            path: None,
+        }
+    })?;
+    serde_path_to_error::deserialize(deserializer).map_err(|error| {
+        let path = error.path().to_string();
+        let source = error.into_inner();
+        let span = source.span();
+        ManifestError::InvalidToml {
+            source: Box::new(source),
+            span,
+            // The root path renders as "." which carries no information.
+            path: (path != ".").then_some(path),
+        }
+    })
+}
+
+/// Pairs `kind` with the sections it may carry so a manifest cannot be half of two kinds.
+///
+/// `[webview]` is required by, and exclusive to, `kind = "webview"`; `[workbench]` is exclusive
+/// to `kind = "workbench"` but optional there, because a static page needs no methods.
+fn validate_kind_sections(
+    kind: PluginKind,
+    workbench: Option<RawWorkbench>,
+    webview: Option<RawWebview>,
+) -> Result<(Option<PluginWorkbench>, Option<PluginWebview>), ManifestError> {
+    let workbench = match (kind, workbench) {
+        (PluginKind::Workbench, Some(workbench)) => Some(PluginWorkbench::try_from(workbench)?),
+        (PluginKind::Workbench, None) => None,
+        (PluginKind::Agent | PluginKind::Webview | PluginKind::Skill, Some(_)) => {
+            return Err(invalid_field(
+                ManifestField::Workbench,
+                InvalidFieldReason::NotAllowedForKind { kind },
+            ));
+        }
+        (PluginKind::Agent | PluginKind::Webview | PluginKind::Skill, None) => None,
+    };
+    let webview = match (kind, webview) {
+        (PluginKind::Webview, Some(webview)) => Some(PluginWebview::try_from(webview)?),
+        (PluginKind::Webview, None) => {
+            return Err(invalid_field(
+                ManifestField::Webview,
+                InvalidFieldReason::MissingForKind { kind },
+            ));
+        }
+        (PluginKind::Agent | PluginKind::Workbench | PluginKind::Skill, Some(_)) => {
+            return Err(invalid_field(
+                ManifestField::Webview,
+                InvalidFieldReason::NotAllowedForKind { kind },
+            ));
+        }
+        (PluginKind::Agent | PluginKind::Workbench | PluginKind::Skill, None) => None,
+    };
+
+    Ok((workbench, webview))
 }
 
 /// Holds validated source repository metadata for one plugin release.
@@ -250,24 +352,8 @@ impl PluginDependencies {
 #[serde(deny_unknown_fields)]
 struct RawPluginManifest {
     resolver: u64,
-    name: String,
-    namespace: String,
-    kind: String,
-    version: String,
-    description: String,
-    homepage: Option<String>,
-    license: Option<String>,
-    url: String,
-    sha256: String,
-    head: Option<RawHead>,
-    dependencies: Option<RawDependencies>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawInstalledManifest {
-    resolver: Option<u64>,
-    name: String,
+    identifier: String,
+    title: Option<String>,
     namespace: String,
     kind: String,
     version: String,
@@ -278,6 +364,31 @@ struct RawInstalledManifest {
     sha256: Option<String>,
     head: Option<RawHead>,
     dependencies: Option<RawDependencies>,
+    workbench: Option<RawWorkbench>,
+    webview: Option<RawWebview>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawInstalledManifest {
+    resolver: Option<u64>,
+    /// Identifier segment of the installed package, spelled `identifier` (not `name`) because an
+    /// installed manifest is only ever addressed by the full id the host resolves from its name
+    /// and namespace.
+    identifier: String,
+    title: Option<String>,
+    namespace: String,
+    kind: String,
+    version: String,
+    description: String,
+    homepage: Option<String>,
+    license: Option<String>,
+    url: Option<String>,
+    sha256: Option<String>,
+    head: Option<RawHead>,
+    dependencies: Option<RawDependencies>,
+    workbench: Option<RawWorkbench>,
+    webview: Option<RawWebview>,
 }
 
 #[derive(Deserialize)]
@@ -299,6 +410,7 @@ struct RawDependencies {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RawMetadata {
     name: String,
+    title: Option<String>,
     namespace: String,
     kind: String,
     version: String,
@@ -307,13 +419,19 @@ struct RawMetadata {
     license: Option<String>,
     head: Option<RawHead>,
     dependencies: Option<RawDependencies>,
+    workbench: Option<RawWorkbench>,
+    webview: Option<RawWebview>,
 }
 
 impl RawPluginManifest {
-    /// Splits the release form into shared metadata and required download fields.
-    fn into_parts(self) -> (RawMetadata, u64, String, String) {
+    /// Splits the release form into shared metadata and optional download fields.
+    fn into_parts(self) -> (RawMetadata, u64, Option<String>, Option<String>) {
         let metadata = RawMetadata {
-            name: self.name,
+            // The marketplace release form spells the name segment `identifier` like the
+            // installed form, and the download fields are optional now that the marketplace no
+            // longer publishes `.orax` release URLs.
+            name: self.identifier,
+            title: self.title,
             namespace: self.namespace,
             kind: self.kind,
             version: self.version,
@@ -322,6 +440,8 @@ impl RawPluginManifest {
             license: self.license,
             head: self.head,
             dependencies: self.dependencies,
+            workbench: self.workbench,
+            webview: self.webview,
         };
         (metadata, self.resolver, self.url, self.sha256)
     }
@@ -331,7 +451,10 @@ impl RawInstalledManifest {
     /// Splits the installed form into shared metadata and optional download fields.
     fn into_parts(self) -> (RawMetadata, Option<u64>, Option<String>, Option<String>) {
         let metadata = RawMetadata {
-            name: self.name,
+            // The installed manifest spells the name segment `identifier`, mapping it onto the
+            // shared metadata name so both forms converge on one validated domain model.
+            name: self.identifier,
+            title: self.title,
             namespace: self.namespace,
             kind: self.kind,
             version: self.version,
@@ -340,6 +463,8 @@ impl RawInstalledManifest {
             license: self.license,
             head: self.head,
             dependencies: self.dependencies,
+            workbench: self.workbench,
+            webview: self.webview,
         };
         (metadata, self.resolver, self.url, self.sha256)
     }
@@ -347,6 +472,7 @@ impl RawInstalledManifest {
 
 #[derive(Clone, Copy)]
 enum TextPolicy {
+    Title,
     Description,
     License,
 }
@@ -355,6 +481,7 @@ impl TextPolicy {
     /// Returns the maximum byte length for this field category.
     fn max_bytes(self) -> usize {
         match self {
+            Self::Title => 128,
             Self::Description => 1000,
             Self::License => 256,
         }

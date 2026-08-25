@@ -25,6 +25,7 @@ function desktopPlatform(open = vi.fn()): PlatformAdapter {
     ...createStubPlatform(),
     locationActions: {
       resolveTaskCwd: async () => "C:/repo",
+      resolveWorkspaceCwd: async () => "C:/repo",
       open,
     },
   };
@@ -43,6 +44,7 @@ async function renderFileLink(
     platform?: PlatformAdapter;
     openDiff?: (path: string, line?: number) => void;
     openWorkspaceFile?: (path: string, line?: number, column?: number) => void;
+    cwd?: string | null;
   },
 ) {
   const openDiff = options?.openDiff ?? vi.fn();
@@ -54,7 +56,16 @@ async function renderFileLink(
           onOpenDiff={openDiff}
           onOpenWorkspaceFile={openWorkspaceFile}
         >
-          <ChatLinkContext.Provider value={{ index, taskId: "task-1" }}>
+          <ChatLinkContext.Provider
+            value={{
+              index,
+              taskId: "task-1",
+              cwd:
+                options !== undefined && "cwd" in options
+                  ? options.cwd
+                  : "C:/repo",
+            }}
+          >
             <ChatFileLink source="inline-code" raw={raw}>
               {raw}
             </ChatFileLink>
@@ -157,10 +168,11 @@ describe("ChatFileLink", () => {
       ...createStubPlatform(),
       locationActions: {
         resolveTaskCwd: () => new Promise(() => undefined),
+        resolveWorkspaceCwd: () => new Promise(() => undefined),
         open: vi.fn(),
       },
     };
-    await renderFileLink("src/main.rs", { platform });
+    await renderFileLink("src/main.rs", { platform, cwd: null });
     fireEvent.contextMenu(
       screen.getByRole("button", { name: /src\/main\.rs/ }),
     );
@@ -179,7 +191,7 @@ describe("ChatFileLink", () => {
     ).toBeNull();
   });
 
-  it("opens Explorer with the OS-absolute path from resolveTaskCwd", async () => {
+  it("opens Explorer with the context's OS-absolute cwd", async () => {
     const user = userEvent.setup();
     const open = vi.fn();
     const platform = desktopPlatform(open);
@@ -209,6 +221,26 @@ describe("ChatFileLink", () => {
     await waitFor(() => {
       expect(open).toHaveBeenCalledWith("explorer", "C:/repo/src/main.rs");
     });
+  });
+
+  it("does not resolve task cwd separately for each mounted link", async () => {
+    const resolveTaskCwd = vi.fn(async () => "C:/other");
+    const platform: PlatformAdapter = {
+      ...createStubPlatform(),
+      locationActions: {
+        resolveTaskCwd,
+        resolveWorkspaceCwd: vi.fn(async () => "C:/repo"),
+        open: vi.fn(),
+      },
+    };
+    await renderFileLink("src/main.rs", { platform, cwd: "C:/repo" });
+    expect(resolveTaskCwd).not.toHaveBeenCalled();
+  });
+
+  it("does not open an empty context menu when no secondary action exists", async () => {
+    await renderFileLink("src/lib.rs", { cwd: null });
+    fireEvent.contextMenu(screen.getByRole("button", { name: /src\/lib\.rs/ }));
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("does not offer an in-app alternate on a read-only Files link", async () => {

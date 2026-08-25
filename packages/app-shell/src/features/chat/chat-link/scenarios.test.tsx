@@ -36,6 +36,7 @@ function desktopPlatform(open = vi.fn()): PlatformAdapter {
     ...createStubPlatform(),
     locationActions: {
       resolveTaskCwd: async () => "C:/repo",
+      resolveWorkspaceCwd: async () => "C:/repo",
       open,
     },
   };
@@ -357,7 +358,10 @@ describe("chat link usage scenarios", () => {
     it("still hands the deleted file path to the system file manager", async () => {
       const user = userEvent.setup();
       const open = vi.fn();
-      await renderFileLink("src/lib.rs", { platform: desktopPlatform(open) });
+      await renderFileLink("src/lib.rs", {
+        platform: desktopPlatform(open),
+        cwd: "C:/repo",
+      });
       fireEvent.contextMenu(
         screen.getByRole("button", { name: /src\/lib\.rs/ }),
       );

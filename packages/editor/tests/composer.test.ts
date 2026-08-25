@@ -10,9 +10,12 @@ import {
   plainTextToComposerContent,
 } from "../src/composer/composer-plain-text.ts";
 import {
+  composerFileAttrsFromUnknown,
+  composerFileChipTitle,
   composerFileLabel,
   composerFilePlainText,
 } from "../src/composer/composer-file.ts";
+import { parseComposerFileQuote } from "../src/composer/composer-file-quote.ts";
 import { parseFenceOpener } from "../src/composer/composer-code-fence.ts";
 import { highlightInputMatch } from "../src/composer/composer-highlight.ts";
 import { isComposerOpenableUrl } from "../src/composer/composer-link.ts";
@@ -97,6 +100,210 @@ test("file chips serialize to backtick path:line payloads", () => {
   assert.equal(
     composerFilePlainText({ path: "README.md", startLine: 3, endLine: 3 }),
     "`README.md:3`",
+  );
+});
+
+test("composerFileChipTitle keeps one-line path:range and uses path for multiline payloads", () => {
+  assert.equal(
+    composerFileChipTitle({
+      path: "src/app.ts",
+      startLine: 4,
+      endLine: 12,
+    }),
+    "src/app.ts:4-12",
+  );
+  assert.equal(
+    composerFileChipTitle({
+      path: "src/app.ts",
+      startLine: 4,
+      endLine: 5,
+      snippet: "const a = 1;\nconst b = 2;",
+    }),
+    "src/app.ts",
+  );
+});
+
+test("composerFileAttrsFromUnknown drops non-positive and NaN line numbers", () => {
+  assert.deepEqual(
+    composerFileAttrsFromUnknown({
+      path: "a.ts",
+      startLine: Number.NaN,
+      endLine: 0,
+      snippet: null,
+      origin: "diff",
+      diffSide: "new",
+    }),
+    {
+      path: "a.ts",
+      startLine: undefined,
+      endLine: undefined,
+      snippet: undefined,
+      kind: "file",
+      origin: "diff",
+      diffSide: "new",
+    },
+  );
+});
+
+test("file chips with snippets serialize to citation fences", () => {
+  assert.equal(
+    composerFilePlainText({
+      path: "src/app.ts",
+      startLine: 4,
+      endLine: 5,
+      snippet: "const a = 1;\nconst b = 2;",
+    }),
+    "\n```4:5:src/app.ts\nconst a = 1;\nconst b = 2;\n```\n",
+  );
+});
+
+test("diff-gutter quotes serialize as a git patch so the agent sees an existing change", () => {
+  assert.equal(
+    composerFilePlainText({
+      path: "src/example.ts",
+      startLine: 1,
+      endLine: 2,
+      snippet: " keep\n+new line",
+      origin: "diff",
+      diffSide: "new",
+    }),
+    [
+      "",
+      "```diff",
+      "diff --git a/src/example.ts b/src/example.ts",
+      "--- a/src/example.ts",
+      "+++ b/src/example.ts",
+      "@@ -1,1 +1,2 @@ quoted from git diff (new side), lines 1-2",
+      " keep",
+      "+new line",
+      "```",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(
+    composerFilePlainText({
+      path: "src/example.ts",
+      startLine: 2,
+      endLine: 2,
+      snippet: "-old line",
+      origin: "diff",
+      diffSide: "old",
+    }),
+    [
+      "",
+      "```diff",
+      "diff --git a/src/example.ts b/src/example.ts",
+      "--- a/src/example.ts",
+      "+++ b/src/example.ts",
+      "@@ -2,1 +2,0 @@ quoted from git diff (old side), lines 2-2",
+      "-old line",
+      "```",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(
+    composerFilePlainText({
+      path: "src/example.ts",
+      startLine: 1,
+      endLine: 3,
+      snippet: " keep\n-old line\n+new line",
+      origin: "diff",
+    }),
+    [
+      "",
+      "```diff",
+      "diff --git a/src/example.ts b/src/example.ts",
+      "--- a/src/example.ts",
+      "+++ b/src/example.ts",
+      "@@ -1,2 +1,2 @@ quoted from git diff, lines 1-3",
+      " keep",
+      "-old line",
+      "+new line",
+      "```",
+      "",
+    ].join("\n"),
+  );
+});
+
+/** Splits a serialized quote back into the fence info string and its body. */
+function fencedQuoteParts(payload: string): { info: string; body: string } {
+  const lines = payload.replace(/^\n/, "").replace(/\n$/, "").split("\n");
+  const opener = lines[0] ?? "";
+  return {
+    info: opener.replace(/^`+/, ""),
+    body: lines.slice(1, -1).join("\n"),
+  };
+}
+
+test("parseComposerFileQuote round-trips every payload composerFilePlainText writes", () => {
+  const quotes = [
+    {
+      path: "src/app.ts",
+      startLine: 4,
+      endLine: 5,
+      snippet: "const a = 1;\nconst b = 2;",
+      kind: "file" as const,
+      origin: undefined,
+      diffSide: undefined,
+    },
+    {
+      path: "src/example.ts",
+      startLine: 1,
+      endLine: 2,
+      snippet: " keep\n+new line",
+      kind: "file" as const,
+      origin: "diff" as const,
+      diffSide: "new" as const,
+    },
+    {
+      path: "src/example.ts",
+      startLine: 2,
+      endLine: 2,
+      snippet: "-old line",
+      kind: "file" as const,
+      origin: "diff" as const,
+      diffSide: "old" as const,
+    },
+    {
+      // A drag across a collapsed hunk quotes a wider span than the body has
+      // lines, so only the range note can carry the label history rebuilds.
+      path: "src/example.ts",
+      startLine: 2,
+      endLine: 40,
+      snippet: " keep\n-old line\n+new line",
+      kind: "file" as const,
+      origin: "diff" as const,
+      diffSide: undefined,
+    },
+  ];
+
+  for (const quote of quotes) {
+    const { info, body } = fencedQuoteParts(composerFilePlainText(quote));
+    assert.deepEqual(parseComposerFileQuote(info, body), quote);
+  }
+});
+
+test("parseComposerFileQuote leaves ordinary fenced code alone", () => {
+  assert.equal(parseComposerFileQuote("ts", "const a = 1;"), null);
+  assert.equal(parseComposerFileQuote("", "plain text"), null);
+  // Renamed file: a quote always patches one path against itself.
+  assert.equal(
+    parseComposerFileQuote("diff", "diff --git a/a.ts b/b.ts\n+added"),
+    null,
+  );
+  // A hand-written patch without the quote note stays a diff code block.
+  assert.equal(
+    parseComposerFileQuote(
+      "diff",
+      [
+        "diff --git a/a.ts b/a.ts",
+        "--- a/a.ts",
+        "+++ b/a.ts",
+        "@@ -1,1 +1,1 @@",
+        "+added",
+      ].join("\n"),
+    ),
+    null,
   );
 });
 
@@ -355,9 +562,9 @@ test("isComposerOpenableUrl matches Desktop open_external schemes", () => {
   assert.equal(isComposerOpenableUrl(""), false);
 });
 
-test("range selection decorates intersecting chips for visual highlight", async () => {
+test("pointer over a chip includes the whole atom before the midpoint", async () => {
   const { Editor } = await import("@tiptap/core");
-  const { chipSelectionDecorations } =
+  const { textSelectionForChipDrag } =
     await import("../src/composer/composer-chip-selection.ts");
   const editor = new Editor({
     extensions: createComposerExtensions({ placeholder: "Type" }),
@@ -378,20 +585,176 @@ test("range selection decorates intersecting chips for visual highlight", async 
       ],
     },
   });
-  const size = editor.state.doc.content.size;
-  editor.commands.setTextSelection({ from: 1, to: size - 1 });
-  const decorated = chipSelectionDecorations(editor.state);
-  // ProseMirror keeps attrs on the internal decoration type; narrow for the assert.
-  const classes = decorated
-    .find()
-    .map((decoration) => {
-      const attrs = (
-        decoration as unknown as { type: { attrs?: { class?: string } } }
-      ).type.attrs;
-      return attrs?.class;
-    })
-    .filter(Boolean);
-  assert.equal(classes.includes("composer-chip-in-selection"), true);
+  let chipPos = -1;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "composerFile") {
+      chipPos = pos;
+      return false;
+    }
+    return true;
+  });
+  const chip = editor.state.doc.nodeAt(chipPos);
+  assert.ok(chip);
+  // Caret maps to the left edge (chipPos) while the pointer is already on the chip.
+  const forward = textSelectionForChipDrag(
+    editor.state.doc,
+    1,
+    chipPos,
+    chipPos,
+  );
+  assert.equal(forward.from, 1);
+  assert.equal(forward.to, chipPos + chip.nodeSize);
+
+  const backward = textSelectionForChipDrag(
+    editor.state.doc,
+    chipPos + chip.nodeSize + 2,
+    chipPos + chip.nodeSize,
+    chipPos,
+  );
+  assert.equal(backward.from, chipPos);
+  assert.equal(backward.to, chipPos + chip.nodeSize + 2);
+
+  // Press on the right half (caret after the atom) then drag left across it.
+  const fromRightHalf = textSelectionForChipDrag(
+    editor.state.doc,
+    chipPos + chip.nodeSize,
+    chipPos,
+    chipPos,
+  );
+  assert.equal(fromRightHalf.from, chipPos);
+  assert.equal(fromRightHalf.to, chipPos + chip.nodeSize);
+
+  // Dragging left off the chip's start must not keep the chip selected.
+  const away = textSelectionForChipDrag(editor.state.doc, chipPos, 1, -1);
+  assert.equal(away.from, 1);
+  assert.equal(away.to, chipPos);
+  editor.destroy();
+});
+
+test("node selection can target a single file chip among adjacent siblings", async () => {
+  const { Editor } = await import("@tiptap/core");
+  const { NodeSelection } = await import("@tiptap/pm/state");
+  const editor = new Editor({
+    extensions: createComposerExtensions({ placeholder: "Type" }),
+    content: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "composerFile",
+              attrs: { path: "a.ts", startLine: 1, endLine: 1, kind: "file" },
+            },
+            {
+              type: "composerFile",
+              attrs: { path: "b.ts", startLine: 2, endLine: 2, kind: "file" },
+            },
+            {
+              type: "composerFile",
+              attrs: { path: "c.ts", startLine: 3, endLine: 3, kind: "file" },
+            },
+            { type: "text", text: " tail" },
+          ],
+        },
+      ],
+    },
+  });
+
+  let secondChipPos: number | null = null;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "composerFile" && node.attrs.path === "b.ts") {
+      secondChipPos = pos;
+      return false;
+    }
+    return true;
+  });
+  assert.ok(secondChipPos !== null);
+  editor.commands.setNodeSelection(secondChipPos!);
+  assert.ok(editor.state.selection instanceof NodeSelection);
+  const selected = editor.state.selection as InstanceType<typeof NodeSelection>;
+  assert.equal(selected.node.attrs.path, "b.ts");
+  assert.equal(editor.state.selection.from, secondChipPos);
+  assert.equal(
+    editor.state.selection.to,
+    secondChipPos! + selected.node.nodeSize,
+  );
+  editor.destroy();
+});
+
+test("pinComposerChipSelection keeps NodeSelection on one adjacent chip", async () => {
+  const { Editor } = await import("@tiptap/core");
+  const { NodeSelection } = await import("@tiptap/pm/state");
+  const { pinComposerChipSelection } =
+    await import("../src/composer/composer-chip-selection.ts");
+  const editor = new Editor({
+    extensions: createComposerExtensions({ placeholder: "Type" }),
+    content: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            {
+              type: "composerFile",
+              attrs: { path: "a.ts", startLine: 1, endLine: 1, kind: "file" },
+            },
+            {
+              type: "composerFile",
+              attrs: { path: "b.ts", startLine: 2, endLine: 2, kind: "file" },
+            },
+            {
+              type: "composerFile",
+              attrs: { path: "c.ts", startLine: 3, endLine: 3, kind: "file" },
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  let secondChipPos = -1;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "composerFile" && node.attrs.path === "b.ts") {
+      secondChipPos = pos;
+      return false;
+    }
+    return true;
+  });
+  assert.ok(secondChipPos >= 0);
+
+  let prevented = false;
+  // Headless TipTap still applies transactions through commands; mirror the
+  // plugin's dispatch path with a minimal view facade over editor state.
+  let state = editor.state;
+  const view = {
+    get state() {
+      return state;
+    },
+    dispatch(tr: Parameters<typeof state.apply>[0]) {
+      state = state.apply(tr);
+    },
+  };
+  assert.equal(
+    pinComposerChipSelection(view, secondChipPos, {
+      preventDefault() {
+        prevented = true;
+      },
+    }),
+    true,
+  );
+  assert.equal(prevented, true);
+  assert.ok(state.selection instanceof NodeSelection);
+  assert.equal(
+    (state.selection as InstanceType<typeof NodeSelection>).node.attrs.path,
+    "b.ts",
+  );
+  assert.equal(state.selection.from, secondChipPos);
+  assert.equal(
+    state.selection.to,
+    secondChipPos +
+      (state.selection as InstanceType<typeof NodeSelection>).node.nodeSize,
+  );
   editor.destroy();
 });
 
@@ -465,4 +828,65 @@ test("composerFileLabel uses the last path segment even when the path ends with 
     composerFileLabel({ path: "foo/bar/", kind: "directory" }),
     "bar",
   );
+});
+
+test("arrow keys step the caret over a chip instead of node-selecting it", async () => {
+  const { Editor } = await import("@tiptap/core");
+  const { chipCaretStep } =
+    await import("../src/composer/composer-chip-selection.ts");
+  const editor = new Editor({
+    extensions: createComposerExtensions({ placeholder: "Type" }),
+    content: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "pre" },
+            {
+              type: "composerFile",
+              attrs: { path: "AGENTS.md", kind: "file" },
+            },
+            { type: "text", text: "post" },
+          ],
+        },
+      ],
+    },
+  });
+  let chipPos = -1;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "composerFile") {
+      chipPos = pos;
+      return false;
+    }
+    return true;
+  });
+  const chip = editor.state.doc.nodeAt(chipPos);
+  assert.ok(chip);
+  const chipEnd = chipPos + chip.nodeSize;
+
+  // Caret against the chip's left edge: one press lands past the whole atom.
+  editor.commands.setTextSelection(chipPos);
+  const forward = chipCaretStep(editor.state, 1);
+  assert.deepEqual(
+    { from: forward?.from, to: forward?.to },
+    { from: chipEnd, to: chipEnd },
+  );
+
+  editor.commands.setTextSelection(chipEnd);
+  const backward = chipCaretStep(editor.state, -1);
+  assert.deepEqual(
+    { from: backward?.from, to: backward?.to },
+    { from: chipPos, to: chipPos },
+  );
+
+  // Inside plain text, and moving away from the chip, stay with ProseMirror.
+  editor.commands.setTextSelection(2);
+  assert.equal(chipCaretStep(editor.state, 1), null);
+  editor.commands.setTextSelection(chipPos);
+  assert.equal(chipCaretStep(editor.state, -1), null);
+  // A range selection is a shift-extension; ProseMirror already keeps it text.
+  editor.commands.setTextSelection({ from: 1, to: chipEnd });
+  assert.equal(chipCaretStep(editor.state, 1), null);
+  editor.destroy();
 });

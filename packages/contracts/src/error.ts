@@ -20,6 +20,28 @@ export type ContractError =
     | { "code": "agent_not_found"; "params": EmptyErrorParams }
     | { "code": "plugin_not_found"; "params": EmptyErrorParams }
     | { "code": "plugin_disabled"; "params": EmptyErrorParams }
+    | {
+      "code": "plugin_configuration_declaration_invalid";
+      "params": EmptyErrorParams;
+    }
+    | {
+      "code": "plugin_configuration_not_declared";
+      "params": EmptyErrorParams;
+    }
+    | { "code": "configuration_revision_conflict"; "params": EmptyErrorParams }
+    | {
+      "code": "plugin_configuration_declaration_changed";
+      "params": EmptyErrorParams;
+    }
+    | { "code": "configuration_load_failed"; "params": EmptyErrorParams }
+    | {
+      "code": "plugin_configuration_validation";
+      "params": PluginConfigurationValidationParams;
+    }
+    | {
+      "code": "plugin_configuration_recovery_not_required";
+      "params": EmptyErrorParams;
+    }
     | { "code": "project_not_found"; "params": EmptyErrorParams }
     | { "code": "task_not_found"; "params": EmptyErrorParams }
     | { "code": "resource_in_use"; "params": EmptyErrorParams }
@@ -45,8 +67,8 @@ export type ContractError =
     | { "code": "permission_option_invalid"; "params": EmptyErrorParams }
     | { "code": "prompt_empty"; "params": EmptyErrorParams }
     | { "code": "prompt_too_large"; "params": EmptyErrorParams }
+    | { "code": "workspace_unavailable"; "params": EmptyErrorParams }
     | { "code": "task_worktree_unavailable"; "params": EmptyErrorParams }
-    | { "code": "task_project_root_unavailable"; "params": EmptyErrorParams }
     | { "code": "file_system_path_not_found"; "params": EmptyErrorParams }
     | { "code": "spec_document_not_found"; "params": EmptyErrorParams }
     | { "code": "worktree_root_not_absolute"; "params": EmptyErrorParams }
@@ -137,6 +159,21 @@ export type OpenLocationFailedParams = { target: OpenLocationTarget };
 export type OpenLocationTarget = "explorer" | "terminal" | "vscode";
 
 /**
+ * Addresses one stable validation failure to its Setting ID.
+ */
+export type PluginConfigurationFieldError = {
+  settingId: string;
+  errorCode: string;
+};
+
+/**
+ * Carries Setting-addressed validation failures for a rejected configuration replacement.
+ */
+export type PluginConfigurationValidationParams = {
+  fieldErrors: Array<PluginConfigurationFieldError>;
+};
+
+/**
  * Enumerates every user-visible Ora failure and its exact interpolation parameters.
  */
 export type PublicError =
@@ -154,6 +191,25 @@ export type PublicError =
   | { "code": "agent_not_found"; "params": EmptyErrorParams }
   | { "code": "plugin_not_found"; "params": EmptyErrorParams }
   | { "code": "plugin_disabled"; "params": EmptyErrorParams }
+  | {
+    "code": "plugin_configuration_declaration_invalid";
+    "params": EmptyErrorParams;
+  }
+  | { "code": "plugin_configuration_not_declared"; "params": EmptyErrorParams }
+  | { "code": "configuration_revision_conflict"; "params": EmptyErrorParams }
+  | {
+    "code": "plugin_configuration_declaration_changed";
+    "params": EmptyErrorParams;
+  }
+  | { "code": "configuration_load_failed"; "params": EmptyErrorParams }
+  | {
+    "code": "plugin_configuration_validation";
+    "params": PluginConfigurationValidationParams;
+  }
+  | {
+    "code": "plugin_configuration_recovery_not_required";
+    "params": EmptyErrorParams;
+  }
   | { "code": "project_not_found"; "params": EmptyErrorParams }
   | { "code": "task_not_found"; "params": EmptyErrorParams }
   | { "code": "resource_in_use"; "params": EmptyErrorParams }
@@ -179,8 +235,8 @@ export type PublicError =
   | { "code": "permission_option_invalid"; "params": EmptyErrorParams }
   | { "code": "prompt_empty"; "params": EmptyErrorParams }
   | { "code": "prompt_too_large"; "params": EmptyErrorParams }
+  | { "code": "workspace_unavailable"; "params": EmptyErrorParams }
   | { "code": "task_worktree_unavailable"; "params": EmptyErrorParams }
-  | { "code": "task_project_root_unavailable"; "params": EmptyErrorParams }
   | { "code": "file_system_path_not_found"; "params": EmptyErrorParams }
   | { "code": "spec_document_not_found"; "params": EmptyErrorParams }
   | { "code": "worktree_root_not_absolute"; "params": EmptyErrorParams }

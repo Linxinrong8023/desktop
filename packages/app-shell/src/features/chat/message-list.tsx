@@ -11,7 +11,7 @@ import { MessageBubble } from "./message-bubble";
 import { ResponseTurn } from "./response-turn";
 import type { ChatModelChange, ChatTurn } from "@ora/chat";
 import { useTaskWorkspace } from "../../state/hooks/use-task-workspace";
-import { useProjects } from "../../state/hooks/use-projects";
+import { useWorkspaceCwd } from "../../state/hooks/use-workspace-cwd";
 import {
   collectCumulativeArtifactIndices,
   type TurnArtifactCacheEntry,
@@ -26,30 +26,30 @@ interface MessageListProps {
   isResponding: boolean;
   taskId?: string;
   projectId?: string;
+  workspaceId?: string;
   /** Optional presentation override for chats embedded inside another surface. */
   conversationNavigation?: ConversationNavigationPresentation;
 }
 
+const EMPTY_MODEL_CHANGES: ChatModelChange[] = [];
 /** The scrollable turn thread, kept pinned to live ACP activity unless the reader scrolls away. */
 export function MessageList({
   turns,
-  modelChanges = [],
+  modelChanges = EMPTY_MODEL_CHANGES,
   userName,
   isResponding,
   taskId,
   projectId,
+  workspaceId,
   conversationNavigation,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const workspaceQuery = useTaskWorkspace(taskId);
-  const projectsQuery = useProjects({
-    enabled: taskId === undefined && projectId !== undefined,
-  });
-  const cwd =
-    workspaceQuery.data?.rootPath ??
-    projectsQuery.data?.find((project) => project.id === projectId)?.rootPath ??
-    null;
+  const workspaceCwdQuery = useWorkspaceCwd(
+    taskId === undefined ? workspaceId : undefined,
+  );
+  const cwd = workspaceQuery.data?.rootPath ?? workspaceCwdQuery.data ?? null;
   const [artifactCache] = useState(
     () => new Map<string, TurnArtifactCacheEntry>(),
   );
@@ -116,20 +116,14 @@ export function MessageList({
                 edited: [],
                 referenced: [],
               };
-              const turnChatLinkValue = (() => {
-                if (taskId !== undefined) {
-                  return { index: turnIndex, taskId, cwd };
-                }
-                if (projectId !== undefined) {
-                  return { index: turnIndex, cwd };
-                }
-                return null;
-              })();
+              const turnChatLinkValue =
+                taskId !== undefined
+                  ? { index: turnIndex, taskId, cwd }
+                  : projectId !== undefined
+                    ? { index: turnIndex, cwd }
+                    : null;
               return (
                 <div key={turn.id}>
-                  {/* Markers sit between turns rather than inside them, so they are
-                    rendered here instead of carrying a turn anchor: the navigator
-                    maps prompts and responses, and a divider is neither. */}
                   {modelChangesAt(modelChanges, index).map((change) => (
                     <ModelChangeDivider
                       key={change.id}

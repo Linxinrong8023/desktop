@@ -11,18 +11,16 @@ import { useWorkspaceSelectionStore } from "./stores/workspace-selection-store";
 import { useDraftSessionsStore } from "./stores/draft-sessions-store";
 import { EMPTY_WORKSPACE_SELECTION } from "./stores/sanitize-workspace-selection";
 
-const PROJECT: Project = { id: "p1", name: "Ora", rootPath: "/ora" };
+const PROJECT: Project = { id: "p1", name: "Ora" };
 const TASK: Task = {
   id: "t1",
   projectId: "p1",
+  workspaceId: "workspace-t1",
   title: "Refactor",
-  workspaceMode: "worktree",
-  type: "default",
-  workflowRunId: null,
 };
 const SESSION: Session = {
   id: "s1",
-  taskId: "t1",
+  workspaceId: "workspace-t1",
   agentRef: "ora-space.opencode",
   status: "running",
   title: null,
@@ -40,6 +38,7 @@ beforeEach(() => {
   useUiStore.setState({
     expandedProjects: new Set(),
     expandedTasks: new Set(),
+    treeExpansionBootstrapped: false,
   });
   vi.restoreAllMocks();
 });
@@ -83,8 +82,51 @@ describe("useRestoreWorkspaceSelection", () => {
       });
     });
     expect(useWorkspaceSelectionStore.getState().pendingRestore).toBeNull();
-    expect(useUiStore.getState().expandedProjects.has("p1")).toBe(true);
-    expect(useUiStore.getState().expandedTasks.has("t1")).toBe(true);
+    // Selection restore must not force-expand; expand state is owned by ui-store.
+    expect(useUiStore.getState().expandedProjects.has("p1")).toBe(false);
+    expect(useUiStore.getState().expandedTasks.has("t1")).toBe(false);
+  });
+
+  it("keeps a collapsed project collapsed when restoring its session", async () => {
+    useUiStore.setState({
+      expandedProjects: new Set(),
+      expandedTasks: new Set(),
+      treeExpansionBootstrapped: true,
+    });
+    useWorkspaceSelectionStore.setState({
+      selection: EMPTY_WORKSPACE_SELECTION,
+      pendingRestore: {
+        projectId: "p1",
+        taskId: "t1",
+        sessionId: "s1",
+        workflowRunId: null,
+        draftId: null,
+      },
+    });
+    const state = createMockClientState();
+    state.projects = [PROJECT];
+    state.tasks = [TASK];
+    state.sessions = [SESSION];
+    const client = createMockClient(state);
+
+    renderHookWithClient(
+      () =>
+        useRestoreWorkspaceSelection({
+          projects: state.projects,
+          tasks: state.tasks,
+          sessions: state.sessions,
+          treePending: false,
+        }),
+      client,
+    );
+
+    await waitFor(() => {
+      expect(useWorkspaceSelectionStore.getState().selection.sessionId).toBe(
+        "s1",
+      );
+    });
+    expect(useUiStore.getState().expandedProjects.has("p1")).toBe(false);
+    expect(useUiStore.getState().expandedTasks.has("t1")).toBe(false);
   });
 
   it("clears a stale session candidate without applying it", async () => {
@@ -123,7 +165,9 @@ describe("useRestoreWorkspaceSelection", () => {
     );
   });
 
-  it("does not overwrite a live selection the user already made", async () => {
+  it("applies the staged restore even if live selection was set before commit", async () => {
+    // Direct setState simulates a stale in-memory selection; pendingRestore must
+    // still win so startup chatter cannot keep a wrong leaf.
     useWorkspaceSelectionStore.setState({
       selection: {
         projectId: "p1",
@@ -158,15 +202,33 @@ describe("useRestoreWorkspaceSelection", () => {
     );
 
     await waitFor(() => {
-      expect(useWorkspaceSelectionStore.getState().pendingRestore).toBeNull();
+      expect(useWorkspaceSelectionStore.getState().selection).toEqual({
+        projectId: "p1",
+        taskId: "t1",
+        sessionId: "s1",
+        workflowRunId: null,
+        draftId: null,
+      });
     });
-    expect(useWorkspaceSelectionStore.getState().selection).toEqual({
-      projectId: "p1",
-      taskId: null,
-      sessionId: null,
-      workflowRunId: null,
-      draftId: null,
+    expect(useWorkspaceSelectionStore.getState().pendingRestore).toBeNull();
+  });
+
+  it("lets an explicit selectSession cancel a staged restore", () => {
+    useWorkspaceSelectionStore.setState({
+      selection: EMPTY_WORKSPACE_SELECTION,
+      pendingRestore: {
+        projectId: "p1",
+        taskId: "t1",
+        sessionId: "s1",
+        workflowRunId: null,
+        draftId: null,
+      },
     });
+    useWorkspaceSelectionStore.getState().selectSession("s-newest", "t1", "p1");
+    expect(useWorkspaceSelectionStore.getState().selection.sessionId).toBe(
+      "s-newest",
+    );
+    expect(useWorkspaceSelectionStore.getState().pendingRestore).toBeNull();
   });
 
   it("waits while the tree is still pending", async () => {
@@ -204,6 +266,44 @@ describe("useRestoreWorkspaceSelection", () => {
       EMPTY_WORKSPACE_SELECTION,
     );
     expect(useWorkspaceSelectionStore.getState().pendingRestore).not.toBeNull();
+  });
+
+  it("does not miss-clear when the sessions list is empty before the tree is ready", async () => {
+    // Regression: gating on `!isPending` alone let a failed/empty interim list
+    // clear pendingRestore and persist the wipe — next launch then restored nothing.
+    useWorkspaceSelectionStore.setState({
+      selection: EMPTY_WORKSPACE_SELECTION,
+      pendingRestore: {
+        projectId: "p1",
+        taskId: "t1",
+        sessionId: "s1",
+        workflowRunId: null,
+        draftId: null,
+      },
+    });
+    const state = createMockClientState();
+    state.projects = [PROJECT];
+    state.tasks = [TASK];
+    state.sessions = [];
+    const client = createMockClient(state);
+
+    renderHookWithClient(
+      () =>
+        useRestoreWorkspaceSelection({
+          projects: state.projects,
+          tasks: state.tasks,
+          sessions: state.sessions,
+          treePending: true,
+        }),
+      client,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      useWorkspaceSelectionStore.getState().pendingRestore?.sessionId,
+    ).toBe("s1");
   });
 
   it("waits for draft rehydration before treating a draft candidate as missing", async () => {
@@ -342,7 +442,7 @@ describe("useRestoreWorkspaceSelection", () => {
         snapshotId: "snap-1",
         name: "Deploy",
         status: "succeeded",
-        taskId: "t-run",
+        workspaceId: "workspace-t-run",
         createdAt: 0n,
         updatedAt: 0n,
       },
@@ -366,7 +466,7 @@ describe("useRestoreWorkspaceSelection", () => {
       ).toBe("run-1");
     });
     expect(useWorkspaceSelectionStore.getState().pendingRestore).toBeNull();
-    expect(useUiStore.getState().expandedProjects.has("p1")).toBe(true);
+    expect(useUiStore.getState().expandedProjects.has("p1")).toBe(false);
   });
 
   it("waits while the workflow-run query has errored instead of discarding the candidate", async () => {
@@ -435,7 +535,7 @@ describe("useRestoreWorkspaceSelection", () => {
       createFocus: { projectId: "p2", taskId: null },
     });
     const state = createMockClientState();
-    state.projects = [PROJECT, { id: "p2", name: "Other", rootPath: "/other" }];
+    state.projects = [PROJECT, { id: "p2", name: "Other" }];
     state.tasks = [TASK];
     state.sessions = [SESSION];
     const client = createMockClient(state);

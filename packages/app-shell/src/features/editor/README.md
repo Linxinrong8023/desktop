@@ -12,8 +12,11 @@ App-shell wrapper around `@ora/editor` for prompt boxes.
   code. Text-only restore still rebuilds path backticks and `$skill` tokens
   when possible; slash-command chips and directory `kind` need the parked doc.
   Programmatic hydrate dismisses the `@`/`/` palette so a parked `@…` suffix
-  does not reopen the menu. Explorer line selections queue per conversation
-  key and are refused (with a warning) when no session/draft/task is selected.
+  does not reopen the menu. Explorer line selections deliver into the bound
+  conversation composer (queued only while that composer is unmounted) and are
+  refused (with a warning) when no session/draft/task is selected. A quote the
+  composer cannot insert is reported inline rather than dropped silently; it is
+  not re-queued, because replaying is what resurrected deleted chips.
   `appendText` inserts parsed blocks at the end so `/command` chips are not
   flattened by a Markdown round-trip. Pastes that include both files and plain text keep the text.
   Typing an opener in front of existing closers (`**`, `==`, `~~`, and the
@@ -30,16 +33,31 @@ App-shell wrapper around `@ora/editor` for prompt boxes.
 - Style kit nodes with Ora CSS variables. Links match the dashboard underline
   and open in the host browser on click. File `@` mentions render as inline
   type-icon + basename refs (Tabler via `WorkspaceFileIcon` / React node view),
-  not bordered pills: soft teal basename ink with type-colored icons.
-  `==highlight==` is a Typora yellow (`rgb(255, 255, 0)`; delimiters hidden).
-  File chips with a line range expose `data-start-line` / `data-end-line` and a
-  matching `title`. Compact user-message Markdown expands every single newline
-  outside fences (including runs of one-character lines).
-  `/` skills and `$` commands are mint-wash pills with forest green ink
-  (Cursor-style; no neon glow).
+  not bordered pills: soft teal basename ink with type-colored icons. Line
+  quotes append a muted `L12-34` range; when a snippet was captured,
+  `documentPlainText` expands to a citation fence for file-preview quotes, or
+  a mini `diff --git` patch for Diff-gutter quotes, while the
+  chip stays compact in the composer. File chips with a line range expose
+  `data-start-line` / `data-end-line` and a matching `title`. Drag-selecting
+  across chips snaps the range onto the chip under the pointer (atoms skip
+  native `::selection`) and paints `data-chip-selected` without a React
+  re-render. Hovering a file chip swaps its type icon for a remove control in
+  the same slot, so the chip keeps its width; the control drops that reference
+  from the prompt and is not a tab stop (keyboard removal stays select the chip
+  plus Backspace). `==highlight==` is a Typora yellow (`rgb(255, 255, 0)`;
+  delimiters hidden). Compact user-message Markdown expands every single
+  newline outside fences (including runs of one-character lines). `/` skills
+  and `$` commands are mint-wash pills with forest green ink (Cursor-style;
+  no neon glow).
 - Sent user messages stay `documentPlainText` in the store and render read-only
   via chat `MarkdownDocument` (`density="compact"`). Compact mode expands
-  TipTap single newlines outside fences and maps `==highlight==` to `<mark>`.
+  TipTap single newlines outside fences, maps `==highlight==` to `<mark>`, and
+  reads quote fences back into chips through `parseComposerFileQuote` so a sent
+  quote keeps the composer's compact look instead of unfolding into its source.
+  Both surfaces render the chip from `FileRefChipContent` against one unscoped
+  stylesheet (`features/file-ref-chip.css`), so the prompt box and the message
+  bubble cannot drift apart; the editor scope only adds editing behaviour
+  (drag, node selection, `user-select`).
   Future edit remounts `ComposerEditor` on that same string; history rows do
   not keep a TipTap instance.
 
