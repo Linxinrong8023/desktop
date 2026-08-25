@@ -1,3 +1,4 @@
+use crate::skill::{InstalledSkillDescriptor, validate_skill};
 use crate::webview::{InstalledWebviewDescriptor, validate_webview};
 use crate::workbench::{InstalledWorkbenchDescriptor, validate_workbench};
 use ora_domain::PluginId;
@@ -21,6 +22,7 @@ pub enum PluginContribution {
     Agent(InstalledPluginAgent),
     Workbench(InstalledWorkbenchDescriptor),
     Webview(InstalledWebviewDescriptor),
+    Skill(InstalledSkillDescriptor),
 }
 
 impl PluginContribution {
@@ -30,6 +32,7 @@ impl PluginContribution {
             Self::Agent(_) => "agent",
             Self::Workbench(_) => "workbench",
             Self::Webview(_) => "webview",
+            Self::Skill(_) => "skill",
         }
     }
 
@@ -38,7 +41,7 @@ impl PluginContribution {
         match self {
             Self::Agent(agent) => Some(&agent.entrypoint),
             Self::Workbench(workbench) => Some(&workbench.entrypoint),
-            Self::Webview(_) => None,
+            Self::Webview(_) | Self::Skill(_) => None,
         }
     }
 }
@@ -127,6 +130,7 @@ pub(crate) fn validate(
             })?;
             PluginContribution::Webview(validate_webview(package_root, webview)?)
         }
+        PluginKind::Skill => PluginContribution::Skill(validate_skill(package_root)?),
     };
 
     Ok(InstalledPlugin {

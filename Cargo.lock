@@ -3183,6 +3183,7 @@ dependencies = [
  "futures",
  "ora-domain",
  "ora-plugin-manifest",
+ "ora-skill-package",
  "ora-utils",
  "pretty_assertions",
  "semver",

@@ -2,6 +2,7 @@ use crate::app_event::AppEventPublisher;
 use crate::clock::SystemClock;
 use crate::error::{BackendError, ErrorClassification};
 use gitlancer::{BranchName, CliGitRunner, Git};
+use ora_application::Clock;
 use ora_contracts::{
     ActivatePluginRequest, ActivatePluginResponse, DisablePluginRequest, DisablePluginResponse,
     EmptyErrorParams, EnablePluginRequest, EnablePluginResponse, ImportPluginRequest,
@@ -11,15 +12,18 @@ use ora_contracts::{
     SyncAvailablePluginsRequest, SyncAvailablePluginsResponse, UninstallPluginRequest,
     UninstallPluginResponse,
 };
-use ora_db::{RepositoryPool, SqlitePluginStateRepository};
+use ora_db::{
+    PluginSkillProjection, RepositoryPool, SqlitePluginStateRepository, SqliteSkillRepository,
+};
 use ora_domain::PluginId;
+use ora_effect::Digest;
 use ora_logging::{ora_debug, ora_info, ora_warn};
 use ora_plugin_lifecycle::{
     ConnectionError, DenoPluginRuntime, DenoPluginRuntimeLauncher, InboundNotification,
     PluginGenerationKey, PluginGenerationLease, PluginLifecycle, PluginLifecycleConfig,
     PluginLifecycleError, PluginNotificationSink, PluginRuntimeTimeouts,
 };
-use ora_plugin_manager::Installer;
+use ora_plugin_manager::{Installer, PluginContribution, PluginManager};
 use ora_plugin_registry::{
     RegistryEntry, RegistryError, RegistryIndex, RegistrySource, RegistrySync,
 };
@@ -159,6 +163,8 @@ pub(crate) struct PluginApi {
     data_directory: PathBuf,
     installer: Installer<ReqwestDownloader>,
     notifications: BroadcastNotificationSink,
+    skill_repository: SqliteSkillRepository,
+    clock: SystemClock,
 }
 
 impl PluginApi {
@@ -188,7 +194,7 @@ impl PluginApi {
                 data_directory: data_directory.clone(),
                 deno_path,
             },
-            SqlitePluginStateRepository::new(pool),
+            SqlitePluginStateRepository::new(pool.clone()),
             clock,
             DenoPluginRuntimeLauncher::new(PluginRuntimeTimeouts::default()),
             publisher,
@@ -202,9 +208,21 @@ impl PluginApi {
             data_directory,
             installer,
             notifications,
+            skill_repository: SqliteSkillRepository::new(pool),
+            clock,
         })
     }
 
+    /// Rebuilds catalog projections for every Skill plugin already installed on disk.
+    pub(crate) fn sync_installed_skills(&self) -> Result<(), BackendError> {
+        let manager = PluginManager::discover(&self.data_directory);
+        for plugin in manager.installed_plugins() {
+            if matches!(plugin.contributes, PluginContribution::Skill(_)) {
+                self.persist_discovered_plugin_skills(plugin)?;
+            }
+        }
+        Ok(())
+    }
     /// Returns the cached marketplace registry index, or an empty catalog when absent.
     pub(crate) fn list_available_plugins(
         &self,
@@ -336,8 +354,15 @@ impl PluginApi {
     pub(crate) async fn uninstall(
         &self,
         request: UninstallPluginRequest,
-    ) -> Result<UninstallPluginResponse, PluginLifecycleError> {
-        self.lifecycle.uninstall_plugin(request).await
+    ) -> Result<UninstallPluginResponse, BackendError> {
+        let plugin_id = request.plugin_id.clone();
+        let response = self.lifecycle.uninstall_plugin(request).await?;
+        let plugin_id = PluginId::parse(&plugin_id)
+            .map_err(|error| BackendError::internal("uninstalled plugin id is invalid", error))?;
+        self.skill_repository
+            .remove_plugin_skills(&plugin_id, self.clock.now_timestamp_millis())
+            .map_err(|error| BackendError::internal("failed to remove plugin Skills", error))?;
+        Ok(response)
     }
     /// Installs a marketplace plugin by resolving its release manifest from the synced source and
     /// downloading, verifying, and extracting its package through the network-backed installer.
@@ -387,7 +412,7 @@ impl PluginApi {
             )
             .await
             .map_err(|error| BackendError::internal("failed to install plugin", error))?;
-        self.finalize_new_install(&request.plugin_id).await;
+        self.finalize_new_install(&request.plugin_id).await?;
         ora_info!(plugin_id = %request.plugin_id, "installed marketplace plugin");
         Ok(InstallPluginResponse {
             plugin_id: request.plugin_id,
@@ -413,7 +438,7 @@ impl PluginApi {
         .await
         .map_err(|error| BackendError::internal("failed to join plugin import task", error))?
         .map_err(|error| BackendError::internal("failed to import plugin archive", error))?;
-        self.finalize_new_install(&package.id).await;
+        self.finalize_new_install(&package.id).await?;
         ora_info!(plugin_id = %package.id, "imported plugin release from local archive");
         Ok(ImportPluginResponse {
             plugin_id: package.id,
@@ -427,7 +452,8 @@ impl PluginApi {
     /// new package to appear in the installed list without restarting the backend. Enabling is a
     /// best-effort follow-up: a package that fails to launch still reports its failure through the
     /// lifecycle runtime instead of failing the install.
-    async fn finalize_new_install(&self, plugin_id: &str) {
+    async fn finalize_new_install(&self, plugin_id: &str) -> Result<(), BackendError> {
+        self.sync_plugin_skills(plugin_id)?;
         if let Err(error) = self.lifecycle.scan_plugins(ScanPluginsRequest {}).await {
             ora_warn!(plugin_id = %plugin_id, %error, "installed the package but failed to refresh the installed-plugin snapshot");
         }
@@ -440,6 +466,65 @@ impl PluginApi {
         {
             ora_warn!(plugin_id = %plugin_id, %error, "installed plugin could not be enabled by default");
         }
+        Ok(())
+    }
+
+    /// Projects validated static Skill metadata into the shared catalog and Effect source tables.
+    fn sync_plugin_skills(&self, plugin_id: &str) -> Result<(), BackendError> {
+        let manager = PluginManager::discover(&self.data_directory);
+        let plugin = manager
+            .installed_plugins()
+            .iter()
+            .find(|plugin| plugin.id.canonical() == plugin_id)
+            .ok_or_else(|| {
+                BackendError::internal(
+                    "installed plugin was not discoverable for Skill synchronization",
+                    std::io::Error::new(std::io::ErrorKind::NotFound, plugin_id.to_string()),
+                )
+            })?;
+        self.persist_discovered_plugin_skills(plugin)
+    }
+
+    /// Persists one already-discovered Skill plugin without exposing package layout to callers.
+    fn persist_discovered_plugin_skills(
+        &self,
+        plugin: &ora_plugin_manager::InstalledPlugin,
+    ) -> Result<(), BackendError> {
+        let PluginContribution::Skill(descriptor) = &plugin.contributes else {
+            self.skill_repository
+                .remove_plugin_skills(&plugin.id, self.clock.now_timestamp_millis())
+                .map_err(|error| {
+                    BackendError::internal("failed to clear stale plugin Skills", error)
+                })?;
+            return Ok(());
+        };
+        let mut projections = Vec::with_capacity(descriptor.skills.len());
+        for skill in &descriptor.skills {
+            let manifest_path = skill.package_root.join("SKILL.md");
+            let manifest = std::fs::read(&manifest_path).map_err(|error| {
+                BackendError::internal(
+                    "failed to read validated plugin Skill manifest",
+                    std::io::Error::new(
+                        error.kind(),
+                        format!("{}: {error}", manifest_path.display()),
+                    ),
+                )
+            })?;
+            projections.push(PluginSkillProjection {
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                package_root: skill.package_root.clone(),
+                skill_md_digest: Digest::sha256(&manifest).to_string(),
+            });
+        }
+        self.skill_repository
+            .replace_plugin_skills(
+                &plugin.id,
+                &plugin.version.to_string(),
+                &projections,
+                self.clock.now_timestamp_millis(),
+            )
+            .map_err(|error| BackendError::internal("failed to persist plugin Skills", error))
     }
 }
 

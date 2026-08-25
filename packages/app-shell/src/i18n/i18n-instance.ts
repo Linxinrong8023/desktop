@@ -688,6 +688,7 @@ export const translationResources = {
     "settings.skills.deleteDescription":
       "该技能将从可用命令中移除，此操作无法撤销。",
     "settings.skills.unavailable": "不可用",
+    "settings.skills.pluginDisabled": "已禁用",
     "settings.skills.unavailableTitle": "“{{name}}”的技能包已丢失",
     "settings.skills.unavailableDescription":
       "这个技能还在列表里，但本地文件找不到了。请删除，或重新上传同名技能包。",
@@ -2158,6 +2159,7 @@ export const translationResources = {
     "settings.skills.deleteDescription":
       "This skill will be removed from available commands. This cannot be undone.",
     "settings.skills.unavailable": "Unavailable",
+    "settings.skills.pluginDisabled": "Disabled",
     "settings.skills.unavailableTitle":
       "The “{{name}}” skill package is missing",
     "settings.skills.unavailableDescription":

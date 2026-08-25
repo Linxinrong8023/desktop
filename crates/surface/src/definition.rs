@@ -82,7 +82,7 @@ impl SurfaceDefinition {
     /// truth and this is a pure type transfer.
     pub fn from_installed(plugin: &InstalledPlugin) -> Option<Self> {
         let source = match &plugin.contributes {
-            PluginContribution::Agent(_) => return None,
+            PluginContribution::Agent(_) | PluginContribution::Skill(_) => return None,
             PluginContribution::Workbench(descriptor) => {
                 SurfaceSource::Workbench(WorkbenchDefinition {
                     asset_root: descriptor.asset_root.clone(),
@@ -157,7 +157,7 @@ mod tests {
     }
 
     /// A webview plugin becomes a singleton remote-site definition, a workbench plugin a
-    /// multi-instance page definition, and an agent none at all.
+    /// multi-instance page definition, and agents and skills none at all.
     #[test]
     fn maps_installed_contributions_to_definitions() {
         let webview = installed(
@@ -184,6 +184,7 @@ mod tests {
                 entrypoint: PortableRelativePath::parse("main.js").expect("entrypoint"),
             }),
         );
+        let skill = installed("acme.skill", PluginContribution::Skill(Default::default()));
 
         let webview_definition = SurfaceDefinition::from_installed(&webview);
         let workbench_definition = SurfaceDefinition::from_installed(&workbench);
@@ -199,6 +200,7 @@ mod tests {
                     .as_ref()
                     .map(SurfaceDefinition::instance_policy),
                 SurfaceDefinition::from_installed(&agent),
+                SurfaceDefinition::from_installed(&skill),
             ),
             (
                 Some(SurfaceDefinition {
@@ -216,6 +218,7 @@ mod tests {
                 Some(InstancePolicy::Singleton),
                 Some(SurfaceKind::Workbench),
                 Some(InstancePolicy::Multiple),
+                None,
                 None,
             )
         );
