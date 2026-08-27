@@ -36,8 +36,6 @@ pub enum DatabaseError {
     CorruptEffectState(String),
     #[error("workflow run execution context is incomplete")]
     IncompleteWorkflowRunContext,
-    #[error("user configuration value for `{key}` is corrupt")]
-    CorruptUserConfigValue { key: &'static str },
     #[error("migration versions must be unique, found duplicate version `{0}`")]
     DuplicateMigrationVersion(String),
     #[error("migration versions must be strictly increasing, found `{current}` after `{previous}`")]

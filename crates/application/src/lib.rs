@@ -54,9 +54,7 @@ pub use task::{
     workspace_branch_prefix,
 };
 pub use task::{PROVISIONING_LEASE_DURATION_MS, ProvisioningLeaseRenewal, TaskWorkspaceCommit};
-pub use user_config::{
-    DeveloperMode, NetworkProxySettings, UserConfigRepository, UserConfigService,
-};
+pub use user_config::{DeveloperMode, NetworkProxySettings, UserConfigService};
 pub use workflow::{
     ActivateVersionResult, ActivateWorkflowHandler, CreateWorkflowHandler, DeleteSnapshotHandler,
     DeleteSnapshotResult, DeleteWorkflowHandler, DeleteWorkflowResult, GetDraftHandler,

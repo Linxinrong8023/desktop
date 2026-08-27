@@ -26,6 +26,7 @@ members = [
     "crates/surface",
     "crates/test-support",
     "crates/utils",
+    "crates/user-config",
     "xtask",
 ]
 default-members = [
@@ -53,6 +54,7 @@ default-members = [
     "crates/surface",
     "crates/test-support",
     "crates/utils",
+    "crates/user-config",
     "xtask",
 ]
 resolver = "2"
@@ -92,6 +94,7 @@ ora-skill-package = { path = "crates/skill-package" }
 ora-surface = { path = "crates/surface" }
 ora-test-support = { path = "crates/test-support" }
 ora-utils = { path = "crates/utils" }
+ora-user-config = { path = "crates/user-config" }
 
 # External
 agent-client-protocol-schema = "=1.6.0"

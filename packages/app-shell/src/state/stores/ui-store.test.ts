@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import {
-  useUiStore,
-  UI_STORAGE_KEY,
-  DEFAULT_DASHBOARD_WIDTH,
-} from "./ui-store";
+import { useUiStore, UI_STORAGE_KEY } from "./ui-store";
 import { flushDebouncedPersistStorage } from "./debounced-json-storage";
 import type { Session } from "@ora/contracts";
 
@@ -14,9 +10,6 @@ beforeEach(() => {
     sidebarCollapsed: false,
     settingsOpen: false,
     workflowEditorOpen: false,
-    dashboardOpen: false,
-    dashboardMode: "trace",
-    dashboardWidth: DEFAULT_DASHBOARD_WIDTH,
     expandedProjects: new Set<string>(),
     expandedTasks: new Set<string>(),
     treeExpansionBootstrapped: false,
@@ -41,7 +34,6 @@ describe("useUiStore", () => {
     useUiStore.getState().setSettingsOpen(true);
     expect(useUiStore.getState().settingsOpen).toBe(true);
   });
-
   it("toggles the workflow editor without persisting it", () => {
     useUiStore.getState().setWorkflowEditorOpen(true);
     expect(useUiStore.getState().workflowEditorOpen).toBe(true);
@@ -123,7 +115,6 @@ describe("useUiStore", () => {
 
   it("persists layout preferences to localStorage under the v1 key", () => {
     useUiStore.getState().setSidebarCollapsed(true);
-    useUiStore.getState().setDashboardWidth(640);
     useUiStore.getState().toggleProjectExpand("p1");
     useUiStore.getState().toggleTaskExpand("t1");
     useUiStore.getState().bootstrapTreeExpansion([], []);
@@ -134,7 +125,6 @@ describe("useUiStore", () => {
     const parsed = JSON.parse(raw!) as {
       state: {
         sidebarCollapsed: boolean;
-        dashboardWidth: number;
         expandedProjects: string[];
         expandedTasks: string[];
         treeExpansionBootstrapped: boolean;
@@ -142,7 +132,6 @@ describe("useUiStore", () => {
     };
     expect(parsed.state).toEqual({
       sidebarCollapsed: true,
-      dashboardWidth: 640,
       expandedProjects: ["p1"],
       expandedTasks: ["t1"],
       treeExpansionBootstrapped: true,
@@ -158,7 +147,6 @@ describe("useUiStore", () => {
       JSON.stringify({
         state: {
           sidebarCollapsed: true,
-          dashboardWidth: 900,
           expandedProjects: ["p1", "p2"],
           expandedTasks: ["t1"],
           treeExpansionBootstrapped: true,
@@ -168,7 +156,6 @@ describe("useUiStore", () => {
     );
     await useUiStore.persist.rehydrate();
     expect(useUiStore.getState().sidebarCollapsed).toBe(true);
-    expect(useUiStore.getState().dashboardWidth).toBe(900);
     expect(useUiStore.getState().expandedProjects).toEqual(
       new Set(["p1", "p2"]),
     );
@@ -182,7 +169,6 @@ describe("useUiStore", () => {
       JSON.stringify({
         state: {
           sidebarCollapsed: false,
-          dashboardWidth: DEFAULT_DASHBOARD_WIDTH,
           expandedProjects: ["p1"],
           expandedTasks: [],
           treeExpansionBootstrapped: true,
@@ -192,9 +178,6 @@ describe("useUiStore", () => {
     );
     useUiStore.setState({
       sidebarCollapsed: false,
-      dashboardOpen: false,
-      dashboardMode: "trace",
-      dashboardWidth: DEFAULT_DASHBOARD_WIDTH,
       expandedProjects: new Set(["p1"]),
       expandedTasks: new Set(),
       treeExpansionBootstrapped: true,
@@ -211,13 +194,12 @@ describe("useUiStore", () => {
     expect(useUiStore.getState().expandedProjects).toEqual(new Set());
   });
 
-  it("clamps corrupt dashboard widths and drops non-string expand ids", async () => {
+  it("drops corrupt non-string expand ids", async () => {
     window.localStorage.setItem(
       UI_STORAGE_KEY,
       JSON.stringify({
         state: {
           sidebarCollapsed: "yes",
-          dashboardWidth: 99999,
           expandedProjects: ["p1", 42, null, ""],
           expandedTasks: "t1",
           treeExpansionBootstrapped: 1,
@@ -227,7 +209,6 @@ describe("useUiStore", () => {
     );
     await useUiStore.persist.rehydrate();
     expect(useUiStore.getState().sidebarCollapsed).toBe(false);
-    expect(useUiStore.getState().dashboardWidth).toBe(1400);
     expect(useUiStore.getState().expandedProjects).toEqual(new Set(["p1"]));
     expect(useUiStore.getState().expandedTasks).toEqual(new Set());
     expect(useUiStore.getState().treeExpansionBootstrapped).toBe(false);
@@ -238,7 +219,6 @@ describe("useUiStore", () => {
     await useUiStore.persist.rehydrate();
     expect(useUiStore.persist.hasHydrated()).toBe(true);
     expect(useUiStore.getState().sidebarCollapsed).toBe(false);
-    expect(useUiStore.getState().dashboardWidth).toBe(DEFAULT_DASHBOARD_WIDTH);
     expect(useUiStore.getState().expandedProjects).toEqual(new Set());
     expect(useUiStore.getState().expandedTasks).toEqual(new Set());
     expect(useUiStore.getState().treeExpansionBootstrapped).toBe(false);

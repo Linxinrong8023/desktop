@@ -25,7 +25,7 @@ mod user_config;
 mod workflow;
 mod workspace_diff;
 
-pub use agent_runtime::{SessionEventStream, SessionLocator};
+pub use agent_runtime::SessionEventStream;
 pub use app_event::AppEventHub;
 pub use bootstrap::{Backend, BackendBootstrapError, BackendPaths};
 pub use error::{BackendError, ErrorClassification};

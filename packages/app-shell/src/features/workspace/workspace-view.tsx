@@ -6,10 +6,8 @@ import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import {
   IconBrandGit,
-  IconChartBar,
   IconFolder,
   IconGitBranch,
-  IconLayoutDashboard,
   IconLayoutSidebarLeftExpand,
   IconPlayerPlay,
 } from "@tabler/icons-react";
@@ -166,8 +164,6 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
   // the one the composer and model picker are actually pointing at — a stale
   // read would warm a different agent than what is on screen.
   const targetAgentCli = useTargetAgentCli(selection);
-  const openDashboardPanel = useUiStore((s) => s.openDashboardPanel);
-
   const chatStore = useChatStore();
   useWorkspaceDiffLiveSync(chatStore, sessions);
   const client = useContractsClient();
@@ -667,24 +663,6 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
           </DragRegion>
           <LocationActionsButton workspaceId={selectedWorkspaceId} />
           <SurfaceLauncher />
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => openDashboardPanel("trace")}
-            aria-label={t("dashboard.open")}
-            title={t("dashboard.open")}
-          >
-            <IconLayoutDashboard />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => openDashboardPanel("compare")}
-            aria-label={t("dashboard.openCompare")}
-            title={t("dashboard.openCompare")}
-          >
-            <IconChartBar />
-          </Button>
           <WindowControls />
         </div>
         <SessionAgentBanner session={session} />

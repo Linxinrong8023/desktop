@@ -1,7 +1,5 @@
 use crate::agent::AgentApi;
-use crate::agent_runtime::{
-    AgentRuntimeManager, AgentRuntimeSetup, SessionEventStream, SessionLocator,
-};
+use crate::agent_runtime::{AgentRuntimeManager, AgentRuntimeSetup, SessionEventStream};
 use crate::app_event::AppEventHub;
 use crate::clock::SystemClock;
 use crate::error::{BackendError, ErrorClassification};
@@ -68,6 +66,10 @@ pub enum BackendBootstrapError {
     },
     #[error("failed to bootstrap backend database")]
     Database(#[source] ora_db::DatabaseError),
+    #[error("persisted worktree root is invalid: {path:?}")]
+    InvalidWorktreeRoot { path: PathBuf },
+    #[error("failed to load persisted user configuration")]
+    UserConfig(#[source] BackendError),
     #[error("failed to initialize plugin lifecycle")]
     PluginLifecycle(#[source] ora_plugin_lifecycle::PluginLifecycleError),
     #[error("failed to initialize plugin management")]
@@ -127,11 +129,26 @@ impl Backend {
                 .parent()
                 .unwrap_or_else(|| Path::new(".")),
         )?;
-        ensure_directory(&paths.worktree_root)?;
         let catalog = default_migration_catalog().map_err(BackendBootstrapError::Database)?;
         let pool = DatabaseBootstrapper::system()
             .bootstrap_repository_pool(&DatabaseLocation::path(&paths.database_path), &catalog)
             .map_err(BackendBootstrapError::Database)?;
+        let user_config = Arc::new(UserConfigApi::new(pool.clone()));
+        let stored_worktree_root = user_config
+            .worktree_root()
+            .map_err(BackendBootstrapError::UserConfig)?;
+        let configured_worktree_root = match stored_worktree_root {
+            Some(root) => {
+                if !root.is_absolute() || !root.is_dir() {
+                    return Err(BackendBootstrapError::InvalidWorktreeRoot { path: root });
+                }
+                root
+            }
+            None => {
+                ensure_directory(&paths.worktree_root)?;
+                paths.worktree_root
+            }
+        };
         crate::skill_reconciliation::reconcile_skill_storage(&pool, &paths.skills_root)
             .map_err(BackendBootstrapError::SkillStorageReconciliation)?;
         crate::skill_reconciliation::cleanup_import_temp_sessions()
@@ -154,7 +171,7 @@ impl Backend {
             .sync_installed_skills()
             .map_err(BackendBootstrapError::PluginSkillCatalog)?;
         let scheduler = Scheduler::new(paths.timezone);
-        let worktree_root = Arc::new(RwLock::new(paths.worktree_root));
+        let worktree_root = Arc::new(RwLock::new(configured_worktree_root));
         let sessions_root = paths.sessions_root;
         // Side files holding the worktree baseline an interactive node diffs at completion.
         let baselines_root = sessions_root.join("node-baselines");
@@ -693,8 +710,42 @@ impl Backend {
         BackendPreferredLogLevelStore::new(self.user_config.clone())
     }
 
-    /// Replaces the root used by task creations that start after this update.
+    /// Returns the worktree root row, preserving absence for first-run migration.
+    pub fn persisted_worktree_root(&self) -> Result<Option<PathBuf>, BackendError> {
+        self.user_config.worktree_root()
+    }
+
+    /// Returns the active root used for new task worktrees.
+    pub fn worktree_root(&self) -> Result<PathBuf, BackendError> {
+        self.worktree_root
+            .read()
+            .map(|root| root.clone())
+            .map_err(|_poisoned| {
+                BackendError::new(
+                    ErrorClassification::Internal,
+                    PublicError::InternalError(EmptyErrorParams {}),
+                    "worktree root configuration is unavailable",
+                )
+            })
+    }
+
+    /// Validates and persists the root before publishing it to future task creations.
     pub fn set_worktree_root(&self, worktree_root: PathBuf) -> Result<(), BackendError> {
+        if !worktree_root.is_absolute() {
+            return Err(BackendError::new(
+                ErrorClassification::InvalidRequest,
+                PublicError::WorktreeRootNotAbsolute(EmptyErrorParams {}),
+                "worktree root must be an absolute path",
+            ));
+        }
+        if !worktree_root.is_dir() {
+            return Err(BackendError::new(
+                ErrorClassification::InvalidRequest,
+                PublicError::WorktreeRootNotDirectory(EmptyErrorParams {}),
+                "worktree root must be an existing directory",
+            ));
+        }
+        self.user_config.set_worktree_root(&worktree_root)?;
         let mut configured_root = self.worktree_root.write().map_err(|_poisoned| {
             BackendError::new(
                 ErrorClassification::Internal,
@@ -1149,17 +1200,6 @@ impl Backend {
         request: ListAgentModelsRequest,
     ) -> Result<ListAgentModelsResponse, BackendError> {
         self.agent_runtime.agent_models(request)
-    }
-
-    /// Resolves one Ora session id to its private agent session identifier and worktree cwd.
-    ///
-    /// Backend-only: the returned `agent_session_id` is never exposed to the frontend. The
-    /// Desktop dashboard command consumes it to locate the agent-written trace file.
-    pub fn resolve_session_locator(
-        &self,
-        session_id: &str,
-    ) -> Result<SessionLocator, BackendError> {
-        self.agent_runtime.resolve_session_locator(session_id)
     }
 
     // =============================================================================

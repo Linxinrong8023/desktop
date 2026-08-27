@@ -23,11 +23,6 @@ import { SurfaceDownloadPrompt } from "./features/surface/surface-download-promp
 import { SurfaceDownloadToaster } from "./features/surface/surface-download-toaster";
 import { SurfaceEventBridge } from "./features/surface/surface-event-bridge";
 import { useEmbeddedSurfaceVisible } from "./features/surface/surface-occlusion";
-import { TraceDashboardPanel } from "./features/trace-dashboard/trace-dashboard-panel";
-import type {
-  DashboardCompareResolver,
-  DashboardResolver,
-} from "./features/trace-dashboard/types";
 import { AppI18nProvider } from "./i18n/i18n";
 import type { CurrentUser } from "./lib/types";
 import { createAppQueryClient } from "./state/query-client";
@@ -48,10 +43,6 @@ interface AppShellProps {
   user?: CurrentUser;
   /** Runtime adapter; hosts will inject the generated-contract adapter once available. */
   workflowRuntime?: WorkflowRuntime;
-  /** Desktop-injected resolver for the trace dashboard iframe URL; null when absent. */
-  resolveDashboardUrl?: DashboardResolver | null;
-  /** Desktop-injected resolver for the standalone token-comparison dashboard. */
-  resolveDashboardCompareUrl?: DashboardCompareResolver | null;
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 320;
@@ -66,8 +57,6 @@ export function AppShell({
   platform,
   user,
   workflowRuntime,
-  resolveDashboardUrl = null,
-  resolveDashboardCompareUrl = null,
 }: AppShellProps) {
   // One client per shell instance so HMR or multiple mounted shells never share cache.
   const [queryClient] = useState(() => createAppQueryClient());
@@ -81,8 +70,6 @@ export function AppShell({
               chatStore={chatStore}
               platform={platform}
               user={user}
-              resolveDashboardUrl={resolveDashboardUrl}
-              resolveDashboardCompareUrl={resolveDashboardCompareUrl}
             />
           </WorkflowRuntimeProvider>
         </AppEventGate>
@@ -97,8 +84,6 @@ function AppShellContent({
   chatStore,
   platform,
   user: injectedUser,
-  resolveDashboardUrl,
-  resolveDashboardCompareUrl,
 }: AppShellProps) {
   // Mirror theme/density onto <html> for the shell's lifetime.
   useEffect(() => startThemeSubscription(), []);
@@ -214,10 +199,6 @@ function AppShellContent({
               <SurfaceEventBridge />
               <SurfaceDownloadToaster />
               <SurfaceDownloadPrompt />
-              <TraceDashboardPanel
-                resolveDashboardUrl={resolveDashboardUrl ?? null}
-                resolveDashboardCompareUrl={resolveDashboardCompareUrl ?? null}
-              />
               {/* Mounted here, not in the sidebar, so collapsing the sidebar does
                   not take the workspace dialogs down with it. */}
               <WorkspaceDialogs />

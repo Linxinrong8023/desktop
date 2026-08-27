@@ -2950,6 +2950,7 @@ dependencies = [
  "ora-logging",
  "ora-skill-package",
  "ora-test-support",
+ "ora-user-config",
  "ora-utils",
  "petgraph",
  "pretty_assertions",
@@ -2992,6 +2993,7 @@ dependencies = [
  "ora-scheduler",
  "ora-skill-package",
  "ora-test-support",
+ "ora-user-config",
  "ora-utils",
  "pretty_assertions",
  "serde",
@@ -3032,6 +3034,7 @@ dependencies = [
  "ora-effect",
  "ora-logging",
  "ora-skill-package",
+ "ora-user-config",
  "pretty_assertions",
  "r2d2",
  "rusqlite",
@@ -3346,6 +3349,16 @@ version = "0.0.0"
 dependencies = [
  "pretty_assertions",
  "tempfile",
+]
+
+[[package]]
+name = "ora-user-config"
+version = "0.0.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

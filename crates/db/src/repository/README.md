@@ -27,8 +27,8 @@ These transactions mutate Ora-owned database state only. They never invoke Git, 
 
 SQL details remain internal to this module; lifecycle policy and public error mapping belong to `ora-application` and `ora-backend`.
 
-`SqliteUserConfigRepository` owns the raw `developer_mode`, `log_level`, and
-`network_proxy_settings` key/value encodings. Missing rows remain absent and resolve through typed defaults; malformed values fail explicitly, and per-key upserts preserve unrelated preferences.
+`SqliteUserConfigRepository` implements the generic raw key/value operations from
+`ora-user-config`. Missing rows remain absent, per-key upserts preserve unrelated preferences, and typed defaults, JSON encoding, and malformed-value handling stay in their owning application or Backend layer.
 
 Repository failures preserve their concrete SQLite errors behind application-owned source-chain wrappers. Skill package promotion and compensation are outside this module, so SQLite never coordinates source copies or filesystem renames. This module does not stringify or log failures that the outer request lifecycle will complete.
 

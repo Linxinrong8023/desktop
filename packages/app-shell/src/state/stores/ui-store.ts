@@ -28,24 +28,13 @@ export type DeleteTarget =
   | { kind: "session"; id: string; name: string }
   | { kind: "workflowRun"; id: string; name: string; projectId: string };
 
-export type DashboardPanelMode = "trace" | "compare";
-
 export const UI_STORAGE_KEY = "ora.ui.v1";
-
-/** Matches the trace dashboard panel's drag clamp so disk values stay usable. */
-export const DEFAULT_DASHBOARD_WIDTH = 800;
-const MIN_DASHBOARD_WIDTH = 420;
-const MAX_DASHBOARD_WIDTH = 1400;
 
 interface UiState {
   sidebarCollapsed: boolean;
   settingsOpen: boolean;
   /** First-class workflow definition editor; session-only, not persisted. */
   workflowEditorOpen: boolean;
-  dashboardOpen: boolean;
-  dashboardMode: DashboardPanelMode;
-  /** Resizable dashboard panel width in px; clamped to a sane min/max by the panel. */
-  dashboardWidth: number;
   expandedProjects: Set<string>;
   expandedTasks: Set<string>;
   /**
@@ -58,9 +47,6 @@ interface UiState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setWorkflowEditorOpen: (open: boolean) => void;
-  setDashboardOpen: (open: boolean) => void;
-  openDashboardPanel: (mode: DashboardPanelMode) => void;
-  setDashboardWidth: (width: number) => void;
   toggleProjectExpand: (projectId: string) => void;
   toggleTaskExpand: (taskId: string) => void;
   /** Expands a project without toggling it closed (used after mutations select a child). */
@@ -90,7 +76,6 @@ interface UiState {
 /** Disk shape for the UI slice — Sets become string arrays for JSON. */
 interface UiPersistSlice {
   sidebarCollapsed?: unknown;
-  dashboardWidth?: unknown;
   expandedProjects?: unknown;
   expandedTasks?: unknown;
   treeExpansionBootstrapped?: unknown;
@@ -99,7 +84,6 @@ interface UiPersistSlice {
 /** Layout fields restored from disk (or defaults when missing/corrupt). */
 export interface UiPersistFields {
   sidebarCollapsed: boolean;
-  dashboardWidth: number;
   expandedProjects: Set<string>;
   expandedTasks: Set<string>;
   treeExpansionBootstrapped: boolean;
@@ -113,17 +97,6 @@ function sanitizeIdSet(value: unknown): Set<string> {
   );
 }
 
-/** Clamps a persisted dashboard width into the panel's live drag range. */
-function sanitizeDashboardWidth(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_DASHBOARD_WIDTH;
-  }
-  return Math.min(
-    MAX_DASHBOARD_WIDTH,
-    Math.max(MIN_DASHBOARD_WIDTH, Math.round(value)),
-  );
-}
-
 /** Maps an untrusted persist slice onto the layout fields the store owns. */
 export function sanitizeUiPersistSlice(
   slice: UiPersistSlice | undefined,
@@ -131,7 +104,6 @@ export function sanitizeUiPersistSlice(
   if (slice === undefined) {
     return {
       sidebarCollapsed: false,
-      dashboardWidth: DEFAULT_DASHBOARD_WIDTH,
       expandedProjects: new Set(),
       expandedTasks: new Set(),
       treeExpansionBootstrapped: false,
@@ -139,7 +111,6 @@ export function sanitizeUiPersistSlice(
   }
   return {
     sidebarCollapsed: slice.sidebarCollapsed === true,
-    dashboardWidth: sanitizeDashboardWidth(slice.dashboardWidth),
     expandedProjects: sanitizeIdSet(slice.expandedProjects),
     expandedTasks: sanitizeIdSet(slice.expandedTasks),
     treeExpansionBootstrapped: slice.treeExpansionBootstrapped === true,
@@ -179,9 +150,6 @@ export const useUiStore = create<UiState>()(
       sidebarCollapsed: initialPersist.sidebarCollapsed,
       settingsOpen: false,
       workflowEditorOpen: false,
-      dashboardOpen: false,
-      dashboardMode: "trace",
-      dashboardWidth: initialPersist.dashboardWidth,
       expandedProjects: initialPersist.expandedProjects,
       expandedTasks: initialPersist.expandedTasks,
       treeExpansionBootstrapped: initialPersist.treeExpansionBootstrapped,
@@ -191,11 +159,6 @@ export const useUiStore = create<UiState>()(
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setWorkflowEditorOpen: (workflowEditorOpen) =>
         set({ workflowEditorOpen }),
-      setDashboardOpen: (dashboardOpen) => set({ dashboardOpen }),
-      openDashboardPanel: (dashboardMode) =>
-        set({ dashboardMode, dashboardOpen: true }),
-      setDashboardWidth: (dashboardWidth) =>
-        set({ dashboardWidth: sanitizeDashboardWidth(dashboardWidth) }),
       toggleProjectExpand: (projectId) =>
         set((state) => {
           const next = new Set(state.expandedProjects);
@@ -264,7 +227,6 @@ export const useUiStore = create<UiState>()(
       storage: createDebouncedJSONStorage(),
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
-        dashboardWidth: state.dashboardWidth,
         expandedProjects: [...state.expandedProjects],
         expandedTasks: [...state.expandedTasks],
         treeExpansionBootstrapped: state.treeExpansionBootstrapped,
@@ -291,10 +253,6 @@ export const useUiStore = create<UiState>()(
             current.sidebarCollapsed !== initialPersist.sidebarCollapsed
               ? current.sidebarCollapsed
               : restored.sidebarCollapsed,
-          dashboardWidth:
-            current.dashboardWidth !== initialPersist.dashboardWidth
-              ? current.dashboardWidth
-              : restored.dashboardWidth,
         };
       },
     },
