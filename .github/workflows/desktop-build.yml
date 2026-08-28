@@ -6,7 +6,8 @@
 #   `tag` to also create a draft GitHub Release.
 # - push of a `v*` tag: equivalent to release=true with the pushed tag.
 #
-# Bundle targets come from tauri.conf.json (`dmg`, `nsis`, `appimage`, `deb`);
+# Bundle targets come from tauri.conf.json (`dmg`, `app`, `nsis`, `appimage`,
+# `deb`);
 # on each OS the Tauri bundler only produces the targets valid for that
 # platform. All three platforms build the same commit in parallel and the
 # release job collects every artifact into a single draft Release.
