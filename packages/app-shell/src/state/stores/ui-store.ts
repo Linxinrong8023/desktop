@@ -12,6 +12,7 @@ export type DialogState =
       kind: "runWorkflow";
       projectId: string;
       workspaceId: string;
+      taskId?: string;
       workflowId: string;
       workflowName: string;
     };

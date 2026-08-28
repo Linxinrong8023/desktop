@@ -74,6 +74,7 @@ export function WorkspaceDialogs() {
             ? {
                 projectId: runWorkflowDialog.projectId,
                 workspaceId: runWorkflowDialog.workspaceId,
+                taskId: runWorkflowDialog.taskId,
               }
             : null
         }

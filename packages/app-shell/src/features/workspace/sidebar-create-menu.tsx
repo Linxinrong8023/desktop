@@ -23,6 +23,8 @@ interface SidebarCreateMenuProps {
   projectId: string;
   /** Exact Workspace that owns chats and workflow execution created from this row. */
   workspaceId: string | null;
+  /** Task row owning the workspace, when this menu is rendered under a task. */
+  taskId?: string;
   scope: "project" | "task";
   onNewTask: () => void;
 }
@@ -40,6 +42,7 @@ const ITEM_CLASS =
 export function SidebarCreateMenu({
   projectId,
   workspaceId,
+  taskId,
   scope,
   onNewTask,
 }: SidebarCreateMenuProps) {
@@ -252,6 +255,7 @@ export function SidebarCreateMenu({
                       kind: "runWorkflow",
                       projectId,
                       workspaceId,
+                      ...(taskId !== undefined ? { taskId } : {}),
                       workflowId: workflow.id,
                       workflowName: workflow.name,
                     });

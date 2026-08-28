@@ -765,7 +765,7 @@ describe("WorkspaceSidebar", () => {
         snapshotId: "snap1",
         name: "Review bot",
         status: "pending",
-        workspaceId: "workspace-wt1",
+        workspaceId: "workspace-p1",
         createdAt: 0n,
         updatedAt: 0n,
       },
@@ -779,6 +779,43 @@ describe("WorkspaceSidebar", () => {
     expect(
       within(runRow).getByRole("button", { name: /归档|Archive/ }),
     ).not.toBeNull();
+  });
+
+  it("places task workflow runs under the owning task", async () => {
+    const state = workspaceWithOneSession();
+    state.workflowRuns = [
+      {
+        id: "run-task",
+        projectId: PROJECT.id,
+        workflowId: "wf-task",
+        snapshotId: "snap-task",
+        name: "Task workflow",
+        status: "pending",
+        workspaceId: TASK.workspaceId,
+        createdAt: 0n,
+        updatedAt: 0n,
+      },
+      {
+        id: "run-project",
+        projectId: PROJECT.id,
+        workflowId: "wf-project",
+        snapshotId: "snap-project",
+        name: "Project workflow",
+        status: "pending",
+        workspaceId: "workspace-p1",
+        createdAt: 0n,
+        updatedAt: 0n,
+      },
+    ];
+    renderSidebar(state);
+
+    await waitFor(() => {
+      expect(treeRow("Task workflow")).not.toBeNull();
+      expect(treeRow("Project workflow")).not.toBeNull();
+    });
+
+    expect(treeRow("Task workflow")!.style.paddingLeft).toBe("44px");
+    expect(treeRow("Project workflow")!.style.paddingLeft).toBe("26px");
   });
 
   it("opens delete confirmation from the session context menu", async () => {
@@ -865,6 +902,7 @@ describe("WorkspaceSidebar", () => {
       kind: "runWorkflow",
       projectId: PROJECT.id,
       workspaceId: TASK.workspaceId,
+      taskId: TASK.id,
       workflowId: "wf1",
       workflowName: "Task review",
     });

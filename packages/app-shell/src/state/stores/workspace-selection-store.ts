@@ -69,8 +69,12 @@ interface WorkspaceSelectionState {
     taskId: string | null,
     projectId: string,
   ) => void;
-  /** Selects a graph workflow run under a project (clears task/session). */
-  selectWorkflowRun: (workflowRunId: string, projectId: string) => void;
+  /** Selects a graph workflow run under its project and optional task workspace. */
+  selectWorkflowRun: (
+    workflowRunId: string,
+    projectId: string,
+    taskId?: string,
+  ) => void;
   /** Clears the entire selection. */
   clearSelection: () => void;
   /** Clears only the session leg (used after the selected session is deleted). */
@@ -249,10 +253,10 @@ export const useWorkspaceSelectionStore = create<WorkspaceSelectionState>()(
             draftId,
           });
         },
-        selectWorkflowRun: (workflowRunId, projectId) => {
+        selectWorkflowRun: (workflowRunId, projectId, taskId) => {
           replaceSelection({
             projectId,
-            taskId: null,
+            taskId: taskId ?? null,
             sessionId: null,
             workflowRunId,
             draftId: null,
