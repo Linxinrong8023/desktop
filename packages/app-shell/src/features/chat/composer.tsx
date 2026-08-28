@@ -1,5 +1,6 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import {
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -7,7 +8,6 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ClipboardEvent, KeyboardEvent } from "react";
 import {
   IconArrowUp,
   IconLoader2,
@@ -16,7 +16,18 @@ import {
   IconPlus,
   IconX,
 } from "@tabler/icons-react";
-import { Button, Textarea } from "@ora/ui";
+import { Button } from "@ora/ui";
+import {
+  ComposerEditor,
+  type ComposerEditorHandle,
+} from "../editor/composer-editor";
+import {
+  EMPTY_COMPOSER_QUERY,
+  queryStateFromText,
+  queryStatesEqual,
+  type ComposerQueryState,
+} from "../editor/composer-query";
+import type { JSONContent } from "@tiptap/core";
 import type { Skill } from "@ora/contracts";
 import { useTranslation } from "react-i18next";
 import { ModelSelector } from "./model-selector";
@@ -26,37 +37,43 @@ import { ComposerActionMenu } from "./composer-action-menu";
 import { ImagePreviewDialog } from "./image-preview-dialog";
 import {
   buildComposerActions,
+  buildComposerFileActions,
   filterComposerActions,
   visibleComposerActions,
   type ComposerAction,
   type ComposerActionGroup,
 } from "./composer-actions";
 import { SelectedPluginsButton } from "./selected-plugins-button";
+import {
+  fileMentionMenuStatus,
+  fileMentionStatusMessageKey,
+  useComposerFileMentions,
+} from "./use-composer-file-mentions";
 import { useComposerFileContextStore } from "../../state/stores/composer-file-context-store";
 import { usePluginInstallStore } from "../../state/stores/plugin-install-store";
 import { useComposerPluginSelectionStore } from "../../state/stores/composer-plugin-selection-store";
+import { useComposerInputStore } from "../../state/stores/composer-input-store";
 import { conversationKeyFor } from "../../state/stores/conversation-key";
+import { useDraftSessionsStore } from "../../state/stores/draft-sessions-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
 import {
-  AI_AGENT_CATEGORY_KEY,
+  clearComposerSendAdoption,
+  DraftSendAbandonedError,
+  composerSendAdoptedSession,
+} from "../../state/session-drafts";
+import {
   PLUGIN_CATALOG,
   findPlugin,
   type PluginEntry,
 } from "../settings/plugin-catalog";
-
-/** Candidate plugins for the composer's "@" and "+" menus; the AI agent CLIs are chosen elsewhere. */
-const CANDIDATE_PLUGINS = PLUGIN_CATALOG.filter(
-  (plugin) => plugin.categoryKey !== AI_AGENT_CATEGORY_KEY,
-);
 /** Stable empty array so the store selector below doesn't return a fresh reference every render. */
 const EMPTY_PLUGIN_IDS: string[] = [];
 
-/** Matches an "@" mention token ending at the cursor, e.g. the "Doc" in "check @Doc". */
-const AT_TRIGGER_PATTERN = /(?<=^|\s)@([^\s]*)$/;
-
 interface ComposerProps {
   taskId?: string;
-  onSend: (text: string, images?: acp.ImageContent[]) => void;
+  /** Project checkout used for @ mentions when no task is selected yet. */
+  projectId?: string;
+  onSend: (text: string, images?: acp.ImageContent[]) => void | Promise<void>;
   /**
    * Invoked when Enter (or send) is pressed with an empty input. Used in Spec mode
    * to run the highlighted stage directly; absent when there is nothing to launch.
@@ -73,6 +90,10 @@ interface ComposerProps {
    */
   isStreaming?: boolean;
   disabled?: boolean;
+  /** Allows the agent/model picker to remain actionable while message composition is blocked. */
+  modelSelectorDisabled?: boolean;
+  /** Session whose model configuration the selector should display. */
+  modelSelectorSessionId?: string;
   placeholder?: string;
   autoFocus?: boolean;
   skills?: Skill[];
@@ -98,44 +119,53 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_TOTAL_IMAGE_BYTES = 10 * 1024 * 1024;
 
 /**
- * The chat composer: a rounded input shell wrapping the @ora/ui Textarea with
- * an inline send button. Enter sends, Shift+Enter inserts a newline, and the
- * textarea auto-grows up to a max height.
+ * The chat composer: a rounded input shell wrapping ComposerEditor with an
+ * inline send button. Enter sends, Shift+Enter inserts a newline, and the
+ * editor auto-grows up to a max height.
  */
 export function Composer({
   taskId,
+  projectId,
   onSend,
   onEmptySubmit,
   onStop,
   isResponding,
   isStreaming = false,
   disabled = false,
+  modelSelectorDisabled = disabled,
+  modelSelectorSessionId,
   placeholder,
   autoFocus = false,
   skills = [],
   availableCommands = [],
 }: ComposerProps) {
   const { t } = useTranslation();
-  const [value, setValue] = useState("");
+  const [query, setQuery] = useState<ComposerQueryState>(EMPTY_COMPOSER_QUERY);
   const [selectedActionIndex, setSelectedActionIndex] = useState(0);
+  const actionHighlightSourceRef = useRef<"keyboard" | "pointer">("keyboard");
   const [menuDismissed, setMenuDismissed] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<
     ReadonlySet<ComposerActionGroup>
   >(new Set());
-  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [attachments, setAttachmentsState] = useState<ImageAttachment[]>([]);
+  const attachmentsRef = useRef<ImageAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const [caret, setCaret] = useState(0);
   const installedPluginIds = usePluginInstallStore(
     (state) => state.installedIds,
   );
-  const disabledPluginIds = usePluginInstallStore((state) => state.disabledIds);
   // Keyed by conversation, not by task: sibling sessions under one task each keep their own
   // applied plugins, and the composer instance is reused across session switches rather than
   // remounted, so this cannot live in component state. `dispatchSend` rekeys a pre-session
   // conversation onto its real session id, which is what carries the picks across a first send.
   const conversationKey = useWorkspaceSelectionStore((state) =>
     conversationKeyFor(state.selection),
+  );
+  const draftId = useWorkspaceSelectionStore(
+    (state) => state.selection.draftId,
+  );
+  const selectedSessionId = useWorkspaceSelectionStore(
+    (state) => state.selection.sessionId,
   );
   const selectedPluginIds = useComposerPluginSelectionStore(
     (state) =>
@@ -154,22 +184,21 @@ export function Composer({
         .filter((plugin): plugin is PluginEntry => plugin !== undefined),
     [selectedPluginIds],
   );
-  // Only plugins the user actually installed, hasn't disabled, and hasn't already applied
-  // show up in "@" and "+" — picking one removes it from the menu until it is removed below.
+  // Only plugins the user actually installed and hasn't already applied
+  // show up in "+" — picking one removes it from the menu until it is removed below.
   const composerPlugins = useMemo(
     () =>
-      CANDIDATE_PLUGINS.filter(
+      PLUGIN_CATALOG.filter(
         (plugin) =>
           installedPluginIds.includes(plugin.id) &&
-          !disabledPluginIds.includes(plugin.id) &&
           !selectedPluginIds.includes(plugin.id),
       ),
-    [disabledPluginIds, installedPluginIds, selectedPluginIds],
+    [installedPluginIds, selectedPluginIds],
   );
   const [previewedAttachment, setPreviewedAttachment] =
     useState<ImageAttachment | null>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<ComposerEditorHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const leftControlsRef = useRef<HTMLDivElement>(null);
@@ -178,44 +207,238 @@ export function Composer({
   const [showModelSelector, setShowModelSelector] = useState(true);
   const actionOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const actionMenuId = useId();
-  const pendingFileContext = useComposerFileContextStore((state) =>
-    taskId === undefined ? undefined : state.pendingByTask[taskId],
+  // Bumped on every submit so an older send's reject cannot restore text over a
+  // newer attempt (Stop during handshake, then type and send again).
+  const submitGenerationRef = useRef(0);
+  const bindFileContextDelivery = useComposerFileContextStore(
+    (state) => state.bindDelivery,
   );
-  const consumeFileContext = useComposerFileContextStore(
-    (state) => state.consumeSelections,
-  );
-  const lastInjectedRequestId = useRef<number | null>(null);
 
-  useEffect(() => {
+  /** Keeps async attachment work and React state on the same latest array. */
+  const replaceAttachments = useCallback((next: ImageAttachment[]) => {
+    const current = attachmentsRef.current;
     if (
-      taskId === undefined ||
-      pendingFileContext === undefined ||
-      pendingFileContext.id === lastInjectedRequestId.current
+      current.length === next.length &&
+      current.every((item, index) => item.id === next[index]?.id)
     ) {
+      attachmentsRef.current = next;
+      return;
+    }
+    attachmentsRef.current = next;
+    setAttachmentsState(next);
+  }, []);
+
+  /**
+   * Parks unsent text/images/doc on the current conversation key so switching
+   * sessions (or drafts) can restore them. TipTap `doc` stays in memory so
+   * chips round-trip with their kind. Also mirrors typed text onto the draft
+   * store while the surface is still a client-only draft (sidebar title).
+   */
+  const persistComposerInput = useCallback(
+    (text: string, nextImages?: ImageAttachment[], doc?: JSONContent) => {
+      const images = nextImages ?? attachmentsRef.current;
+      const parkedDoc = doc ?? editorRef.current?.getJSON();
+      useComposerInputStore.getState().setInput(conversationKey, {
+        text,
+        images,
+        ...(parkedDoc !== undefined ? { doc: parkedDoc } : {}),
+      });
+      if (draftId === null || selectedSessionId !== null) return;
+      useDraftSessionsStore.getState().updateContent(draftId, {
+        text,
+        ...(nextImages === undefined ? {} : { images: nextImages }),
+      });
+    },
+    [conversationKey, draftId, selectedSessionId],
+  );
+
+  // TipTap's replaceText/clear emit onTextChange; skipping park writes there keeps
+  // attachmentsRef and the store aligned during hydrate and send-failure restore.
+  const suppressPersistRef = useRef(false);
+  /**
+   * Blocks slash/@ menus after programmatic hydrate without calling setState in
+   * the conversation layout effect (react-hooks/set-state-in-effect). Cleared on
+   * the next user-driven doc change.
+   */
+  const suppressQueryMenuRef = useRef(false);
+
+  /**
+   * Conversation-keyed React state is adjusted during render so it stays inside
+   * the same `act()` as the selection store update. TipTap `setContent` still
+   * waits for a microtask (flushSync), but must not call setState from there.
+   */
+  const syncedSurfaceRef = useRef<string | null>(null);
+  if (syncedSurfaceRef.current !== conversationKey) {
+    const previousKey = syncedSurfaceRef.current;
+    // Park the surface we are leaving before adopting the new key. The editor
+    // still shows the old session until hydrate's microtask runs; without this,
+    // onTextChange would write that stale document onto the new session id.
+    if (previousKey !== null) {
+      const editor = editorRef.current;
+      if (editor !== null) {
+        useComposerInputStore.getState().setInput(previousKey, {
+          text: editor.getText(),
+          images: [...attachmentsRef.current],
+          doc: editor.getJSON(),
+        });
+      }
+    }
+    suppressPersistRef.current = true;
+    syncedSurfaceRef.current = conversationKey;
+    const parked = useComposerInputStore.getState().byKey[conversationKey];
+    const draft =
+      draftId !== null && selectedSessionId === null
+        ? useDraftSessionsStore
+            .getState()
+            .drafts.find((candidate) => candidate.id === draftId)
+        : undefined;
+    const text = parked !== undefined ? parked.text : (draft?.text ?? "");
+    const images = parked !== undefined ? parked.images : (draft?.images ?? []);
+    replaceAttachments(images);
+    const nextQuery = queryStateFromText(text, text);
+    setQuery((current) =>
+      queryStatesEqual(current, nextQuery) ? current : nextQuery,
+    );
+    setPlusMenuOpen(false);
+    setMenuDismissed(false);
+    setAttachmentError(null);
+    suppressQueryMenuRef.current = true;
+    setExpandedGroups((current) => (current.size === 0 ? current : new Set()));
+    setSelectedActionIndex(0);
+  }
+
+  /** Sets editor content and attachments without re-entering persistComposerInput. */
+  const applyComposerContent = useCallback(
+    (text: string, images: ImageAttachment[], doc?: JSONContent) => {
+      suppressPersistRef.current = true;
+      // Parked `@…` / `/…` suffixes must not pop the palette on session restore.
+      suppressQueryMenuRef.current = true;
+      try {
+        replaceAttachments(images);
+        if (doc !== undefined) {
+          try {
+            editorRef.current?.replaceDocument(doc);
+          } catch {
+            // A stale or hand-edited parked doc (schema drift) must not break
+            // hydration: fall back to the text-only markdown restore so the
+            // composer still comes up with the typed message.
+            editorRef.current?.replaceText(text);
+          }
+        } else if (text.length === 0) {
+          editorRef.current?.clear();
+        } else {
+          editorRef.current?.replaceText(text);
+        }
+      } finally {
+        suppressPersistRef.current = false;
+      }
+    },
+    [replaceAttachments],
+  );
+
+  const conversationKeyRef = useRef(conversationKey);
+  conversationKeyRef.current = conversationKey;
+
+  const hydratedConversationKey = useRef<string | null>(null);
+  const pendingHydrateKeyRef = useRef<string | null>(null);
+  const hydrateGenerationRef = useRef(0);
+  // Passive effect + microtask: TipTap setContent uses flushSync; calling it inside
+  // useLayoutEffect nests flushSync in React's lifecycle and fails the stderr gate.
+  useEffect(() => {
+    if (hydratedConversationKey.current === conversationKey) return;
+    if (pendingHydrateKeyRef.current === conversationKey) return;
+
+    const previousKey = hydratedConversationKey.current;
+    const key = conversationKey;
+    const parked = useComposerInputStore.getState().byKey[key];
+    const draft =
+      draftId !== null && selectedSessionId === null
+        ? useDraftSessionsStore
+            .getState()
+            .drafts.find((candidate) => candidate.id === draftId)
+        : undefined;
+    const text =
+      parked !== undefined
+        ? parked.text
+        : draft !== undefined
+          ? (draft.text ?? "")
+          : "";
+    const images =
+      parked !== undefined
+        ? parked.images
+        : draft !== undefined
+          ? (draft.images ?? [])
+          : [];
+    const doc = parked?.doc;
+    const emptyPayload =
+      text.length === 0 && images.length === 0 && doc === undefined;
+    // First mount onto an empty conversation: the editor is already blank.
+    // Scheduling a deferred clear races pastes/typing that land before the
+    // microtask and would wipe them.
+    if (emptyPayload && previousKey === null) {
+      hydratedConversationKey.current = key;
+      suppressPersistRef.current = false;
       return;
     }
 
-    lastInjectedRequestId.current = pendingFileContext.id;
-    const context = [
-      t("chat.selectedFileLines"),
-      ...pendingFileContext.selections.map(
-        ({ path, startLine, endLine }) =>
-          `- \`${path}:${startLine === endLine ? startLine : `${startLine}-${endLine}`}\``,
-      ),
-    ].join("\n");
-    setValue((current) => {
-      const prefix = current.trimEnd();
-      return prefix.length === 0
-        ? `${context}\n\n`
-        : `${prefix}\n\n${context}\n\n`;
+    const generation = (hydrateGenerationRef.current += 1);
+    pendingHydrateKeyRef.current = key;
+    queueMicrotask(() => {
+      try {
+        if (pendingHydrateKeyRef.current === key) {
+          pendingHydrateKeyRef.current = null;
+        }
+        if (hydrateGenerationRef.current !== generation) return;
+        if (conversationKeyRef.current !== key) return;
+        hydratedConversationKey.current = key;
+        applyComposerContent(text, images, doc);
+      } finally {
+        if (conversationKeyRef.current === key) {
+          suppressPersistRef.current = false;
+        }
+      }
     });
-    consumeFileContext(taskId, pendingFileContext.id);
-    textAreaRef.current?.focus();
-  }, [consumeFileContext, pendingFileContext, t, taskId]);
-  const slashQuery = value.match(/^\/([^\s]*)$/)?.[1] ?? null;
-  const atMatch = value.slice(0, caret).match(AT_TRIGGER_PATTERN);
-  const atQuery = atMatch?.[1] ?? null;
-  const atTriggerIndex = atMatch !== null ? (atMatch.index ?? null) : null;
+  }, [applyComposerContent, conversationKey, draftId, selectedSessionId]);
+
+  // Quotes insert here directly. A pending store that the composer re-read on
+  // session switch / Strict Mode replayed chips the user had already deleted.
+  useEffect(() => {
+    let active = true;
+    const unbind = bindFileContextDelivery(conversationKey, (selections) => {
+      if (!active) return;
+      const editor = editorRef.current;
+      // The child editor can remount while this Composer stays mounted, so the
+      // handle is not guaranteed here. Either way the quote has nowhere to go
+      // and is not re-queued (that is what replayed deleted chips before), so
+      // the user has to be told rather than left staring at an unchanged box.
+      if (editor === null) {
+        setAttachmentError(t("chat.fileContext.injectFailed"));
+        return;
+      }
+      try {
+        editor.insertFileChips(selections);
+        editor.focus({ at: "end" });
+      } catch {
+        setAttachmentError(t("chat.fileContext.injectFailed"));
+      }
+    });
+    return () => {
+      active = false;
+      unbind();
+    };
+  }, [bindFileContextDelivery, conversationKey, t]);
+  const slashQuery = query.slashQuery;
+  const atQuery = query.atQuery;
+  const fileMentionEnabled =
+    !plusMenuOpen && !menuDismissed && !disabled && !isResponding;
+  const fileMentions = useComposerFileMentions({
+    taskId,
+    projectId,
+    atQuery,
+    enabled: fileMentionEnabled,
+  });
+  const fileMentionActive = fileMentions.active;
+
   const allActions = useMemo(
     () =>
       buildComposerActions({
@@ -231,30 +454,40 @@ export function Composer({
   );
   const filteredActions = useMemo(() => {
     if (plusMenuOpen) return filterComposerActions(allActions, "");
-    if (atQuery !== null)
-      return filterComposerActions(
-        allActions.filter((action) => action.group === "plugins"),
-        atQuery,
-      );
-    // Slash is for skills and commands only; plugins are reached through "@" or the "+" menu.
+    if (atQuery !== null) {
+      // Loading/error/debounce clears paths so the menu never offers stale hits.
+      return buildComposerFileActions(fileMentions.entries);
+    }
+    // Slash is for skills and commands only; plugins are reached through the "+" menu.
     return filterComposerActions(
       allActions.filter((action) => action.group !== "plugins"),
       slashQuery ?? "",
     );
-  }, [allActions, atQuery, plusMenuOpen, slashQuery]);
+  }, [allActions, atQuery, fileMentions.entries, plusMenuOpen, slashQuery]);
   const visibleActions = useMemo(
     () => visibleComposerActions(filteredActions, expandedGroups),
     [expandedGroups, filteredActions],
   );
+  const fileMenuStatus = fileMentionMenuStatus(fileMentions.status);
+  const fileMenuStatusMessageKey = fileMentionStatusMessageKey(
+    fileMentions.status,
+    fileMentions.debouncedQuery,
+  );
+  const fileMenuStatusMessage =
+    fileMenuStatusMessageKey === undefined
+      ? undefined
+      : t(fileMenuStatusMessageKey);
   const showActionMenu =
-    visibleActions.length > 0 &&
     (plusMenuOpen ||
-      (slashQuery !== null && !menuDismissed) ||
-      (atQuery !== null && !menuDismissed)) &&
+      (slashQuery !== null &&
+        !menuDismissed &&
+        !suppressQueryMenuRef.current) ||
+      (atQuery !== null && !menuDismissed && !suppressQueryMenuRef.current)) &&
     !disabled &&
-    !isResponding;
+    !isResponding &&
+    (visibleActions.length > 0 || fileMentionActive);
 
-  const hasText = value.trim().length > 0;
+  const hasText = !query.isBlank;
   // With an empty input the send affordance still fires when there is a stage to
   // launch, so pressing Enter runs the highlighted step.
   const canSend =
@@ -264,55 +497,140 @@ export function Composer({
 
   const submit = () => {
     if (isResponding || disabled) return;
-    const text = value.trim();
+    const text = (editorRef.current?.getText() ?? "").trim();
     if (text === "" && attachments.length === 0) {
       onEmptySubmit?.();
       return;
     }
-    if (attachments.length === 0) onSend(text);
-    else
-      onSend(
-        text,
-        attachments.map((attachment) => attachment.content),
-      );
-    setValue("");
-    setAttachments([]);
+    const sentAttachments = attachments;
+    const sentDoc = editorRef.current?.getJSON();
+    const sentImages =
+      sentAttachments.length === 0
+        ? undefined
+        : sentAttachments.map((attachment) => attachment.content);
+    // Capture the surface this send left so a reject after navigation cannot
+    // paint the abandoned message onto a different conversation's composer.
+    const sendConversationKey = conversationKey;
+    const sendDraftId = draftId;
+    const sendSessionId = selectedSessionId;
+    const submitGeneration = (submitGenerationRef.current += 1);
+    // Async wrapping turns a synchronous callback throw into the same rejected
+    // promise path used by transport failures, so restoration always runs.
+    const sendResult = (async () => {
+      if (sentImages === undefined) await onSend(text);
+      else await onSend(text, sentImages);
+    })();
+    applyComposerContent("", []);
+    setQuery(EMPTY_COMPOSER_QUERY);
     setAttachmentError(null);
+    // Drop the conversation-keyed park so a later return cannot resurrect the
+    // message that was just sent. Draft-store text is left alone so the muted
+    // sidebar title survives until attach replaces the row.
+    useComposerInputStore.getState().clear(conversationKey);
     closeActionMenu();
+    // If the send rejects while still on this surface, put the message back.
+    // Abandoned sends (Stop / navigated away) already repark stores — restore the
+    // reused composer UI only when we never left, so a later surface is not
+    // contaminated. Hard failures restore only on the send surface, the
+    // recovered draft, or the warm session that first-send adopted — never an
+    // unrelated chat the user opened mid-attach. A newer submit supersedes
+    // this catch entirely (Stop → retype → send).
+    //
+    // Use async/await (not Promise.resolve().then) so reject handlers attach
+    // directly to the send promise; tests can await the same promise inside
+    // act() and CI's stderr gate will not see stray setState warnings.
+    void (async () => {
+      try {
+        await sendResult;
+        clearComposerSendAdoption(sendConversationKey);
+      } catch (error: unknown) {
+        try {
+          if (submitGeneration !== submitGenerationRef.current) return;
+          const selection = useWorkspaceSelectionStore.getState().selection;
+          const onSendSurface =
+            conversationKeyFor(selection) === sendConversationKey &&
+            selection.draftId === sendDraftId &&
+            selection.sessionId === sendSessionId;
+          let adoptedSession: string | undefined;
+          if (error instanceof DraftSendAbandonedError) {
+            // Workspace already reparked text/images onto the draft; attach the
+            // TipTap tree so / and directory chips survive when the user returns
+            // (including after they navigated away mid-handshake).
+            if (sendDraftId !== null && sentDoc !== undefined) {
+              const draftKey = `draft:${sendDraftId}`;
+              const parked = useComposerInputStore.getState().byKey[draftKey];
+              useComposerInputStore.getState().setInput(draftKey, {
+                text: parked?.text ?? text,
+                images: parked?.images ?? sentAttachments,
+                doc: sentDoc,
+              });
+            } else if (sentDoc !== undefined) {
+              persistComposerInput(text, sentAttachments, sentDoc);
+            }
+            if (!onSendSurface) return;
+          } else {
+            adoptedSession = composerSendAdoptedSession(sendConversationKey);
+            const onSendDraft =
+              sendDraftId !== null && selection.draftId === sendDraftId;
+            const onAdoptedSession =
+              adoptedSession !== undefined &&
+              selection.sessionId === adoptedSession;
+            if (!onSendSurface && !onSendDraft && !onAdoptedSession) return;
+          }
+          if (
+            adoptedSession !== undefined &&
+            selection.sessionId === adoptedSession
+          ) {
+            useComposerInputStore.getState().setInput(adoptedSession, {
+              text,
+              images: sentAttachments,
+              ...(sentDoc !== undefined ? { doc: sentDoc } : {}),
+            });
+          } else {
+            persistComposerInput(text, sentAttachments, sentDoc);
+          }
+          applyComposerContent(text, sentAttachments, sentDoc);
+          setQuery(queryStateFromText(text, text));
+        } finally {
+          clearComposerSendAdoption(sendConversationKey);
+        }
+      }
+    })();
   };
 
-  /** Inserts a skill or command token for review while keeping arguments under user control. */
-  const insertPromptToken = (inserted: string) => {
-    setValue(inserted);
+  /** Inserts a skill or command mention so the token stays distinct from body text. */
+  const insertPromptToken = (kind: "skill" | "command", name: string) => {
+    editorRef.current?.insertPromptToken(kind, name);
     closeActionMenu();
-    requestAnimationFrame(() => {
-      textAreaRef.current?.focus();
-      textAreaRef.current?.setSelectionRange(inserted.length, inserted.length);
-    });
+    requestAnimationFrame(() => editorRef.current?.focus());
   };
 
-  /** Adds a plugin to this message's applied set and clears any "@" token that triggered it. */
+  /** Adds a plugin to this message's applied set (reached from the "+" menu). */
   const applyPlugin = (plugin: PluginEntry) => {
     addSelectedPlugin(conversationKey, plugin.id);
-    if (atTriggerIndex !== null) {
-      const nextValue = value.slice(0, atTriggerIndex) + value.slice(caret);
-      setValue(nextValue);
-      requestAnimationFrame(() => {
-        textAreaRef.current?.focus();
-        textAreaRef.current?.setSelectionRange(atTriggerIndex, atTriggerIndex);
-      });
-    }
     closeActionMenu();
+    requestAnimationFrame(() => editorRef.current?.focus());
+  };
+
+  /** Inserts a workspace path chip (file or folder) and clears the `@…` token. */
+  const insertFileMention = (path: string, entryKind: "file" | "directory") => {
+    editorRef.current?.removeAtToken();
+    editorRef.current?.insertFileChips([{ path, kind: entryKind }]);
+    closeActionMenu();
+    requestAnimationFrame(() => editorRef.current?.focus({ at: "keep" }));
   };
 
   /** Executes the selected palette action through its existing product data path. */
   const selectAction = (action: ComposerAction) => {
     switch (action.group) {
+      case "files":
+        insertFileMention(action.path, action.entryKind);
+        return;
       case "skills":
-        insertPromptToken(`$${action.skill.name} `);
+        insertPromptToken("skill", action.skill.name);
         return;
       case "commands":
-        insertPromptToken(`/${action.command.name} `);
+        insertPromptToken("command", action.command.name);
         return;
       case "plugins":
         applyPlugin(action.plugin);
@@ -336,8 +654,10 @@ export function Composer({
     const selectedFiles = [...files];
     if (selectedFiles.length === 0) return;
     const totalBytes =
-      attachments.reduce((sum, attachment) => sum + attachment.size, 0) +
-      selectedFiles.reduce((sum, file) => sum + file.size, 0);
+      attachmentsRef.current.reduce(
+        (sum, attachment) => sum + attachment.size,
+        0,
+      ) + selectedFiles.reduce((sum, file) => sum + file.size, 0);
     if (selectedFiles.some((file) => !ACCEPTED_IMAGE_TYPES.has(file.type))) {
       setAttachmentError(t("chat.attachments.unsupported"));
       return;
@@ -350,64 +670,95 @@ export function Composer({
       return;
     }
     const next = await Promise.all(selectedFiles.map(readImageAttachment));
-    setAttachments((current) => [...current, ...next]);
+    const combined = [...attachmentsRef.current, ...next];
+    replaceAttachments(combined);
+    persistComposerInput(editorRef.current?.getText() ?? "", combined);
     setAttachmentError(null);
   };
 
   /** Adds clipboard files through the same validation path as the attachment picker. */
-  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = [...event.clipboardData.files];
+  const handlePasteFiles = (files: File[]) => {
     if (files.length === 0) return;
-    event.preventDefault();
     void addImages(files).catch(() =>
       setAttachmentError(t("chat.attachments.readFailed")),
     );
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (showActionMenu) {
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-        event.preventDefault();
-        const direction = event.key === "ArrowDown" ? 1 : -1;
-        setSelectedActionIndex(
-          (current) =>
-            (current + direction + visibleActions.length) %
-            visibleActions.length,
-        );
-        return;
-      }
+  const handleMenuKeyDown = (event: KeyboardEvent): boolean => {
+    if (!showActionMenu) return false;
+    if (visibleActions.length === 0) {
       if (event.key === "Escape") {
         event.preventDefault();
         closeActionMenu();
-        return;
+        return true;
       }
+      // Keep Enter/Tab from sending while the @ file palette is open without hits.
       if (
+        fileMentionActive &&
         (event.key === "Enter" || event.key === "Tab") &&
-        !event.nativeEvent.isComposing
+        !event.isComposing
       ) {
         event.preventDefault();
-        const action = visibleActions[selectedActionIndex];
-        if (action !== undefined) selectAction(action);
-        return;
+        return true;
       }
+      return false;
     }
-    if (
-      event.key === "Enter" &&
-      !event.shiftKey &&
-      !event.nativeEvent.isComposing
-    ) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      submit();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      actionHighlightSourceRef.current = "keyboard";
+      setSelectedActionIndex(
+        (current) =>
+          (current + direction + visibleActions.length) % visibleActions.length,
+      );
+      return true;
     }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeActionMenu();
+      return true;
+    }
+    if ((event.key === "Enter" || event.key === "Tab") && !event.isComposing) {
+      event.preventDefault();
+      // Debounce / in-flight: keep highlighting but do not commit a stale path.
+      if (fileMentionActive && fileMentions.selectionLocked) {
+        return true;
+      }
+      const action = visibleActions[selectedActionIndex];
+      if (action !== undefined) selectAction(action);
+      return true;
+    }
+    return false;
   };
 
-  // Auto-grow the textarea to fit its content, capped at a comfortable max.
-  useEffect(() => {
-    const el = textAreaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-  }, [value]);
+  const handleDocChange = () => {
+    // Programmatic hydrate/clear must not reopen @ / menus from a parked `@…`
+    // or `/…` suffix at the caret.
+    if (suppressPersistRef.current) return;
+    suppressQueryMenuRef.current = false;
+    setPlusMenuOpen(false);
+    setMenuDismissed(false);
+    setExpandedGroups((current) => (current.size === 0 ? current : new Set()));
+    actionHighlightSourceRef.current = "keyboard";
+    setSelectedActionIndex(0);
+  };
+
+  // Render-phase highlight sync (avoid setState-in-effect): reset when the
+  // settled @ query changes, and clamp when the visible list shrinks.
+  const [highlightQueryKey, setHighlightQueryKey] = useState(
+    fileMentions.debouncedQuery,
+  );
+  if (fileMentionActive && fileMentions.debouncedQuery !== highlightQueryKey) {
+    setHighlightQueryKey(fileMentions.debouncedQuery);
+    actionHighlightSourceRef.current = "keyboard";
+    setSelectedActionIndex(0);
+  }
+  if (
+    visibleActions.length > 0 &&
+    selectedActionIndex >= visibleActions.length
+  ) {
+    setSelectedActionIndex(visibleActions.length - 1);
+  }
 
   // Hide the model picker only when the footer cannot fit both control groups.
   // The stored width lets the check continue to work after the picker is hidden.
@@ -462,7 +813,10 @@ export function Composer({
   }, [showModelSelector]);
 
   useEffect(() => {
-    if (!showActionMenu) return;
+    if (!showActionMenu || visibleActions.length === 0) return;
+    // Pointer highlight already follows the cursor; scrolling that row into view
+    // fights the wheel and snaps the list back toward the active item.
+    if (actionHighlightSourceRef.current !== "keyboard") return;
     const safeIndex = Math.min(selectedActionIndex, visibleActions.length - 1);
     actionOptionRefs.current[safeIndex]?.scrollIntoView?.({ block: "nearest" });
   }, [selectedActionIndex, showActionMenu, visibleActions.length]);
@@ -490,7 +844,15 @@ export function Composer({
           activeIndex={selectedActionIndex}
           expandedGroups={expandedGroups}
           optionRefs={actionOptionRefs}
-          onActiveIndexChange={setSelectedActionIndex}
+          status={fileMentionActive ? fileMenuStatus : "ready"}
+          statusMessage={fileMentionActive ? fileMenuStatusMessage : undefined}
+          truncated={fileMentions.truncated}
+          filesPalette={fileMentionActive}
+          selectionLocked={fileMentionActive && fileMentions.selectionLocked}
+          onActiveIndexChange={(index) => {
+            actionHighlightSourceRef.current = "pointer";
+            setSelectedActionIndex(index);
+          }}
           onToggleGroup={(group) => {
             setExpandedGroups((current) => {
               const next = new Set(current);
@@ -530,11 +892,16 @@ export function Composer({
                 </button>
                 <button
                   type="button"
-                  onClick={() =>
-                    setAttachments((current) =>
-                      current.filter((item) => item.id !== attachment.id),
-                    )
-                  }
+                  onClick={() => {
+                    const next = attachmentsRef.current.filter(
+                      (item) => item.id !== attachment.id,
+                    );
+                    replaceAttachments(next);
+                    persistComposerInput(
+                      editorRef.current?.getText() ?? "",
+                      next,
+                    );
+                  }}
                   aria-label={t("chat.attachments.remove", {
                     name: attachment.name,
                   })}
@@ -551,38 +918,30 @@ export function Composer({
             {attachmentError}
           </p>
         )}
-        <Textarea
-          ref={textAreaRef}
+        <ComposerEditor
+          ref={editorRef}
           autoFocus={autoFocus}
           placeholder={placeholder ?? t("chat.placeholder")}
-          value={value}
           disabled={disabled}
-          onChange={(event) => {
-            setValue(event.target.value);
-            setCaret(event.target.selectionStart ?? event.target.value.length);
-            setPlusMenuOpen(false);
-            setMenuDismissed(false);
-            setExpandedGroups(new Set());
-            setSelectedActionIndex(0);
-          }}
-          onSelect={(event) =>
-            setCaret(event.currentTarget.selectionStart ?? 0)
-          }
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          aria-label={t("chat.messageLabel")}
-          aria-autocomplete="list"
-          aria-haspopup="listbox"
-          aria-expanded={showActionMenu}
-          aria-controls={showActionMenu ? actionMenuId : undefined}
-          aria-activedescendant={
+          ariaLabel={t("chat.messageLabel")}
+          ariaAutoComplete="list"
+          ariaHasPopup="listbox"
+          ariaExpanded={showActionMenu}
+          ariaControls={showActionMenu ? actionMenuId : undefined}
+          ariaActivedescendant={
             showActionMenu
               ? `${actionMenuId}-option-${selectedActionIndex}`
               : undefined
           }
-          // The shell already carries the surface, so the Textarea's own disabled
-          // fill would read as a grey block floating inside the card.
-          className="min-h-14 max-h-[200px] resize-none rounded-none border-0 bg-transparent px-2 py-1 text-[15px] leading-6 shadow-none focus-visible:ring-0 disabled:bg-transparent"
+          onSubmit={submit}
+          onQueryChange={setQuery}
+          onDocChange={handleDocChange}
+          onTextChange={(text) => {
+            if (suppressPersistRef.current) return;
+            persistComposerInput(text);
+          }}
+          onPasteFiles={handlePasteFiles}
+          onMenuKeyDown={handleMenuKeyDown}
         />
         <div
           ref={footerRef}
@@ -650,7 +1009,12 @@ export function Composer({
             ref={rightControlsRef}
             className="flex shrink-0 items-center gap-2"
           >
-            {showModelSelector && <ModelSelector disabled={disabled} />}
+            {showModelSelector && (
+              <ModelSelector
+                disabled={modelSelectorDisabled}
+                sessionId={modelSelectorSessionId}
+              />
+            )}
             <Button
               size="icon"
               // A live turn always stops on click, whether it is still starting up

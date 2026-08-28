@@ -49,7 +49,8 @@ interface RunActInspectorProps {
   onSaveInstruction?: () => void;
   onDiscardInstructionDraft?: () => void;
   instructionSavePending?: boolean;
-  onClose: () => void;
+  /** Fallback close action when no stage card can host the persistent toggle. */
+  onClose?: () => void;
 }
 
 /**
@@ -150,7 +151,7 @@ function RunActInspectorPanel({
   onDiscardInstructionDraft?: () => void;
   instructionSavePending?: boolean;
   fileChanges: WorkflowNodeFileChange[];
-  onClose: () => void;
+  onClose?: () => void;
 }) {
   const { i18n, t } = useTranslation();
   const locale =
@@ -195,16 +196,18 @@ function RunActInspectorPanel({
           </p>
         </div>
         <RunStatusBadge status={state.status} quiet className="shrink-0" />
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="shrink-0 cursor-pointer"
-          aria-label={t("workflowRun.inspector.collapse")}
-          onClick={onClose}
-        >
-          <IconLayoutSidebarRightCollapse className="size-4" />
-        </Button>
+        {onClose !== undefined && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="shrink-0 cursor-pointer"
+            aria-label={t("workflowRun.inspector.collapse")}
+            onClick={onClose}
+          >
+            <IconLayoutSidebarRightCollapse className="size-4" />
+          </Button>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
@@ -395,7 +398,7 @@ function InspectorHeader({
 }: {
   title: string;
   subtitle: string;
-  onClose: () => void;
+  onClose?: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -404,16 +407,18 @@ function InspectorHeader({
         <h3 className="text-xs font-semibold">{title}</h3>
         <p className="mt-1 text-[11px] text-muted-foreground">{subtitle}</p>
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        className="shrink-0 cursor-pointer"
-        aria-label={t("workflowRun.inspector.collapse")}
-        onClick={onClose}
-      >
-        <IconLayoutSidebarRightCollapse className="size-4" />
-      </Button>
+      {onClose !== undefined && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0 cursor-pointer"
+          aria-label={t("workflowRun.inspector.collapse")}
+          onClick={onClose}
+        >
+          <IconLayoutSidebarRightCollapse className="size-4" />
+        </Button>
+      )}
     </div>
   );
 }

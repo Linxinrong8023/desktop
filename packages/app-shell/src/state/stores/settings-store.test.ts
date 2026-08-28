@@ -22,6 +22,7 @@ afterEach(() => {
 describe("useSettingsStore", () => {
   it("starts with default settings", () => {
     expect(useSettingsStore.getState().settings).toEqual(DEFAULT_SETTINGS);
+    expect(useSettingsStore.getState().settings.agentCli).toBeNull();
   });
 
   it("merges a partial patch into settings", () => {
@@ -44,13 +45,13 @@ describe("useSettingsStore", () => {
   });
 
   it("persists settings to localStorage under the v1 key", () => {
-    useSettingsStore.getState().updateSettings({ agentCli: "nga" });
+    useSettingsStore.getState().updateSettings({ agentCli: "ora-space.nga" });
     const raw = window.localStorage.getItem(STORAGE_KEY);
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!) as {
       state: { settings: SettingsPreferences };
     };
-    expect(parsed.state.settings.agentCli).toBe("nga");
+    expect(parsed.state.settings.agentCli).toBe("ora-space.nga");
   });
 
   it("merges persisted partial settings over defaults via the merge strategy", () => {
@@ -64,6 +65,53 @@ describe("useSettingsStore", () => {
     expect(useSettingsStore.getState().settings).toEqual({
       ...DEFAULT_SETTINGS,
       theme: "light",
+    });
+  });
+
+  it("migrates the former implicit OpenCode default to no selection", () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: { settings: { theme: "light", agentCli: "ora-space.opencode" } },
+        version: 1,
+      }),
+    );
+    useSettingsStore.persist.rehydrate();
+    expect(useSettingsStore.getState().settings).toEqual({
+      ...DEFAULT_SETTINGS,
+      theme: "light",
+      agentCli: null,
+    });
+  });
+
+  it("retains a legacy agent value that required an explicit selection", () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: { settings: { agentCli: "ora-space.nga" } },
+        version: 1,
+      }),
+    );
+    useSettingsStore.persist.rehydrate();
+    expect(useSettingsStore.getState().settings.agentCli).toBe("ora-space.nga");
+  });
+
+  it("retains a persisted agent identity this build does not recognize", () => {
+    // Agent identities are open strings, so a stored one can name an agent written before
+    // identities were namespaced, or a plugin that has since been uninstalled. The merge
+    // strategy carries it forward unexamined; the pickers resolve it against the live
+    // runtime instead of validating it here.
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: { settings: { theme: "light", agentCli: "open_code" } },
+      }),
+    );
+    useSettingsStore.persist.rehydrate();
+    expect(useSettingsStore.getState().settings).toEqual({
+      ...DEFAULT_SETTINGS,
+      theme: "light",
+      agentCli: "open_code",
     });
   });
 

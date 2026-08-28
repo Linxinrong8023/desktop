@@ -1,18 +1,23 @@
 use crate::agent::AgentApi;
-use crate::agent_runtime::{AgentRuntimeManager, SessionEventStream, SessionLocator};
+use crate::agent_runtime::{AgentRuntimeManager, AgentRuntimeSetup, SessionEventStream};
 use crate::app_event::AppEventHub;
 use crate::clock::SystemClock;
 use crate::error::{BackendError, ErrorClassification};
+use crate::git_cleanup::KeyedResourceLocks;
 use crate::plugin::PluginApi;
+use crate::plugin_gateway::PluginGateway;
 use crate::project::ProjectApi;
 use crate::session::SessionApi;
 use crate::skill::SkillApi;
 use crate::spec::SpecApi;
 use crate::task::TaskApi;
-use crate::task_diff::TaskDiffApi;
+use crate::user_config::{BackendPreferredLogLevelStore, UserConfigApi};
 use crate::workflow::WorkflowApi;
-use crate::workflow_run::WorkflowRunApi;
-use crate::workflow_run_engine::{ConcreteWorkflowRunControl, build_workflow_run_engine};
+use crate::workflow::run::WorkflowRunApi;
+use crate::workflow::run::{
+    ConcreteWorkflowRunControl, ConcreteWorkflowRunEngine, build_workflow_run_engine,
+};
+use crate::workspace_diff::WorkspaceDiffApi;
 use ora_application::{ApplicationError, Clock, WorkflowRunEngineRepository};
 use ora_contracts::*;
 use ora_contracts::{EmptyErrorParams, PublicError};
@@ -35,9 +40,9 @@ pub struct BackendPaths {
     pub deno_path: PathBuf,
     pub worktree_root: PathBuf,
     pub home_directory: PathBuf,
-    /// Directory against which persisted relative project roots are resolved.
+    /// Directory against which persisted relative local Workspace locations are resolved.
     ///
-    /// Relative roots are stored against the directory from which `ORA_DATA_DIR`
+    /// Relative locations are stored against the directory from which `ORA_DATA_DIR`
     /// was created. Live process cwd is not used: Desktop `tauri dev` starts in
     /// `src-tauri`, which is not that directory.
     pub relative_path_base: PathBuf,
@@ -61,8 +66,16 @@ pub enum BackendBootstrapError {
     },
     #[error("failed to bootstrap backend database")]
     Database(#[source] ora_db::DatabaseError),
+    #[error("persisted worktree root is invalid: {path:?}")]
+    InvalidWorktreeRoot { path: PathBuf },
+    #[error("failed to load persisted user configuration")]
+    UserConfig(#[source] BackendError),
     #[error("failed to initialize plugin lifecycle")]
     PluginLifecycle(#[source] ora_plugin_lifecycle::PluginLifecycleError),
+    #[error("failed to initialize plugin management")]
+    Plugin(#[source] BackendError),
+    #[error("failed to synchronize installed plugin Skills")]
+    PluginSkillCatalog(#[source] BackendError),
     #[error("failed to reconcile skill storage")]
     SkillStorage(#[source] ApplicationError),
     #[error("failed to initialize agent runtime")]
@@ -80,7 +93,8 @@ pub struct Backend {
     worktree_root: Arc<RwLock<PathBuf>>,
     project: Arc<ProjectApi>,
     task: Arc<TaskApi>,
-    task_diff: Arc<TaskDiffApi>,
+    workspace_diff: Arc<WorkspaceDiffApi>,
+    user_config: Arc<UserConfigApi>,
     session: Arc<SessionApi>,
     agent_runtime: Arc<AgentRuntimeManager>,
     plugin: Arc<PluginApi>,
@@ -90,6 +104,14 @@ pub struct Backend {
     workflow: Arc<WorkflowApi>,
     workflow_run: Arc<WorkflowRunApi>,
     workflow_run_engine: Arc<ConcreteWorkflowRunControl>,
+    /// Serializes scheduling-affecting workflow-run mutations per run across the control entry
+    /// points, the manual completion path, and the session-driver callback.
+    run_locks: Arc<KeyedResourceLocks>,
+    /// Transient set of node runs a manual completion is currently claiming; blocks a concurrent
+    /// prompt against the same node without adding any persisted status.
+    completing_node_runs: Arc<crate::workflow::run::interactive::CompletingNodeRuns>,
+    sessions_root: PathBuf,
+    baselines_root: PathBuf,
     app_events: Arc<AppEventHub>,
     git_cleanup: crate::git_cleanup::GitCleanupHandle,
     relative_path_base: PathBuf,
@@ -97,6 +119,9 @@ pub struct Backend {
 
 impl Backend {
     /// Opens persistent storage and constructs every shared CRUD API.
+    ///
+    /// Installed agent plugins join the built-in CLIs as agent providers; they are discovered by
+    /// the plugin lifecycle under `paths.data_directory`, which also owns their processes.
     pub fn open(paths: BackendPaths) -> Result<Self, BackendBootstrapError> {
         ensure_directory(
             paths
@@ -104,17 +129,33 @@ impl Backend {
                 .parent()
                 .unwrap_or_else(|| Path::new(".")),
         )?;
-        ensure_directory(&paths.worktree_root)?;
         let catalog = default_migration_catalog().map_err(BackendBootstrapError::Database)?;
         let pool = DatabaseBootstrapper::system()
             .bootstrap_repository_pool(&DatabaseLocation::path(&paths.database_path), &catalog)
             .map_err(BackendBootstrapError::Database)?;
+        let user_config = Arc::new(UserConfigApi::new(pool.clone()));
+        let stored_worktree_root = user_config
+            .worktree_root()
+            .map_err(BackendBootstrapError::UserConfig)?;
+        let configured_worktree_root = match stored_worktree_root {
+            Some(root) => {
+                if !root.is_absolute() || !root.is_dir() {
+                    return Err(BackendBootstrapError::InvalidWorktreeRoot { path: root });
+                }
+                root
+            }
+            None => {
+                ensure_directory(&paths.worktree_root)?;
+                paths.worktree_root
+            }
+        };
         crate::skill_reconciliation::reconcile_skill_storage(&pool, &paths.skills_root)
             .map_err(BackendBootstrapError::SkillStorageReconciliation)?;
         crate::skill_reconciliation::cleanup_import_temp_sessions()
             .map_err(BackendBootstrapError::SkillStorageReconciliation)?;
         let clock = SystemClock;
         let app_events = Arc::new(AppEventHub::new());
+        let user_config = Arc::new(UserConfigApi::new(pool.clone()));
         let plugin = Arc::new(
             PluginApi::open(
                 pool.clone(),
@@ -122,28 +163,50 @@ impl Backend {
                 paths.deno_path,
                 clock,
                 app_events.publisher(),
+                user_config.clone(),
             )
-            .map_err(BackendBootstrapError::PluginLifecycle)?,
+            .map_err(BackendBootstrapError::Plugin)?,
         );
+        plugin
+            .sync_installed_skills()
+            .map_err(BackendBootstrapError::PluginSkillCatalog)?;
         let scheduler = Scheduler::new(paths.timezone);
-        let worktree_root = Arc::new(RwLock::new(paths.worktree_root));
+        let worktree_root = Arc::new(RwLock::new(configured_worktree_root));
         let sessions_root = paths.sessions_root;
+        // Side files holding the worktree baseline an interactive node diffs at completion.
+        let baselines_root = sessions_root.join("node-baselines");
         let relative_path_base = paths.relative_path_base;
         let agent_runtime = Arc::new(
-            AgentRuntimeManager::new(
-                pool.clone(),
-                paths.home_directory,
-                relative_path_base.clone(),
-                sessions_root.clone(),
+            AgentRuntimeManager::new(AgentRuntimeSetup {
+                plugin_host: plugin.clone(),
+                pool: pool.clone(),
+                home_directory: paths.home_directory,
+                relative_path_base: relative_path_base.clone(),
+                sessions_root: sessions_root.clone(),
                 clock,
                 scheduler,
-                app_events.publisher(),
-            )
+                app_events: app_events.publisher(),
+            })
             .map_err(BackendBootstrapError::AgentRuntime)?,
         );
-        // Crash recovery: fail orphaned node runs and running runs left by a previous process
-        // before serving new commands (best-effort; a failure must not block startup).
-        run_workflow_run_boot_sweep(&pool, clock);
+        // Build the run engine before the crash sweep so recovery can resume stalled runs.
+        let workflow_run_assembly = build_workflow_run_engine(
+            agent_runtime.clone(),
+            pool.clone(),
+            baselines_root.clone(),
+            clock,
+        );
+        let workflow_run_engine = workflow_run_assembly.control;
+        let run_locks = workflow_run_assembly.run_locks;
+        let workflow_engine = workflow_run_assembly.engine;
+
+        // Crash recovery: fail orphaned node runs, then reconcile stalled Running runs left by a
+        // previous process before serving new commands (best-effort; a failure must not block
+        // startup).
+        run_workflow_run_boot_sweep(&pool, &workflow_engine, &run_locks, clock);
+        // Reclaim orphaned worktree-baseline side files left by a previous process.
+        prune_orphaned_baselines(&pool, &baselines_root);
+
         // Durable Git cleanup: the worker's first pass replays every cleanup job
         // and expired provisioning lease a previous process left behind.
         let git_cleanup_worker =
@@ -151,29 +214,42 @@ impl Backend {
         let repository_gates = git_cleanup_worker.repository_gates();
         let git_cleanup = git_cleanup_worker.spawn();
 
-        let workflow_run_engine = build_workflow_run_engine(
-            agent_runtime.clone(),
+        // Durable Effect reconciliation: the first pass replays every surface a previous process
+        // left short of its Desired generation, including the retirement cleanup an uninstall
+        // started but could not finish.
+        let effect_worker = crate::effect_worker::EffectWorker::new(
             pool.clone(),
-            paths.skills_root.clone(),
-            clock,
-        )
-        .control;
+            plugin.clone(),
+            agent_runtime.clone(),
+        );
+        effect_worker.recover();
+        // Creating a Workspace is not something a consumer declaration can observe, so both create
+        // paths wake the worker to converge it promptly instead of at the next scan.
+        let effect_reconcile = effect_worker.spawn();
+        plugin.set_effect_reconcile(effect_reconcile.clone());
 
         Ok(Self {
-            project: Arc::new(ProjectApi::new(pool.clone(), sessions_root.clone(), clock)),
+            project: Arc::new(ProjectApi::new(
+                pool.clone(),
+                sessions_root.clone(),
+                clock,
+                effect_reconcile.clone(),
+            )),
             task: Arc::new(TaskApi::new(
                 pool.clone(),
                 worktree_root.clone(),
-                sessions_root,
-                repository_gates.clone(),
+                relative_path_base.clone(),
+                sessions_root.clone(),
+                repository_gates,
                 clock,
+                effect_reconcile,
             )),
-            task_diff: Arc::new(TaskDiffApi::new(
+            workspace_diff: Arc::new(WorkspaceDiffApi::new(
                 pool.clone(),
-                clock,
                 git_cleanup.clone(),
                 relative_path_base.clone(),
             )),
+            user_config,
             session: Arc::new(SessionApi::new(pool.clone())),
             agent_runtime,
             plugin,
@@ -190,20 +266,23 @@ impl Backend {
                 relative_path_base.clone(),
             )),
             workflow: Arc::new(WorkflowApi::new(pool.clone(), clock)),
-            workflow_run: Arc::new(WorkflowRunApi::new(
-                pool.clone(),
-                worktree_root.clone(),
-                paths.skills_root,
-                repository_gates,
-                clock,
-            )),
+            workflow_run: Arc::new(WorkflowRunApi::new(pool.clone(), paths.skills_root, clock)),
             workflow_run_engine,
+            run_locks,
+            completing_node_runs: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            sessions_root,
+            baselines_root,
             app_events,
             git_cleanup,
             pool,
             worktree_root,
             relative_path_base,
         })
+    }
+
+    /// Returns the plugin data-plane gateway the desktop surface layer drives.
+    pub fn plugin_gateway(&self) -> Arc<PluginGateway> {
+        Arc::new(PluginGateway::new(Arc::clone(&self.plugin)))
     }
 
     /// Returns the cached installed-plugin snapshot without rescanning the filesystem.
@@ -214,37 +293,103 @@ impl Backend {
         Ok(self.plugin.list(request))
     }
 
-    /// Explicitly rescans packages and reconciles durable and runtime state.
+    /// Returns one typed Plugin Configuration editor snapshot.
+    pub fn get_plugin_configuration(
+        &self,
+        request: GetPluginConfigurationRequest,
+    ) -> Result<GetPluginConfigurationResponse, BackendError> {
+        self.plugin.get_configuration(request)
+    }
+
+    /// Persists one revision-checked Plugin Configuration replacement.
+    pub fn save_plugin_configuration(
+        &self,
+        request: SavePluginConfigurationRequest,
+    ) -> Result<SavePluginConfigurationResponse, BackendError> {
+        self.plugin.save_configuration(request)
+    }
+
+    /// Executes an explicit Reset All or damaged-data recovery operation.
+    pub fn reset_plugin_configuration(
+        &self,
+        request: ResetPluginConfigurationRequest,
+    ) -> Result<ResetPluginConfigurationResponse, BackendError> {
+        self.plugin.reset_configuration(request)
+    }
+
+    /// Returns the cached marketplace registry index used to populate plugin discovery.
+    pub fn list_available_plugins(
+        &self,
+        request: ListAvailablePluginsRequest,
+    ) -> Result<ListAvailablePluginsResponse, BackendError> {
+        self.plugin
+            .list_available_plugins(request)
+            .map_err(|error| BackendError::internal("failed to load plugin registry index", error))
+    }
+
+    /// Returns every configured marketplace source in precedence order.
+    pub fn list_marketplace_sources(
+        &self,
+        request: ListMarketplaceSourcesRequest,
+    ) -> Result<ListMarketplaceSourcesResponse, BackendError> {
+        self.plugin.list_marketplace_sources(request)
+    }
+
+    /// Adds one marketplace source after validating and persisting it.
+    pub fn add_marketplace_source(
+        &self,
+        request: AddMarketplaceSourceRequest,
+    ) -> Result<AddMarketplaceSourceResponse, BackendError> {
+        self.plugin.add_marketplace_source(request)
+    }
+
+    /// Removes one marketplace source by URL after persisting the new ordering.
+    pub fn delete_marketplace_source(
+        &self,
+        request: DeleteMarketplaceSourceRequest,
+    ) -> Result<DeleteMarketplaceSourceResponse, BackendError> {
+        self.plugin.delete_marketplace_source(request)
+    }
+
+    /// Changes one marketplace source\u2019s proxy policy after persisting it.
+    pub fn update_marketplace_source(
+        &self,
+        request: UpdateMarketplaceSourceRequest,
+    ) -> Result<UpdateMarketplaceSourceResponse, BackendError> {
+        self.plugin.update_marketplace_source(request)
+    }
+
+    /// Pulls the marketplace source and rebuilds the cache used by plugin discovery.
+    pub fn sync_available_plugins(
+        &self,
+        request: SyncAvailablePluginsRequest,
+    ) -> Result<SyncAvailablePluginsResponse, BackendError> {
+        self.plugin.sync_available_plugins(request)
+    }
+
+    /// Reads the README one marketplace listing publishes for its detail page.
+    pub fn read_plugin_readme(
+        &self,
+        request: ReadPluginReadmeRequest,
+    ) -> Result<ReadPluginReadmeResponse, BackendError> {
+        self.plugin.read_plugin_readme(request)
+    }
+
+    /// Explicitly rescans packages and reconciles process-local runtime state.
     pub async fn scan_plugins(
         &self,
         request: ScanPluginsRequest,
     ) -> Result<ScanPluginsResponse, BackendError> {
-        self.plugin.scan(request).await.map_err(BackendError::from)
-    }
-
-    /// Persists plugin eligibility without starting its process.
-    pub async fn enable_plugin(
-        &self,
-        request: EnablePluginRequest,
-    ) -> Result<EnablePluginResponse, BackendError> {
-        self.plugin
-            .enable(request)
+        let response = self
+            .plugin
+            .scan(request)
             .await
-            .map_err(BackendError::from)
+            .map_err(BackendError::from)?;
+        self.agent_runtime.sync_plugin_agents();
+        Ok(response)
     }
 
-    /// Stops a plugin when necessary before persisting ineligibility.
-    pub async fn disable_plugin(
-        &self,
-        request: DisablePluginRequest,
-    ) -> Result<DisablePluginResponse, BackendError> {
-        self.plugin
-            .disable(request)
-            .await
-            .map_err(BackendError::from)
-    }
-
-    /// Starts one enabled plugin and returns its immediate starting state.
+    /// Starts one installed plugin and returns its immediate starting state.
     pub async fn activate_plugin(
         &self,
         request: ActivatePluginRequest,
@@ -255,7 +400,7 @@ impl Backend {
             .map_err(BackendError::from)
     }
 
-    /// Stops one plugin process without changing durable eligibility.
+    /// Stops one plugin process while leaving the installed plugin available.
     pub async fn stop_plugin(
         &self,
         request: StopPluginRequest,
@@ -263,15 +408,55 @@ impl Backend {
         self.plugin.stop(request).await.map_err(BackendError::from)
     }
 
-    /// Stops and removes one plugin package plus its durable state.
+    /// Stops and removes one plugin package plus its process-local state.
     pub async fn uninstall_plugin(
         &self,
         request: UninstallPluginRequest,
     ) -> Result<UninstallPluginResponse, BackendError> {
-        self.plugin
-            .uninstall(request)
-            .await
-            .map_err(BackendError::from)
+        let response = self.plugin.uninstall(request).await?;
+        self.agent_runtime.sync_plugin_agents();
+        Ok(response)
+    }
+
+    /// Installs a marketplace plugin by resolving its release manifest from the synced source and
+    /// downloading, verifying, and extracting its package through the network-backed installer.
+    ///
+    /// The agent set is reconciled afterwards so the newly installed package supplies a reachable
+    /// agent in this process rather than only after the next restart.
+    pub async fn install_plugin(
+        &self,
+        request: InstallPluginRequest,
+    ) -> Result<InstallPluginResponse, BackendError> {
+        let response = self.plugin.install(request).await?;
+        self.agent_runtime.sync_plugin_agents();
+        Ok(response)
+    }
+
+    /// Updates one installed marketplace plugin to the version its source publishes and
+    /// reconciles the agent set afterwards.
+    ///
+    /// The agent set is reconciled so a replaced agent package supplies a reachable agent in this
+    /// process rather than only after the next restart.
+    pub async fn update_plugin(
+        &self,
+        request: UpdatePluginRequest,
+    ) -> Result<UpdatePluginResponse, BackendError> {
+        let response = self.plugin.update(request).await?;
+        self.agent_runtime.sync_plugin_agents();
+        Ok(response)
+    }
+
+    /// Imports one local release archive and reconciles the agent set afterwards.
+    ///
+    /// The agent set is reconciled so the imported package supplies a reachable agent in this
+    /// process rather than only after the next restart.
+    pub async fn import_plugin(
+        &self,
+        request: ImportPluginRequest,
+    ) -> Result<ImportPluginResponse, BackendError> {
+        let response = self.plugin.import(request).await?;
+        self.agent_runtime.sync_plugin_agents();
+        Ok(response)
     }
 
     /// Starts a workflow run against its frozen snapshot graph.
@@ -279,6 +464,7 @@ impl Backend {
         &self,
         request: StartWorkflowRunRequest,
     ) -> Result<StartWorkflowRunResponse, BackendError> {
+        let _gate = self.run_locks.acquire_exclusive(request.run_id.clone());
         self.workflow_run_engine
             .start(request)
             .map_err(BackendError::from)
@@ -295,9 +481,14 @@ impl Backend {
     ) -> Result<CancelWorkflowRunResponse, BackendError> {
         let run_id = ora_domain::WorkflowRunId::new(&request.run_id);
         let engine = self.workflow_run_engine.clone();
-        let response =
-            spawn_repository_work(move || engine.cancel(request).map_err(BackendError::from))
-                .await?;
+        let run_locks = self.run_locks.clone();
+        let response = spawn_repository_work(move || {
+            // Serialize the `Cancelled` transition against every other mutation for the run; the
+            // async session cleanup below runs outside the gate.
+            let _gate = run_locks.acquire_exclusive(request.run_id.clone());
+            engine.cancel(request).map_err(BackendError::from)
+        })
+        .await?;
         self.stop_workflow_run_sessions(&run_id).await;
         Ok(response)
     }
@@ -346,11 +537,147 @@ impl Backend {
         }
     }
 
+    /// Completes one awaiting interactive workflow node as a human request.
+    ///
+    /// The node is fenced first so no concurrent prompt can start, then its final assistant output
+    /// and file diff are read from persisted state, the completion is committed through the engine
+    /// under the per-run gate, and finally its session is stopped best-effort. Committing before
+    /// stopping means a failed stop can no longer leave a "stopped session but still awaiting node"
+    /// gap: once the node is terminal, prompt policy treats the session as read-only.
+    pub async fn complete_workflow_node(
+        &self,
+        request: CompleteWorkflowNodeRequest,
+    ) -> Result<CompleteWorkflowNodeResponse, BackendError> {
+        let run_id = ora_domain::WorkflowRunId::new(&request.run_id);
+        let node_id = request.node_id.clone();
+
+        // Fence the node against concurrent prompts and completions before doing any expensive
+        // work: once claimed, a prompt is rejected and the worktree stays stable until the commit.
+        let claimed_node_run_id = {
+            let pool = self.pool.clone();
+            let run_locks = self.run_locks.clone();
+            let completing = self.completing_node_runs.clone();
+            let run_id = run_id.clone();
+            let node_id = node_id.clone();
+            spawn_repository_work(move || {
+                crate::workflow::run::interactive::claim_node_for_completion(
+                    &pool,
+                    &run_locks,
+                    &completing,
+                    &run_id,
+                    &node_id,
+                )
+            })
+            .await?
+        };
+
+        // Prepare the final output and diff outside the gate; on failure release the claim so the
+        // node returns to its awaitable state.
+        let prepared = {
+            let pool = self.pool.clone();
+            let sessions_root = self.sessions_root.clone();
+            let baselines_root = self.baselines_root.clone();
+            let agent_runtime = self.agent_runtime.clone();
+            let run_id = run_id.clone();
+            let node_id = node_id.clone();
+            match spawn_repository_work(move || {
+                crate::workflow::run::interactive::prepare_completion(
+                    &pool,
+                    &sessions_root,
+                    &baselines_root,
+                    &agent_runtime,
+                    &run_id,
+                    &node_id,
+                )
+            })
+            .await
+            {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    self.release_completion_claim(&claimed_node_run_id).await;
+                    return Err(error);
+                }
+            }
+        };
+
+        // Commit the node completion under the gate and release the claim in the same critical
+        // section, so a prompt cannot slip in between the commit and the release. Revalidate first:
+        // a cancel that won during prepare must abort this completion rather than report success.
+        let pool = self.pool.clone();
+        let engine = self.workflow_run_engine.clone();
+        let run_locks = self.run_locks.clone();
+        let completing = self.completing_node_runs.clone();
+        let node_run_id = prepared.node_run_id.clone();
+        let output = prepared.output.clone();
+        let stop_reason = prepared.stop_reason.clone();
+        let file_changes = prepared.file_changes.clone();
+        let response = spawn_repository_work(move || {
+            let _gate = run_locks.acquire_exclusive(run_id.as_ref());
+            let result = crate::workflow::run::interactive::revalidate_completion(
+                &pool,
+                &run_id,
+                &node_run_id,
+            )
+            .and_then(|()| {
+                engine
+                    .complete_node(&run_id, &node_run_id, output, stop_reason, file_changes)
+                    .map_err(BackendError::from)
+            });
+            completing
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&node_run_id);
+            result
+        })
+        .await?;
+
+        // The node is terminal now, so its worktree baseline is no longer needed for a diff.
+        let baseline_path = self
+            .baselines_root
+            .join(format!("{}.json", prepared.node_run_id.as_ref()));
+        let _ = spawn_repository_work(move || {
+            std::fs::remove_file(baseline_path).ok();
+            Ok(())
+        })
+        .await;
+
+        // Stop the session best-effort after the commit: the node is terminal now, so a failure
+        // here only leaves a lingering session that prompt policy already treats as read-only.
+        if let Some(session_id) = prepared.session_id.as_ref()
+            && let Err(error) = self
+                .agent_runtime
+                .stop_session(StopSessionRequest {
+                    session_id: session_id.to_string(),
+                })
+                .await
+        {
+            ora_warn!(session_id = %session_id, error = %error, "complete: failed to stop completed node session");
+        }
+
+        Ok(response)
+    }
+
+    /// Releases a completion claim after a prepare failure, returning the node to its awaitable
+    /// state. Best-effort: a poisoned or contended completing set must not mask the real error.
+    async fn release_completion_claim(&self, node_run_id: &ora_domain::WorkflowNodeRunId) {
+        let completing = self.completing_node_runs.clone();
+        let node_run_id = node_run_id.clone();
+        let _ = spawn_repository_work(move || {
+            completing
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&node_run_id);
+            Ok(())
+        })
+        .await;
+    }
+
     /// Restarts a finished workflow run.
     pub fn restart_workflow_run(
         &self,
         request: RestartWorkflowRunRequest,
     ) -> Result<RestartWorkflowRunResponse, BackendError> {
+        let _gate = self.run_locks.acquire_exclusive(request.run_id.clone());
         self.workflow_run_engine
             .restart(request)
             .map_err(BackendError::from)
@@ -361,6 +688,7 @@ impl Backend {
         &self,
         request: UpdateWorkflowRunInputRequest,
     ) -> Result<UpdateWorkflowRunInputResponse, BackendError> {
+        let _gate = self.run_locks.acquire_exclusive(request.run_id.clone());
         self.workflow_run_engine
             .update_input(request)
             .map_err(BackendError::from)
@@ -371,8 +699,88 @@ impl Backend {
         self.pool.clone()
     }
 
-    /// Replaces the root used by task creations that start after this update.
+    /// Returns the authoritative shared developer-mode preference.
+    pub async fn developer_mode(&self) -> Result<ora_application::DeveloperMode, BackendError> {
+        self.user_config.developer_mode().await
+    }
+
+    /// Persists and returns the authoritative shared developer-mode preference.
+    pub async fn set_developer_mode(
+        &self,
+        mode: ora_application::DeveloperMode,
+    ) -> Result<ora_application::DeveloperMode, BackendError> {
+        self.user_config.set_developer_mode(mode).await
+    }
+
+    /// Returns the preferred runtime log level stored in shared user configuration.
+    pub async fn preferred_log_level(&self) -> Result<ora_logging::LogLevel, BackendError> {
+        self.user_config.preferred_log_level().await
+    }
+
+    /// Persists and returns the preferred runtime log level in shared user configuration.
+    pub async fn set_preferred_log_level(
+        &self,
+        level: ora_logging::LogLevel,
+    ) -> Result<ora_logging::LogLevel, BackendError> {
+        self.user_config.set_preferred_log_level(level).await
+    }
+
+    /// Returns the optional configured network proxy settings.
+    pub fn network_proxy_settings(
+        &self,
+    ) -> Result<Option<ora_application::NetworkProxySettings>, BackendError> {
+        self.user_config.network_proxy_settings()
+    }
+
+    /// Persists and returns the configured network proxy settings.
+    pub fn set_network_proxy_settings(
+        &self,
+        settings: ora_application::NetworkProxySettings,
+    ) -> Result<ora_application::NetworkProxySettings, BackendError> {
+        self.user_config.set_network_proxy_settings(settings)
+    }
+
+    /// Returns the restricted preferred-level persistence capability for runtime logging.
+    pub fn preferred_log_level_store(&self) -> BackendPreferredLogLevelStore {
+        BackendPreferredLogLevelStore::new(self.user_config.clone())
+    }
+
+    /// Returns the worktree root row, preserving absence for first-run migration.
+    pub fn persisted_worktree_root(&self) -> Result<Option<PathBuf>, BackendError> {
+        self.user_config.worktree_root()
+    }
+
+    /// Returns the active root used for new task worktrees.
+    pub fn worktree_root(&self) -> Result<PathBuf, BackendError> {
+        self.worktree_root
+            .read()
+            .map(|root| root.clone())
+            .map_err(|_poisoned| {
+                BackendError::new(
+                    ErrorClassification::Internal,
+                    PublicError::InternalError(EmptyErrorParams {}),
+                    "worktree root configuration is unavailable",
+                )
+            })
+    }
+
+    /// Validates and persists the root before publishing it to future task creations.
     pub fn set_worktree_root(&self, worktree_root: PathBuf) -> Result<(), BackendError> {
+        if !worktree_root.is_absolute() {
+            return Err(BackendError::new(
+                ErrorClassification::InvalidRequest,
+                PublicError::WorktreeRootNotAbsolute(EmptyErrorParams {}),
+                "worktree root must be an absolute path",
+            ));
+        }
+        if !worktree_root.is_dir() {
+            return Err(BackendError::new(
+                ErrorClassification::InvalidRequest,
+                PublicError::WorktreeRootNotDirectory(EmptyErrorParams {}),
+                "worktree root must be an existing directory",
+            ));
+        }
+        self.user_config.set_worktree_root(&worktree_root)?;
         let mut configured_root = self.worktree_root.write().map_err(|_poisoned| {
             BackendError::new(
                 ErrorClassification::Internal,
@@ -393,6 +801,26 @@ impl Backend {
         crate::task::resolve_task_cwd(
             &self.pool,
             &ora_domain::TaskId::new(task_id),
+            &self.relative_path_base,
+        )
+    }
+
+    /// Resolves the project checkout root used before a task exists (draft / warm chat).
+    ///
+    /// Resolves the local directory backing one Workspace for host integrations.
+    pub fn resolve_workspace_cwd(&self, workspace_id: &str) -> Result<PathBuf, BackendError> {
+        crate::task::resolve_workspace_cwd(
+            &self.pool,
+            &ora_domain::WorkspaceId::new(workspace_id),
+            &self.relative_path_base,
+        )
+    }
+
+    /// Resolves the main Workspace directory for an ordinary project chat.
+    pub fn resolve_project_cwd(&self, project_id: &str) -> Result<PathBuf, BackendError> {
+        crate::task::resolve_project_cwd(
+            &self.pool,
+            &ora_domain::ProjectId::new(project_id),
             &self.relative_path_base,
         )
     }
@@ -422,6 +850,40 @@ impl Backend {
     ) -> Result<ListProjectsResponse, BackendError> {
         self.project.list(request).map_err(BackendError::from)
     }
+
+    /// Lists visible workspaces directly from their Workspace-owned persistence boundary.
+    pub fn list_workspaces(
+        &self,
+        _request: ListWorkspacesRequest,
+    ) -> Result<ListWorkspacesResponse, BackendError> {
+        let workspaces = ora_db::SqliteWorkspaceRepository::new(self.pool.clone())
+            .list_all_workspaces()
+            .map_err(|error| BackendError::internal("failed to list workspaces", error))?;
+        Ok(ListWorkspacesResponse {
+            workspaces: workspaces
+                .into_iter()
+                .map(|workspace| Workspace {
+                    id: workspace.id.to_string(),
+                    project_id: workspace.project_id.to_string(),
+                    kind: match workspace.kind {
+                        ora_domain::WorkspaceKind::Main => WorkspaceKind::Main,
+                        ora_domain::WorkspaceKind::Isolated => WorkspaceKind::Isolated,
+                    },
+                    lifecycle: match workspace.lifecycle {
+                        ora_domain::WorkspaceLifecycle::Provisioning => {
+                            WorkspaceLifecycle::Provisioning
+                        }
+                        ora_domain::WorkspaceLifecycle::Active => WorkspaceLifecycle::Active,
+                        ora_domain::WorkspaceLifecycle::Unavailable => {
+                            WorkspaceLifecycle::Unavailable
+                        }
+                        ora_domain::WorkspaceLifecycle::Retiring => WorkspaceLifecycle::Retiring,
+                        ora_domain::WorkspaceLifecycle::Deleted => WorkspaceLifecycle::Deleted,
+                    },
+                })
+                .collect(),
+        })
+    }
     /// Lists selectable branches for one project repository.
     pub fn list_project_branches(
         &self,
@@ -440,8 +902,8 @@ impl Backend {
     }
     /// Deletes one project through the shared application composition.
     ///
-    /// The delete cascades to the project's Tasks, so every chat surface beneath
-    /// it dies along with the project root's and their warm sessions are
+    /// The delete cascades to the project's Workspaces and Tasks, so every chat
+    /// surface beneath it dies along with their warm sessions and histories are
     /// discarded together. The Task identifiers are collected first because the
     /// delete is what makes those rows invisible; both queries share one blocking
     /// hop so that ordering cannot be broken by a scheduling decision.
@@ -452,21 +914,20 @@ impl Backend {
         let project = self.project.clone();
         let pool = self.pool.clone();
         let project_id = ora_domain::ProjectId::new(request.project_id.as_str());
-        let (response, task_ids) = spawn_repository_work(move || {
-            let task_ids = crate::task::task_ids_in_project(&pool, &project_id);
-            project.delete(request).map(|response| (response, task_ids))
+        let (response, workspace_ids) = spawn_repository_work(move || {
+            let workspace_ids = crate::task::workspace_ids_in_project(&pool, &project_id);
+            project
+                .delete(request)
+                .map(|response| (response, workspace_ids))
         })
         .await?;
 
-        let mut targets: Vec<WarmSessionTarget> = task_ids
+        let targets: Vec<WarmSessionTarget> = workspace_ids
             .into_iter()
-            .map(|task_id| WarmSessionTarget::Task {
-                task_id: task_id.to_string(),
+            .map(|workspace_id| WarmSessionTarget::Workspace {
+                workspace_id: workspace_id.to_string(),
             })
             .collect();
-        targets.push(WarmSessionTarget::ProjectRoot {
-            project_id: response.project_id.clone(),
-        });
         self.agent_runtime.discard_warm_sessions(&targets).await;
         // The cascade registered the cleanup jobs; this only trims their latency.
         self.git_cleanup.notify();
@@ -511,8 +972,8 @@ impl Backend {
         let task = self.task.clone();
         let response = spawn_repository_work(move || task.delete(request)).await?;
         self.agent_runtime
-            .discard_warm_sessions(&[WarmSessionTarget::Task {
-                task_id: response.task_id.clone(),
+            .discard_warm_sessions(&[WarmSessionTarget::Workspace {
+                workspace_id: response.workspace_id.clone(),
             }])
             .await;
         // The cascade registered the cleanup job; this only trims its latency.
@@ -557,62 +1018,31 @@ impl Backend {
     }
 
     // =============================================================================
-    // taskDiff
+    // workspaceDiff
     // =============================================================================
-    /// Returns the current Git snapshot for the task directory used by its agent session.
-    pub fn get_task_diff(
+    /// Returns the current Git snapshot for one workspace checkout — a task's isolated worktree
+    /// or a project's main checkout alike.
+    pub fn get_workspace_diff(
         &self,
-        request: GetTaskDiffRequest,
-    ) -> Result<GetTaskDiffResponse, BackendError> {
-        self.task_diff.get_diff(request)
+        request: GetWorkspaceDiffRequest,
+    ) -> Result<GetWorkspaceDiffResponse, BackendError> {
+        self.workspace_diff.get_diff(request)
     }
 
-    /// Commits every current change in one isolated task worktree.
-    pub fn commit_task_changes(
+    /// Commits every current change in one workspace checkout.
+    pub fn commit_workspace_changes(
         &self,
-        request: CommitTaskChangesRequest,
-    ) -> Result<CommitTaskChangesResponse, BackendError> {
-        self.task_diff.commit_changes(request)
+        request: CommitWorkspaceChangesRequest,
+    ) -> Result<CommitWorkspaceChangesResponse, BackendError> {
+        self.workspace_diff.commit_changes(request)
     }
 
-    /// Pushes the verified branch owned by one isolated task worktree.
-    pub fn push_task_branch(
+    /// Pushes one workspace checkout's branch, verified when it has a recorded `Worktree` row.
+    pub fn push_workspace_branch(
         &self,
-        request: PushTaskBranchRequest,
-    ) -> Result<PushTaskBranchResponse, BackendError> {
-        self.task_diff.push_branch(request)
-    }
-
-    /// Lists every persisted review discussion for one task.
-    pub fn list_task_diff_comments(
-        &self,
-        request: ListTaskDiffCommentsRequest,
-    ) -> Result<ListTaskDiffCommentsResponse, BackendError> {
-        self.task_diff.list_comments(request)
-    }
-
-    /// Creates one line-anchored task diff discussion.
-    pub fn create_task_diff_comment(
-        &self,
-        request: CreateTaskDiffCommentRequest,
-    ) -> Result<CreateTaskDiffCommentResponse, BackendError> {
-        self.task_diff.create_comment(request)
-    }
-
-    /// Adds one reply under an existing task diff discussion.
-    pub fn reply_task_diff_comment(
-        &self,
-        request: ReplyTaskDiffCommentRequest,
-    ) -> Result<ReplyTaskDiffCommentResponse, BackendError> {
-        self.task_diff.reply_comment(request)
-    }
-
-    /// Resolves or reopens one root task diff discussion.
-    pub fn set_task_diff_comment_status(
-        &self,
-        request: SetTaskDiffCommentStatusRequest,
-    ) -> Result<SetTaskDiffCommentStatusResponse, BackendError> {
-        self.task_diff.set_comment_status(request)
+        request: PushWorkspaceBranchRequest,
+    ) -> Result<PushWorkspaceBranchResponse, BackendError> {
+        self.workspace_diff.push_branch(request)
     }
 
     // =============================================================================
@@ -655,9 +1085,16 @@ impl Backend {
         &self,
         request: ListSessionsRequest,
     ) -> Result<ListSessionsResponse, BackendError> {
-        self.session.list(request).map_err(BackendError::from)
+        // Snapshot unpublished ownership before reading SQLite. If a node binding commits between
+        // these reads, this snapshot still excludes the row returned by the earlier database view;
+        // a later request instead sees the committed binding through the repository filter.
+        let unpublished = self.agent_runtime.unpublished_workflow_session_ids()?;
+        let mut response = self.session.list(request).map_err(BackendError::from)?;
+        response
+            .sessions
+            .retain(|session| !unpublished.contains(&session.id));
+        Ok(response)
     }
-
     /// Renames one session, locks agent title acquisition, then notifies subscribers.
     pub async fn rename_session(
         &self,
@@ -679,7 +1116,7 @@ impl Backend {
             .try_publish(AppEvent::SessionTitleUpdated { session_id });
         Ok(response)
     }
-    /// Streams the provider-owned history for one persisted session.
+    /// Loads one session conversation and continues its active turn when present.
     pub async fn load_session(
         &self,
         request: LoadSessionRequest,
@@ -693,11 +1130,43 @@ impl Backend {
     }
 
     /// Streams one structured ACP prompt turn for a running session.
+    ///
+    /// When the session belongs to an awaiting interactive workflow node, the node flips to
+    /// `Running` for the duration of the turn and back to `Pending` when the turn ends or the
+    /// stream is dropped, so the node's awaiting status tracks the agent's generating state.
     pub async fn prompt_session(
         &self,
         request: PromptSessionRequest,
     ) -> Result<SessionEventStream<PromptSessionEvent>, BackendError> {
-        self.agent_runtime.prompt_session(request).await
+        let node_run_id = crate::workflow::run::interactive::begin_human_turn(
+            &self.pool,
+            &self.run_locks,
+            &self.completing_node_runs,
+            &request.session_id,
+        )
+        .await?;
+        let stream = match self.agent_runtime.prompt_session(request).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                // The turn never started; put the awaiting node back where it was.
+                if let Some(node_run_id) = node_run_id.as_ref() {
+                    let _ =
+                        crate::workflow::run::interactive::end_human_turn(&self.pool, node_run_id)
+                            .await;
+                }
+                return Err(error);
+            }
+        };
+        let Some(node_run_id) = node_run_id else {
+            return Ok(stream);
+        };
+        let pool = self.pool.clone();
+        Ok(stream.attach_cleanup(move || {
+            tokio::spawn(async move {
+                let _ =
+                    crate::workflow::run::interactive::end_human_turn(&pool, &node_run_id).await;
+            });
+        }))
     }
 
     /// Delivers one validated permission response to the owning session actor.
@@ -714,6 +1183,14 @@ impl Backend {
         request: StopSessionRequest,
     ) -> Result<StopSessionResponse, BackendError> {
         self.agent_runtime.stop_session(request).await
+    }
+
+    /// Cancels one active prompt while keeping its session available for another turn.
+    pub fn cancel_session_prompt(
+        &self,
+        request: CancelSessionPromptRequest,
+    ) -> Result<CancelSessionPromptResponse, BackendError> {
+        self.agent_runtime.cancel_session_prompt(request)
     }
 
     /// Moves one existing conversation onto a different agent CLI.
@@ -752,15 +1229,12 @@ impl Backend {
         Ok(self.agent_runtime.agent_runtime_status())
     }
 
-    /// Resolves one Ora session id to its private agent session identifier and worktree cwd.
-    ///
-    /// Backend-only: the returned `agent_session_id` is never exposed to the frontend. The
-    /// Desktop dashboard command consumes it to locate the agent-written trace file.
-    pub fn resolve_session_locator(
+    /// Lists the models one agent advertises outside any session.
+    pub fn list_agent_models(
         &self,
-        session_id: &str,
-    ) -> Result<SessionLocator, BackendError> {
-        self.agent_runtime.resolve_session_locator(session_id)
+        request: ListAgentModelsRequest,
+    ) -> Result<ListAgentModelsResponse, BackendError> {
+        self.agent_runtime.agent_models(request)
     }
 
     // =============================================================================
@@ -1068,6 +1542,16 @@ impl Backend {
             .delete(request)
             .map_err(BackendError::from)
     }
+
+    /// Renames one workflow run through its Workspace-owned display field.
+    pub fn rename_workflow_run(
+        &self,
+        request: RenameWorkflowRunRequest,
+    ) -> Result<RenameWorkflowRunResponse, BackendError> {
+        self.workflow_run
+            .rename(request)
+            .map_err(BackendError::from)
+    }
 }
 
 /// Runs one blocking repository operation off the async runtime's worker threads.
@@ -1078,7 +1562,7 @@ impl Backend {
 /// holds the reservation. Parking an async worker for that long starves every
 /// other request the runtime is serving, so the wait belongs on the blocking
 /// pool even though the caller is asynchronous for unrelated reasons.
-async fn spawn_repository_work<T>(
+pub(crate) async fn spawn_repository_work<T>(
     work: impl FnOnce() -> Result<T, BackendError> + Send + 'static,
 ) -> Result<T, BackendError>
 where
@@ -1097,12 +1581,18 @@ fn ensure_directory(path: &Path) -> Result<(), BackendBootstrapError> {
     })
 }
 
-/// Fails runs interrupted by a previous process, keeping `current_nodes` intact.
+/// Fails runs interrupted by a previous process, then reconciles the survivors.
 ///
 /// Runs that were `Running` or `Failed` when the process died have their non-terminal node runs
-/// marked `Failed` with `interrupted_by_restart`; the sweep is idempotent and best-effort so a
-/// storage failure cannot block startup.
-fn run_workflow_run_boot_sweep(pool: &RepositoryPool, clock: SystemClock) {
+/// marked `Failed` with `interrupted_by_restart`. Surviving `Running` runs are then reconciled:
+/// stalled ones resume scheduling, and invalid `Pending` nodes fail closed. The sweep is
+/// idempotent and best-effort so a storage failure cannot block startup.
+fn run_workflow_run_boot_sweep(
+    pool: &RepositoryPool,
+    engine: &Arc<ConcreteWorkflowRunEngine>,
+    run_locks: &Arc<KeyedResourceLocks>,
+    clock: SystemClock,
+) {
     let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
     let run_ids = match repository.list_recoverable_runs() {
         Ok(run_ids) => run_ids,
@@ -1111,11 +1601,43 @@ fn run_workflow_run_boot_sweep(pool: &RepositoryPool, clock: SystemClock) {
             return;
         }
     };
-    if run_ids.is_empty() {
-        return;
-    }
-    if let Err(error) = repository.fail_orphaned_node_runs(&run_ids, clock.now_timestamp_millis()) {
+    if !run_ids.is_empty()
+        && let Err(error) =
+            repository.fail_orphaned_node_runs(&run_ids, clock.now_timestamp_millis())
+    {
         ora_error!(error = %error, "workflow run boot sweep failed to fail orphaned node runs");
+    }
+    crate::workflow::run::reconcile_running_workflow_runs(engine, run_locks, pool);
+}
+
+/// Deletes worktree-baseline side files whose node run is missing or no longer awaiting input.
+///
+/// Baselines exist only while an interactive node awaits input; a crash between a node's terminal
+/// commit and its baseline deletion, or a node that failed without cleanup, leaves orphaned side
+/// files that this sweep reclaims at the next boot.
+fn prune_orphaned_baselines(pool: &RepositoryPool, baselines_root: &Path) {
+    let Ok(entries) = std::fs::read_dir(baselines_root) else {
+        return;
+    };
+    let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let node_run_id = ora_domain::WorkflowNodeRunId::new(name);
+        let still_awaiting = repository
+            .find_node_run_by_id(&node_run_id)
+            .map(|node_run| {
+                node_run.is_some_and(|node| node.status == ora_domain::WorkflowNodeStatus::Pending)
+            })
+            .unwrap_or(false);
+        if !still_awaiting {
+            let _ = std::fs::remove_file(&path);
+        }
     }
 }
 
@@ -1123,6 +1645,7 @@ fn run_workflow_run_boot_sweep(pool: &RepositoryPool, clock: SystemClock) {
 mod tests {
     use super::{Backend, BackendPaths};
     use crate::error::ErrorClassification;
+    use ora_application::DeveloperMode;
     use ora_contracts::CreateTaskRequest;
     use ora_contracts::{
         CreateAgentRequest, CreateProjectRequest, CreateSkillRequest, DeleteAgentRequest,
@@ -1130,6 +1653,7 @@ mod tests {
         GetTaskRequest, ListAgentsRequest, ListProjectsRequest, ListSkillsRequest,
         UpdateAgentRequest, UpdateProjectRequest, UpdateSkillRequest,
     };
+    use ora_logging::LogLevel;
     use ora_test_support::GitTestScaffold;
     use std::fs;
     use tempfile::TempDir;
@@ -1156,11 +1680,38 @@ mod tests {
 
         assert!(database_path.is_file());
         assert!(worktree_root.is_dir());
+        assert_eq!(
+            (
+                backend.developer_mode().await.unwrap(),
+                backend.preferred_log_level().await.unwrap(),
+            ),
+            (DeveloperMode::Disabled, LogLevel::Info)
+        );
+        assert_eq!(
+            (
+                backend
+                    .set_developer_mode(DeveloperMode::Enabled)
+                    .await
+                    .unwrap(),
+                backend
+                    .set_preferred_log_level(LogLevel::Debug)
+                    .await
+                    .unwrap(),
+            ),
+            (DeveloperMode::Enabled, LogLevel::Debug)
+        );
+        assert_eq!(
+            (
+                backend.developer_mode().await.unwrap(),
+                backend.preferred_log_level().await.unwrap(),
+            ),
+            (DeveloperMode::Enabled, LogLevel::Debug)
+        );
 
         let project = backend
             .create_project(CreateProjectRequest {
                 name: "Ora".to_string(),
-                root_path: temporary
+                main_workspace_path: temporary
                     .path()
                     .join("repository")
                     .to_string_lossy()
@@ -1256,6 +1807,58 @@ mod tests {
         assert_eq!(error.public_error().code(), "project_not_found");
     }
 
+    /// Verifies startup projects installed Skill plugins into the shared Skill catalog.
+    #[test]
+    fn opens_with_plugin_skills_written_to_the_existing_database_schema() {
+        let temporary = TempDir::new().expect("create temporary backend directory");
+        let package_root = temporary
+            .path()
+            .join("plugins/installed/official/review-pack/1.0.0");
+        let skill_root = package_root.join("assets/review");
+        fs::create_dir_all(&skill_root).expect("create installed Skill tree");
+        fs::write(
+            package_root.join("orax.toml"),
+            "identifier = \"review-pack\"\nnamespace = \"official\"\nkind = \"skill\"\nversion = \"1.0.0\"\ndescription = \"Review skills\"\n",
+        )
+        .expect("write plugin manifest");
+        fs::write(
+            skill_root.join("SKILL.md"),
+            "---\nname: review\ndescription: Reviews changes\n---\n# Review instructions\n",
+        )
+        .expect("write Skill manifest");
+
+        let backend = Backend::open(BackendPaths {
+            database_path: temporary.path().join("ora.sqlite3"),
+            data_directory: temporary.path().to_path_buf(),
+            deno_path: std::path::PathBuf::from("deno"),
+            worktree_root: temporary.path().join("worktrees"),
+            home_directory: temporary.path().to_path_buf(),
+            relative_path_base: temporary.path().to_path_buf(),
+            sessions_root: temporary.path().join("sessions"),
+            skills_root: temporary.path().join("atoms/skills"),
+            ripgrep_path: std::path::PathBuf::from("rg"),
+            timezone: chrono_tz::UTC,
+        })
+        .expect("open shared backend");
+
+        let skills = backend
+            .list_skills(ListSkillsRequest {})
+            .expect("list plugin Skills")
+            .skills;
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].namespace, "official/review-pack");
+        assert_eq!(skills[0].name, "review");
+        assert_eq!(
+            skills[0].source,
+            ora_contracts::SkillSource::Plugin {
+                plugin_id: "official/review-pack".to_string(),
+            }
+        );
+        assert_eq!(
+            skills[0].availability,
+            ora_contracts::SkillAvailability::Available
+        );
+    }
     /// Verifies an update rewrites only the manifest and preserves other package files.
     #[test]
     fn update_preserves_other_package_files() {
@@ -1334,7 +1937,7 @@ mod tests {
         let project = backend
             .create_project(CreateProjectRequest {
                 name: "Ora".to_string(),
-                root_path: repository_root.to_string_lossy().into_owned(),
+                main_workspace_path: repository_root.to_string_lossy().into_owned(),
             })
             .expect("create project")
             .project;
@@ -1342,12 +1945,11 @@ mod tests {
             .create_task(CreateTaskRequest {
                 project_id: project.id,
                 title: "Move configuration".to_string(),
-                workspace_mode: None,
                 base_branch: Some("main".to_string()),
             })
             .expect("create task")
             .task;
-        let original_worktree_path = original_worktree_root.join(&task.id);
+        let original_worktree_path = original_worktree_root.join(&task.workspace_id);
         assert!(original_worktree_path.is_dir());
 
         let replacement_root = temporary.path().join("replacement-worktrees");
@@ -1368,5 +1970,387 @@ mod tests {
                 .get_task(GetTaskRequest { task_id: task.id })
                 .is_err()
         );
+    }
+
+    /// Verifies a local Tavily MCP `.orax` import, configuration editor snapshot, and `store.json`
+    /// persistence for the `apiKey` setting.
+    #[tokio::test]
+    async fn tavily_mcp_local_import_and_configuration() {
+        use ora_contracts::{
+            GetPluginConfigurationRequest, ImportPluginRequest, InstalledPluginContribution,
+            ListInstalledPluginsRequest, PluginConfigurationCompleteness,
+            PluginConfigurationSummary, PluginSettingValue, SavePluginConfigurationRequest,
+        };
+        use pretty_assertions::assert_eq;
+        use std::collections::BTreeMap;
+        use std::fs;
+        use std::path::PathBuf;
+
+        const PLUGIN_ID: &str = "official/ora-space.tavily-search";
+        const TEST_API_KEY: &str = "tvly-test-e2e-key";
+
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let orax_archive = workspace_root.join(".tmp/ora-space.tavily-search-v0.1.0.orax");
+        if !orax_archive.is_file() {
+            eprintln!(
+                "skipping Tavily MCP import E2E: missing {}",
+                orax_archive.display()
+            );
+            return;
+        }
+
+        let temporary = TempDir::new().expect("create temporary backend directory");
+        let data_directory = temporary.path().to_path_buf();
+        let backend = Backend::open(BackendPaths {
+            database_path: data_directory.join("ora.sqlite3"),
+            data_directory: data_directory.clone(),
+            deno_path: std::path::PathBuf::from("deno"),
+            worktree_root: data_directory.join("worktrees"),
+            home_directory: data_directory.clone(),
+            relative_path_base: data_directory.clone(),
+            sessions_root: data_directory.join("sessions"),
+            skills_root: data_directory.join("atoms").join("skills"),
+            ripgrep_path: std::path::PathBuf::from("rg"),
+            timezone: chrono_tz::UTC,
+        })
+        .expect("open shared backend");
+
+        backend
+            .import_plugin(ImportPluginRequest {
+                path: orax_archive.to_string_lossy().into_owned(),
+            })
+            .await
+            .expect("import Tavily MCP release");
+
+        let installed = backend
+            .list_installed_plugins(ListInstalledPluginsRequest {})
+            .expect("list installed plugins")
+            .plugins
+            .into_iter()
+            .find(|plugin| plugin.id == PLUGIN_ID)
+            .expect("Tavily MCP plugin is installed");
+        assert_eq!(
+            installed.contribution,
+            InstalledPluginContribution::Mcp,
+            "installed plugin contribution"
+        );
+        assert_eq!(
+            installed.configuration,
+            PluginConfigurationSummary::Available {
+                completeness: PluginConfigurationCompleteness::Incomplete,
+            },
+            "configuration is incomplete before apiKey is saved"
+        );
+
+        let configuration = backend
+            .get_plugin_configuration(GetPluginConfigurationRequest {
+                plugin_id: PLUGIN_ID.to_string(),
+            })
+            .expect("load plugin configuration editor")
+            .configuration;
+        let api_key_setting = configuration
+            .settings
+            .iter()
+            .find(|setting| setting.declaration.id == "apiKey")
+            .expect("apiKey setting is declared");
+        assert_eq!(api_key_setting.declaration.title, "API key");
+
+        let saved = backend
+            .save_plugin_configuration(SavePluginConfigurationRequest {
+                plugin_id: PLUGIN_ID.to_string(),
+                expected_revision: configuration.revision,
+                declaration_fingerprint: configuration.declaration_fingerprint.clone(),
+                values: BTreeMap::from([(
+                    "apiKey".to_string(),
+                    PluginSettingValue::String(TEST_API_KEY.to_string()),
+                )]),
+            })
+            .expect("save Tavily apiKey setting")
+            .configuration;
+        assert_eq!(
+            saved.summary,
+            PluginConfigurationSummary::Available {
+                completeness: PluginConfigurationCompleteness::Complete,
+            }
+        );
+
+        let store_json = fs::read_to_string(
+            data_directory.join("plugins/data/official/ora-space.tavily-search/store.json"),
+        )
+        .expect("read persisted store.json");
+        assert!(
+            store_json.contains(TEST_API_KEY),
+            "store.json should contain the saved apiKey value"
+        );
+    }
+
+    /// Verifies marketplace registry resolution for the Tavily MCP listing without downloading
+    /// the release archive.
+    #[test]
+    fn tavily_mcp_marketplace_manifest_resolves_from_staged_registry() {
+        use ora_domain::PluginId;
+        use ora_plugin_registry::RegistryIndex;
+        use pretty_assertions::assert_eq;
+        use std::fs;
+        use std::path::PathBuf;
+
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let marketplace_registry = workspace_root.join(".tmp/marketplace/registry");
+        if !marketplace_registry.is_dir() {
+            eprintln!(
+                "skipping Tavily MCP marketplace manifest E2E: missing {}",
+                marketplace_registry.display()
+            );
+            return;
+        }
+
+        let temporary = TempDir::new().expect("create temporary backend directory");
+        let marketplace_checkout = temporary
+            .path()
+            .join("plugins/sources/github.com/ora-space/marketplace");
+        fs::create_dir_all(&marketplace_checkout).expect("create marketplace checkout");
+        copy_dir_recursive(
+            &marketplace_registry,
+            &marketplace_checkout.join("registry"),
+        )
+        .expect("stage marketplace registry");
+
+        let registry_dir = marketplace_checkout.join("registry");
+        let plugin_id = PluginId::parse("official/ora-space.tavily-search").expect("plugin id");
+        let manifest = RegistryIndex::resolve_manifest_all(&[registry_dir.as_path()], &plugin_id)
+            .expect("resolve marketplace manifest")
+            .expect("Tavily listing is present in staged registry");
+        assert_eq!(
+            manifest.url().map(|url| url.as_url().to_string()),
+            Some(
+                "https://github.com/ora-space/tavily-search-mcp/releases/download/v0.1.0/ora-space.tavily-search-v0.1.0.orax"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            manifest.sha256().map(|digest| digest.to_string()),
+            Some("a8b58b0fc0a7c85fe774620682703149b4b6acbaa99303f399309558da282130".to_string())
+        );
+    }
+
+    /// Downloads and installs Tavily from a staged marketplace registry. Requires the release URL
+    /// to be reachable without authentication.
+    #[tokio::test]
+    #[ignore = "requires ora-space/tavily-search-mcp release assets to be publicly downloadable"]
+    async fn tavily_mcp_marketplace_install_and_configuration() {
+        use ora_contracts::{
+            GetPluginConfigurationRequest, InstallPluginRequest, ListInstalledPluginsRequest,
+            PluginConfigurationCompleteness, PluginConfigurationSummary, PluginSettingValue,
+            SavePluginConfigurationRequest,
+        };
+        use pretty_assertions::assert_eq;
+        use std::collections::BTreeMap;
+        use std::fs;
+        use std::path::PathBuf;
+
+        const PLUGIN_ID: &str = "official/ora-space.tavily-search";
+        const TEST_API_KEY: &str = "tvly-test-marketplace-e2e";
+
+        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
+        let marketplace_registry = workspace_root.join(".tmp/marketplace/registry");
+        if !marketplace_registry.is_dir() {
+            eprintln!(
+                "skipping Tavily MCP marketplace E2E: missing {}",
+                marketplace_registry.display()
+            );
+            return;
+        }
+
+        let temporary = TempDir::new().expect("create temporary backend directory");
+        let data_directory = temporary.path().to_path_buf();
+        let marketplace_checkout =
+            data_directory.join("plugins/sources/github.com/ora-space/marketplace");
+        fs::create_dir_all(&marketplace_checkout).expect("create marketplace checkout");
+        copy_dir_recursive(
+            &marketplace_registry,
+            &marketplace_checkout.join("registry"),
+        )
+        .expect("stage marketplace registry");
+
+        let backend = Backend::open(BackendPaths {
+            database_path: data_directory.join("ora.sqlite3"),
+            data_directory: data_directory.clone(),
+            deno_path: std::path::PathBuf::from("deno"),
+            worktree_root: data_directory.join("worktrees"),
+            home_directory: data_directory.clone(),
+            relative_path_base: data_directory.clone(),
+            sessions_root: data_directory.join("sessions"),
+            skills_root: data_directory.join("atoms").join("skills"),
+            ripgrep_path: std::path::PathBuf::from("rg"),
+            timezone: chrono_tz::UTC,
+        })
+        .expect("open shared backend");
+
+        backend
+            .install_plugin(InstallPluginRequest {
+                plugin_id: PLUGIN_ID.to_string(),
+            })
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "install Tavily MCP from staged marketplace registry: {error:?}. \
+                     If the release URL returns 404, ensure ora-space/tavily-search-mcp is public."
+                );
+            });
+
+        let installed = backend
+            .list_installed_plugins(ListInstalledPluginsRequest {})
+            .expect("list installed plugins")
+            .plugins
+            .into_iter()
+            .find(|plugin| plugin.id == PLUGIN_ID)
+            .expect("Tavily MCP plugin is installed after marketplace install");
+        assert_eq!(
+            installed.configuration,
+            PluginConfigurationSummary::Available {
+                completeness: PluginConfigurationCompleteness::Incomplete,
+            }
+        );
+
+        let configuration = backend
+            .get_plugin_configuration(GetPluginConfigurationRequest {
+                plugin_id: PLUGIN_ID.to_string(),
+            })
+            .expect("load plugin configuration editor")
+            .configuration;
+        backend
+            .save_plugin_configuration(SavePluginConfigurationRequest {
+                plugin_id: PLUGIN_ID.to_string(),
+                expected_revision: configuration.revision,
+                declaration_fingerprint: configuration.declaration_fingerprint.clone(),
+                values: BTreeMap::from([(
+                    "apiKey".to_string(),
+                    PluginSettingValue::String(TEST_API_KEY.to_string()),
+                )]),
+            })
+            .expect("save Tavily apiKey after marketplace install");
+
+        let store_json = fs::read_to_string(
+            data_directory.join("plugins/data/official/ora-space.tavily-search/store.json"),
+        )
+        .expect("read persisted store.json");
+        assert!(
+            store_json.contains(TEST_API_KEY),
+            "store.json should contain the saved apiKey value"
+        );
+    }
+
+    /// When `ORA_E2E_PLUGIN_DATA` points at a live Desktop plugin home, verifies Tavily settings
+    /// persistence against the real on-disk layout.
+    #[tokio::test]
+    async fn tavily_mcp_save_configuration_in_desktop_plugin_home() {
+        use ora_contracts::{
+            GetPluginConfigurationRequest, ListInstalledPluginsRequest,
+            PluginConfigurationCompleteness, PluginConfigurationSummary, PluginSettingValue,
+            SavePluginConfigurationRequest,
+        };
+        use std::collections::BTreeMap;
+        use std::fs;
+        use std::path::PathBuf;
+
+        const PLUGIN_ID: &str = "official/ora-space.tavily-search";
+        const TEST_API_KEY: &str = "tvly-desktop-e2e-key";
+
+        let Ok(data_directory) = std::env::var("ORA_E2E_PLUGIN_DATA") else {
+            return;
+        };
+        let data_directory = PathBuf::from(data_directory);
+        let plugin_data_directory = data_directory.clone();
+        if !data_directory.is_dir() {
+            eprintln!(
+                "skipping desktop-home Tavily E2E: {} is not a directory",
+                data_directory.display()
+            );
+            return;
+        }
+
+        let temporary = TempDir::new().expect("create temporary backend directory");
+        let backend = Backend::open(BackendPaths {
+            database_path: temporary.path().join("ora.sqlite3"),
+            data_directory,
+            deno_path: std::path::PathBuf::from("deno"),
+            worktree_root: temporary.path().join("worktrees"),
+            home_directory: temporary.path().to_path_buf(),
+            relative_path_base: temporary.path().to_path_buf(),
+            sessions_root: temporary.path().join("sessions"),
+            skills_root: temporary.path().join("atoms").join("skills"),
+            ripgrep_path: std::path::PathBuf::from("rg"),
+            timezone: chrono_tz::UTC,
+        })
+        .expect("open shared backend");
+
+        let installed = backend
+            .list_installed_plugins(ListInstalledPluginsRequest {})
+            .expect("list installed plugins")
+            .plugins
+            .into_iter()
+            .find(|plugin| plugin.id == PLUGIN_ID)
+            .expect("Tavily MCP plugin is installed in desktop plugin home");
+        assert!(
+            matches!(
+                installed.configuration,
+                PluginConfigurationSummary::Available {
+                    completeness: PluginConfigurationCompleteness::Incomplete,
+                } | PluginConfigurationSummary::Available {
+                    completeness: PluginConfigurationCompleteness::Complete,
+                }
+            ),
+            "configuration should be available after the dotted-name store-path fix"
+        );
+
+        let configuration = backend
+            .get_plugin_configuration(GetPluginConfigurationRequest {
+                plugin_id: PLUGIN_ID.to_string(),
+            })
+            .expect("load plugin configuration editor")
+            .configuration;
+        if matches!(
+            configuration.summary,
+            PluginConfigurationSummary::Available {
+                completeness: PluginConfigurationCompleteness::Complete,
+            }
+        ) {
+            return;
+        }
+        backend
+            .save_plugin_configuration(SavePluginConfigurationRequest {
+                plugin_id: PLUGIN_ID.to_string(),
+                expected_revision: configuration.revision,
+                declaration_fingerprint: configuration.declaration_fingerprint.clone(),
+                values: BTreeMap::from([(
+                    "apiKey".to_string(),
+                    PluginSettingValue::String(TEST_API_KEY.to_string()),
+                )]),
+            })
+            .expect("save Tavily apiKey in desktop plugin home");
+
+        let store_json = fs::read_to_string(
+            plugin_data_directory.join("plugins/data/official/ora-space.tavily-search/store.json"),
+        )
+        .expect("read persisted store.json");
+        assert!(
+            store_json.contains(TEST_API_KEY),
+            "store.json should contain the saved apiKey value"
+        );
+    }
+
+    /// Recursively copies one directory tree for marketplace registry staging in tests.
+    fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+        fs::create_dir_all(to)?;
+        for entry in fs::read_dir(from)? {
+            let entry = entry?;
+            let destination = to.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                copy_dir_recursive(&entry.path(), &destination)?;
+            } else {
+                fs::copy(entry.path(), destination)?;
+            }
+        }
+        Ok(())
     }
 }

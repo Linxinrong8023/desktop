@@ -13,12 +13,33 @@ vi.mock("../specs/specs-view", () => ({
 }));
 
 vi.mock("./workspace-files-view", () => ({
-  WorkspaceFilesView: ({ surface }: { surface: "explorer" | "search" }) => (
-    <div data-testid="files-explorer">{surface}</div>
+  WorkspaceFilesView: ({
+    surface,
+    fileRequest,
+    artifactRequest,
+    projectId,
+    taskId,
+  }: {
+    surface: "explorer" | "search";
+    fileRequest?: { path: string; requestId: number; line?: number };
+    artifactRequest?: { path: string; requestId: number; line?: number };
+    projectId: string;
+    taskId?: string;
+  }) => (
+    <div data-testid="files-explorer">
+      {surface}:{projectId}:{taskId ?? ""}:{fileRequest?.path ?? ""}:
+      {fileRequest?.line ?? ""}
+      {artifactRequest?.path ?? ""}
+    </div>
   ),
 }));
 
-function renderPanel(props: { projectId?: string; taskId?: string }) {
+function renderPanel(props: {
+  projectId?: string;
+  taskId?: string;
+  fileRequest?: { path: string; requestId: number; line?: number };
+  artifactRequest?: { path: string; requestId: number; line?: number };
+}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -30,6 +51,8 @@ function renderPanel(props: { projectId?: string; taskId?: string }) {
             <WorkspaceReviewFilesPanel
               projectId={props.projectId ?? "project-1"}
               taskId={props.taskId}
+              fileRequest={props.fileRequest}
+              artifactRequest={props.artifactRequest}
             />
           </TooltipProvider>
         </AppI18nProvider>
@@ -51,18 +74,67 @@ describe("WorkspaceReviewFilesPanel", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens project files directly on specs and hides explorer/search toggles", () => {
+  it("opens project files on explorer with search available when no task is selected", () => {
     renderPanel({});
 
-    expect(screen.getByTestId("specs-content")).toBeInTheDocument();
+    expect(screen.getByTestId("files-explorer")).toHaveTextContent(
+      "explorer:project-1::",
+    );
     expect(
-      screen.queryByRole("button", { name: /浏览|Explorer/ }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /搜索|Search/ }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /刷新 Specs|Refresh Specs/ }),
+      screen.getByRole("button", { name: /资源管理器|Explorer/ }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /搜索|Search/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /刷新工作区文件|Refresh workspace files/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("forces explorer and forwards a file request from chat", () => {
+    renderPanel({
+      taskId: "task-1",
+      fileRequest: { path: "src/lib.ts", requestId: 1, line: 8 },
+    });
+
+    expect(screen.getByTestId("files-explorer")).toHaveTextContent(
+      "explorer:project-1:task-1:src/lib.ts:8",
+    );
+  });
+
+  it("opens a project-scoped file request without a task", () => {
+    renderPanel({
+      fileRequest: { path: "README.md", requestId: 2, line: 1 },
+    });
+
+    expect(screen.getByTestId("files-explorer")).toHaveTextContent(
+      "explorer:project-1::README.md:1",
+    );
+  });
+
+  it("returns from Specs to Explorer for an unresolved artifact request", async () => {
+    const user = userEvent.setup();
+    const view = renderPanel({ taskId: "task-1" });
+    await user.click(screen.getByRole("button", { name: "Specs" }));
+    expect(screen.getByTestId("specs-content")).toBeInTheDocument();
+
+    view.rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <PlatformProvider adapter={createStubPlatform()}>
+          <AppI18nProvider>
+            <TooltipProvider>
+              <WorkspaceReviewFilesPanel
+                projectId="project-1"
+                taskId="task-1"
+                artifactRequest={{ path: "install", requestId: 1 }}
+              />
+            </TooltipProvider>
+          </AppI18nProvider>
+        </PlatformProvider>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByTestId("files-explorer")).toHaveTextContent("install");
   });
 });

@@ -5,14 +5,16 @@ Ora Rust services initialize shared structured logging through `ora-logging`.
 ## Ownership boundary
 
 - `ora-logging` owns the process-wide subscriber setup, JSON event formatting, sink selection, file rotation, retention cleanup, and the immutable process timezone.
-- Runtime composition roots own reading configuration, calling `ora_logging::init_logging` with an explicit `LoggingConfig`, and retaining the returned `LoggingGuard` for the rest of the process lifetime. The guard keeps non-blocking writer workers alive for every active sink (stdout and/or file); dropping it early loses buffered output. On shutdown, `WorkerGuard` waits briefly for the background worker to drain and may still drop remaining buffered events if a sink is slow. Stdout and file sinks are non-lossy: a full writer channel exerts backpressure on callers instead of dropping lines, so log integrity is preferred over never blocking under extreme sink stalls.
+- Runtime composition roots own reading configuration, calling `ora_logging::init_logging` with an explicit `LoggingConfig`, retaining the returned `LoggingGuard`, and composing the cloneable `LogLevelControl` with preference storage. The guard keeps non-blocking writer workers alive for every active sink (stdout and/or file); dropping it early loses buffered output. On shutdown, `WorkerGuard` waits briefly for the background worker to drain and may still drop remaining buffered events if a sink is slow. Stdout and file sinks are non-lossy: a full writer channel exerts backpressure on callers instead of dropping lines, so log integrity is preferred over never blocking under extreme sink stalls.
 - Runtime request seams and infrastructure crates emit structured `tracing` events but never configure sinks or read environment variables. Application handlers and repository adapters do not emit generic completion or propagation-only failure events.
 
 Initialization is process-wide and the timezone can be set only once, so it must happen before any `ora_logging::clock` access. If a file sink cannot be created or prepared, initialization fails with a typed `LoggingInitError` instead of silently degrading to another sink.
 
 ## Desktop configuration
 
-Desktop does not read logging environment variables. It builds its `LoggingConfig` in code: the file sink is `app_data_dir/logs/ora.log` with daily rotation and three retained days, debug builds write to stdout and the file while release builds write to the file only, and the timezone comes from the operating system. See [Desktop Runtime](desktop-runtime.md).
+Desktop reads an optional `ORA_LOG_LEVEL` value and otherwise restores `user_config.log_level`, defaulting to `info`. Accepted values are `trace`, `debug`, `info`, `warn`, and `error`, ignoring surrounding whitespace and ASCII case; an unsupported value is a startup error. The environment override controls the effective level for that process without changing the stored preference.
+
+The `ora-runtime-settings` manager serializes live updates. It reloads the process filter before persisting the preference, rolls the filter back if persistence fails, and completes a started commit or compensation even if the requesting Tauri future is cancelled. The file sink remains `app_data_dir/logs/ora.log` with daily rotation and three retained days; debug builds also write to stdout, and the timezone comes from the operating system. See [Desktop Runtime](desktop-runtime.md).
 
 ## JSON event contract
 

@@ -63,8 +63,22 @@ describe("workflow demo", () => {
       initialWidth: 230,
       initialHeight: 98,
       handles: [
-        { type: "target", position: "left", x: -5, y: 56, width: 10, height: 10 },
-        { type: "source", position: "right", x: 225, y: 56, width: 10, height: 10 },
+        {
+          type: "target",
+          position: "left",
+          x: -5,
+          y: 56,
+          width: 10,
+          height: 10,
+        },
+        {
+          type: "source",
+          position: "right",
+          x: 225,
+          y: 56,
+          width: 10,
+          height: 10,
+        },
       ],
     });
     expect(node).not.toHaveProperty("width");
@@ -96,12 +110,35 @@ describe("workflow demo", () => {
     );
 
     const missingAgentContract = createMockWorkflow("en-US");
-    const agent = missingAgentContract.nodes.find((node) => node.data.kind === "agent");
+    const agent = missingAgentContract.nodes.find(
+      (node) => node.data.kind === "agent",
+    );
     if (agent === undefined) {
       throw new Error("The code review fixture requires an Agent node");
     }
     delete agent.data.agentConfig;
     expect(() => parseDemoWorkflow(missingAgentContract)).toThrow(
+      "Invalid workflow definition",
+    );
+  });
+
+  it("accepts editor annotations and rejects identifiers shared with executable nodes", () => {
+    const workflow = createMockWorkflow("en-US");
+    workflow.annotations = [
+      {
+        id: "annotation-1",
+        type: "annotation",
+        position: { x: 40, y: 60 },
+        width: 240,
+        height: 140,
+        data: { text: "Review this branch", theme: "yellow" },
+      },
+    ];
+
+    expect(parseDemoWorkflow(workflow)).toEqual(workflow);
+
+    workflow.annotations[0]!.id = workflow.nodes[0]!.id;
+    expect(() => parseDemoWorkflow(workflow)).toThrow(
       "Invalid workflow definition",
     );
   });
@@ -115,7 +152,10 @@ describe("workflow demo", () => {
       id: "spec-change-lifecycle",
       name: "OpenSpec workflow demo",
       nodes: [
-        expect.objectContaining({ id: "start", data: expect.objectContaining({ kind: "start" }) }),
+        expect.objectContaining({
+          id: "start",
+          data: expect.objectContaining({ kind: "start" }),
+        }),
         expect.objectContaining({
           id: "explore",
           data: expect.objectContaining({
@@ -133,7 +173,9 @@ describe("workflow demo", () => {
             title: "SFMEA review",
             agentConfig: expect.objectContaining({
               roleId: "Reviewer",
-              skills: [expect.objectContaining({ skillId: "cdase:sfmea_review" })],
+              skills: [
+                expect.objectContaining({ skillId: "cdase:sfmea_review" }),
+              ],
             }),
           }),
         }),
@@ -162,7 +204,9 @@ describe("workflow demo", () => {
             title: "Code defect scan",
             agentConfig: expect.objectContaining({
               roleId: "Reviewer",
-              skills: [expect.objectContaining({ skillId: "code-defect-scan" })],
+              skills: [
+                expect.objectContaining({ skillId: "code-defect-scan" }),
+              ],
             }),
           }),
         }),
@@ -193,8 +237,14 @@ describe("workflow demo", () => {
         expect.objectContaining({ source: "explore", target: "sfmea-review" }),
         expect.objectContaining({ source: "sfmea-review", target: "propose" }),
         expect.objectContaining({ source: "propose", target: "apply" }),
-        expect.objectContaining({ source: "apply", target: "code-defect-scan" }),
-        expect.objectContaining({ source: "code-defect-scan", target: "defect-repair" }),
+        expect.objectContaining({
+          source: "apply",
+          target: "code-defect-scan",
+        }),
+        expect.objectContaining({
+          source: "code-defect-scan",
+          target: "defect-repair",
+        }),
         expect.objectContaining({ source: "defect-repair", target: "archive" }),
       ],
     });
@@ -204,13 +254,13 @@ describe("workflow demo", () => {
         .filter((node) => node.data.kind === "agent")
         .map((node) => node.data.agentConfig?.executor),
     ).toEqual([
-      { agentCli: "open_code", modelId: "deepseek/deepseek-v4-pro" },
-      { agentCli: "open_code", modelId: "deepseek/deepseek-v4-pro" },
-      { agentCli: "open_code", modelId: "deepseek/deepseek-v4-pro" },
-      { agentCli: "open_code", modelId: "deepseek/deepseek-v4-flash" },
-      { agentCli: "open_code", modelId: "deepseek/deepseek-v4-pro" },
-      { agentCli: "open_code", modelId: "deepseek/deepseek-v4-flash" },
-      { agentCli: "open_code", modelId: "deepseek/deepseek-v4-flash" },
+      { agentCli: "ora-space.opencode", modelId: "deepseek/deepseek-v4-pro" },
+      { agentCli: "ora-space.opencode", modelId: "deepseek/deepseek-v4-pro" },
+      { agentCli: "ora-space.opencode", modelId: "deepseek/deepseek-v4-pro" },
+      { agentCli: "ora-space.opencode", modelId: "deepseek/deepseek-v4-flash" },
+      { agentCli: "ora-space.opencode", modelId: "deepseek/deepseek-v4-pro" },
+      { agentCli: "ora-space.opencode", modelId: "deepseek/deepseek-v4-flash" },
+      { agentCli: "ora-space.opencode", modelId: "deepseek/deepseek-v4-flash" },
     ]);
   });
 
@@ -230,5 +280,4 @@ describe("workflow demo", () => {
       "归档",
     ]);
   });
-
 });

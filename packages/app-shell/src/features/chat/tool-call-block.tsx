@@ -22,6 +22,8 @@ import { useTranslation } from "react-i18next";
 import type { ChatToolCall, ChatToolCallStatus } from "@ora/chat";
 import { DiffView } from "./diff-view";
 import { ContentBlock } from "./content-block";
+import { ChatFileLink } from "./chat-link/chat-file-link";
+import { ChatToolOutputText } from "./chat-link/markdown-overrides";
 
 interface ToolCallBlockProps {
   tool: ChatToolCall;
@@ -110,19 +112,38 @@ export function ToolCallBlock({
         >
           {tool.locations.length > 0 && (
             <div className="space-y-1">
-              {tool.locations.map((location) => (
-                <code
-                  data-selectable
-                  key={`${location.path}:${location.line ?? ""}`}
-                  className="block max-w-full truncate text-[11px] text-sky-700 dark:text-sky-400"
-                  title={location.path}
-                >
-                  {location.path}
-                  {location.line === undefined || location.line === null
-                    ? ""
-                    : `:${location.line}`}
-                </code>
-              ))}
+              {tool.locations.map((location) => {
+                const raw =
+                  location.line === undefined || location.line === null
+                    ? location.path
+                    : `${location.path}:${location.line}`;
+                const label =
+                  location.line === undefined || location.line === null
+                    ? location.path
+                    : `${location.path}:${location.line}`;
+                if (/[\\/]$/.test(location.path.trim())) {
+                  return (
+                    <code
+                      data-selectable
+                      key={`${location.path}:${location.line ?? ""}`}
+                      className="block max-w-full truncate text-[11px] text-sky-700 dark:text-sky-400"
+                      title={location.path}
+                    >
+                      {label}
+                    </code>
+                  );
+                }
+                return (
+                  <ChatFileLink
+                    key={`${location.path}:${location.line ?? ""}`}
+                    source="inline-code"
+                    raw={raw}
+                    className="block max-w-full truncate text-left text-[11px]"
+                  >
+                    {label}
+                  </ChatFileLink>
+                );
+              })}
             </div>
           )}
           {tool.content.map((content, index) => (
@@ -243,14 +264,7 @@ function ToolContent({ content }: { content: acp.ToolCallContent }) {
       );
     case "content":
       if (content.content.type === "text") {
-        return (
-          <pre
-            data-selectable
-            className="max-h-72 overflow-auto rounded-r-sm border-l-2 border-border bg-[var(--code-background)] px-3 py-2.5 text-[11px] leading-5 whitespace-pre-wrap"
-          >
-            {content.content.text}
-          </pre>
-        );
+        return <ChatToolOutputText text={content.content.text} />;
       }
       return <ContentBlock content={content.content} appearance="tool" />;
   }

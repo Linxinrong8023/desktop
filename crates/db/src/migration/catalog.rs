@@ -2,13 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::DatabaseError;
 
-use super::schema_v0001;
-use super::schema_v0002;
-use super::schema_v0003;
-use super::schema_v0004;
-use super::schema_v0005;
-use super::schema_v0006;
-use super::schema_v0007;
+use super::schema;
 
 /// Captures one versioned migration and the SQL needed to move schema state up or down.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,14 +31,14 @@ impl Migration {
         self.version
     }
 
-    /// Returns the forward SQL statements that install this migration.
-    pub fn up_statements(&self) -> &'static [&'static str] {
-        self.up_statements
+    /// Serializes the forward statements into the stable SQL snapshot persisted after execution.
+    pub fn up_sql(&self) -> String {
+        serialize_statements(self.up_statements)
     }
 
-    /// Returns the rollback SQL statements that remove this migration's schema changes.
-    pub fn down_statements(&self) -> &'static [&'static str] {
-        self.down_statements
+    /// Serializes the rollback statements so future rewrites can undo the schema that actually ran.
+    pub fn down_sql(&self) -> String {
+        serialize_statements(self.down_statements)
     }
 }
 
@@ -96,19 +90,25 @@ impl MigrationCatalog {
             .get(version)
             .map(|index| &self.migrations[*index])
     }
+
+    /// Returns the catalog version at a history position for applied-order validation.
+    pub(crate) fn version_at(&self, position: usize) -> Option<&'static str> {
+        self.migrations.get(position).map(Migration::version)
+    }
 }
 
 /// Builds the default migration catalog shipped by the crate.
 pub fn default_migration_catalog() -> Result<MigrationCatalog, DatabaseError> {
-    MigrationCatalog::new(vec![
-        schema_v0001::migration(),
-        schema_v0002::migration(),
-        schema_v0003::migration(),
-        schema_v0004::migration(),
-        schema_v0005::migration(),
-        schema_v0006::migration(),
-        schema_v0007::migration(),
-    ])
+    MigrationCatalog::new(schema::migrations())
+}
+
+/// Produces stable, executable SQL from an ordered statement list.
+fn serialize_statements(statements: &[&str]) -> String {
+    statements
+        .iter()
+        .map(|statement| statement.trim())
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 /// Validates that migration versions stay unique and strictly increasing to preserve a linear history.

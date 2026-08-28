@@ -297,6 +297,37 @@ impl HistoryAssembler {
         self.next_seq = self.next_seq.saturating_add(1);
         seq
     }
+
+    /// Snapshots the records still open in the assembler, each carrying its assigned position.
+    ///
+    /// A load replays these alongside the durable history so the merged stream is gap-free and
+    /// correctly ordered: records are appended out of position, and these are the ones not yet
+    /// written to disk.
+    pub fn pending_records(&self) -> Vec<AssembledRecord> {
+        let mut records: Vec<AssembledRecord> = self
+            .texts
+            .iter()
+            .map(PendingText::to_record)
+            .chain(
+                self.tools
+                    .iter()
+                    // A tool that has already been written is durable, not pending; snapshotting
+                    // it again would duplicate it in the merged replay prefix.
+                    .filter(|tool| !tool.written)
+                    .map(|tool| tool_record(tool.seq, &tool.call)),
+            )
+            .collect();
+        if let Some((seq, plan)) = &self.plan {
+            records.push(AssembledRecord {
+                seq: *seq,
+                record: HistoryRecord::Update {
+                    update: Box::new(SessionUpdate::Plan(plan.clone())),
+                },
+            });
+        }
+        records.sort_by_key(|record| record.seq);
+        records
+    }
 }
 
 impl PendingTool {
@@ -354,6 +385,19 @@ impl PendingText {
                 self.kind,
                 self.message_id,
                 ContentBlock::Text(TextContent::new(self.text)),
+            ),
+        }
+    }
+
+    /// Borrows one accumulated message or thought as a record without consuming it, for snapshotting
+    /// the open items a load must replay before switching to live events.
+    fn to_record(&self) -> AssembledRecord {
+        AssembledRecord {
+            seq: self.seq,
+            record: chunk_record(
+                self.kind,
+                self.message_id.clone(),
+                ContentBlock::Text(TextContent::new(self.text.clone())),
             ),
         }
     }

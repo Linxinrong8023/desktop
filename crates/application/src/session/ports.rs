@@ -1,5 +1,5 @@
 use crate::RepositoryError;
-use ora_domain::{AgentCli, HistoryState, Session, SessionId, SessionStatus, SessionTitle};
+use ora_domain::{AgentRef, HistoryState, Session, SessionId, SessionStatus, SessionTitle};
 
 /// Supplies application-owned persistence operations for session CRUD use cases.
 ///
@@ -14,6 +14,12 @@ pub trait SessionRepository {
 
     /// Lists every visible session in storage order.
     fn list_sessions(&self) -> Result<Vec<Session>, RepositoryError>;
+
+    /// Lists visible sessions that are not owned by workflow node runs.
+    ///
+    /// Workflow node sessions remain individually addressable for Theater and history replay, but
+    /// ordinary conversation surfaces must not project them as user-created chats.
+    fn list_standalone_sessions(&self) -> Result<Vec<Session>, RepositoryError>;
 
     /// Updates only the durable display title and returns the complete current row.
     fn update_session_title(
@@ -35,7 +41,7 @@ pub trait SessionRepository {
     fn update_session_binding(
         &self,
         session_id: &SessionId,
-        agent_cli: AgentCli,
+        agent_ref: AgentRef,
         agent_session_id: &str,
         now: i64,
     ) -> Result<Session, RepositoryError>;

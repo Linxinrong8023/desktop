@@ -31,6 +31,8 @@ pub use clock::{FixedHistoryClock, HistoryClock};
 pub use error::HistoryError;
 pub use handoff::{binding_needs_handoff, render_handoff};
 pub use path::history_path;
-pub use reader::{HistoryIntegrity, SessionHistory, read_session_history};
+pub use reader::{
+    HistoryIntegrity, SessionHistory, read_session_history, read_session_history_up_to,
+};
 pub use record::{AgentSwitch, HistoryLine, HistoryRecord, SCHEMA_VERSION, SessionMeta};
 pub use writer::{HistoryWriter, remove_session_history};

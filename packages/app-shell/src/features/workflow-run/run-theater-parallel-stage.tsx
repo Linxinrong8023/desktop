@@ -33,12 +33,15 @@ interface ParallelAct {
 }
 
 interface RunTheaterParallelStageProps {
+  runId: string;
   acts: ParallelAct[];
   primaryId: string;
   onFocusNode: (nodeId: string) => void;
-  onOpenInspector: () => void;
+  inspectorOpen: boolean;
+  onToggleInspector: () => void;
   sessionConversationNodeId?: string | null;
   onSessionConversationNodeIdChange?: (nodeId: string | null) => void;
+  onNodeCompleted?: (nodeId: string) => void;
   /**
    * Embedded HITL for the focused parallel act. Peers stay chrome-only so the
    * path chips / dots below remain the switcher.
@@ -53,12 +56,15 @@ interface RunTheaterParallelStageProps {
  * so focus changes don’t hard-cut the track.
  */
 export function RunTheaterParallelStage({
+  runId,
   acts,
   primaryId,
   onFocusNode,
-  onOpenInspector,
+  inspectorOpen,
+  onToggleInspector,
   sessionConversationNodeId = null,
   onSessionConversationNodeIdChange,
+  onNodeCompleted,
   primaryInteraction,
 }: RunTheaterParallelStageProps) {
   const { t } = useTranslation();
@@ -197,9 +203,6 @@ export function RunTheaterParallelStage({
     if (!wasDragging) {
       setDragging(false);
       setDragX(0);
-      if (sessionConversationNodeId !== primaryId) {
-        onOpenInspector();
-      }
       return;
     }
 
@@ -236,12 +239,6 @@ export function RunTheaterParallelStage({
       event.preventDefault();
       slideTo(committedIndex + 1);
       return;
-    }
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      if (sessionConversationNodeId !== primaryId) {
-        onOpenInspector();
-      }
     }
   }
 
@@ -356,6 +353,8 @@ export function RunTheaterParallelStage({
                     <RunTheaterActCard
                       data={act.data}
                       state={act.state}
+                      runId={runId}
+                      nodeId={act.nodeId}
                       live={live}
                       artifactCount={act.artifactCount}
                       conversation={act.conversation}
@@ -372,8 +371,13 @@ export function RunTheaterParallelStage({
                             }
                           : undefined
                       }
+                      onNodeCompleted={onNodeCompleted}
                       variant="stage"
                       emphasized={act.nodeId === primaryId}
+                      inspectorOpen={inspectorOpen}
+                      onToggleInspector={
+                        act.nodeId === primaryId ? onToggleInspector : undefined
+                      }
                       interaction={
                         act.nodeId === primaryId
                           ? primaryInteraction

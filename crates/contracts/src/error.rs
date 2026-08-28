@@ -73,6 +73,23 @@ pub struct TaskBaseBranchNotFoundParams {
     pub branch_name: String,
 }
 
+/// Addresses one stable validation failure to its Setting ID.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "error.ts")]
+pub struct PluginConfigurationFieldError {
+    pub setting_id: String,
+    pub error_code: String,
+}
+
+/// Carries Setting-addressed validation failures for a rejected configuration replacement.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "error.ts")]
+pub struct PluginConfigurationValidationParams {
+    pub field_errors: Vec<PluginConfigurationFieldError>,
+}
+
 /// Enumerates every user-visible Ora failure and its exact interpolation parameters.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(tag = "code", content = "params", rename_all = "snake_case")]
@@ -91,7 +108,14 @@ pub enum PublicError {
     AgentNameConflict(EmptyErrorParams),
     AgentNotFound(EmptyErrorParams),
     PluginNotFound(EmptyErrorParams),
-    PluginDisabled(EmptyErrorParams),
+    PluginHostIncompatible(EmptyErrorParams),
+    PluginConfigurationDeclarationInvalid(EmptyErrorParams),
+    PluginConfigurationNotDeclared(EmptyErrorParams),
+    ConfigurationRevisionConflict(EmptyErrorParams),
+    PluginConfigurationDeclarationChanged(EmptyErrorParams),
+    ConfigurationLoadFailed(EmptyErrorParams),
+    PluginConfigurationValidation(PluginConfigurationValidationParams),
+    PluginConfigurationRecoveryNotRequired(EmptyErrorParams),
     ProjectNotFound(EmptyErrorParams),
     TaskNotFound(EmptyErrorParams),
     ResourceInUse(EmptyErrorParams),
@@ -99,15 +123,11 @@ pub enum PublicError {
     TaskBaseBranchRequired(EmptyErrorParams),
     TaskBaseBranchNotFound(TaskBaseBranchNotFoundParams),
     WorktreeNotFound(EmptyErrorParams),
-    TaskDiffBaselineUnavailable(EmptyErrorParams),
-    TaskDiffCommitMessageBlank(EmptyErrorParams),
-    TaskDiffTooLarge(EmptyErrorParams),
-    TaskDiffStale(EmptyErrorParams),
-    TaskDiffCommentNotFound(EmptyErrorParams),
-    TaskDiffCommentInvalid(EmptyErrorParams),
-    TaskDiffCommentConflict(EmptyErrorParams),
+    WorkspaceDiffBaselineUnavailable(EmptyErrorParams),
+    WorkspaceDiffCommitMessageBlank(EmptyErrorParams),
+    WorkspaceDiffTooLarge(EmptyErrorParams),
     SessionNotFound(EmptyErrorParams),
-    AgentCliNotFound(EmptyErrorParams),
+    AgentNotInstalled(EmptyErrorParams),
     AgentRuntimeUnavailable(EmptyErrorParams),
     SessionBusy(EmptyErrorParams),
     SessionStopped(EmptyErrorParams),
@@ -118,8 +138,8 @@ pub enum PublicError {
     PermissionOptionInvalid(EmptyErrorParams),
     PromptEmpty(EmptyErrorParams),
     PromptTooLarge(EmptyErrorParams),
+    WorkspaceUnavailable(EmptyErrorParams),
     TaskWorktreeUnavailable(EmptyErrorParams),
-    TaskProjectRootUnavailable(EmptyErrorParams),
     FileSystemPathNotFound(EmptyErrorParams),
     SpecDocumentNotFound(EmptyErrorParams),
     WorktreeRootNotAbsolute(EmptyErrorParams),
@@ -175,6 +195,8 @@ pub enum PublicError {
     WorkflowRunStartFailed(EmptyErrorParams),
     WorkflowRunNotRestartable(EmptyErrorParams),
     WorkflowRunNotEditable(EmptyErrorParams),
+    WorkflowNodeNotFound(EmptyErrorParams),
+    WorkflowNodeNotAwaitingInput(EmptyErrorParams),
 }
 
 impl PublicError {
@@ -194,7 +216,20 @@ impl PublicError {
             Self::AgentNameConflict(_) => "agent_name_conflict",
             Self::AgentNotFound(_) => "agent_not_found",
             Self::PluginNotFound(_) => "plugin_not_found",
-            Self::PluginDisabled(_) => "plugin_disabled",
+            Self::PluginHostIncompatible(_) => "plugin_host_incompatible",
+            Self::PluginConfigurationDeclarationInvalid(_) => {
+                "plugin_configuration_declaration_invalid"
+            }
+            Self::PluginConfigurationNotDeclared(_) => "plugin_configuration_not_declared",
+            Self::ConfigurationRevisionConflict(_) => "configuration_revision_conflict",
+            Self::PluginConfigurationDeclarationChanged(_) => {
+                "plugin_configuration_declaration_changed"
+            }
+            Self::ConfigurationLoadFailed(_) => "configuration_load_failed",
+            Self::PluginConfigurationValidation(_) => "plugin_configuration_validation",
+            Self::PluginConfigurationRecoveryNotRequired(_) => {
+                "plugin_configuration_recovery_not_required"
+            }
             Self::ProjectNotFound(_) => "project_not_found",
             Self::TaskNotFound(_) => "task_not_found",
             Self::ResourceInUse(_) => "resource_in_use",
@@ -202,15 +237,11 @@ impl PublicError {
             Self::TaskBaseBranchRequired(_) => "task_base_branch_required",
             Self::TaskBaseBranchNotFound(_) => "task_base_branch_not_found",
             Self::WorktreeNotFound(_) => "worktree_not_found",
-            Self::TaskDiffBaselineUnavailable(_) => "task_diff_baseline_unavailable",
-            Self::TaskDiffCommitMessageBlank(_) => "task_diff_commit_message_blank",
-            Self::TaskDiffTooLarge(_) => "task_diff_too_large",
-            Self::TaskDiffStale(_) => "task_diff_stale",
-            Self::TaskDiffCommentNotFound(_) => "task_diff_comment_not_found",
-            Self::TaskDiffCommentInvalid(_) => "task_diff_comment_invalid",
-            Self::TaskDiffCommentConflict(_) => "task_diff_comment_conflict",
+            Self::WorkspaceDiffBaselineUnavailable(_) => "workspace_diff_baseline_unavailable",
+            Self::WorkspaceDiffCommitMessageBlank(_) => "workspace_diff_commit_message_blank",
+            Self::WorkspaceDiffTooLarge(_) => "workspace_diff_too_large",
             Self::SessionNotFound(_) => "session_not_found",
-            Self::AgentCliNotFound(_) => "agent_cli_not_found",
+            Self::AgentNotInstalled(_) => "agent_not_installed",
             Self::AgentRuntimeUnavailable(_) => "agent_runtime_unavailable",
             Self::SessionBusy(_) => "session_busy",
             Self::SessionStopped(_) => "session_stopped",
@@ -221,8 +252,8 @@ impl PublicError {
             Self::PermissionOptionInvalid(_) => "permission_option_invalid",
             Self::PromptEmpty(_) => "prompt_empty",
             Self::PromptTooLarge(_) => "prompt_too_large",
+            Self::WorkspaceUnavailable(_) => "workspace_unavailable",
             Self::TaskWorktreeUnavailable(_) => "task_worktree_unavailable",
-            Self::TaskProjectRootUnavailable(_) => "task_project_root_unavailable",
             Self::FileSystemPathNotFound(_) => "file_system_path_not_found",
             Self::SpecDocumentNotFound(_) => "spec_document_not_found",
             Self::WorktreeRootNotAbsolute(_) => "worktree_root_not_absolute",
@@ -278,6 +309,8 @@ impl PublicError {
             Self::WorkflowRunStartFailed(_) => "workflow_run_start_failed",
             Self::WorkflowRunNotRestartable(_) => "workflow_run_not_restartable",
             Self::WorkflowRunNotEditable(_) => "workflow_run_not_editable",
+            Self::WorkflowNodeNotFound(_) => "workflow_node_not_found",
+            Self::WorkflowNodeNotAwaitingInput(_) => "workflow_node_not_awaiting_input",
         }
     }
 }
@@ -300,6 +333,8 @@ pub(crate) fn export(config: &Config) -> Result<(), ExportError> {
     OpenLocationFailedParams::export_all(config)?;
     SkillFolderConflictParams::export_all(config)?;
     TaskBaseBranchNotFoundParams::export_all(config)?;
+    PluginConfigurationFieldError::export_all(config)?;
+    PluginConfigurationValidationParams::export_all(config)?;
     PublicError::export_all(config)?;
     ContractError::export_all(config)?;
     Ok(())
@@ -308,8 +343,9 @@ pub(crate) fn export(config: &Config) -> Result<(), ExportError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ContractError, EmptyErrorParams, OpenLocationFailedParams, OpenLocationTarget, PublicError,
-        RequestId, SkillFolderConflictParams, TaskBaseBranchNotFoundParams,
+        ContractError, EmptyErrorParams, OpenLocationFailedParams, OpenLocationTarget,
+        PluginConfigurationValidationParams, PublicError, RequestId, SkillFolderConflictParams,
+        TaskBaseBranchNotFoundParams,
     };
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -353,7 +389,16 @@ mod tests {
             PublicError::AgentNameConflict(empty),
             PublicError::AgentNotFound(empty),
             PublicError::PluginNotFound(empty),
-            PublicError::PluginDisabled(empty),
+            PublicError::PluginHostIncompatible(empty),
+            PublicError::PluginConfigurationDeclarationInvalid(empty),
+            PublicError::PluginConfigurationNotDeclared(empty),
+            PublicError::ConfigurationRevisionConflict(empty),
+            PublicError::PluginConfigurationDeclarationChanged(empty),
+            PublicError::ConfigurationLoadFailed(empty),
+            PublicError::PluginConfigurationValidation(PluginConfigurationValidationParams {
+                field_errors: Vec::new(),
+            }),
+            PublicError::PluginConfigurationRecoveryNotRequired(empty),
             PublicError::ProjectNotFound(empty),
             PublicError::TaskNotFound(empty),
             PublicError::ResourceInUse(empty),
@@ -363,15 +408,11 @@ mod tests {
                 branch_name: "main".to_string(),
             }),
             PublicError::WorktreeNotFound(empty),
-            PublicError::TaskDiffBaselineUnavailable(empty),
-            PublicError::TaskDiffCommitMessageBlank(empty),
-            PublicError::TaskDiffTooLarge(empty),
-            PublicError::TaskDiffStale(empty),
-            PublicError::TaskDiffCommentNotFound(empty),
-            PublicError::TaskDiffCommentInvalid(empty),
-            PublicError::TaskDiffCommentConflict(empty),
+            PublicError::WorkspaceDiffBaselineUnavailable(empty),
+            PublicError::WorkspaceDiffCommitMessageBlank(empty),
+            PublicError::WorkspaceDiffTooLarge(empty),
             PublicError::SessionNotFound(empty),
-            PublicError::AgentCliNotFound(empty),
+            PublicError::AgentNotInstalled(empty),
             PublicError::AgentRuntimeUnavailable(empty),
             PublicError::SessionBusy(empty),
             PublicError::SessionStopped(empty),
@@ -382,8 +423,8 @@ mod tests {
             PublicError::PermissionOptionInvalid(empty),
             PublicError::PromptEmpty(empty),
             PublicError::PromptTooLarge(empty),
+            PublicError::WorkspaceUnavailable(empty),
             PublicError::TaskWorktreeUnavailable(empty),
-            PublicError::TaskProjectRootUnavailable(empty),
             PublicError::FileSystemPathNotFound(empty),
             PublicError::SpecDocumentNotFound(empty),
             PublicError::WorktreeRootNotAbsolute(empty),
@@ -436,6 +477,8 @@ mod tests {
             PublicError::WorkflowRunCannotUseDraftSnapshot(empty),
             PublicError::WorkflowRunNotFound(empty),
             PublicError::WorkflowRunActive(empty),
+            PublicError::WorkflowNodeNotFound(empty),
+            PublicError::WorkflowNodeNotAwaitingInput(empty),
         ];
 
         for error in &samples {
@@ -453,7 +496,14 @@ mod tests {
                 | PublicError::AgentNameConflict(_)
                 | PublicError::AgentNotFound(_)
                 | PublicError::PluginNotFound(_)
-                | PublicError::PluginDisabled(_)
+                | PublicError::PluginHostIncompatible(_)
+                | PublicError::PluginConfigurationDeclarationInvalid(_)
+                | PublicError::PluginConfigurationNotDeclared(_)
+                | PublicError::ConfigurationRevisionConflict(_)
+                | PublicError::PluginConfigurationDeclarationChanged(_)
+                | PublicError::ConfigurationLoadFailed(_)
+                | PublicError::PluginConfigurationValidation(_)
+                | PublicError::PluginConfigurationRecoveryNotRequired(_)
                 | PublicError::ProjectNotFound(_)
                 | PublicError::TaskNotFound(_)
                 | PublicError::ResourceInUse(_)
@@ -461,15 +511,11 @@ mod tests {
                 | PublicError::TaskBaseBranchRequired(_)
                 | PublicError::TaskBaseBranchNotFound(_)
                 | PublicError::WorktreeNotFound(_)
-                | PublicError::TaskDiffBaselineUnavailable(_)
-                | PublicError::TaskDiffCommitMessageBlank(_)
-                | PublicError::TaskDiffTooLarge(_)
-                | PublicError::TaskDiffStale(_)
-                | PublicError::TaskDiffCommentNotFound(_)
-                | PublicError::TaskDiffCommentInvalid(_)
-                | PublicError::TaskDiffCommentConflict(_)
+                | PublicError::WorkspaceDiffBaselineUnavailable(_)
+                | PublicError::WorkspaceDiffCommitMessageBlank(_)
+                | PublicError::WorkspaceDiffTooLarge(_)
                 | PublicError::SessionNotFound(_)
-                | PublicError::AgentCliNotFound(_)
+                | PublicError::AgentNotInstalled(_)
                 | PublicError::AgentRuntimeUnavailable(_)
                 | PublicError::SessionBusy(_)
                 | PublicError::SessionStopped(_)
@@ -480,8 +526,8 @@ mod tests {
                 | PublicError::PermissionOptionInvalid(_)
                 | PublicError::PromptEmpty(_)
                 | PublicError::PromptTooLarge(_)
+                | PublicError::WorkspaceUnavailable(_)
                 | PublicError::TaskWorktreeUnavailable(_)
-                | PublicError::TaskProjectRootUnavailable(_)
                 | PublicError::FileSystemPathNotFound(_)
                 | PublicError::SpecDocumentNotFound(_)
                 | PublicError::WorktreeRootNotAbsolute(_)
@@ -536,7 +582,9 @@ mod tests {
                 | PublicError::WorkflowRoleNotFound(_)
                 | PublicError::WorkflowRunStartFailed(_)
                 | PublicError::WorkflowRunNotRestartable(_)
-                | PublicError::WorkflowRunNotEditable(_) => {}
+                | PublicError::WorkflowRunNotEditable(_)
+                | PublicError::WorkflowNodeNotFound(_)
+                | PublicError::WorkflowNodeNotAwaitingInput(_) => {}
             }
         }
 
@@ -547,7 +595,7 @@ mod tests {
     #[test]
     fn public_error_codes_match_serde_tags_for_every_variant() {
         let samples = public_error_samples();
-        assert_eq!(samples.len(), 90);
+        assert_eq!(samples.len(), 95);
 
         for error in samples {
             let serialized = serde_json::to_value(&error).unwrap();

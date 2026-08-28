@@ -1,8 +1,10 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import type {
-  ContractsClient,
-  SessionHistoryNotice,
-  SessionPermissionRequest,
+import {
+  type ContractsClient,
+  type PromptSessionEvent,
+  RemoteContractError,
+  type SessionHistoryNotice,
+  type SessionPermissionRequest,
 } from "@ora/contracts";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type {
@@ -237,6 +239,38 @@ export function createChatStore(
       const controller = new AbortController();
       const staged = new HistoryBuilder(createId, now);
       let completed = false;
+      let pendingPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+
+      /** Publishes the active replay turn without repainting once per provider text token. */
+      const flushPendingPreview = () => {
+        if (pendingPreviewTimer !== null) {
+          clearTimeout(pendingPreviewTimer);
+          pendingPreviewTimer = null;
+        }
+        const preview = staged.preview(previous.configOptions);
+        if (preview.isResponding) {
+          updateConversation(set, oraSessionId, () => preview);
+          return;
+        }
+        // Historical turns look open between their first chunk and turn_ended.
+        // Always clear a previously published live flag when the turn settles;
+        // otherwise the sidebar keeps the working icon until the whole load ends.
+        updateConversation(set, oraSessionId, (conversation) =>
+          conversation.isResponding
+            ? { ...conversation, isResponding: false }
+            : conversation,
+        );
+      };
+
+      /** Matches live prompt rendering by limiting text-only replay updates to one per frame. */
+      const schedulePendingPreview = () => {
+        if (pendingPreviewTimer !== null) return;
+        pendingPreviewTimer = setTimeout(() => {
+          pendingPreviewTimer = null;
+          flushPendingPreview();
+        }, 16);
+      };
+
       operations.set(oraSessionId, controller);
       updateConversation(set, oraSessionId, () => ({
         ...previous,
@@ -249,6 +283,7 @@ export function createChatStore(
           { sessionId: oraSessionId },
           { signal: controller.signal },
         )) {
+          let batchPreview = false;
           if (event.type === "session_update") {
             // Session-scoped updates are split out before the turn accumulator
             // sees them; they describe the conversation, not any one turn.
@@ -257,15 +292,29 @@ export function createChatStore(
               staged.configOptions = configOptions;
             } else {
               staged.applyUpdate(event.update);
+              batchPreview =
+                (event.update.sessionUpdate === "user_message_chunk" ||
+                  event.update.sessionUpdate === "agent_message_chunk" ||
+                  event.update.sessionUpdate === "agent_thought_chunk") &&
+                event.update.content.type === "text";
             }
           } else if (event.type === "permission_request") {
             staged.addPermission(event);
           } else if (event.type === "turn_ended") {
+            // Preserve the final text batch while the turn is still live; ending it first would
+            // make preview deliberately decline to publish a non-responding intermediate state.
+            if (pendingPreviewTimer !== null) flushPendingPreview();
             staged.endTurn(event.stopReason);
           } else if (event.type === "history_notice") {
             staged.addHistoryNotice(event.notice);
           } else {
             completed = true;
+          }
+          if (!completed) {
+            // A workflow-owned prompt may already be active when load starts. Publish only that
+            // open turn incrementally; completed-history loads remain staged until completion.
+            if (batchPreview) schedulePendingPreview();
+            else flushPendingPreview();
           }
         }
         if (!completed) {
@@ -288,6 +337,10 @@ export function createChatStore(
         }));
         if (!isAbortError(error)) throw error;
       } finally {
+        if (pendingPreviewTimer !== null) {
+          clearTimeout(pendingPreviewTimer);
+          pendingPreviewTimer = null;
+        }
         operations.delete(oraSessionId);
         updateConversation(set, oraSessionId, (conversation) => ({
           ...conversation,
@@ -461,9 +514,11 @@ export function createChatStore(
       }
 
       try {
-        for await (const event of client.prompt(
-          { sessionId: key, prompt },
-          { signal: controller.signal },
+        for await (const event of promptWithReattach(
+          client,
+          key,
+          prompt,
+          controller.signal,
         )) {
           if (event.type === "session_update") {
             // The user turn is already materialized, so the echoed prompt chunk
@@ -715,12 +770,26 @@ class HistoryBuilder {
     };
   }
 
+  /** Materializes safe partial replay state while a load stream is still producing events. */
+  preview(
+    fallbackConfigOptions: acp.SessionConfigOption[],
+  ): SessionConversation {
+    return {
+      ...this.snapshot(),
+      configOptions: this.configOptions ?? fallbackConfigOptions,
+      modelChanges: [],
+      pendingPermissions: [...this.permissions],
+      isLoading: true,
+      isResponding: this.hasOpenTurn,
+    };
+  }
+
   /** Materializes replay metadata so it can share live-update normalization. */
   private snapshot(): SessionConversation {
     return {
       ...EMPTY_CONVERSATION,
-      turns: this.turns,
-      historyNotices: this.historyNotices,
+      turns: [...this.turns],
+      historyNotices: [...this.historyNotices],
       availableCommands: this.availableCommands,
       sessionTitle: this.sessionTitle,
       sessionUpdatedAt: this.sessionUpdatedAt,
@@ -1242,6 +1311,51 @@ function sessionScopedConfigOptions(
   return update.sessionUpdate === "config_option_update"
     ? update.configOptions
     : null;
+}
+
+/**
+ * Streams one prompt, rebuilding a route that died under a still-open session.
+ *
+ * `sessionStopped` before the first event means the connection generation this
+ * session was routed on is gone — an agent provider that restarted, not a
+ * conversation the user ended. Ora's load path already knows how to re-attach
+ * and restore the agent's context, so the send borrows it once instead of
+ * surfacing a failure that the very next message would have repaired anyway.
+ *
+ * The reload is streamed and discarded: the caller's transcript is already the
+ * session's history, so applying the replay would only repaint what is on
+ * screen. Nothing is retried once an event has been delivered — a stream that
+ * broke midway has already shown the user part of a turn, and sending the same
+ * prompt again would duplicate it.
+ */
+async function* promptWithReattach(
+  client: ChatSessionClient,
+  sessionId: string,
+  prompt: acp.ContentBlock[],
+  signal: AbortSignal,
+): AsyncGenerator<PromptSessionEvent> {
+  let delivered = false;
+  try {
+    for await (const event of client.prompt(
+      { sessionId, prompt },
+      { signal },
+    )) {
+      delivered = true;
+      yield event;
+    }
+    return;
+  } catch (error) {
+    if (delivered || !isSessionStoppedError(error)) throw error;
+  }
+  await loadSessionConversation(client, sessionId, signal);
+  yield* client.prompt({ sessionId, prompt }, { signal });
+}
+
+/** Reports whether a failure is the backend refusing a session that holds no live route. */
+function isSessionStoppedError(error: unknown): boolean {
+  return (
+    error instanceof RemoteContractError && error.code === "session_stopped"
+  );
 }
 
 /**

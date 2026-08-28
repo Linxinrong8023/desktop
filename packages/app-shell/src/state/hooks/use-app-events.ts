@@ -23,6 +23,17 @@ export function useAppEvents(client: ContractsClient) {
     const invalidateSessions = () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
     };
+    // Runtime transitions, scans, and package removal can happen outside mutations on this
+    // client, so refresh every view derived from installed plugin state together.
+    const invalidatePluginState = () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.installedPlugins,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.agentRuntimeStatus,
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.skills });
+    };
     const scheduleReconnect = () => {
       if (disposed) return;
       reconnectTimer = setTimeout(() => {
@@ -52,6 +63,8 @@ export function useAppEvents(client: ContractsClient) {
             refetchSessions();
           } else if (event.type === "session_title_updated") {
             invalidateSessions();
+          } else if (event.type === "plugin_status_changed") {
+            invalidatePluginState();
           }
         }
         handleDisconnect();

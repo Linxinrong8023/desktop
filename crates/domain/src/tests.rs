@@ -1,8 +1,8 @@
 use crate::{
-    AgentCli, AgentDefinition, AgentDefinitionId, AuditFields, BACKUP_DIR_NAME, DomainModelError,
+    AgentDefinition, AgentDefinitionId, AgentRef, AuditFields, BACKUP_DIR_NAME, DomainModelError,
     HistoryState, JOURNAL_DIR_NAME, Namespace, Project, ProjectId, STAGING_DIR_NAME, Session,
-    SessionId, SessionStatus, Skill, SkillId, Task, TaskId, TaskType, Worktree, WorktreeActivity,
-    WorktreeBaseline, WorktreeId,
+    SessionId, SessionStatus, Skill, SkillId, Task, TaskId, WorkspaceId, Worktree,
+    WorktreeActivity, WorktreeBaseline,
 };
 use pretty_assertions::assert_eq;
 
@@ -10,17 +10,10 @@ use pretty_assertions::assert_eq;
 #[test]
 fn constructs_schema_backed_entities() {
     let audit_fields = AuditFields::new(1_700_000_000_000, 1_700_000_000_500, false);
-    let project = Project::new(
-        ProjectId::new("project-1"),
-        "Ora",
-        "/workspace/ora",
-        audit_fields.clone(),
-    );
+    let project = Project::new(ProjectId::new("project-1"), "Ora", audit_fields.clone());
     let worktree = Worktree::new(
-        WorktreeId::new("worktree-1"),
-        TaskId::new("task-1"),
+        WorkspaceId::new("workspace-1"),
         Some("feature/domain-models".to_string()),
-        Some("/worktrees/task-1".to_string()),
         WorktreeBaseline::recorded("base-commit").unwrap(),
         WorktreeActivity::Active,
         audit_fields.clone(),
@@ -28,14 +21,14 @@ fn constructs_schema_backed_entities() {
     let task = Task::new(
         TaskId::new("task-1"),
         project.id.clone(),
+        WorkspaceId::new("workspace-1"),
         "Implement domain models",
-        Some(worktree.id.clone()),
         audit_fields.clone(),
     );
     let session = Session::new(
         SessionId::new("session-1"),
-        task.id.clone(),
-        AgentCli::OpenCode,
+        WorkspaceId::new("workspace-1"),
+        AgentRef::parse("ora-space.nga").unwrap(),
         "agent-session-1",
         SessionStatus::Running,
         audit_fields.clone(),
@@ -63,17 +56,17 @@ fn constructs_schema_backed_entities() {
         Project {
             id: ProjectId::new("project-1"),
             name: "Ora".to_string(),
-            root_path: "/workspace/ora".to_string(),
+            repository_kind: "git".to_string(),
+            repository_url: None,
+            default_branch: None,
             audit_fields: audit_fields.clone(),
         }
     );
     assert_eq!(
         worktree,
         Worktree {
-            id: WorktreeId::new("worktree-1"),
-            task_id: TaskId::new("task-1"),
+            workspace_id: WorkspaceId::new("workspace-1"),
             branch_name: Some("feature/domain-models".to_string()),
-            checkout_root: Some("/worktrees/task-1".to_string()),
             baseline: WorktreeBaseline::recorded("base-commit").unwrap(),
             activity: WorktreeActivity::Active,
             audit_fields: audit_fields.clone(),
@@ -84,10 +77,8 @@ fn constructs_schema_backed_entities() {
         Task {
             id: TaskId::new("task-1"),
             project_id: ProjectId::new("project-1"),
+            workspace_id: WorkspaceId::new("workspace-1"),
             title: "Implement domain models".to_string(),
-            task_type: TaskType::Default,
-            workflow_run_id: None,
-            worktree_id: Some(WorktreeId::new("worktree-1")),
             audit_fields: audit_fields.clone(),
         }
     );
@@ -95,8 +86,8 @@ fn constructs_schema_backed_entities() {
         session,
         Session {
             id: SessionId::new("session-1"),
-            task_id: TaskId::new("task-1"),
-            agent_cli: AgentCli::OpenCode,
+            workspace_id: WorkspaceId::new("workspace-1"),
+            agent_ref: AgentRef::parse("ora-space.nga").unwrap(),
             agent_session_id: "agent-session-1".to_string(),
             title: None,
             status: SessionStatus::Running,
@@ -111,6 +102,7 @@ fn constructs_schema_backed_entities() {
             namespace: Namespace::local(),
             name: "review".to_string(),
             description: "Reviews implementation changes".to_string(),
+            origin: crate::SkillOrigin::Local,
             audit_fields: audit_fields.clone(),
         }
     );
@@ -216,55 +208,23 @@ fn rejects_dot_prefixed_skill_names() {
     }
 }
 
-/// Verifies CLI identities use the reviewed namespaced database representation.
+/// Verifies an agent reference accepts any installed provider id and rejects only blank text.
+///
+/// An identity Ora does not recognize is a provider that is not installed right now, so parsing
+/// must not treat it as corrupt data the way a closed set would.
 #[test]
-fn maps_agent_cli_database_values() {
+fn parses_any_non_blank_agent_reference() {
     assert_eq!(
-        AgentCli::ALL.map(AgentCli::database_value),
+        ["ora-space.claude", "acme.my-agent", "  spaced.id  "].map(AgentRef::parse),
         [
-            "ora-space.opencode",
-            "ora-space.nga",
-            "ora-space.codeagentcli",
-            "ora-space.claude",
-            "ora-space.codex",
+            AgentRef::parse("ora-space.claude"),
+            AgentRef::parse("acme.my-agent"),
+            AgentRef::parse("spaced.id"),
         ]
     );
     assert_eq!(
-        [
-            "ora-space.opencode",
-            "ora-space.nga",
-            "ora-space.codeagentcli",
-            "ora-space.claude",
-            "ora-space.codex",
-        ]
-        .map(AgentCli::from_database_value),
-        [
-            Ok(AgentCli::OpenCode),
-            Ok(AgentCli::Nga),
-            Ok(AgentCli::CodeAgentCli),
-            Ok(AgentCli::Claude),
-            Ok(AgentCli::Codex),
-        ]
-    );
-    assert_eq!(
-        AgentCli::from_database_value("opencode"),
-        Err(DomainModelError::InvalidAgentCli("opencode".to_string()))
-    );
-}
-
-/// Verifies only Ora's own CLIs require the `acp` subcommand; the Claude/Codex
-/// adapter binaries speak ACP directly with no launch arguments.
-#[test]
-fn maps_agent_cli_launch_arguments() {
-    assert_eq!(
-        AgentCli::ALL.map(AgentCli::launch_arguments),
-        [
-            ["acp"].as_slice(),
-            ["acp"].as_slice(),
-            ["acp"].as_slice(),
-            [].as_slice(),
-            [].as_slice(),
-        ]
+        AgentRef::parse("   "),
+        Err(DomainModelError::InvalidAgentRef("   ".to_string()))
     );
 }
 

@@ -1,149 +1,260 @@
-use crate::manifest::{AgentManifest, PackageManifest};
+use crate::hook::{InstalledHookDescriptor, validate_hook};
+use crate::mcp::{InstalledMcpDescriptor, validate_mcp};
+use crate::skill::{InstalledSkillDescriptor, validate_skill};
+use crate::webview::{InstalledWebviewDescriptor, validate_webview};
+use crate::workbench::{InstalledWorkbenchDescriptor, validate_workbench};
+use ora_domain::PluginId;
+use ora_plugin_config::{CompiledConfigurationFile, ConfigurationError, ConfigurationService};
+use ora_plugin_manifest::{PluginKind, PluginManifest};
 use ora_utils::path::{CanonicalPathRoot, PortableRelativePath};
 use semver::Version;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-const SUPPORTED_MANIFEST_VERSION: u32 = 1;
-const SUPPORTED_PLUGIN_API_VERSION: u32 = 1;
-const SUPPORTED_AGENT_CONTRACT_VERSION: u32 = 1;
+/// Package-relative path of the strict `assets/config.json` contribution file shared by the
+/// processless MCP and Hook kinds.
+pub const CONFIGURATION_FILE: &str = "assets/config.json";
 
-/// Identifies the supported JavaScript module format of an installed package.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginPackageType {
-    Module,
+/// Installed orax packages with a process always ship a fixed `main.js` at the package root.
+pub const INSTALLED_ENTRYPOINT: &str = "main.js";
+
+/// Holds the validated contribution of one installed plugin.
+///
+/// `kind` selects the variant, and each variant carries everything that kind must declare,
+/// including the process entrypoint for the kinds that have one. Keeping the kind and its
+/// contribution in one value is what makes "a webview plugin with an entrypoint" or "a
+/// workbench plugin without a page" unrepresentable rather than a case every consumer re-checks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginContribution {
+    Agent(InstalledPluginAgent),
+    Workbench(InstalledWorkbenchDescriptor),
+    Webview(InstalledWebviewDescriptor),
+    Skill(InstalledSkillDescriptor),
+    Mcp(InstalledMcpDescriptor),
+    Hook(InstalledHookDescriptor),
 }
 
-/// Identifies the supported contribution family of an installed plugin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginKind {
-    Agent,
-}
-
-impl PluginKind {
-    /// Returns the package manifest spelling used on the frontend wire contract.
-    pub fn as_str(self) -> &'static str {
+impl PluginContribution {
+    /// Returns the `kind` spelling used on the frontend wire contract.
+    pub fn kind(&self) -> &'static str {
         match self {
-            Self::Agent => "agent",
+            Self::Agent(_) => "agent",
+            Self::Workbench(_) => "workbench",
+            Self::Webview(_) => "webview",
+            Self::Skill(_) => "skill",
+            Self::Mcp(_) => "mcp",
+            Self::Hook(_) => "hook",
+        }
+    }
+
+    /// Returns the process entrypoint relative to the package root, if this kind runs one.
+    pub fn entrypoint(&self) -> Option<&PortableRelativePath> {
+        match self {
+            Self::Agent(agent) => Some(&agent.entrypoint),
+            Self::Workbench(workbench) => Some(&workbench.entrypoint),
+            Self::Webview(_) | Self::Skill(_) | Self::Mcp(_) | Self::Hook(_) => None,
         }
     }
 }
 
-/// Holds uninterpreted engine requirements declared by a validated plugin.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginEngines {
-    pub ora: String,
-    pub plugin_api: u32,
-    pub bun: String,
-}
-
-/// Holds one validated agent contribution.
+/// Holds the single validated agent contributed by one agent-kind package.
+///
+/// The agent has no identifier of its own: one package provides exactly one agent, so the
+/// package's plugin id is that agent's identity everywhere in the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledPluginAgent {
-    pub id: String,
     pub display_name: String,
-    pub contract_version: u32,
+    /// `main.js` relative to the package root.
+    pub entrypoint: PortableRelativePath,
 }
 
-/// Holds one fully validated plugin package and its package-local entrypoint.
+/// Holds one fully validated plugin package.
+///
+/// `package_root` is the installed package directory
+/// (`<data-dir>/plugins/installed/<namespace>/<name>/<version>/`); everything the plugin ships
+/// is resolved relative to it and nothing below it is ever written by the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledPlugin {
     pub package_root: PathBuf,
-    pub package_name: String,
+    pub id: PluginId,
     pub version: Version,
-    pub package_type: PluginPackageType,
-    pub manifest_version: u32,
-    pub id: String,
+    /// The manifest carries no display name, so the plugin name stands in for every kind.
     pub display_name: String,
-    pub kind: PluginKind,
-    pub main: PortableRelativePath,
-    pub engines: PluginEngines,
-    pub agents: Vec<InstalledPluginAgent>,
+    pub description: String,
+    pub homepage: Option<String>,
+    pub license: Option<String>,
+    pub contributes: PluginContribution,
+    /// Trusted SVG source for the package icon, absent when the package ships none.
+    pub logo: Option<String>,
+    pub configuration_declaration: PluginConfigurationDeclarationValidity,
+}
+
+/// Records whether an immutable configuration declaration can participate in installation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginConfigurationDeclarationValidity {
+    NotDeclared,
+    Valid,
+    Invalid { reason: String },
 }
 
 /// Reports a semantic manifest constraint after structural deserialization succeeds.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[error("{message}")]
 pub(crate) struct ManifestValidationError {
-    field_path: &'static str,
+    field_path: String,
     message: String,
 }
 
 impl ManifestValidationError {
     /// Returns the stable manifest field associated with the failed constraint.
-    pub(crate) fn field_path(&self) -> &'static str {
-        self.field_path
+    pub(crate) fn field_path(&self) -> &str {
+        &self.field_path
     }
 }
 
-/// Converts a structurally valid package into an installed plugin after semantic checks.
+/// Converts a parsed orax manifest into an installed plugin after host-side checks.
+///
+/// `ora_plugin_manifest` already enforced the schema, so validation here re-checks only what
+/// depends on the host or the package on disk: the entrypoint and page files a kind must ship,
+/// the files a kind must not ship, and the cross-value policies of the kind-specific sections.
+///
+/// `logo` arrives already read and security-validated by the discovery layer, so this function
+/// keeps its filesystem work limited to the files it must resolve.
 pub(crate) fn validate(
     package_root: &Path,
-    manifest: PackageManifest,
+    manifest: &PluginManifest,
+    logo: Option<String>,
 ) -> Result<InstalledPlugin, ManifestValidationError> {
-    require_non_empty("name", &manifest.name)?;
-    let version = Version::parse(&manifest.version).map_err(|error| {
+    let name = manifest.name().as_str();
+    // Both segments passed the manifest grammar, which is a strict subset of what the domain
+    // id accepts, so this conversion cannot fail for a reason the user could act on.
+    let id = PluginId::new(manifest.namespace().as_str(), name).map_err(|error| {
         invalid(
-            "version",
-            format!("package version is not valid SemVer: {error}"),
+            "identifier",
+            format!("plugin id is not representable: {error}"),
         )
     })?;
-    if manifest.package_type != "module" {
-        return Err(invalid("type", "package type must be `module`"));
-    }
-    if manifest.ora.manifest_version != SUPPORTED_MANIFEST_VERSION {
+    // The one bounded read of `assets/config.json` serves both the kind policy below and the
+    // Settings-declaration validity, so the two views can never disagree about the same file.
+    let configuration_file =
+        match ConfigurationService::configuration_file_from_package(package_root) {
+            Ok(file) => Ok(file),
+            Err(ConfigurationError::InvalidDeclaration(error)) => Err(error),
+            Err(error) => {
+                return Err(invalid(
+                    CONFIGURATION_FILE,
+                    format!("configuration declaration could not be read: {error}"),
+                ));
+            }
+        };
+    // The MCP shape is exclusive to the mcp kind: any other kind shipping a transport is either
+    // a mispackaged MCP or an attempt to smuggle connection state into a process kind. The Hook
+    // shape is exclusive to the hook kind for the symmetric reason.
+    if !matches!(manifest.kind(), PluginKind::Mcp)
+        && matches!(
+            configuration_file,
+            Ok(Some(CompiledConfigurationFile::Mcp(_)))
+        )
+    {
         return Err(invalid(
-            "ora.manifestVersion",
+            CONFIGURATION_FILE,
             format!(
-                "unsupported manifest version {}; expected {SUPPORTED_MANIFEST_VERSION}",
-                manifest.ora.manifest_version
+                "only `mcp` packages may declare an MCP transport (kind is `{}`)",
+                manifest.kind()
             ),
         ));
     }
-    require_non_empty("ora.id", &manifest.ora.id)?;
-    require_non_empty("ora.displayName", &manifest.ora.display_name)?;
-    let kind = match manifest.ora.kind.as_str() {
-        "agent" => PluginKind::Agent,
-        value => {
-            return Err(invalid(
-                "ora.kind",
-                format!("unsupported plugin kind `{value}`; expected `agent`"),
-            ));
+    if !matches!(manifest.kind(), PluginKind::Hook)
+        && matches!(
+            configuration_file,
+            Ok(Some(CompiledConfigurationFile::Hook(_)))
+        )
+    {
+        return Err(invalid(
+            CONFIGURATION_FILE,
+            format!(
+                "only `hook` packages may declare a Hook configuration (kind is `{}`)",
+                manifest.kind()
+            ),
+        ));
+    }
+    let contributes = match manifest.kind() {
+        PluginKind::Agent => PluginContribution::Agent(InstalledPluginAgent {
+            display_name: name.to_owned(),
+            entrypoint: validate_entrypoint(package_root)?,
+        }),
+        PluginKind::Workbench => {
+            PluginContribution::Workbench(validate_workbench(package_root, manifest.workbench())?)
         }
+        PluginKind::Webview => {
+            // The manifest crate pairs `kind = "webview"` with a `[webview]` section, so a parsed
+            // manifest always takes the `Some` path; the error is reported rather than unwrapped
+            // so a future schema change cannot panic discovery.
+            let webview = manifest.webview().ok_or_else(|| {
+                invalid(
+                    "webview",
+                    "a webview plugin must declare a `[webview]` section",
+                )
+            })?;
+            PluginContribution::Webview(validate_webview(package_root, webview)?)
+        }
+        PluginKind::Skill => PluginContribution::Skill(validate_skill(package_root)?),
+        PluginKind::Mcp => {
+            PluginContribution::Mcp(validate_mcp(package_root, &configuration_file)?)
+        }
+        PluginKind::Hook => PluginContribution::Hook(validate_hook(
+            package_root,
+            &configuration_file,
+            manifest.artifact(),
+        )?),
     };
-    let main = validate_main_path(package_root, &manifest.ora.main)?;
-    require_non_empty("ora.engines.ora", &manifest.ora.engines.ora)?;
-    if manifest.ora.engines.plugin_api != SUPPORTED_PLUGIN_API_VERSION {
-        return Err(invalid(
-            "ora.engines.pluginApi",
-            format!(
-                "unsupported plugin API version {}; expected {SUPPORTED_PLUGIN_API_VERSION}",
-                manifest.ora.engines.plugin_api
-            ),
-        ));
-    }
-    require_non_empty("ora.engines.bun", &manifest.ora.engines.bun)?;
-
-    let agents = validate_agents(manifest.ora.contributes.agents)?;
+    let configuration_declaration = match &configuration_file {
+        Ok(None) => PluginConfigurationDeclarationValidity::NotDeclared,
+        Ok(Some(CompiledConfigurationFile::Settings(_))) => {
+            PluginConfigurationDeclarationValidity::Valid
+        }
+        // An MCP file contributes exactly its Settings subset to the configuration editor, so a
+        // transport-only file behaves like a package without a declaration.
+        Ok(Some(CompiledConfigurationFile::Mcp(configuration))) => {
+            if configuration.settings.is_some() {
+                PluginConfigurationDeclarationValidity::Valid
+            } else {
+                PluginConfigurationDeclarationValidity::NotDeclared
+            }
+        }
+        // A Hook file contributes its optional Settings subset to the configuration editor; RTK
+        // v0.1.0 declares none, so no Configure action is offered until Settings ship.
+        Ok(Some(CompiledConfigurationFile::Hook(configuration))) => {
+            if configuration.settings.is_some() {
+                PluginConfigurationDeclarationValidity::Valid
+            } else {
+                PluginConfigurationDeclarationValidity::NotDeclared
+            }
+        }
+        Err(error) => PluginConfigurationDeclarationValidity::Invalid {
+            reason: error.to_string(),
+        },
+    };
 
     Ok(InstalledPlugin {
         package_root: package_root.to_path_buf(),
-        package_name: manifest.name,
-        version,
-        package_type: PluginPackageType::Module,
-        manifest_version: manifest.ora.manifest_version,
-        id: manifest.ora.id,
-        display_name: manifest.ora.display_name,
-        kind,
-        main,
-        engines: PluginEngines {
-            ora: manifest.ora.engines.ora,
-            plugin_api: manifest.ora.engines.plugin_api,
-            bun: manifest.ora.engines.bun,
-        },
-        agents,
+        id,
+        version: manifest.version().clone(),
+        display_name: name.to_owned(),
+        description: manifest.description().to_owned(),
+        homepage: manifest.homepage().map(|url| url.as_str().to_owned()),
+        license: manifest.license().map(str::to_owned),
+        contributes,
+        logo,
+        configuration_declaration,
     })
+}
+
+/// Resolves the fixed `main.js` entrypoint as an existing regular file inside the package.
+pub(crate) fn validate_entrypoint(
+    package_root: &Path,
+) -> Result<PortableRelativePath, ManifestValidationError> {
+    validate_main_path(package_root, INSTALLED_ENTRYPOINT)
 }
 
 /// Resolves one existing regular entrypoint without allowing package-boundary escape.
@@ -151,42 +262,35 @@ fn validate_main_path(
     package_root: &Path,
     value: &str,
 ) -> Result<PortableRelativePath, ManifestValidationError> {
-    require_non_empty("ora.main", value)?;
     let relative = PortableRelativePath::parse(value).map_err(|error| {
         invalid(
-            "ora.main",
+            "main",
             format!("entrypoint must be a safe relative path: {error}"),
         )
     })?;
-    if relative.is_root() {
-        return Err(invalid(
-            "ora.main",
-            "entrypoint must identify a package file",
-        ));
-    }
     let root = CanonicalPathRoot::new(package_root).map_err(|error| {
         invalid(
-            "ora.main",
+            "main",
             format!("plugin package root is unavailable: {error}"),
         )
     })?;
     let resolved = root.resolve_existing(&relative).map_err(|error| {
         invalid(
-            "ora.main",
-            format!("entrypoint must resolve inside the plugin package: {error}"),
+            "main",
+            format!("entrypoint `{value}` must exist inside the plugin package: {error}"),
         )
     })?;
     // The canonical check covers the current symlink target only; is_file remains path-based and
     // cannot prevent a caller-controlled replacement between validation and later loading.
     if !resolved.is_file() {
         return Err(invalid(
-            "ora.main",
-            "entrypoint must identify a regular package file",
+            "main",
+            format!("entrypoint `{value}` must be a regular package file"),
         ));
     }
     let main = root.relative_path(&resolved).map_err(|error| {
         invalid(
-            "ora.main",
+            "main",
             format!("entrypoint must resolve inside the plugin package: {error}"),
         )
     })?;
@@ -194,55 +298,13 @@ fn validate_main_path(
     Ok(main)
 }
 
-/// Validates agent contract versions and uniqueness inside one package.
-fn validate_agents(
-    agents: Vec<AgentManifest>,
-) -> Result<Vec<InstalledPluginAgent>, ManifestValidationError> {
-    let mut seen_ids = HashSet::new();
-    let mut installed = Vec::with_capacity(agents.len());
-
-    for agent in agents {
-        require_non_empty("ora.contributes.agents[].id", &agent.id)?;
-        require_non_empty("ora.contributes.agents[].displayName", &agent.display_name)?;
-        if agent.contract_version != SUPPORTED_AGENT_CONTRACT_VERSION {
-            return Err(invalid(
-                "ora.contributes.agents[].contractVersion",
-                format!(
-                    "unsupported agent contract version {}; expected {SUPPORTED_AGENT_CONTRACT_VERSION}",
-                    agent.contract_version
-                ),
-            ));
-        }
-        if !seen_ids.insert(agent.id.clone()) {
-            return Err(invalid(
-                "ora.contributes.agents[].id",
-                format!("duplicate agent id `{}`", agent.id),
-            ));
-        }
-
-        installed.push(InstalledPluginAgent {
-            id: agent.id,
-            display_name: agent.display_name,
-            contract_version: agent.contract_version,
-        });
-    }
-
-    Ok(installed)
-}
-
-/// Rejects required strings that contain only whitespace while preserving valid values verbatim.
-fn require_non_empty(field_path: &'static str, value: &str) -> Result<(), ManifestValidationError> {
-    if value.trim().is_empty() {
-        return Err(invalid(field_path, "value must not be empty"));
-    }
-
-    Ok(())
-}
-
 /// Builds one semantic error with a stable field path.
-fn invalid(field_path: &'static str, message: impl Into<String>) -> ManifestValidationError {
+pub(crate) fn invalid(
+    field_path: impl Into<String>,
+    message: impl Into<String>,
+) -> ManifestValidationError {
     ManifestValidationError {
-        field_path,
+        field_path: field_path.into(),
         message: message.into(),
     }
 }

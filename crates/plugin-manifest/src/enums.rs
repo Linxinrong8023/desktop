@@ -45,9 +45,18 @@ pub enum PluginNamespaceError {
 }
 
 /// Identifies the closed set of plugin kinds supported by resolver version 1.
+///
+/// `Hook` is a processless contribution: its package carries one immutable Hook Configuration
+/// and one package-contained executable, but the host never starts a Deno runtime for it. An
+/// installed Hook is globally available; its lifecycle runtime stays `stopped`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PluginKind {
     Workbench,
+    Agent,
+    Webview,
+    Skill,
+    Mcp,
+    Hook,
 }
 
 impl PluginKind {
@@ -55,6 +64,11 @@ impl PluginKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Workbench => "workbench",
+            Self::Agent => "agent",
+            Self::Webview => "webview",
+            Self::Skill => "skill",
+            Self::Mcp => "mcp",
+            Self::Hook => "hook",
         }
     }
 }
@@ -73,6 +87,11 @@ impl FromStr for PluginKind {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "workbench" => Ok(Self::Workbench),
+            "agent" => Ok(Self::Agent),
+            "webview" => Ok(Self::Webview),
+            "skill" => Ok(Self::Skill),
+            "mcp" => Ok(Self::Mcp),
+            "hook" => Ok(Self::Hook),
             found => Err(PluginKindError::Unsupported {
                 found: found.to_owned(),
             }),

@@ -16,6 +16,7 @@ import {
   createMockClientState,
 } from "../../test/mock-client";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
+import { useDraftSessionsStore } from "../../state/stores/draft-sessions-store";
 import {
   useSettingsStore,
   DEFAULT_SETTINGS,
@@ -25,27 +26,26 @@ import { WorkspaceSidebar } from "./workspace-sidebar";
 import { WorkspaceView } from "./workspace-view";
 
 const USER = { name: "Eric", email: "eric@example.com" };
-const PROJECT: Project = { id: "p1", name: "Ora Desktop", rootPath: "/ora" };
+const PROJECT: Project = { id: "p1", name: "Ora Desktop" };
 const TASK1: Task = {
   id: "t1",
   projectId: "p1",
+  workspaceId: "workspace-t1",
   title: "Task One",
-  workspaceMode: "worktree",
-  type: "default",
-  workflowRunId: null,
 };
 const TASK2: Task = {
   id: "t2",
   projectId: "p1",
+  workspaceId: "workspace-t2",
   title: "Task Two",
-  workspaceMode: "worktree",
-  type: "default",
-  workflowRunId: null,
 };
 
 beforeEach(() => {
   useWorkspaceSelectionStore.getState().clearSelection();
-  useSettingsStore.setState({ settings: DEFAULT_SETTINGS });
+  useDraftSessionsStore.getState().clear();
+  useSettingsStore.setState({
+    settings: { ...DEFAULT_SETTINGS, agentCli: "ora-space.opencode" },
+  });
   usePendingAgentStore.setState({ selections: {} });
 });
 
@@ -71,12 +71,26 @@ function renderWorkspace() {
   );
 }
 
-/** Clicks a task row in the sidebar tree by its visible title. */
-async function clickTask(
+/**
+ * Opens a worktree's new-chat surface through that Task row's create menu.
+ * Row click alone only toggles expand and does not select a composer.
+ */
+async function openTaskComposer(
   user: ReturnType<typeof userEvent.setup>,
   title: string,
 ) {
-  await user.click(await screen.findByText(title));
+  const label = await screen.findByText(title);
+  const row = label.closest(".group\\/tree");
+  expect(row).not.toBeNull();
+  await user.click(label);
+  await user.click(
+    within(row as HTMLElement).getByRole("button", {
+      name: /在此任务中新建|Create in this task/,
+    }),
+  );
+  await user.click(
+    await screen.findByRole("button", { name: /新建任务|New task/ }),
+  );
 }
 
 /** The collapsed picker, which names the agent the selected surface is on. */
@@ -106,21 +120,21 @@ describe("agent picker isolation across real sidebar navigation", () => {
     const user = userEvent.setup();
     renderWorkspace();
 
-    await clickTask(user, "Task One");
+    await openTaskComposer(user, "Task One");
     await pickAgent(user, /Claude Code/);
     expect(within(picker()).getByText("Claude Code")).not.toBeNull();
 
-    await clickTask(user, "Task Two");
+    await openTaskComposer(user, "Task Two");
     await pickAgent(user, /OpenCode/);
     expect(within(picker()).getByText("OpenCode")).not.toBeNull();
 
-    await clickTask(user, "Task One");
+    await openTaskComposer(user, "Task One");
     expect(within(picker()).getByText("Claude Code")).not.toBeNull();
 
-    await clickTask(user, "Task Two");
+    await openTaskComposer(user, "Task Two");
     expect(within(picker()).getByText("OpenCode")).not.toBeNull();
 
-    await clickTask(user, "Task One");
+    await openTaskComposer(user, "Task One");
     expect(within(picker()).getByText("Claude Code")).not.toBeNull();
-  });
+  }, 15_000);
 });

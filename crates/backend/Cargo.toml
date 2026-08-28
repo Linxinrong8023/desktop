@@ -18,14 +18,22 @@ ora-application = { workspace = true }
 ora-contracts = { workspace = true }
 ora-db = { workspace = true }
 ora-domain = { workspace = true }
+ora-effect = { workspace = true }
 ora-fs = { workspace = true }
 ora-history = { workspace = true }
 ora-logging = { workspace = true }
+ora-plugin-config = { workspace = true }
+ora-plugin-manifest = { workspace = true }
 ora-plugin-lifecycle = { workspace = true }
+ora-plugin-manager = { workspace = true }
+ora-plugin-runtime = { workspace = true }
+ora-plugin-registry = { workspace = true }
 ora-process = { workspace = true }
+ora-runtime-settings = { workspace = true }
 ora-scheduler = { workspace = true }
 ora-skill-package = { workspace = true }
-ora-utils = { workspace = true }
+ora-utils = { workspace = true, features = ["http-reqwest"] }
+ora-user-config = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 similar = { workspace = true }
@@ -35,9 +43,13 @@ chrono-tz = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
+uuid = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+ora-plugin-manifest = { workspace = true }
 ora-test-support = { workspace = true }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
+zip = { workspace = true }

@@ -1,16 +1,41 @@
-//! Discovers installed Ora plugin packages without executing plugin code.
+//! Discovers installed Ora plugin packages without executing plugin code, and orchestrates
+//! checksum-verified installs of new plugin releases.
 
 mod discovery;
+mod hook;
+mod install;
 mod issue;
-mod manifest;
+mod logo;
+mod mcp;
+mod skill;
 mod validation;
+mod webview;
+mod workbench;
 
+#[cfg(test)]
+mod kind_tests;
 #[cfg(test)]
 mod tests;
 
+pub use discovery::{MANIFEST_FILE_NAME, installed_root};
+pub use hook::InstalledHookDescriptor;
+pub use install::{
+    HostTarget, InstallError, InstalledPackage, Installer, ResolvedReleaseSource, UpdateError,
+    select_release,
+};
 pub use issue::{PluginDiscoveryIssue, PluginDiscoveryIssueKind};
+pub use mcp::{InstalledMcpDescriptor, MCP_CONFIGURATION_FILE};
+pub use ora_plugin_manifest::HookTarget;
+pub use skill::{
+    InstalledSkill, InstalledSkillDescriptor, SKILL_ASSET_DIRECTORY, SKILL_MANIFEST_FILE_NAME,
+};
 pub use validation::{
-    InstalledPlugin, InstalledPluginAgent, PluginEngines, PluginKind, PluginPackageType,
+    CONFIGURATION_FILE, INSTALLED_ENTRYPOINT, InstalledPlugin, InstalledPluginAgent,
+    PluginConfigurationDeclarationValidity, PluginContribution,
+};
+pub use webview::InstalledWebviewDescriptor;
+pub use workbench::{
+    InstalledWorkbenchDescriptor, WORKBENCH_ASSET_DIRECTORY, WORKBENCH_PAGE_ENTRY,
 };
 
 use std::path::Path;
@@ -26,7 +51,7 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
-    /// Discovers direct child plugin packages below `<data_dir>/plugins`.
+    /// Discovers the selected plugin versions below `<data_dir>/plugins/installed`.
     pub fn discover(data_dir: impl AsRef<Path>) -> Self {
         let discovery::PluginDiscovery {
             installed_plugins,

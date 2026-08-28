@@ -11,6 +11,11 @@ export interface SaveTextFileOptions {
   content: string;
 }
 
+/** Defines one native save dialog whose chosen path the caller consumes itself. */
+export interface SelectSavePathOptions {
+  defaultFileName: string;
+}
+
 /** Reads and updates the Desktop worktree root used for new task worktrees. */
 export interface WorktreeStorageCapability {
   getRoot(): Promise<string>;
@@ -50,46 +55,165 @@ export type LocationTarget = "explorer" | "terminal" | "vscode";
 /**
  * Hands an absolute path off to a file manager, terminal, or VS Code on the host OS.
  *
- * Desktop exposes the two calls the split button drives - resolving the git
- * worktree directory that backs a task, then opening it in the chosen target.
+ * Desktop exposes the calls the split button drives - resolving either a
+ * Workspace or task directory, then opening it in the chosen target.
  */
 export interface LocationActionsCapability {
-  /** Resolves the absolute working directory (git worktree root) backing one task. */
+  /** Resolves the absolute working directory backing one isolated worktree task. */
   resolveTaskCwd(taskId: string): Promise<string>;
+  /** Resolves the absolute local directory backing one Workspace. */
+  resolveWorkspaceCwd(workspaceId: string): Promise<string>;
   /** Opens one absolute path in the chosen host application. */
   open(target: LocationTarget, path: string): Promise<void>;
 }
 
-/** A native marketplace integration exposed by Ora Desktop. */
-export type SkillMarketplaceProvider = "skillHub" | "huaweiAgentCenter";
+/**
+ * Explains why a release cannot be installed by the updater itself. Mirrors the Rust
+ * `ManualUpdateReason` in `apps/desktop/src-tauri/src/update/mod.rs`.
+ */
+export type ManualUpdateReason = "system_package" | "unpackaged_binary";
 
-/** Reports the download lifecycle controlled by a provider-specific native marketplace window. */
-export type SkillMarketplaceStatus =
+/** Describes the native Desktop updater state shown by the shell's version control. */
+export type DesktopUpdateStatus =
+  | { kind: "current" }
+  | { kind: "checking" }
   | {
-      status: "downloading";
-      provider: SkillMarketplaceProvider;
+      kind: "downloading";
+      version: string;
+      downloaded: number;
+      total: number | null;
+    }
+  | { kind: "ready"; version: string }
+  | { kind: "manual_update"; version: string; reason: ManualUpdateReason }
+  | { kind: "installing"; version: string }
+  | { kind: "failed"; message: string };
+
+/** Exposes update status and installation without coupling shared UI to Tauri IPC. */
+export interface DesktopUpdateCapability {
+  getStatus(): Promise<DesktopUpdateStatus>;
+  install(): Promise<void>;
+  /** Runs an update check on demand, outside the scheduled delayed and cron checks. */
+  check(): Promise<void>;
+  onStatus(
+    listener: (status: DesktopUpdateStatus) => void,
+  ): Promise<() => void>;
+}
+
+/** Where a plugin surface renders: docked into the right panel or in its own native window. */
+export type SurfaceTarget = "embedded" | "windowed";
+
+/** Lifecycle of one native surface instance, mirrored from the backend registry. */
+export type SurfaceState =
+  "opening" | "open" | "migrating" | "closing" | "failed";
+
+/** One live plugin surface owned by the host runtime. */
+/** Which kind of surface a record hosts; decides the entry look and the download behavior. */
+export type SurfaceKind = "workbench" | "webview";
+
+/** One live plugin surface owned by the host runtime. */
+export interface SurfaceRecord {
+  instance: number;
+  pluginId: string;
+  kind: SurfaceKind;
+  title: string;
+  target: SurfaceTarget;
+  state: SurfaceState;
+}
+
+/** Lifecycle and download notifications emitted by the host for every surface instance. */
+export type SurfaceEvent =
+  | {
+      type: "opened";
+      instance: number;
+      pluginId: string;
+      kind: SurfaceKind;
+      target: SurfaceTarget;
+      title: string;
+    }
+  | { type: "migrated"; instance: number; target: SurfaceTarget }
+  | { type: "migrateFailed"; instance: number; reason: string }
+  | { type: "failed"; instance: number; reason: string }
+  | { type: "closed"; instance: number }
+  | {
+      type: "downloadStarted";
+      instance: number;
+      pluginId: string;
+      downloadId: number;
       fileName: string;
     }
   | {
-      status: "downloaded";
-      provider: SkillMarketplaceProvider;
+      /** A prompt-disposition download landed; the user must pick one of `actions`. */
+      type: "downloadChoice";
+      instance: number;
+      pluginId: string;
+      downloadId: number;
+      pageOrigin: string;
       fileName: string;
-      archivePath: string;
+      sizeBytes: number;
+      actions: DownloadAction[];
     }
   | {
-      status: "failed";
-      provider: SkillMarketplaceProvider;
-      stage: "download";
-      code: string;
-      message: string;
+      type: "downloadCompleted";
+      instance: number;
+      pluginId: string;
+      downloadId: number;
+      fileName: string;
+      action: string;
+      /** For a completed `import_skill`: the prepared import session to open for review. */
+      importSessionId: string | null;
+    }
+  | {
+      type: "downloadFailed";
+      instance: number;
+      pluginId: string;
+      downloadId: number;
+      fileName: string;
+      reason: string;
     };
 
-/** Opens a provider-specific native WebView and observes its Ora-owned download lifecycle. */
-export interface SkillMarketplaceCapability {
-  open(provider: SkillMarketplaceProvider): Promise<void>;
-  onStatus(
-    listener: (status: SkillMarketplaceStatus) => void,
-  ): Promise<() => void>;
+/** The closed set of host download actions a webview-plugin download may resolve to. */
+export type DownloadAction = "import_skill" | "save_as";
+
+/** The result of resolving a webview-plugin download. */
+export interface ResolveDownloadOutcome {
+  action: string;
+  importSessionId: string | null;
+}
+
+/** The placeholder rectangle in CSS pixels plus the device scale the native layer needs. */
+export interface SurfaceBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale: number;
+}
+
+/** Identifies the single surface an installed workbench or webview plugin contributes. */
+export interface SurfaceOpenTarget {
+  pluginId: string;
+}
+
+/** Drives native plugin surfaces (embedded child webviews or standalone windows). */
+export interface SurfaceCapability {
+  capabilities(): Promise<{ embedded: boolean }>;
+  list(): Promise<SurfaceRecord[]>;
+  open(target: SurfaceOpenTarget, mount: SurfaceTarget): Promise<SurfaceRecord>;
+  close(instance: number): Promise<void>;
+  setBounds(instance: number, bounds: SurfaceBounds): Promise<void>;
+  setVisible(instance: number, visible: boolean): Promise<void>;
+  popout(instance: number): Promise<void>;
+  dock(instance: number): Promise<void>;
+  reload(instance: number): Promise<void>;
+  /** Runs a host action for a prompt-disposition webview download. */
+  resolveDownload(
+    downloadId: number,
+    action: DownloadAction,
+    destination?: string,
+  ): Promise<ResolveDownloadOutcome>;
+  /** Discards a prompt-disposition webview download the user dismissed. */
+  discardDownload(downloadId: number): Promise<void>;
+  onEvent(listener: (event: SurfaceEvent) => void): Promise<() => void>;
 }
 
 /** Collects the host capabilities consumed by the shared application shell. */
@@ -97,9 +221,18 @@ export interface PlatformAdapter {
   readonly worktreeStorage: WorktreeStorageCapability;
   readonly windowControls: WindowControlsCapability;
   readonly locationActions: LocationActionsCapability;
-  readonly skillMarketplace: SkillMarketplaceCapability;
+  readonly surfaces: SurfaceCapability;
+  readonly updates?: DesktopUpdateCapability;
   selectPath(options: SelectPathOptions): Promise<string | null>;
+  /** Opens the native save dialog and returns the chosen path, or null when dismissed. */
+  selectSavePath(options: SelectSavePathOptions): Promise<string | null>;
   saveTextFile(options: SaveTextFileOptions): Promise<boolean>;
+  /**
+   * Opens an http(s) or mailto URL in the host browser. Prompt-box links call
+   * this so Desktop is not stuck with a webview `window.open` that never leaves
+   * the app.
+   */
+  openExternalUrl(url: string): Promise<void>;
 }
 
 /** Reports a caller bug that attempts to open two selectors on one adapter concurrently. */

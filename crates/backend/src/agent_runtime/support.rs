@@ -1,22 +1,21 @@
+use super::connection::AgentAcpClient;
 use crate::{BackendError, ErrorClassification};
 use agent_client_protocol_schema::v1::{
     PermissionOption, PermissionOptionId, PermissionOptionKind, RequestPermissionOutcome,
     RequestPermissionResponse, SelectedPermissionOutcome,
 };
-use ora_acp::AcpClient;
 use ora_contracts::{
-    AgentCli as ContractAgentCli, RespondToPermissionRequest, RespondToPermissionResponse,
+    AgentRef as ContractAgentRef, RespondToPermissionRequest, RespondToPermissionResponse,
     Session as ContractSession, SessionHistoryState as ContractSessionHistoryState,
     SessionStatus as ContractSessionStatus,
 };
 use ora_contracts::{EmptyErrorParams, PublicError};
-use ora_domain::{AgentCli, HistoryState, Session, SessionStatus};
+use ora_domain::{AgentRef, HistoryState, Session, SessionStatus};
 use std::collections::HashMap;
-use tokio::process::ChildStdin;
 
 /// Responds to a pending permission after validating the public request ownership.
 pub(super) async fn respond_permission(
-    client: &AcpClient<ChildStdin>,
+    client: &AgentAcpClient,
     request: RespondToPermissionRequest,
     permissions: &mut HashMap<String, (agent_client_protocol_schema::v1::RequestId, Vec<String>)>,
 ) -> Result<RespondToPermissionResponse, BackendError> {
@@ -64,9 +63,9 @@ pub(super) fn pick_auto_allow_option(options: &[PermissionOption]) -> Option<&Pe
 pub(super) fn contract_session(session: Session) -> ContractSession {
     ContractSession {
         id: session.id.to_string(),
-        task_id: session.task_id.to_string(),
+        workspace_id: session.workspace_id.to_string(),
         title: session.title.map(|title| title.as_str().to_owned()),
-        agent_cli: contract_agent_cli(session.agent_cli),
+        agent_ref: session.agent_ref.into(),
         status: match session.status {
             SessionStatus::Running => ContractSessionStatus::Running,
             SessionStatus::Stopped => ContractSessionStatus::Stopped,
@@ -78,44 +77,14 @@ pub(super) fn contract_session(session: Session) -> ContractSession {
     }
 }
 
-/// Maps the stable persisted CLI identity into its transport representation.
-pub(super) fn contract_agent_cli(agent_cli: AgentCli) -> ContractAgentCli {
-    match agent_cli {
-        AgentCli::OpenCode => ContractAgentCli::OpenCode,
-        AgentCli::Nga => ContractAgentCli::Nga,
-        AgentCli::CodeAgentCli => ContractAgentCli::CodeAgentCli,
-        AgentCli::Claude => ContractAgentCli::Claude,
-        AgentCli::Codex => ContractAgentCli::Codex,
-    }
-}
-
-/// Maps the transport CLI identity into its stable persisted form.
-pub(super) fn domain_agent_cli(agent_cli: ContractAgentCli) -> AgentCli {
-    match agent_cli {
-        ContractAgentCli::OpenCode => AgentCli::OpenCode,
-        ContractAgentCli::Nga => AgentCli::Nga,
-        ContractAgentCli::CodeAgentCli => AgentCli::CodeAgentCli,
-        ContractAgentCli::Claude => AgentCli::Claude,
-        ContractAgentCli::Codex => AgentCli::Codex,
-    }
-}
-
-/// Drains child stderr so provider diagnostics can never block the shared process.
-pub(super) async fn drain_stderr(mut stderr: tokio::process::ChildStderr) {
-    use tokio::io::AsyncReadExt;
-    let mut tail = Vec::with_capacity(64 * 1024);
-    let mut buffer = [0_u8; 4096];
-    loop {
-        match stderr.read(&mut buffer).await {
-            Ok(0) | Err(_) => return,
-            Ok(read) => {
-                tail.extend_from_slice(&buffer[..read]);
-                if tail.len() > 64 * 1024 {
-                    tail.drain(..tail.len() - 64 * 1024);
-                }
-            }
-        }
-    }
+/// Validates a client-supplied agent identity before it is used to select a runtime.
+///
+/// The transport carries an open string because which agents exist depends on installed plugins,
+/// so structural validation happens here. Whether the named agent is actually installed is a
+/// separate, later question answered by the supervisor lookup.
+pub(super) fn domain_agent_ref(agent_ref: ContractAgentRef) -> Result<AgentRef, BackendError> {
+    AgentRef::parse(&agent_ref)
+        .map_err(|error| runtime_internal("agent_not_installed", error.to_string()))
 }
 
 /// Builds the stable public error for an unknown or deleted Ora session.
@@ -138,10 +107,7 @@ pub(super) fn session_stopped() -> BackendError {
 
 /// Builds the degraded-mode error while the selected CLI is starting or recovering.
 pub(super) fn runtime_unavailable() -> BackendError {
-    runtime_internal(
-        "agent_runtime_unavailable",
-        "agent CLI runtime is unavailable",
-    )
+    runtime_internal("agent_runtime_unavailable", "agent runtime is unavailable")
 }
 
 pub(super) fn runtime_unavailable_with(
@@ -168,9 +134,9 @@ pub(super) fn map_acp_error(error: ora_acp::AcpError) -> BackendError {
 /// Builds an internal runtime error with a caller-selected stable code.
 pub(super) fn runtime_internal(code: &'static str, message: impl Into<String>) -> BackendError {
     let (classification, public_error) = match code {
-        "agent_cli_not_found" => (
+        "agent_not_installed" => (
             ErrorClassification::NotFound,
-            PublicError::AgentCliNotFound(EmptyErrorParams {}),
+            PublicError::AgentNotInstalled(EmptyErrorParams {}),
         ),
         "agent_runtime_unavailable" => (
             ErrorClassification::Internal,

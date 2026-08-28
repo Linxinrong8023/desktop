@@ -1,0 +1,26 @@
+.video-node-view {
+  display: block;
+  margin: 1rem auto;
+  max-width: min(500px, 100%);
+
+  &.selected {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  .video-wrapper {
+    position: relative;
+    width: 100%;
+    border-radius: 4px;
+    overflow: hidden;
+
+    .video-element {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 4px;
+      background-color: #000;
+    }
+  }
+}

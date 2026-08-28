@@ -23,6 +23,8 @@ export interface WorkflowNodeCardShellProps extends Omit<
   style?: CSSProperties;
   /** Overlay on the kind icon (status dot, etc.). */
   iconAccessory?: ReactNode;
+  /** Compact marker rendered immediately after the node title. */
+  titleAccessory?: ReactNode;
   /** Trailing chips in the title row (status badge, etc.). */
   headerAccessory?: ReactNode;
   /** Far-right header control (delete in editor). */
@@ -33,6 +35,8 @@ export interface WorkflowNodeCardShellProps extends Omit<
   body?: ReactNode;
   /** Read-only details rendered at the full card width beneath the header. */
   details?: ReactNode;
+  /** Layout classes for the full-width details slot. */
+  detailsClassName?: string;
   targetHandle?: ReactNode;
   sourceHandle?: ReactNode;
 }
@@ -107,11 +111,13 @@ export function WorkflowNodeCardShell({
   frameClassName,
   style,
   iconAccessory,
+  titleAccessory,
   headerAccessory,
   headerEnd,
   footer,
   body,
   details,
+  detailsClassName,
   targetHandle,
   sourceHandle,
   ...articleProps
@@ -162,6 +168,7 @@ export function WorkflowNodeCardShell({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <h4 className={cn("min-w-0 truncate", tokens.title)}>{title}</h4>
+            {titleAccessory}
             <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
               {kindLabel}
             </span>
@@ -176,7 +183,9 @@ export function WorkflowNodeCardShell({
           {density === "editor" && (
             <div className="mx-auto w-4/5 border-t border-border" />
           )}
-          <div className="px-3 pb-3 pt-2">{details}</div>
+          <div className={cn("px-3 pb-3 pt-2", detailsClassName)}>
+            {details}
+          </div>
         </>
       )}
       {footer !== undefined && footer !== null && (

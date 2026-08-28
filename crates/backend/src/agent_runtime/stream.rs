@@ -29,6 +29,23 @@ impl<Event> SessionEventStream<Event> {
         }
     }
 
+    /// Chains one cleanup callback into the stream's drop, preserving the cancel-on-drop behavior
+    /// and any existing cleanup. Used by the workflow prompt hook to flip an interactive node back
+    /// to `Pending` when a human turn ends or the stream is abandoned.
+    pub(crate) fn attach_cleanup<F>(mut self, cleanup: F) -> Self
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let existing = self.cleanup.take();
+        self.cleanup = Some(Box::new(move || {
+            if let Some(existing) = existing {
+                existing();
+            }
+            cleanup();
+        }));
+        self
+    }
+
     /// Builds a stream owned by a non-actor publisher, such as the application event hub.
     pub(crate) fn with_cleanup<F>(
         receiver: mpsc::Receiver<Result<Event, BackendError>>,

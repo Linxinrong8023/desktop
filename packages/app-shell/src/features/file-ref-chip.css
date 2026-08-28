@@ -1,0 +1,111 @@
+/*
+ * Shared visual for a workspace file reference chip: type icon keeps its own
+ * hue, the basename uses a bright teal ink (higher L / soft chroma for a clear,
+ * airy feel), and the line range trails in a muted mix of the two.
+ *
+ * Unscoped on purpose. The composer renders these as TipTap atoms and chat
+ * history renders the same chip from the sent quote payload, so one definition
+ * keeps the prompt box and the message bubble visually identical.
+ */
+.composer-file-ref {
+  --composer-file-ink: oklch(0.55 0.09 195);
+  display: inline-flex;
+  max-width: 14rem;
+  align-items: center;
+  gap: 0.28em;
+  /* Gap without a selectable text space (those paint as thin selection bars). */
+  margin: 0 0.2em;
+  vertical-align: baseline;
+  color: var(--composer-file-ink);
+  font-size: inherit;
+  font-weight: 500;
+  line-height: inherit;
+  /* Reset UA <button> chrome so a navigable chip stays visually identical to
+   * the inert <span> it replaces. */
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  text-align: inherit;
+}
+
+/*
+ * Clickable chip (a TaskChangesNavigationContext is in scope): hint the link
+ * affordance on hover/focus without touching the established ink color.
+ * Shared by both the history <button> and the composer node view's <span>
+ * (which fields clicks itself, since it also owns TipTap node-selection).
+ */
+.composer-file-ref[data-navigable="true"] {
+  cursor: pointer;
+}
+
+.composer-file-ref[data-navigable="true"]:hover .composer-file-ref-name,
+.composer-file-ref[data-navigable="true"]:focus-visible
+  .composer-file-ref-name {
+  text-decoration: underline dashed;
+  text-underline-offset: 0.2em;
+}
+
+button.composer-file-ref[data-navigable="true"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 0.2rem;
+}
+
+.dark .composer-file-ref {
+  /* Bright aqua on dark chrome; stays readable without neon glow. */
+  --composer-file-ink: oklch(0.82 0.1 195);
+}
+
+.composer-file-ref-icon {
+  width: 0.95em;
+  height: 0.95em;
+  flex-shrink: 0;
+}
+
+/* When the icon is a diff glyph wrapped in a span, keep the box centered. */
+.composer-file-ref-icon:has(> .composer-file-ref-icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.composer-file-ref-label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.35em;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.composer-file-ref-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-file-ref-range {
+  flex-shrink: 0;
+  color: color-mix(
+    in oklch,
+    var(--composer-file-ink) 55%,
+    var(--muted-foreground)
+  );
+  font-weight: 400;
+}
+
+/*
+ * Diff-gutter reference: the file-type glyph is swapped for a small violet
+ * diff icon (IconFileDiff). Violet is the app's established "change" hue
+ * (turn-diff summary, tool blocks), so a changed-file chip reads differently
+ * from a plain file reference instead of showing two icons on one chip.
+ */
+.composer-file-ref-diff-icon {
+  width: 0.95em;
+  height: 0.95em;
+  color: oklch(0.55 0.12 285);
+}
+
+.dark .composer-file-ref-diff-icon {
+  color: oklch(0.68 0.12 285);
+}

@@ -1,7 +1,9 @@
+use super::skill_delivery::SkillMaterializationReceipt;
 use crate::RepositoryError;
 use crate::workflow_run::engine::graph::WorkflowGraph;
 use ora_domain::{
-    SessionId, Task, WorkflowNodeRun, WorkflowNodeRunId, WorkflowRun, WorkflowRunId, Worktree,
+    SessionId, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRun, WorkflowRunId,
+    Workspace,
 };
 use std::path::Path;
 use thiserror::Error;
@@ -35,8 +37,7 @@ pub struct FileChange {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionContext {
     pub run: WorkflowRun,
-    pub task: Task,
-    pub worktree: Worktree,
+    pub workspace: Workspace,
     pub graph_json: String,
 }
 
@@ -46,7 +47,7 @@ pub trait WorkflowNodeRunIdGenerator {
     fn generate_node_run_id(&self) -> WorkflowNodeRunId;
 }
 
-/// Failures raised while setting up a run's worktree initial state at deploy time.
+/// Failures raised while setting up a run workspace's initial state at deploy time.
 #[derive(Debug, Error)]
 pub enum StartPrerequisitesError {
     #[error("workflow skill not found: {skill_id}")]
@@ -55,24 +56,29 @@ pub enum StartPrerequisitesError {
     WorkflowRoleNotFound { role_id: String },
     #[error("skill materialization failed: {message}")]
     SkillMaterializationError { message: String },
+    #[error("agent {agent_ref} does not support workflow-managed skills")]
+    AgentSkillDeliveryUnsupported { agent_ref: String },
+    #[error("failed to resolve skill delivery for agent {agent_ref}: {message}")]
+    AgentSkillDeliveryError { agent_ref: String, message: String },
     #[error("repository operation failed")]
     Repository(#[from] RepositoryError),
 }
 
-/// Validates and materializes a run worktree's initial state at deploy time.
+/// Validates and materializes a run workspace's initial state at deploy time.
 ///
 /// Skills and roles are deploy dependencies: every agent's role must resolve in the agents catalog
 /// and every enabled skill must resolve in the catalog. The backend implementation also copies the
-/// enabled skills into `<worktree>/.agents/skills/` while the worktree is being created, so the
-/// run's initial state is complete before it is persisted and `start` needs no re-validation.
-pub trait WorkflowRunWorktreeInitializer: Send + Sync {
+/// enabled skills into the worktree-relative discovery roots declared by each Agent's delivery
+/// capability while the worktree is being created, so the run's initial state is complete before
+/// it is persisted and `start` needs no re-validation.
+pub trait WorkflowRunWorkspaceInitializer: Send + Sync {
     /// Resolves every declared role and skill in the graph and materializes the enabled skills
-    /// into the freshly provisioned run worktree.
-    fn initialize_worktree(
+    /// into the selected run workspace.
+    fn initialize_workspace(
         &self,
         graph: &WorkflowGraph,
-        worktree_root: &Path,
-    ) -> Result<(), StartPrerequisitesError>;
+        workspace_root: &Path,
+    ) -> Result<SkillMaterializationReceipt, StartPrerequisitesError>;
 }
 
 /// Outcome of starting a run.
@@ -111,6 +117,17 @@ pub enum RestartWorkflowRunResult {
     NotFound,
 }
 
+/// Outcome of publishing a prepared workflow node session to observers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindWorkflowNodeSessionResult {
+    /// The run and node are still running, and the session is now visible to observers.
+    Bound,
+    /// Cancellation or another terminal transition won before the session could be published.
+    NotRunning,
+    /// The node or its owning run no longer exists.
+    NotFound,
+}
+
 /// Outcome of updating a run's kickoff input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateWorkflowRunInputResult {
@@ -128,7 +145,7 @@ pub enum UpdateWorkflowRunInputResult {
 /// a single immediate transaction that maintains `state.current_nodes`. No generic overwrite of
 /// the full run state is exposed to callers.
 pub trait WorkflowRunEngineRepository {
-    /// Loads the run, its task, its worktree, and the frozen snapshot graph in one read.
+    /// Loads the run, its workspace, and the frozen snapshot graph in one read.
     fn find_execution_context(
         &self,
         run_id: &WorkflowRunId,
@@ -140,14 +157,48 @@ pub trait WorkflowRunEngineRepository {
         run_id: &WorkflowRunId,
     ) -> Result<Vec<WorkflowNodeRun>, RepositoryError>;
 
-    /// Binds a node run to its real Ora session right after `attach_session` succeeds, so the
-    /// frontend can subscribe to the session's permission stream before the prompt starts.
-    fn set_node_run_session_id(
+    /// Publishes a node's prepared Ora session only while both the node and run are still running.
+    ///
+    /// The executor calls this after the initial prompt is accepted. Keeping `session_id` absent
+    /// until then prevents a workflow transcript load from displacing that owning prompt, while
+    /// the guarded result lets a cancellation that won the race trigger immediate session cleanup.
+    fn bind_node_run_session(
         &self,
         node_run_id: &WorkflowNodeRunId,
         session_id: &SessionId,
         now: i64,
-    ) -> Result<(), RepositoryError>;
+    ) -> Result<BindWorkflowNodeSessionResult, RepositoryError>;
+
+    /// Finds the live node run bound to a session, if any.
+    ///
+    /// Session bindings are per-node (each node warms its own session), so at most one node run
+    /// carries a given session id; the interactive prompt hook uses this to flip the owning node
+    /// between `Pending` and `Running`.
+    fn find_node_run_by_session_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<WorkflowNodeRun>, RepositoryError>;
+
+    /// Finds one node run by id, if it exists and is not soft-deleted.
+    ///
+    /// Used by baseline cleanup to decide whether a node's side file is still needed: a baseline
+    /// survives only while its node is still awaiting input.
+    fn find_node_run_by_id(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+    ) -> Result<Option<WorkflowNodeRun>, RepositoryError>;
+
+    /// Transitions one node run's status only when its current status is exactly `from`.
+    ///
+    /// Awaiting interactive nodes flip between `Pending` and `Running` around a human turn; the
+    /// guard makes a stale flip against a completed or cancelled node a no-op (`NotRunning`).
+    fn transition_node_run_status(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+        from: WorkflowNodeStatus,
+        to: WorkflowNodeStatus,
+        now: i64,
+    ) -> Result<AdvanceWorkflowRunResult, RepositoryError>;
 
     /// Starts a run by creating the start node-run and transitioning the run to `Running`.
     ///
@@ -168,8 +219,8 @@ pub trait WorkflowRunEngineRepository {
         now: i64,
     ) -> Result<(), RepositoryError>;
 
-    /// Marks one node-run succeeded, records its output, stop reason, and file changes, and removes
-    /// it from `current_nodes`.
+    /// Marks one node-run succeeded, records its final assistant output, stop reason, and file
+    /// changes, and removes it from `current_nodes`.
     fn complete_node(
         &self,
         node_run_id: &WorkflowNodeRunId,
@@ -225,6 +276,9 @@ pub trait WorkflowRunEngineRepository {
     fn list_recoverable_runs(&self) -> Result<Vec<WorkflowRunId>, RepositoryError>;
 
     /// Fails the non-terminal node runs of the given runs and stops their running sessions.
+    ///
+    /// A run whose in-flight nodes are all `Pending` (awaiting interactive input) is preserved
+    /// as-is: it was parked on the human rather than computing, so a restart must not destroy it.
     fn fail_orphaned_node_runs(
         &self,
         run_ids: &[WorkflowRunId],

@@ -5,49 +5,78 @@ use agent_client_protocol_schema::v1::{
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// Identifies the shared CLI runtime selected for a provider-backed session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-#[ts(export_to = "session.ts")]
-pub enum AgentCli {
-    OpenCode,
-    Nga,
-    CodeAgentCli,
-    Claude,
-    Codex,
-}
+/// Identifies the agent provider selected for a provider-backed session.
+///
+/// This is the provider's namespaced package id, and it is deliberately an open string rather
+/// than a closed set: agents arrive with installed plugins, so which ones exist is not knowable
+/// at build time. Clients must be able to render an identity they do not recognize instead of
+/// treating it as invalid.
+pub type AgentRef = String;
 
-/// Describes the live ACP handshake state of one application-scoped CLI runtime.
+/// Describes the live ACP handshake state of one application-scoped agent runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "session.ts")]
-pub enum AgentCliStatus {
+pub enum AgentStatus {
     Ready,
     Starting,
     Unavailable,
+    /// Automatic restart stopped after the provider repeatedly failed in a short period.
+    Failing,
 }
 
-/// Pairs one CLI identity with its current runtime detection status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+/// Pairs one agent identity with its current runtime detection status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "session.ts")]
-pub struct AgentCliRuntimeStatus {
-    pub agent_cli: AgentCli,
-    pub status: AgentCliStatus,
+pub struct AgentRuntimeStatus {
+    pub agent_ref: AgentRef,
+    pub status: AgentStatus,
 }
 
-/// Requests the live detection status of every application-scoped CLI runtime.
+/// Describes one model an agent offers before any session exists.
+///
+/// This is separate from the session config options an agent sends after `session/new`: the agent
+/// and model pickers must render before any session has been created. Agents that expose models
+/// only through session config options contribute nothing here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "session.ts")]
+pub struct AgentModel {
+    pub id: String,
+    pub display_name: String,
+    /// Whether the agent would select this model when the user expresses no preference.
+    pub default: bool,
+}
+
+/// Requests the pre-session model list of one application-scoped agent runtime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "session.ts")]
+pub struct ListAgentModelsRequest {
+    pub agent_ref: AgentRef,
+}
+
+/// Returns the models one agent advertises outside any session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "session.ts")]
+pub struct ListAgentModelsResponse {
+    pub models: Vec<AgentModel>,
+}
+
+/// Requests the live detection status of every application-scoped agent runtime.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "session.ts")]
 pub struct GetAgentRuntimeStatusRequest {}
 
-/// Returns the live detection status of every application-scoped CLI runtime.
+/// Returns the live detection status of every application-scoped agent runtime.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "session.ts")]
 pub struct GetAgentRuntimeStatusResponse {
-    pub statuses: Vec<AgentCliRuntimeStatus>,
+    pub statuses: Vec<AgentRuntimeStatus>,
 }
 
 /// Describes whether a persisted session is registered on its shared CLI connection.
@@ -82,32 +111,26 @@ pub enum SessionHistoryState {
 #[ts(export_to = "session.ts")]
 pub struct Session {
     pub id: String,
-    pub task_id: String,
+    pub workspace_id: String,
     /// The persisted display title, or `null` until the first acquisition succeeds.
     pub title: Option<String>,
-    /// The CLI this conversation currently runs on, which switching replaces.
-    pub agent_cli: AgentCli,
+    /// The agent this conversation currently runs on, which switching replaces.
+    pub agent_ref: AgentRef,
     pub status: SessionStatus,
     pub history_state: SessionHistoryState,
 }
 
-/// Selects the working directory one warm session is created against.
+/// Selects the Workspace one warm session is created against.
 ///
-/// The two variants mirror how Ora resolves a cwd: an existing Task owns either
-/// a linked worktree or the project root, while a chat whose Task does not exist
-/// yet can only target the project root. Modelling this as an enum keeps callers
-/// from having to pass two optional identifiers and guess which one wins.
+/// Direct chats use the project's persisted main Workspace, so a warm request never
+/// carries a project-only fallback that would need to be converted into an implicit owner.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(export_to = "session.ts")]
 pub enum WarmSessionTarget {
-    Task {
-        #[serde(rename = "taskId")]
-        task_id: String,
-    },
-    ProjectRoot {
-        #[serde(rename = "projectId")]
-        project_id: String,
+    Workspace {
+        #[serde(rename = "workspaceId")]
+        workspace_id: String,
     },
 }
 
@@ -121,7 +144,7 @@ pub enum WarmSessionTarget {
 #[ts(export_to = "session.ts")]
 pub struct WarmSessionRequest {
     pub target: WarmSessionTarget,
-    pub agent_cli: AgentCli,
+    pub agent_ref: AgentRef,
 }
 
 /// Returns the warm session identifier together with the agent's current configuration.
@@ -132,6 +155,8 @@ pub struct WarmSessionResponse {
     /// The final Ora session id. It is not persisted until `attachSession`
     /// succeeds, so `getSession` and `listSessions` do not report it yet.
     pub session_id: String,
+    /// The Workspace the backend resolved for this warm provider session.
+    pub workspace_id: String,
     #[ts(type = "Array<import(\"@agentclientprotocol/sdk\").SessionConfigOption>")]
     pub config_options: Vec<SessionConfigOption>,
 }
@@ -159,13 +184,13 @@ pub struct SetSessionConfigResponse {
     pub config_options: Vec<SessionConfigOption>,
 }
 
-/// Binds one warm session to its owning Task and persists the Ora record.
+/// Binds one warm session to its owning Workspace and persists the Ora record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "session.ts")]
 pub struct AttachSessionRequest {
     pub session_id: String,
-    pub task_id: String,
+    pub workspace_id: String,
 }
 
 /// Returns the newly persisted session payload.
@@ -208,7 +233,7 @@ pub struct ListSessionsResponse {
     pub sessions: Vec<Session>,
 }
 
-/// Identifies a stopped session whose provider history should be replayed.
+/// Identifies the session conversation a client wants to load.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "session.ts")]
@@ -249,12 +274,11 @@ pub enum SessionHistoryNotice {
     UnrecordedContent { reason: String },
 }
 
-/// Replays Ora's recorded history while keeping JSON-RPC framing private to the backend.
+/// Loads Ora's recorded conversation and follows an active turn when one is already running.
 ///
-/// The stream carries assembled updates read back from Ora's own record, not the
-/// provider's replay. `TurnEnded` has no ACP equivalent and exists because a
-/// cancelled turn would otherwise be indistinguishable from a completed one —
-/// information provider replay never carried.
+/// The stream begins with assembled updates from Ora's own record. If the session already has an
+/// active prompt, later provider updates continue on the same stream. `TurnEnded` has no ACP
+/// equivalent and preserves the recorded outcome of completed and cancelled turns.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export_to = "session.ts")]
@@ -309,6 +333,20 @@ pub struct RespondToPermissionRequest {
 #[ts(export_to = "session.ts")]
 pub struct RespondToPermissionResponse {}
 
+/// Identifies a session whose currently active prompt should be cancelled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "session.ts")]
+pub struct CancelSessionPromptRequest {
+    pub session_id: String,
+}
+
+/// Confirms that cancellation was routed to the session actor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "session.ts")]
+pub struct CancelSessionPromptResponse {}
+
 /// Identifies a running session whose child process should be stopped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -325,25 +363,25 @@ pub struct StopSessionResponse {
     pub session: Session,
 }
 
-/// Moves one existing conversation onto a different agent CLI.
+/// Moves one existing conversation onto a different agent.
 ///
-/// Only the binding changes: the session keeps its identifier, its task, and the
-/// history it has accumulated. The new CLI starts with no context, so Ora's
+/// Only the binding changes: the session keeps its identifier, its workspace, and the
+/// history it has accumulated. The new agent starts with no context, so Ora's
 /// recorded transcript is prepended to the next prompt sent into it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "session.ts")]
 pub struct SwitchSessionAgentRequest {
     pub session_id: String,
-    pub agent_cli: AgentCli,
+    pub agent_ref: AgentRef,
 }
 
-/// Returns the session rebound to its new CLI.
+/// Returns the session rebound to its new agent.
 ///
-/// The new CLI reports its own commands and configuration during the handshake
+/// The new agent reports its own commands and configuration during the handshake
 /// that the switch performs, so both travel back with the rebound session. A
 /// client that only heard about the session would otherwise keep offering the
-/// previous CLI's models, which the new one cannot honour.
+/// previous agent's models, which the new one cannot honour.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "session.ts")]
@@ -409,9 +447,11 @@ pub struct RenameSessionResponse {
 
 /// Exports every TypeScript binding declared in this module into the target directory.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
-    AgentCli::export(config)?;
-    AgentCliStatus::export(config)?;
-    AgentCliRuntimeStatus::export(config)?;
+    AgentStatus::export(config)?;
+    AgentRuntimeStatus::export(config)?;
+    AgentModel::export(config)?;
+    ListAgentModelsRequest::export(config)?;
+    ListAgentModelsResponse::export(config)?;
     GetAgentRuntimeStatusRequest::export(config)?;
     GetAgentRuntimeStatusResponse::export(config)?;
     SessionStatus::export(config)?;
@@ -440,6 +480,8 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     PromptSessionEvent::export(config)?;
     RespondToPermissionRequest::export(config)?;
     RespondToPermissionResponse::export(config)?;
+    CancelSessionPromptRequest::export(config)?;
+    CancelSessionPromptResponse::export(config)?;
     StopSessionRequest::export(config)?;
     StopSessionResponse::export(config)?;
     DeleteSessionRequest::export(config)?;
@@ -451,10 +493,23 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
 
 #[cfg(test)]
 mod tests {
-    use super::PromptSessionRequest;
+    use super::{AgentRuntimeStatus, AgentStatus, PromptSessionRequest};
     use agent_client_protocol_schema::v1::{ContentBlock, TextContent};
     use pretty_assertions::assert_eq;
     use serde_json::{Map, json};
+
+    /// Verifies the public status contract distinguishes a stopped crash loop from retrying.
+    #[test]
+    fn serializes_a_failing_agent_runtime_status() {
+        assert_eq!(
+            serde_json::to_value(AgentRuntimeStatus {
+                agent_ref: "acme.agent".to_string(),
+                status: AgentStatus::Failing,
+            })
+            .expect("serialize failing agent status"),
+            json!({ "agentRef": "acme.agent", "status": "failing" })
+        );
+    }
 
     /// Verifies Ora route DTOs preserve official ACP extension metadata without translation.
     #[test]

@@ -32,6 +32,40 @@ pub struct WorkflowGraphNode {
     pub agent_config: Option<AgentConfig>,
 }
 
+/// Controls whether an agent node's final assistant response becomes its `WorkflowNodeRun.output`.
+///
+/// This is a workflow node policy decided at completion time by the workflow layer: the session
+/// runtime always records the full conversation, and this policy only decides whether the extracted
+/// final assistant deliverable is exposed to downstream nodes or withheld.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputPolicy {
+    /// The node exposes no assistant output downstream, regardless of what the agent produced.
+    None,
+    /// The node exposes its final assistant response as `WorkflowNodeRun.output`.
+    FinalAgentResponse,
+}
+
+impl Default for OutputPolicy {
+    /// Nodes default to withholding their output, so a workflow author opts in to exposing it.
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+impl OutputPolicy {
+    /// Applies this policy to an already-extracted final assistant output.
+    ///
+    /// `None` withholds the output downstream; `FinalAgentResponse` passes it through unchanged.
+    /// The extraction itself lives in the automatic driver and the interactive completion path;
+    /// this only decides whether that deliverable becomes `WorkflowNodeRun.output`.
+    pub fn apply(self, output: Option<String>) -> Option<String> {
+        match self {
+            Self::None => None,
+            Self::FinalAgentResponse => output,
+        }
+    }
+}
+
 /// The executable contract of an `agent` node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentConfig {
@@ -39,11 +73,16 @@ pub struct AgentConfig {
     pub role_id: Option<String>,
     pub skills: Vec<AgentSkill>,
     pub prompt: String,
+    /// When true the node is a persistent interactive session: its first turn pauses at
+    /// `Pending` (awaiting input) instead of completing, and the user drives completion.
+    pub interactive: bool,
+    /// Whether the node's final assistant response becomes its run output; see [`OutputPolicy`].
+    pub output_policy: OutputPolicy,
 }
 
 /// The agent CLI and model an `agent` node must run with.
 ///
-/// `agent_cli` stays a string here; mapping it to the contract `AgentCli` enum and checking
+/// `agent_cli` stays a string here; validating it as an agent identity and checking
 /// runtime availability happens in the session driver (phase 4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentExecutor {
@@ -130,6 +169,10 @@ struct WireAgentConfig {
     skills: Vec<WireAgentSkill>,
     #[serde(default)]
     prompt: Option<String>,
+    #[serde(default)]
+    interactive: Option<bool>,
+    #[serde(default)]
+    output_policy: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -181,7 +224,22 @@ impl WireAgentConfig {
                 .map(WireAgentSkill::into_model)
                 .collect(),
             prompt: self.prompt.unwrap_or_default(),
+            // Missing `interactive` defaults to false so existing graphs stay fully automatic.
+            interactive: self.interactive.unwrap_or(false),
+            // Missing or unrecognized `outputPolicy` defaults to the final response, so existing
+            // graphs keep exposing their output and future policy values fail open.
+            output_policy: parse_output_policy(self.output_policy.as_deref()),
         }
+    }
+}
+
+/// Maps the wire `outputPolicy` string to [`OutputPolicy`], defaulting absent and unrecognized
+/// values to `None`. The lenient default keeps future policy values from breaking graph parsing on
+/// older Ora versions.
+fn parse_output_policy(value: Option<&str>) -> OutputPolicy {
+    match value {
+        Some("final_agent_response") => OutputPolicy::FinalAgentResponse,
+        _ => OutputPolicy::None,
     }
 }
 
@@ -307,6 +365,16 @@ impl WorkflowGraph {
     /// Returns the number of edges.
     pub fn edge_count(&self) -> usize {
         self.graph.edge_count()
+    }
+
+    /// Returns every node in deterministic topological execution order.
+    pub fn nodes_in_topological_order(&self) -> Vec<&WorkflowGraphNode> {
+        let mut indices: Vec<_> = self.graph.node_indices().collect();
+        indices.sort_by_key(|index| self.topo_rank.get(index).copied().unwrap_or(usize::MAX));
+        indices
+            .into_iter()
+            .map(|index| &self.graph[index])
+            .collect()
     }
 
     /// Returns the direct successors of `id` in deterministic adjacency order.

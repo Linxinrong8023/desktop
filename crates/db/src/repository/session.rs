@@ -1,7 +1,7 @@
 use ora_application::{RepositoryError, SessionRepository};
 use ora_domain::{
-    AgentCli, AuditFields, DomainModelError, HistoryState, Session, SessionId, SessionStatus,
-    SessionTitle, TaskId,
+    AgentRef, AuditFields, DomainModelError, HistoryState, Session, SessionId, SessionStatus,
+    SessionTitle, WorkspaceId,
 };
 use rusqlite::{Row, params};
 
@@ -26,15 +26,17 @@ impl SessionRepository for SqliteSessionRepository {
         self.pool
             .with_connection(|connection| {
                 let inserted_rows = connection.execute(
-                    "INSERT INTO sessions (id, task_id, agent_cli, agent_session_id, title, status, history_degraded_reason, created_at, updated_at, is_deleted)
+                    "INSERT INTO sessions (id, workspace_id, agent_cli, agent_session_id, title, status, history_degraded_reason, created_at, updated_at, is_deleted)
                      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
                      WHERE EXISTS (
-                         SELECT 1 FROM tasks WHERE id = ?2 AND is_deleted = 0
+                         SELECT 1 FROM workspaces w
+                         JOIN projects p ON p.id = w.project_id AND p.is_deleted = 0
+                         WHERE w.id = ?2 AND w.is_deleted = 0 AND w.lifecycle = 'active'
                      )",
                     params![
                         session.id.as_ref(),
-                        session.task_id.as_ref(),
-                        session.agent_cli.database_value(),
+                        session.workspace_id.as_ref(),
+                        session.agent_ref.as_str(),
                         session.agent_session_id,
                         session.title.as_ref().map(SessionTitle::as_str),
                         session.status.database_value(),
@@ -60,7 +62,7 @@ impl SessionRepository for SqliteSessionRepository {
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
-                    "SELECT id, task_id, agent_cli, agent_session_id, title, status, history_degraded_reason, created_at, updated_at, is_deleted
+                    "SELECT id, workspace_id, agent_cli, agent_session_id, title, status, history_degraded_reason, created_at, updated_at, is_deleted
                      FROM sessions
                      WHERE id = ?1 AND is_deleted = 0",
                 )?;
@@ -79,10 +81,37 @@ impl SessionRepository for SqliteSessionRepository {
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
-                    "SELECT id, task_id, agent_cli, agent_session_id, title, status, history_degraded_reason, created_at, updated_at, is_deleted
+                    "SELECT id, workspace_id, agent_cli, agent_session_id, title, status, history_degraded_reason, created_at, updated_at, is_deleted
                      FROM sessions
                      WHERE is_deleted = 0
                      ORDER BY created_at, id",
+                )?;
+                let mut rows = statement.query([])?;
+                let mut sessions = Vec::new();
+
+                while let Some(row) = rows.next()? {
+                    sessions.push(map_session_row(row)?);
+                }
+
+                Ok(sessions)
+            })
+            .map_err(session_repository_error_from_database)
+    }
+
+    /// Lists visible sessions that are not bound to a visible workflow node run.
+    fn list_standalone_sessions(&self) -> Result<Vec<Session>, RepositoryError> {
+        self.pool
+            .with_connection(|connection| {
+                let mut statement = connection.prepare(
+                    "SELECT id, workspace_id, agent_cli, agent_session_id, title, status, history_degraded_reason, created_at, updated_at, is_deleted
+                     FROM sessions s
+                     WHERE s.is_deleted = 0
+                       AND NOT EXISTS (
+                           SELECT 1
+                           FROM workflow_node_runs nr
+                           WHERE nr.session_id = s.id AND nr.is_deleted = 0
+                       )
+                     ORDER BY s.created_at, s.id",
                 )?;
                 let mut rows = statement.query([])?;
                 let mut sessions = Vec::new();
@@ -108,7 +137,7 @@ impl SessionRepository for SqliteSessionRepository {
                 let mut statement = connection.prepare(
                     "UPDATE sessions SET title = ?2, updated_at = ?3
                      WHERE id = ?1 AND is_deleted = 0
-                     RETURNING id, task_id, agent_cli, agent_session_id, title, status,
+                    RETURNING id, workspace_id, agent_cli, agent_session_id, title, status,
                          history_degraded_reason, created_at, updated_at, is_deleted",
                 )?;
                 let mut rows =
@@ -139,11 +168,12 @@ impl SessionRepository for SqliteSessionRepository {
                     "UPDATE sessions SET status = ?2, updated_at = ?3
                      WHERE id = ?1 AND is_deleted = 0
                        AND EXISTS (
-                           SELECT 1 FROM tasks t
-                           JOIN projects p ON p.id = t.project_id AND p.is_deleted = 0
-                           WHERE t.id = sessions.task_id AND t.is_deleted = 0
+                           SELECT 1 FROM workspaces w
+                           JOIN projects p ON p.id = w.project_id AND p.is_deleted = 0
+                           WHERE w.id = sessions.workspace_id
+                             AND w.is_deleted = 0 AND w.lifecycle = 'active'
                        )
-                     RETURNING id, task_id, agent_cli, agent_session_id, title, status,
+                     RETURNING id, workspace_id, agent_cli, agent_session_id, title, status,
                          history_degraded_reason, created_at, updated_at, is_deleted",
                 )?;
                 let mut rows =
@@ -162,7 +192,7 @@ impl SessionRepository for SqliteSessionRepository {
     fn update_session_binding(
         &self,
         session_id: &SessionId,
-        agent_cli: AgentCli,
+        agent_ref: AgentRef,
         agent_session_id: &str,
         now: i64,
     ) -> Result<Session, RepositoryError> {
@@ -171,12 +201,12 @@ impl SessionRepository for SqliteSessionRepository {
                 let mut statement = connection.prepare(
                     "UPDATE sessions SET agent_cli = ?2, agent_session_id = ?3, updated_at = ?4
                      WHERE id = ?1 AND is_deleted = 0
-                     RETURNING id, task_id, agent_cli, agent_session_id, title, status,
+                    RETURNING id, workspace_id, agent_cli, agent_session_id, title, status,
                          history_degraded_reason, created_at, updated_at, is_deleted",
                 )?;
                 let mut rows = statement.query(params![
                     session_id.as_ref(),
-                    agent_cli.database_value(),
+                    agent_ref.as_str(),
                     agent_session_id,
                     now
                 ])?;
@@ -202,7 +232,7 @@ impl SessionRepository for SqliteSessionRepository {
                 let mut statement = connection.prepare(
                     "UPDATE sessions SET history_degraded_reason = ?2, updated_at = ?3
                      WHERE id = ?1 AND is_deleted = 0
-                     RETURNING id, task_id, agent_cli, agent_session_id, title, status,
+                    RETURNING id, workspace_id, agent_cli, agent_session_id, title, status,
                          history_degraded_reason, created_at, updated_at, is_deleted",
                 )?;
                 let mut rows = statement.query(params![
@@ -244,7 +274,7 @@ impl SessionRepository for SqliteSessionRepository {
 /// Reconstructs a domain session from the selected session columns.
 fn map_session_row(row: &Row<'_>) -> Result<Session, crate::DatabaseError> {
     let status = SessionStatus::from_database_value(row.get("status")?)?;
-    let agent_cli = AgentCli::from_database_value(&row.get::<_, String>("agent_cli")?)?;
+    let agent_ref = AgentRef::parse(row.get::<_, String>("agent_cli")?)?;
     let is_deleted = row.get::<_, i64>("is_deleted")? != 0;
 
     let title = row
@@ -257,8 +287,8 @@ fn map_session_row(row: &Row<'_>) -> Result<Session, crate::DatabaseError> {
 
     Ok(Session::new(
         SessionId::new(row.get::<_, String>("id")?),
-        TaskId::new(row.get::<_, String>("task_id")?),
-        agent_cli,
+        WorkspaceId::new(row.get::<_, String>("workspace_id")?),
+        agent_ref,
         row.get::<_, String>("agent_session_id")?,
         status,
         AuditFields::new(row.get("created_at")?, row.get("updated_at")?, is_deleted),

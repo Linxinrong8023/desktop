@@ -63,6 +63,16 @@ export function createContractsClient(
       delete: (request, options) =>
         executeOperation("deleteProject", request, transport, options),
     },
+    workspace: {
+      list: (request, options) =>
+        executeOperation("listWorkspaces", request, transport, options),
+      getDiff: (request, options) =>
+        executeOperation("getWorkspaceDiff", request, transport, options),
+      commitChanges: (request, options) =>
+        executeOperation("commitWorkspaceChanges", request, transport, options),
+      pushBranch: (request, options) =>
+        executeOperation("pushWorkspaceBranch", request, transport, options),
+    },
     task: {
       create: (request, options) =>
         executeOperation("createTask", request, transport, options),
@@ -76,25 +86,6 @@ export function createContractsClient(
         executeOperation("updateTask", request, transport, options),
       delete: (request, options) =>
         executeOperation("deleteTask", request, transport, options),
-      getDiff: (request, options) =>
-        executeOperation("getTaskDiff", request, transport, options),
-      commitChanges: (request, options) =>
-        executeOperation("commitTaskChanges", request, transport, options),
-      pushBranch: (request, options) =>
-        executeOperation("pushTaskBranch", request, transport, options),
-      listDiffComments: (request, options) =>
-        executeOperation("listTaskDiffComments", request, transport, options),
-      createDiffComment: (request, options) =>
-        executeOperation("createTaskDiffComment", request, transport, options),
-      replyDiffComment: (request, options) =>
-        executeOperation("replyTaskDiffComment", request, transport, options),
-      setDiffCommentStatus: (request, options) =>
-        executeOperation(
-          "setTaskDiffCommentStatus",
-          request,
-          transport,
-          options,
-        ),
     },
     session: {
       warm: (request, options) =>
@@ -118,6 +109,8 @@ export function createContractsClient(
           transport,
           options,
         ),
+      cancelPrompt: (request, options) =>
+        executeOperation("cancelSessionPrompt", request, transport, options),
       stop: (request, options) =>
         executeOperation("stopSession", request, transport, options),
       switchAgent: (request, options) =>
@@ -178,8 +171,64 @@ export function createContractsClient(
         executeOperation("commitAgentImport", request, transport, options),
     },
     plugin: {
+      listAvailable: (request, options) =>
+        executeOperation("listAvailablePlugins", request, transport, options),
+      syncAvailable: (request, options) =>
+        executeOperation("syncAvailablePlugins", request, transport, options),
+      readReadme: (request, options) =>
+        executeOperation("readPluginReadme", request, transport, options),
+      listSources: (request, options) =>
+        executeOperation("listMarketplaceSources", request, transport, options),
+      addSource: (request, options) =>
+        executeOperation("addMarketplaceSource", request, transport, options),
+      deleteSource: (request, options) =>
+        executeOperation(
+          "deleteMarketplaceSource",
+          request,
+          transport,
+          options,
+        ),
+      updateSource: (request, options) =>
+        executeOperation("updateMarketplaceSource", request, transport, options),
+
       listInstalled: (request, options) =>
         executeOperation("listInstalledPlugins", request, transport, options),
+      getConfiguration: (request, options) =>
+        executeOperation("getPluginConfiguration", request, transport, options),
+      saveConfiguration: (request, options) =>
+        executeOperation(
+          "savePluginConfiguration",
+          request,
+          transport,
+          options,
+        ),
+      resetConfiguration: (request, options) =>
+        executeOperation(
+          "resetPluginConfiguration",
+          request,
+          transport,
+          options,
+        ),
+      scan: (request, options) =>
+        executeOperation("scanPlugins", request, transport, options),
+      activate: (request, options) =>
+        executeOperation("activatePlugin", request, transport, options),
+      stop: (request, options) =>
+        executeOperation("stopPlugin", request, transport, options),
+      uninstall: (request, options) =>
+        executeOperation("uninstallPlugin", request, transport, options),
+      install: (request, options) =>
+        executeOperation("installPlugin", request, transport, options),
+      update: (request, options) =>
+        executeOperation("updatePlugin", request, transport, options),
+      import: (request, options) =>
+        executeOperation("importPlugin", request, transport, options),
+    },
+    proxy: {
+      get: (request, options) =>
+        executeOperation("getProxySettings", request, transport, options),
+      set: (request, options) =>
+        executeOperation("setProxySettings", request, transport, options),
     },
     fileSystem: {
       listWorkspaceDirectory: (request, options) =>
@@ -190,6 +239,14 @@ export function createContractsClient(
         executeOperation("searchWorkspace", request, transport, options),
       watchWorkspace: (request, options) =>
         executeStreamOperation("watchWorkspace", request, transport, options),
+      listProjectDirectory: (request, options) =>
+        executeOperation("listProjectDirectory", request, transport, options),
+      readProjectFile: (request, options) =>
+        executeOperation("readProjectFile", request, transport, options),
+      searchProject: (request, options) =>
+        executeOperation("searchProject", request, transport, options),
+      watchProject: (request, options) =>
+        executeStreamOperation("watchProject", request, transport, options),
     },
     spec: {
       catalog: (request, options) =>
@@ -202,6 +259,18 @@ export function createContractsClient(
     gitIdentity: {
       get: (request, options) =>
         executeOperation("getGitIdentity", request, transport, options),
+    },
+    developerMode: {
+      get: (request, options) =>
+        executeOperation("getDeveloperMode", request, transport, options),
+      set: (request, options) =>
+        executeOperation("setDeveloperMode", request, transport, options),
+    },
+    runtimeLogLevel: {
+      get: (request, options) =>
+        executeOperation("getRuntimeLogLevel", request, transport, options),
+      set: (request, options) =>
+        executeOperation("setRuntimeLogLevel", request, transport, options),
     },
     workflow: {
       create: (request, options) =>
@@ -251,6 +320,8 @@ export function createContractsClient(
         executeOperation("listWorkflowNodeRuns", request, transport, options),
       delete: (request, options) =>
         executeOperation("deleteWorkflowRun", request, transport, options),
+      rename: (request, options) =>
+        executeOperation("renameWorkflowRun", request, transport, options),
       start: (request, options) =>
         executeOperation("startWorkflowRun", request, transport, options),
       cancel: (request, options) =>
@@ -259,6 +330,8 @@ export function createContractsClient(
         executeOperation("restartWorkflowRun", request, transport, options),
       updateInput: (request, options) =>
         executeOperation("updateWorkflowRunInput", request, transport, options),
+      completeNode: (request, options) =>
+        executeOperation("completeWorkflowNode", request, transport, options),
     },
   };
 }

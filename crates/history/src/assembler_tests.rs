@@ -491,3 +491,28 @@ fn settles_content_that_cannot_merge_where_it_arrived() {
         }],
     );
 }
+
+/// `pending_records` snapshots only items not yet durable: a tool that already settled and was
+/// written stays out, so the merged replay prefix does not duplicate it.
+#[test]
+fn pending_records_excludes_written_tools() {
+    let mut assembler = HistoryAssembler::new(0);
+    // A completed tool settles immediately and is written.
+    assembler.push_update(&SessionUpdate::ToolCall(
+        ToolCall::new("t1", "Read file").status(ToolCallStatus::Completed),
+    ));
+    // An in-progress tool is still pending.
+    assembler.push_update(&SessionUpdate::ToolCall(
+        ToolCall::new("t2", "Run tests").status(ToolCallStatus::InProgress),
+    ));
+
+    let pending = assembler.pending_records();
+    assert_eq!(pending.len(), 1);
+    let HistoryRecord::Update { update } = &pending[0].record else {
+        panic!("expected an update record");
+    };
+    let SessionUpdate::ToolCall(call) = update.as_ref() else {
+        panic!("expected a tool call");
+    };
+    assert_eq!(call.tool_call_id, ToolCallId::new("t2"));
+}

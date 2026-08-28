@@ -9,6 +9,8 @@ mod formatter;
 mod gitlancer_bridge;
 mod guard;
 mod init;
+mod initialized;
+mod level_control;
 mod macros;
 mod method_name;
 mod test_support;
@@ -20,12 +22,16 @@ pub use config::{FileLoggingConfig, LogLevel, LogOutput, LoggingConfig, Rotation
 pub use correlation::{
     runtime_span, span_with_correlation, span_with_request_id, span_with_trace_id,
 };
-pub use error::{FileSystemAction, LoggingInitError};
+pub use error::{
+    FileSystemAction, LogLevelReadError, LogLevelReloadError, LoggingInitError, ParseLogLevelError,
+};
 pub use error_report::ErrorReport;
 pub use gitlancer_bridge::{OraGitlancerLogger, register_gitlancer_logger};
 pub use guard::LoggingGuard;
 pub use init::init_logging;
-pub use test_support::{with_recorded_trace_logging, with_trace_logging};
+pub use initialized::InitializedLogging;
+pub use level_control::LogLevelControl;
+pub use test_support::{test_log_level_control, with_recorded_trace_logging, with_trace_logging};
 
 #[cfg(test)]
 pub(crate) use init::build_dispatch;

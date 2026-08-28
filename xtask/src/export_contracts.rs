@@ -260,22 +260,6 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "TaskWorkspace"
         | "UpdateTaskRequest"
         | "UpdateTaskResponse" => "task",
-        // taskDiff
-        "CommitTaskChangesRequest"
-        | "CommitTaskChangesResponse"
-        | "CreateTaskDiffCommentRequest"
-        | "CreateTaskDiffCommentResponse"
-        | "GetTaskDiffRequest"
-        | "GetTaskDiffResponse"
-        | "ListTaskDiffCommentsRequest"
-        | "ListTaskDiffCommentsResponse"
-        | "PushTaskBranchRequest"
-        | "PushTaskBranchResponse"
-        | "ReplyTaskDiffCommentRequest"
-        | "ReplyTaskDiffCommentResponse"
-        | "SetTaskDiffCommentStatusRequest"
-        | "SetTaskDiffCommentStatusResponse"
-        | "TaskDiffScope" => "task_diff",
         // session
         "AttachSessionRequest"
         | "AttachSessionResponse"
@@ -298,6 +282,8 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "ListSessionsResponse"
         | "PromptSessionRequest"
         | "PromptSessionEvent"
+        | "CancelSessionPromptRequest"
+        | "CancelSessionPromptResponse"
         | "RespondToPermissionRequest"
         | "RespondToPermissionResponse"
         | "ResumeSessionHistoryRequest"
@@ -353,7 +339,63 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "CommitAgentImportRequest"
         | "CommitAgentImportResponse" => "agent-import",
         // plugin
-        "ListInstalledPluginsRequest" | "ListInstalledPluginsResponse" => "plugin",
+        "ActivatePluginRequest"
+        | "ActivatePluginResponse"
+        | "AvailablePlugin"
+        | "GetPluginConfigurationRequest"
+        | "GetPluginConfigurationResponse"
+        | "PluginConfigurationCompleteness"
+        | "PluginConfigurationDetails"
+        | "PluginConfigurationFieldError"
+        | "PluginConfigurationSummary"
+        | "PluginDataDisposition"
+        | "PluginInstallationValidity"
+        | "PluginSettingDeclaration"
+        | "PluginSettingDetails"
+        | "PluginSettingType"
+        | "PluginSettingValue"
+        | "PluginSettingValueSource"
+        | "ResetPluginConfigurationMode"
+        | "ResetPluginConfigurationRequest"
+        | "ResetPluginConfigurationResponse"
+        | "SavePluginConfigurationRequest"
+        | "SavePluginConfigurationResponse"
+        | "ListAvailablePluginsRequest"
+        | "ListAvailablePluginsResponse"
+        | "ListInstalledPluginsRequest"
+        | "ListInstalledPluginsResponse"
+        | "ScanPluginsRequest"
+        | "ScanPluginsResponse"
+        | "StopPluginRequest"
+        | "StopPluginResponse"
+        | "SyncAvailablePluginsRequest"
+        | "SyncAvailablePluginsResponse"
+        | "UninstallPluginRequest"
+        | "UninstallPluginResponse"
+        | "InstallPluginRequest"
+        | "InstallPluginResponse"
+        | "UpdatePluginRequest"
+        | "UpdatePluginResponse"
+        | "ImportPluginRequest"
+        | "ImportPluginResponse"
+        | "AddMarketplaceSourceRequest"
+        | "AddMarketplaceSourceResponse"
+        | "DeleteMarketplaceSourceRequest"
+        | "DeleteMarketplaceSourceResponse"
+        | "ListMarketplaceSourcesRequest"
+        | "ListMarketplaceSourcesResponse"
+        | "UpdateMarketplaceSourceResponse"
+        | "UpdateMarketplaceSourceRequest"
+        | "MarketplaceSource"
+        | "ReadPluginReadmeRequest"
+        | "ReadPluginReadmeResponse" => "plugin",
+        // proxy
+        "GetProxySettingsRequest"
+        | "GetProxySettingsResponse"
+        | "ProxySettings"
+        | "SetProxySettingsRequest"
+        | "SetProxySettingsResponse" => "proxy",
+
         // workflow
         "CreateWorkflowRequest"
         | "CreateWorkflowResponse"
@@ -401,6 +443,8 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "ListWorkflowRunsByWorkflowResponse"
         | "DeleteWorkflowRunRequest"
         | "DeleteWorkflowRunResponse"
+        | "RenameWorkflowRunRequest"
+        | "RenameWorkflowRunResponse"
         | "StartWorkflowRunRequest"
         | "StartWorkflowRunResponse"
         | "CancelWorkflowRunRequest"
@@ -408,15 +452,36 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "RestartWorkflowRunRequest"
         | "RestartWorkflowRunResponse"
         | "UpdateWorkflowRunInputRequest"
-        | "UpdateWorkflowRunInputResponse" => "workflowRun",
+        | "UpdateWorkflowRunInputResponse"
+        | "NodeCompletionRequester"
+        | "CompleteWorkflowNodeRequest"
+        | "CompleteWorkflowNodeResponse" => "workflowRun",
+        // workspace
+        "WorkspaceKind"
+        | "WorkspaceLifecycle"
+        | "Workspace"
+        | "ListWorkspacesRequest"
+        | "ListWorkspacesResponse" => "workspace",
+        // workspaceDiff
+        "CommitWorkspaceChangesRequest"
+        | "CommitWorkspaceChangesResponse"
+        | "GetWorkspaceDiffRequest"
+        | "GetWorkspaceDiffResponse"
+        | "PushWorkspaceBranchRequest"
+        | "PushWorkspaceBranchResponse"
+        | "WorkspaceDiffScope" => "workspace_diff",
         // fileSystem
         "ListWorkspaceDirectoryRequest"
         | "ListWorkspaceDirectoryResponse"
+        | "ListProjectDirectoryRequest"
         | "ReadWorkspaceFileRequest"
+        | "ReadProjectFileRequest"
         | "ReadWorkspaceFileResponse"
         | "SearchWorkspaceRequest"
         | "SearchWorkspaceResponse"
+        | "SearchProjectRequest"
         | "WatchWorkspaceRequest"
+        | "WatchProjectRequest"
         | "WorkspaceFileEventBatch" => "file-system",
         // spec
         "GetSpecCatalogRequest"
@@ -426,6 +491,14 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "WatchSpecsRequest" => "spec",
         // gitIdentity
         "GetGitIdentityRequest" | "GitIdentityResponse" => "git",
+        // runtimeLogLevel
+        "GetRuntimeLogLevelRequest"
+        | "SetRuntimeLogLevelRequest"
+        | "RuntimeLogLevelStateResponse" => "runtimeLogLevel",
+        // developerMode
+        "GetDeveloperModeRequest" | "SetDeveloperModeRequest" | "DeveloperModeResponse" => {
+            "developerMode"
+        }
         other => panic!("unknown contract type `{other}`"),
     }
 }
@@ -510,8 +583,8 @@ mod tests {
             "session.ts",
             "skill.ts",
             "task.ts",
-            "task_diff.ts",
             "workflow.ts",
+            "workspace_diff.ts",
         ];
 
         for generated_file in generated_files {

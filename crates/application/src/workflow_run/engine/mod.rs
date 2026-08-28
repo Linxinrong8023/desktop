@@ -12,20 +12,26 @@ mod graph;
 mod handlers;
 mod node_type;
 mod ports;
+mod skill_delivery;
 
 pub use engine::{
     EngineError, NodeExecutor, WorkflowRunCallback, WorkflowRunEngine, WorkflowValidationError,
 };
 pub use graph::{
-    AgentConfig, AgentExecutor, AgentSkill, GraphError, WorkflowGraph, WorkflowGraphNode,
+    AgentConfig, AgentExecutor, AgentSkill, GraphError, OutputPolicy, WorkflowGraph,
+    WorkflowGraphNode,
 };
 pub use handlers::WorkflowRunControlHandler;
 pub use node_type::{NodeType, UnknownNodeType};
 pub use ports::{
-    AdvanceWorkflowRunResult, CancelWorkflowRunResult, ExecutionContext, FileChange,
-    NodeRunToStart, RestartWorkflowRunResult, StartPrerequisitesError, StartWorkflowRunResult,
-    UpdateWorkflowRunInputResult, WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository,
-    WorkflowRunWorktreeInitializer,
+    AdvanceWorkflowRunResult, BindWorkflowNodeSessionResult, CancelWorkflowRunResult,
+    ExecutionContext, FileChange, NodeRunToStart, RestartWorkflowRunResult,
+    StartPrerequisitesError, StartWorkflowRunResult, UpdateWorkflowRunInputResult,
+    WorkflowNodeRunIdGenerator, WorkflowRunEngineRepository, WorkflowRunWorkspaceInitializer,
+};
+pub use skill_delivery::{
+    AgentSkillDelivery, AgentSkillDeliveryError, AgentSkillDeliveryProvider,
+    MaterializedSkillBinding, SkillDiscoveryRoots, SkillMaterializationReceipt, WorkflowRunPayload,
 };
 
 #[cfg(test)]

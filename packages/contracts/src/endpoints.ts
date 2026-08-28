@@ -2,18 +2,22 @@
 import type { CreateAgentRequest, CreateAgentResponse, DeleteAgentRequest, DeleteAgentResponse, GetAgentRequest, GetAgentResponse, ListAgentsRequest, ListAgentsResponse, UpdateAgentRequest, UpdateAgentResponse } from "./agent.js";
 import type { CommitAgentImportRequest, CommitAgentImportResponse, PrepareAgentImportRequest, PrepareAgentImportResponse } from "./agent-import.js";
 import type { AppEvent, WatchAppEventsRequest } from "./app_event.js";
-import type { ListWorkspaceDirectoryRequest, ListWorkspaceDirectoryResponse, ReadWorkspaceFileRequest, ReadWorkspaceFileResponse, SearchWorkspaceRequest, SearchWorkspaceResponse, WatchWorkspaceRequest, WorkspaceFileEventBatch } from "./file-system.js";
+import type { DeveloperModeResponse, GetDeveloperModeRequest, SetDeveloperModeRequest } from "./developerMode.js";
+import type { ListProjectDirectoryRequest, ListWorkspaceDirectoryRequest, ListWorkspaceDirectoryResponse, ReadProjectFileRequest, ReadWorkspaceFileRequest, ReadWorkspaceFileResponse, SearchProjectRequest, SearchWorkspaceRequest, SearchWorkspaceResponse, WatchProjectRequest, WatchWorkspaceRequest, WorkspaceFileEventBatch } from "./file-system.js";
 import type { GetGitIdentityRequest, GitIdentityResponse } from "./git.js";
-import type { ListInstalledPluginsRequest, ListInstalledPluginsResponse } from "./plugin.js";
+import type { ActivatePluginRequest, ActivatePluginResponse, AddMarketplaceSourceRequest, AddMarketplaceSourceResponse, DeleteMarketplaceSourceRequest, DeleteMarketplaceSourceResponse, GetPluginConfigurationRequest, GetPluginConfigurationResponse, ImportPluginRequest, ImportPluginResponse, InstallPluginRequest, InstallPluginResponse, ListAvailablePluginsRequest, ListAvailablePluginsResponse, ListInstalledPluginsRequest, ListInstalledPluginsResponse, ListMarketplaceSourcesRequest, ListMarketplaceSourcesResponse, ReadPluginReadmeRequest, ReadPluginReadmeResponse, ResetPluginConfigurationRequest, ResetPluginConfigurationResponse, SavePluginConfigurationRequest, SavePluginConfigurationResponse, ScanPluginsRequest, ScanPluginsResponse, StopPluginRequest, StopPluginResponse, SyncAvailablePluginsRequest, SyncAvailablePluginsResponse, UninstallPluginRequest, UninstallPluginResponse, UpdateMarketplaceSourceRequest, UpdateMarketplaceSourceResponse, UpdatePluginRequest, UpdatePluginResponse } from "./plugin.js";
 import type { CreateProjectRequest, CreateProjectResponse, DeleteProjectRequest, DeleteProjectResponse, GetProjectRequest, GetProjectResponse, ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest, ListProjectsResponse, UpdateProjectRequest, UpdateProjectResponse } from "./project.js";
-import type { AttachSessionRequest, AttachSessionResponse, DeleteSessionRequest, DeleteSessionResponse, GetAgentRuntimeStatusRequest, GetAgentRuntimeStatusResponse, GetSessionRequest, GetSessionResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionEvent, LoadSessionRequest, PromptSessionEvent, PromptSessionRequest, RenameSessionRequest, RenameSessionResponse, RespondToPermissionRequest, RespondToPermissionResponse, ResumeSessionHistoryRequest, ResumeSessionHistoryResponse, SetSessionConfigRequest, SetSessionConfigResponse, StopSessionRequest, StopSessionResponse, SwitchSessionAgentRequest, SwitchSessionAgentResponse, WarmSessionRequest, WarmSessionResponse } from "./session.js";
+import type { GetProxySettingsRequest, GetProxySettingsResponse, SetProxySettingsRequest, SetProxySettingsResponse } from "./proxy.js";
+import type { GetRuntimeLogLevelRequest, RuntimeLogLevelStateResponse, SetRuntimeLogLevelRequest } from "./runtimeLogLevel.js";
+import type { AttachSessionRequest, AttachSessionResponse, CancelSessionPromptRequest, CancelSessionPromptResponse, DeleteSessionRequest, DeleteSessionResponse, GetAgentRuntimeStatusRequest, GetAgentRuntimeStatusResponse, GetSessionRequest, GetSessionResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionEvent, LoadSessionRequest, PromptSessionEvent, PromptSessionRequest, RenameSessionRequest, RenameSessionResponse, RespondToPermissionRequest, RespondToPermissionResponse, ResumeSessionHistoryRequest, ResumeSessionHistoryResponse, SetSessionConfigRequest, SetSessionConfigResponse, StopSessionRequest, StopSessionResponse, SwitchSessionAgentRequest, SwitchSessionAgentResponse, WarmSessionRequest, WarmSessionResponse } from "./session.js";
 import type { CreateSkillRequest, CreateSkillResponse, DeleteSkillRequest, DeleteSkillResponse, GetSkillRequest, GetSkillResponse, ListSkillsRequest, ListSkillsResponse, UpdateSkillRequest, UpdateSkillResponse } from "./skill.js";
 import type { CancelSkillImportRequest, CancelSkillImportResponse, CommitSkillImportRequest, CommitSkillImportResponse, GetSkillImportSessionRequest, GetSkillImportSessionResponse, PrepareSkillImportRequest, PrepareSkillImportResponse } from "./skill-import.js";
 import type { GetSpecCatalogRequest, ReadSpecRequest, ReadSpecResponse, SpecCatalogResponse, WatchSpecsRequest } from "./spec.js";
 import type { CreateTaskRequest, CreateTaskResponse, DeleteTaskRequest, DeleteTaskResponse, GetTaskRequest, GetTaskResponse, GetTaskWorkspaceRequest, GetTaskWorkspaceResponse, ListTasksRequest, ListTasksResponse, UpdateTaskRequest, UpdateTaskResponse } from "./task.js";
-import type { CommitTaskChangesRequest, CommitTaskChangesResponse, CreateTaskDiffCommentRequest, CreateTaskDiffCommentResponse, GetTaskDiffRequest, GetTaskDiffResponse, ListTaskDiffCommentsRequest, ListTaskDiffCommentsResponse, PushTaskBranchRequest, PushTaskBranchResponse, ReplyTaskDiffCommentRequest, ReplyTaskDiffCommentResponse, SetTaskDiffCommentStatusRequest, SetTaskDiffCommentStatusResponse } from "./task_diff.js";
 import type { ActivateWorkflowRequest, ActivateWorkflowResponse, CreateWorkflowRequest, CreateWorkflowResponse, DeleteSnapshotRequest, DeleteSnapshotResponse, DeleteWorkflowRequest, DeleteWorkflowResponse, GetDraftRequest, GetDraftResponse, GetVersionRequest, GetVersionResponse, GetWorkflowRequest, GetWorkflowResponse, GetWorkflowSnapshotRequest, GetWorkflowSnapshotResponse, ListVersionsRequest, ListVersionsResponse, ListWorkflowsRequest, ListWorkflowsResponse, PublishWorkflowRequest, PublishWorkflowResponse, RollbackWorkflowRequest, RollbackWorkflowResponse, UpdateDraftRequest, UpdateDraftResponse, UpdateWorkflowRequest, UpdateWorkflowResponse } from "./workflow.js";
-import type { CancelWorkflowRunRequest, CancelWorkflowRunResponse, CreateWorkflowRunRequest, CreateWorkflowRunResponse, DeleteWorkflowRunRequest, DeleteWorkflowRunResponse, GetWorkflowRunRequest, GetWorkflowRunResponse, ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse, ListWorkflowRunsByWorkflowRequest, ListWorkflowRunsByWorkflowResponse, ListWorkflowRunsRequest, ListWorkflowRunsResponse, RestartWorkflowRunRequest, RestartWorkflowRunResponse, StartWorkflowRunRequest, StartWorkflowRunResponse, UpdateWorkflowRunInputRequest, UpdateWorkflowRunInputResponse } from "./workflowRun.js";
+import type { CancelWorkflowRunRequest, CancelWorkflowRunResponse, CompleteWorkflowNodeRequest, CompleteWorkflowNodeResponse, CreateWorkflowRunRequest, CreateWorkflowRunResponse, DeleteWorkflowRunRequest, DeleteWorkflowRunResponse, GetWorkflowRunRequest, GetWorkflowRunResponse, ListWorkflowNodeRunsRequest, ListWorkflowNodeRunsResponse, ListWorkflowRunsByWorkflowRequest, ListWorkflowRunsByWorkflowResponse, ListWorkflowRunsRequest, ListWorkflowRunsResponse, RenameWorkflowRunRequest, RenameWorkflowRunResponse, RestartWorkflowRunRequest, RestartWorkflowRunResponse, StartWorkflowRunRequest, StartWorkflowRunResponse, UpdateWorkflowRunInputRequest, UpdateWorkflowRunInputResponse } from "./workflowRun.js";
+import type { ListWorkspacesRequest, ListWorkspacesResponse } from "./workspace.js";
+import type { CommitWorkspaceChangesRequest, CommitWorkspaceChangesResponse, GetWorkspaceDiffRequest, GetWorkspaceDiffResponse, PushWorkspaceBranchRequest, PushWorkspaceBranchResponse } from "./workspace_diff.js";
 export type FrontendEndpointDefinition = {
   operationName: string;
   namespace: string;
@@ -30,19 +34,16 @@ export type RequestByOperation = {
   listProjectBranches: ListProjectBranchesRequest;
   updateProject: UpdateProjectRequest;
   deleteProject: DeleteProjectRequest;
+  getDeveloperMode: GetDeveloperModeRequest;
+  setDeveloperMode: SetDeveloperModeRequest;
+  getRuntimeLogLevel: GetRuntimeLogLevelRequest;
+  setRuntimeLogLevel: SetRuntimeLogLevelRequest;
   createTask: CreateTaskRequest;
   getTask: GetTaskRequest;
   listTasks: ListTasksRequest;
   updateTask: UpdateTaskRequest;
   deleteTask: DeleteTaskRequest;
   getTaskWorkspace: GetTaskWorkspaceRequest;
-  getTaskDiff: GetTaskDiffRequest;
-  commitTaskChanges: CommitTaskChangesRequest;
-  pushTaskBranch: PushTaskBranchRequest;
-  listTaskDiffComments: ListTaskDiffCommentsRequest;
-  createTaskDiffComment: CreateTaskDiffCommentRequest;
-  replyTaskDiffComment: ReplyTaskDiffCommentRequest;
-  setTaskDiffCommentStatus: SetTaskDiffCommentStatusRequest;
   warmSession: WarmSessionRequest;
   setSessionConfig: SetSessionConfigRequest;
   attachSession: AttachSessionRequest;
@@ -51,6 +52,7 @@ export type RequestByOperation = {
   loadSession: LoadSessionRequest;
   promptSession: PromptSessionRequest;
   respondToSessionPermission: RespondToPermissionRequest;
+  cancelSessionPrompt: CancelSessionPromptRequest;
   stopSession: StopSessionRequest;
   switchSessionAgent: SwitchSessionAgentRequest;
   resumeSessionHistory: ResumeSessionHistoryRequest;
@@ -74,11 +76,34 @@ export type RequestByOperation = {
   deleteAgent: DeleteAgentRequest;
   prepareAgentImport: PrepareAgentImportRequest;
   commitAgentImport: CommitAgentImportRequest;
+  listAvailablePlugins: ListAvailablePluginsRequest;
+  syncAvailablePlugins: SyncAvailablePluginsRequest;
+  readPluginReadme: ReadPluginReadmeRequest;
+  listMarketplaceSources: ListMarketplaceSourcesRequest;
+  addMarketplaceSource: AddMarketplaceSourceRequest;
+  deleteMarketplaceSource: DeleteMarketplaceSourceRequest;
+  updateMarketplaceSource: UpdateMarketplaceSourceRequest;
   listInstalledPlugins: ListInstalledPluginsRequest;
+  getPluginConfiguration: GetPluginConfigurationRequest;
+  savePluginConfiguration: SavePluginConfigurationRequest;
+  resetPluginConfiguration: ResetPluginConfigurationRequest;
+  scanPlugins: ScanPluginsRequest;
+  activatePlugin: ActivatePluginRequest;
+  stopPlugin: StopPluginRequest;
+  uninstallPlugin: UninstallPluginRequest;
+  installPlugin: InstallPluginRequest;
+  updatePlugin: UpdatePluginRequest;
+  importPlugin: ImportPluginRequest;
+  getProxySettings: GetProxySettingsRequest;
+  setProxySettings: SetProxySettingsRequest;
   listWorkspaceDirectory: ListWorkspaceDirectoryRequest;
   readWorkspaceFile: ReadWorkspaceFileRequest;
   searchWorkspace: SearchWorkspaceRequest;
   watchWorkspace: WatchWorkspaceRequest;
+  listProjectDirectory: ListProjectDirectoryRequest;
+  readProjectFile: ReadProjectFileRequest;
+  searchProject: SearchProjectRequest;
+  watchProject: WatchProjectRequest;
   getGitIdentity: GetGitIdentityRequest;
   getSpecCatalog: GetSpecCatalogRequest;
   readSpec: ReadSpecRequest;
@@ -103,10 +128,16 @@ export type RequestByOperation = {
   listWorkflowRunsByWorkflow: ListWorkflowRunsByWorkflowRequest;
   listWorkflowNodeRuns: ListWorkflowNodeRunsRequest;
   deleteWorkflowRun: DeleteWorkflowRunRequest;
+  renameWorkflowRun: RenameWorkflowRunRequest;
   startWorkflowRun: StartWorkflowRunRequest;
   cancelWorkflowRun: CancelWorkflowRunRequest;
   restartWorkflowRun: RestartWorkflowRunRequest;
   updateWorkflowRunInput: UpdateWorkflowRunInputRequest;
+  completeWorkflowNode: CompleteWorkflowNodeRequest;
+  listWorkspaces: ListWorkspacesRequest;
+  getWorkspaceDiff: GetWorkspaceDiffRequest;
+  commitWorkspaceChanges: CommitWorkspaceChangesRequest;
+  pushWorkspaceBranch: PushWorkspaceBranchRequest;
 };
 
 export type ResponseByOperation = {
@@ -116,19 +147,16 @@ export type ResponseByOperation = {
   listProjectBranches: ListProjectBranchesResponse;
   updateProject: UpdateProjectResponse;
   deleteProject: DeleteProjectResponse;
+  getDeveloperMode: DeveloperModeResponse;
+  setDeveloperMode: DeveloperModeResponse;
+  getRuntimeLogLevel: RuntimeLogLevelStateResponse;
+  setRuntimeLogLevel: RuntimeLogLevelStateResponse;
   createTask: CreateTaskResponse;
   getTask: GetTaskResponse;
   listTasks: ListTasksResponse;
   updateTask: UpdateTaskResponse;
   deleteTask: DeleteTaskResponse;
   getTaskWorkspace: GetTaskWorkspaceResponse;
-  getTaskDiff: GetTaskDiffResponse;
-  commitTaskChanges: CommitTaskChangesResponse;
-  pushTaskBranch: PushTaskBranchResponse;
-  listTaskDiffComments: ListTaskDiffCommentsResponse;
-  createTaskDiffComment: CreateTaskDiffCommentResponse;
-  replyTaskDiffComment: ReplyTaskDiffCommentResponse;
-  setTaskDiffCommentStatus: SetTaskDiffCommentStatusResponse;
   warmSession: WarmSessionResponse;
   setSessionConfig: SetSessionConfigResponse;
   attachSession: AttachSessionResponse;
@@ -137,6 +165,7 @@ export type ResponseByOperation = {
   loadSession: LoadSessionEvent;
   promptSession: PromptSessionEvent;
   respondToSessionPermission: RespondToPermissionResponse;
+  cancelSessionPrompt: CancelSessionPromptResponse;
   stopSession: StopSessionResponse;
   switchSessionAgent: SwitchSessionAgentResponse;
   resumeSessionHistory: ResumeSessionHistoryResponse;
@@ -160,11 +189,34 @@ export type ResponseByOperation = {
   deleteAgent: DeleteAgentResponse;
   prepareAgentImport: PrepareAgentImportResponse;
   commitAgentImport: CommitAgentImportResponse;
+  listAvailablePlugins: ListAvailablePluginsResponse;
+  syncAvailablePlugins: SyncAvailablePluginsResponse;
+  readPluginReadme: ReadPluginReadmeResponse;
+  listMarketplaceSources: ListMarketplaceSourcesResponse;
+  addMarketplaceSource: AddMarketplaceSourceResponse;
+  deleteMarketplaceSource: DeleteMarketplaceSourceResponse;
+  updateMarketplaceSource: UpdateMarketplaceSourceResponse;
   listInstalledPlugins: ListInstalledPluginsResponse;
+  getPluginConfiguration: GetPluginConfigurationResponse;
+  savePluginConfiguration: SavePluginConfigurationResponse;
+  resetPluginConfiguration: ResetPluginConfigurationResponse;
+  scanPlugins: ScanPluginsResponse;
+  activatePlugin: ActivatePluginResponse;
+  stopPlugin: StopPluginResponse;
+  uninstallPlugin: UninstallPluginResponse;
+  installPlugin: InstallPluginResponse;
+  updatePlugin: UpdatePluginResponse;
+  importPlugin: ImportPluginResponse;
+  getProxySettings: GetProxySettingsResponse;
+  setProxySettings: SetProxySettingsResponse;
   listWorkspaceDirectory: ListWorkspaceDirectoryResponse;
   readWorkspaceFile: ReadWorkspaceFileResponse;
   searchWorkspace: SearchWorkspaceResponse;
   watchWorkspace: WorkspaceFileEventBatch;
+  listProjectDirectory: ListWorkspaceDirectoryResponse;
+  readProjectFile: ReadWorkspaceFileResponse;
+  searchProject: SearchWorkspaceResponse;
+  watchProject: WorkspaceFileEventBatch;
   getGitIdentity: GitIdentityResponse;
   getSpecCatalog: SpecCatalogResponse;
   readSpec: ReadSpecResponse;
@@ -189,10 +241,16 @@ export type ResponseByOperation = {
   listWorkflowRunsByWorkflow: ListWorkflowRunsByWorkflowResponse;
   listWorkflowNodeRuns: ListWorkflowNodeRunsResponse;
   deleteWorkflowRun: DeleteWorkflowRunResponse;
+  renameWorkflowRun: RenameWorkflowRunResponse;
   startWorkflowRun: StartWorkflowRunResponse;
   cancelWorkflowRun: CancelWorkflowRunResponse;
   restartWorkflowRun: RestartWorkflowRunResponse;
   updateWorkflowRunInput: UpdateWorkflowRunInputResponse;
+  completeWorkflowNode: CompleteWorkflowNodeResponse;
+  listWorkspaces: ListWorkspacesResponse;
+  getWorkspaceDiff: GetWorkspaceDiffResponse;
+  commitWorkspaceChanges: CommitWorkspaceChangesResponse;
+  pushWorkspaceBranch: PushWorkspaceBranchResponse;
 };
 
 export type EndpointOperation = keyof RequestByOperation;
@@ -246,6 +304,38 @@ export const endpoints = {
     responseType: "DeleteProjectResponse",
     responseMode: "unary",
   },
+  getDeveloperMode: {
+    operationName: "getDeveloperMode",
+    namespace: "developerMode",
+    memberName: "get",
+    requestType: "GetDeveloperModeRequest",
+    responseType: "DeveloperModeResponse",
+    responseMode: "unary",
+  },
+  setDeveloperMode: {
+    operationName: "setDeveloperMode",
+    namespace: "developerMode",
+    memberName: "set",
+    requestType: "SetDeveloperModeRequest",
+    responseType: "DeveloperModeResponse",
+    responseMode: "unary",
+  },
+  getRuntimeLogLevel: {
+    operationName: "getRuntimeLogLevel",
+    namespace: "runtimeLogLevel",
+    memberName: "get",
+    requestType: "GetRuntimeLogLevelRequest",
+    responseType: "RuntimeLogLevelStateResponse",
+    responseMode: "unary",
+  },
+  setRuntimeLogLevel: {
+    operationName: "setRuntimeLogLevel",
+    namespace: "runtimeLogLevel",
+    memberName: "set",
+    requestType: "SetRuntimeLogLevelRequest",
+    responseType: "RuntimeLogLevelStateResponse",
+    responseMode: "unary",
+  },
   createTask: {
     operationName: "createTask",
     namespace: "task",
@@ -292,62 +382,6 @@ export const endpoints = {
     memberName: "getWorkspace",
     requestType: "GetTaskWorkspaceRequest",
     responseType: "GetTaskWorkspaceResponse",
-    responseMode: "unary",
-  },
-  getTaskDiff: {
-    operationName: "getTaskDiff",
-    namespace: "task",
-    memberName: "getDiff",
-    requestType: "GetTaskDiffRequest",
-    responseType: "GetTaskDiffResponse",
-    responseMode: "unary",
-  },
-  commitTaskChanges: {
-    operationName: "commitTaskChanges",
-    namespace: "task",
-    memberName: "commitChanges",
-    requestType: "CommitTaskChangesRequest",
-    responseType: "CommitTaskChangesResponse",
-    responseMode: "unary",
-  },
-  pushTaskBranch: {
-    operationName: "pushTaskBranch",
-    namespace: "task",
-    memberName: "pushBranch",
-    requestType: "PushTaskBranchRequest",
-    responseType: "PushTaskBranchResponse",
-    responseMode: "unary",
-  },
-  listTaskDiffComments: {
-    operationName: "listTaskDiffComments",
-    namespace: "task",
-    memberName: "listDiffComments",
-    requestType: "ListTaskDiffCommentsRequest",
-    responseType: "ListTaskDiffCommentsResponse",
-    responseMode: "unary",
-  },
-  createTaskDiffComment: {
-    operationName: "createTaskDiffComment",
-    namespace: "task",
-    memberName: "createDiffComment",
-    requestType: "CreateTaskDiffCommentRequest",
-    responseType: "CreateTaskDiffCommentResponse",
-    responseMode: "unary",
-  },
-  replyTaskDiffComment: {
-    operationName: "replyTaskDiffComment",
-    namespace: "task",
-    memberName: "replyDiffComment",
-    requestType: "ReplyTaskDiffCommentRequest",
-    responseType: "ReplyTaskDiffCommentResponse",
-    responseMode: "unary",
-  },
-  setTaskDiffCommentStatus: {
-    operationName: "setTaskDiffCommentStatus",
-    namespace: "task",
-    memberName: "setDiffCommentStatus",
-    requestType: "SetTaskDiffCommentStatusRequest",
-    responseType: "SetTaskDiffCommentStatusResponse",
     responseMode: "unary",
   },
   warmSession: {
@@ -412,6 +446,14 @@ export const endpoints = {
     memberName: "respondToPermission",
     requestType: "RespondToPermissionRequest",
     responseType: "RespondToPermissionResponse",
+    responseMode: "unary",
+  },
+  cancelSessionPrompt: {
+    operationName: "cancelSessionPrompt",
+    namespace: "session",
+    memberName: "cancelPrompt",
+    requestType: "CancelSessionPromptRequest",
+    responseType: "CancelSessionPromptResponse",
     responseMode: "unary",
   },
   stopSession: {
@@ -598,12 +640,164 @@ export const endpoints = {
     responseType: "CommitAgentImportResponse",
     responseMode: "unary",
   },
+  listAvailablePlugins: {
+    operationName: "listAvailablePlugins",
+    namespace: "plugin",
+    memberName: "listAvailable",
+    requestType: "ListAvailablePluginsRequest",
+    responseType: "ListAvailablePluginsResponse",
+    responseMode: "unary",
+  },
+  syncAvailablePlugins: {
+    operationName: "syncAvailablePlugins",
+    namespace: "plugin",
+    memberName: "syncAvailable",
+    requestType: "SyncAvailablePluginsRequest",
+    responseType: "SyncAvailablePluginsResponse",
+    responseMode: "unary",
+  },
+  readPluginReadme: {
+    operationName: "readPluginReadme",
+    namespace: "plugin",
+    memberName: "readReadme",
+    requestType: "ReadPluginReadmeRequest",
+    responseType: "ReadPluginReadmeResponse",
+    responseMode: "unary",
+  },
+  listMarketplaceSources: {
+    operationName: "listMarketplaceSources",
+    namespace: "plugin",
+    memberName: "listSources",
+    requestType: "ListMarketplaceSourcesRequest",
+    responseType: "ListMarketplaceSourcesResponse",
+    responseMode: "unary",
+  },
+  addMarketplaceSource: {
+    operationName: "addMarketplaceSource",
+    namespace: "plugin",
+    memberName: "addSource",
+    requestType: "AddMarketplaceSourceRequest",
+    responseType: "AddMarketplaceSourceResponse",
+    responseMode: "unary",
+  },
+  deleteMarketplaceSource: {
+    operationName: "deleteMarketplaceSource",
+    namespace: "plugin",
+    memberName: "deleteSource",
+    requestType: "DeleteMarketplaceSourceRequest",
+    responseType: "DeleteMarketplaceSourceResponse",
+    responseMode: "unary",
+  },
+  updateMarketplaceSource: {
+    operationName: "updateMarketplaceSource",
+    namespace: "plugin",
+    memberName: "updateSource",
+    requestType: "UpdateMarketplaceSourceRequest",
+    responseType: "UpdateMarketplaceSourceResponse",
+    responseMode: "unary",
+  },
   listInstalledPlugins: {
     operationName: "listInstalledPlugins",
     namespace: "plugin",
     memberName: "listInstalled",
     requestType: "ListInstalledPluginsRequest",
     responseType: "ListInstalledPluginsResponse",
+    responseMode: "unary",
+  },
+  getPluginConfiguration: {
+    operationName: "getPluginConfiguration",
+    namespace: "plugin",
+    memberName: "getConfiguration",
+    requestType: "GetPluginConfigurationRequest",
+    responseType: "GetPluginConfigurationResponse",
+    responseMode: "unary",
+  },
+  savePluginConfiguration: {
+    operationName: "savePluginConfiguration",
+    namespace: "plugin",
+    memberName: "saveConfiguration",
+    requestType: "SavePluginConfigurationRequest",
+    responseType: "SavePluginConfigurationResponse",
+    responseMode: "unary",
+  },
+  resetPluginConfiguration: {
+    operationName: "resetPluginConfiguration",
+    namespace: "plugin",
+    memberName: "resetConfiguration",
+    requestType: "ResetPluginConfigurationRequest",
+    responseType: "ResetPluginConfigurationResponse",
+    responseMode: "unary",
+  },
+  scanPlugins: {
+    operationName: "scanPlugins",
+    namespace: "plugin",
+    memberName: "scan",
+    requestType: "ScanPluginsRequest",
+    responseType: "ScanPluginsResponse",
+    responseMode: "unary",
+  },
+  activatePlugin: {
+    operationName: "activatePlugin",
+    namespace: "plugin",
+    memberName: "activate",
+    requestType: "ActivatePluginRequest",
+    responseType: "ActivatePluginResponse",
+    responseMode: "unary",
+  },
+  stopPlugin: {
+    operationName: "stopPlugin",
+    namespace: "plugin",
+    memberName: "stop",
+    requestType: "StopPluginRequest",
+    responseType: "StopPluginResponse",
+    responseMode: "unary",
+  },
+  uninstallPlugin: {
+    operationName: "uninstallPlugin",
+    namespace: "plugin",
+    memberName: "uninstall",
+    requestType: "UninstallPluginRequest",
+    responseType: "UninstallPluginResponse",
+    responseMode: "unary",
+  },
+  installPlugin: {
+    operationName: "installPlugin",
+    namespace: "plugin",
+    memberName: "install",
+    requestType: "InstallPluginRequest",
+    responseType: "InstallPluginResponse",
+    responseMode: "unary",
+  },
+  updatePlugin: {
+    operationName: "updatePlugin",
+    namespace: "plugin",
+    memberName: "update",
+    requestType: "UpdatePluginRequest",
+    responseType: "UpdatePluginResponse",
+    responseMode: "unary",
+  },
+  importPlugin: {
+    operationName: "importPlugin",
+    namespace: "plugin",
+    memberName: "import",
+    requestType: "ImportPluginRequest",
+    responseType: "ImportPluginResponse",
+    responseMode: "unary",
+  },
+  getProxySettings: {
+    operationName: "getProxySettings",
+    namespace: "proxy",
+    memberName: "get",
+    requestType: "GetProxySettingsRequest",
+    responseType: "GetProxySettingsResponse",
+    responseMode: "unary",
+  },
+  setProxySettings: {
+    operationName: "setProxySettings",
+    namespace: "proxy",
+    memberName: "set",
+    requestType: "SetProxySettingsRequest",
+    responseType: "SetProxySettingsResponse",
     responseMode: "unary",
   },
   listWorkspaceDirectory: {
@@ -635,6 +829,38 @@ export const endpoints = {
     namespace: "fileSystem",
     memberName: "watchWorkspace",
     requestType: "WatchWorkspaceRequest",
+    responseType: "WorkspaceFileEventBatch",
+    responseMode: "stream",
+  },
+  listProjectDirectory: {
+    operationName: "listProjectDirectory",
+    namespace: "fileSystem",
+    memberName: "listProjectDirectory",
+    requestType: "ListProjectDirectoryRequest",
+    responseType: "ListWorkspaceDirectoryResponse",
+    responseMode: "unary",
+  },
+  readProjectFile: {
+    operationName: "readProjectFile",
+    namespace: "fileSystem",
+    memberName: "readProjectFile",
+    requestType: "ReadProjectFileRequest",
+    responseType: "ReadWorkspaceFileResponse",
+    responseMode: "unary",
+  },
+  searchProject: {
+    operationName: "searchProject",
+    namespace: "fileSystem",
+    memberName: "searchProject",
+    requestType: "SearchProjectRequest",
+    responseType: "SearchWorkspaceResponse",
+    responseMode: "unary",
+  },
+  watchProject: {
+    operationName: "watchProject",
+    namespace: "fileSystem",
+    memberName: "watchProject",
+    requestType: "WatchProjectRequest",
     responseType: "WorkspaceFileEventBatch",
     responseMode: "stream",
   },
@@ -830,6 +1056,14 @@ export const endpoints = {
     responseType: "DeleteWorkflowRunResponse",
     responseMode: "unary",
   },
+  renameWorkflowRun: {
+    operationName: "renameWorkflowRun",
+    namespace: "workflowRun",
+    memberName: "rename",
+    requestType: "RenameWorkflowRunRequest",
+    responseType: "RenameWorkflowRunResponse",
+    responseMode: "unary",
+  },
   startWorkflowRun: {
     operationName: "startWorkflowRun",
     namespace: "workflowRun",
@@ -860,6 +1094,46 @@ export const endpoints = {
     memberName: "updateInput",
     requestType: "UpdateWorkflowRunInputRequest",
     responseType: "UpdateWorkflowRunInputResponse",
+    responseMode: "unary",
+  },
+  completeWorkflowNode: {
+    operationName: "completeWorkflowNode",
+    namespace: "workflowRun",
+    memberName: "completeNode",
+    requestType: "CompleteWorkflowNodeRequest",
+    responseType: "CompleteWorkflowNodeResponse",
+    responseMode: "unary",
+  },
+  listWorkspaces: {
+    operationName: "listWorkspaces",
+    namespace: "workspace",
+    memberName: "list",
+    requestType: "ListWorkspacesRequest",
+    responseType: "ListWorkspacesResponse",
+    responseMode: "unary",
+  },
+  getWorkspaceDiff: {
+    operationName: "getWorkspaceDiff",
+    namespace: "workspace",
+    memberName: "getDiff",
+    requestType: "GetWorkspaceDiffRequest",
+    responseType: "GetWorkspaceDiffResponse",
+    responseMode: "unary",
+  },
+  commitWorkspaceChanges: {
+    operationName: "commitWorkspaceChanges",
+    namespace: "workspace",
+    memberName: "commitChanges",
+    requestType: "CommitWorkspaceChangesRequest",
+    responseType: "CommitWorkspaceChangesResponse",
+    responseMode: "unary",
+  },
+  pushWorkspaceBranch: {
+    operationName: "pushWorkspaceBranch",
+    namespace: "workspace",
+    memberName: "pushBranch",
+    requestType: "PushWorkspaceBranchRequest",
+    responseType: "PushWorkspaceBranchResponse",
     responseMode: "unary",
   },
 } as const satisfies Record<EndpointOperation, FrontendEndpointDefinition>;

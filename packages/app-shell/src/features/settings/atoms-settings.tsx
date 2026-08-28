@@ -33,12 +33,16 @@ import {
   Input,
   Label,
   Textarea,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
   cn,
 } from "@ora/ui";
 import {
   IconAlertTriangle,
   IconPencil,
   IconPlus,
+  IconPuzzle,
   IconRobot,
   IconSearch,
   IconSparkles,
@@ -64,7 +68,6 @@ import {
 } from "../../state/hooks/use-atom-mutations";
 import { SettingsHeading } from "./settings-heading";
 import { queryKeys } from "../../state/hooks/query-keys";
-import { SkillMarketplacePanel } from "./skill-marketplace-panel";
 
 type AtomRecord = Agent | Skill;
 type TablerIcon = typeof IconRobot;
@@ -97,10 +100,13 @@ interface AtomManagerConfig {
   notice?: ReactNode;
   /** Marks rows that cannot be edited and should open recovery instead. */
   isItemUnavailable?: (item: AtomRecord) => boolean;
+  /** Marks rows supplied by immutable sources such as installed plugins. */
+  isItemReadOnly?: (item: AtomRecord) => boolean;
+
+  /** Renders source ownership in the row's top-right action area. */
+  getItemBadge?: (item: AtomRecord) => ReactNode;
   /** Opens pane-owned recovery when an unavailable row is activated. */
   onActivateUnavailable?: (item: AtomRecord) => void;
-  /** Optional host-specific surface shown between the pane heading and local atom controls. */
-  intro?: ReactNode;
   /** Chooses between compact rows and the wider card grid used by Skills. */
   presentation?: "list" | "grid";
 }
@@ -166,6 +172,34 @@ export function RolesSettings() {
 
 /** The Skills pane manages the reusable skills surfaced to Ora sessions. */
 const EMPTY_SKILLS: Skill[] = [];
+const MAX_INLINE_PLUGIN_ID_LENGTH = 24;
+
+function PluginSourceBadge({ pluginId }: { pluginId: string }) {
+  if (pluginId.length <= MAX_INLINE_PLUGIN_ID_LENGTH) {
+    return (
+      <Badge variant="secondary" className="max-w-52 normal-case">
+        <IconPuzzle aria-hidden="true" />
+        {pluginId}
+      </Badge>
+    );
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        aria-label={pluginId}
+        className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+      >
+        <IconPuzzle className="size-3" aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent
+        align="end"
+        className="max-w-64 whitespace-normal break-all text-left"
+      >
+        {pluginId}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function SkillsSettings() {
   const { t } = useTranslation();
@@ -225,7 +259,6 @@ export function SkillsSettings() {
             {t("settings.skills.import")}
           </Button>
         }
-        intro={<SkillMarketplacePanel />}
         presentation="grid"
         notice={
           unavailableCount > 0 ? (
@@ -240,8 +273,24 @@ export function SkillsSettings() {
           ) : undefined
         }
         isItemUnavailable={(item) =>
-          "availability" in item && item.availability === "unavailable"
+          "availability" in item &&
+          item.availability === "unavailable" &&
+          item.source.kind === "local"
         }
+        isItemReadOnly={(item) =>
+          "source" in item && item.source.kind === "plugin"
+        }
+
+        getItemBadge={(item) => {
+          if (!("source" in item) || item.source.kind !== "plugin") {
+            return undefined;
+          }
+          return (
+            <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
+              <PluginSourceBadge pluginId={item.source.pluginId} />
+            </div>
+          );
+        }}
         onActivateUnavailable={(item) => {
           if ("availability" in item) setRecoverTarget(item);
         }}
@@ -313,8 +362,10 @@ function AtomManager({
   extraAction,
   notice,
   isItemUnavailable,
+  isItemReadOnly,
+
+  getItemBadge,
   onActivateUnavailable,
-  intro,
   presentation = "list",
 }: AtomManagerConfig) {
   const { t } = useTranslation();
@@ -371,8 +422,6 @@ function AtomManager({
       />
 
       {notice}
-
-      {intro}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative min-w-0 flex-1">
@@ -459,6 +508,9 @@ function AtomManager({
             visibleItems.map((item) => {
               const Icon = icon;
               const unavailable = isItemUnavailable?.(item) === true;
+              const readOnly = isItemReadOnly?.(item) === true;
+
+              const itemBadge = getItemBadge?.(item);
               return (
                 <div
                   key={item.id}
@@ -504,36 +556,41 @@ function AtomManager({
                       </p>
                     </div>
                   </div>
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-muted-foreground"
-                      aria-label={
-                        unavailable
-                          ? t(`${tPrefix}.unavailableAction`)
-                          : t("common.edit")
-                      }
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        if (unavailable) onActivateUnavailable?.(item);
-                        else setEditing({ item });
-                      }}
-                    >
-                      {unavailable ? <IconAlertTriangle /> : <IconPencil />}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      aria-label={t("common.delete")}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setDeleteTarget(item);
-                      }}
-                    >
-                      <IconTrash />
-                    </Button>
+                  <div className="flex items-start justify-end gap-1">
+                    {itemBadge}
+                    {!readOnly && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-muted-foreground"
+                          aria-label={
+                            unavailable
+                              ? t(`${tPrefix}.unavailableAction`)
+                              : t("common.edit")
+                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (unavailable) onActivateUnavailable?.(item);
+                            else setEditing({ item });
+                          }}
+                        >
+                          {unavailable ? <IconAlertTriangle /> : <IconPencil />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          aria-label={t("common.delete")}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setDeleteTarget(item);
+                          }}
+                        >
+                          <IconTrash />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               );

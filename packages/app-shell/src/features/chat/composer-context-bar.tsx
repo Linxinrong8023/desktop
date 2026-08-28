@@ -33,6 +33,7 @@ import {
 import { useProjects } from "../../state/hooks/use-projects";
 import { useTasks } from "../../state/hooks/use-tasks";
 import { useUiStore } from "../../state/stores/ui-store";
+import { startSessionDraft } from "../../state/session-drafts";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
 
 /**
@@ -160,7 +161,6 @@ function ProjectTab() {
   const selectedProjectId = useWorkspaceSelectionStore(
     (s) => s.selection.projectId,
   );
-  const selectProject = useWorkspaceSelectionStore((s) => s.selectProject);
   const setDialog = useUiStore((s) => s.setDialog);
 
   const selectedProject = projects.find(
@@ -214,7 +214,10 @@ function ProjectTab() {
                   data-checked={project.id === selectedProjectId}
                   className={MENU_ITEM_CLASS}
                   onSelect={() => {
-                    selectProject(project.id);
+                    startSessionDraft({
+                      projectId: project.id,
+                      taskId: null,
+                    });
                     setOpen(false);
                   }}
                 >
@@ -264,19 +267,16 @@ function BranchTab() {
   const [open, setOpen] = useState(false);
   const { data: tasks = [] } = useTasks();
   const selection = useWorkspaceSelectionStore((s) => s.selection);
-  const selectTask = useWorkspaceSelectionStore((s) => s.selectTask);
   const setDialog = useUiStore((s) => s.setDialog);
 
   const projectId = selection.projectId;
-  const projectTasks = tasks.filter(
-    (task) => task.projectId === projectId && task.workspaceMode === "worktree",
-  );
+  const projectTasks = tasks.filter((task) => task.projectId === projectId);
   const selectedTask = tasks.find((task) => task.id === selection.taskId);
 
   // Direct chat is the default project context, so repeating it between the
   // project and environment adds no information. Worktrees still show their
   // branch control because that context is meaningful and switchable.
-  if (selectedTask?.workspaceMode !== "worktree") {
+  if (selectedTask === undefined) {
     return null;
   }
 
@@ -327,7 +327,10 @@ function BranchTab() {
                   data-checked={task.id === selection.taskId}
                   className={MENU_ITEM_CLASS}
                   onSelect={() => {
-                    selectTask(task.id, task.projectId);
+                    startSessionDraft({
+                      projectId: task.projectId,
+                      taskId: task.id,
+                    });
                     setOpen(false);
                   }}
                 >

@@ -16,6 +16,7 @@ import {
   IconFileTypeTsx,
   IconFileTypeVue,
   IconFileTypeXml,
+  IconFolder,
   IconMarkdown,
   IconPhoto,
   IconSettings,
@@ -99,13 +100,14 @@ const VISUALS_BY_EXTENSION: Readonly<Record<string, WorkspaceFileVisual>> = {
   },
   json: {
     Icon: IconBraces,
-    iconClassName: "text-amber-600 dark:text-amber-400",
+    /* Brighter orange braces next to teal file ink. */
+    iconClassName: "text-orange-400 dark:text-orange-300",
     language: "json",
     label: "JSON",
   },
   jsonc: {
     Icon: IconBraces,
-    iconClassName: "text-amber-600 dark:text-amber-400",
+    iconClassName: "text-orange-400 dark:text-orange-300",
     language: "jsonc",
     label: "JSONC",
   },
@@ -117,13 +119,13 @@ const VISUALS_BY_EXTENSION: Readonly<Record<string, WorkspaceFileVisual>> = {
   },
   md: {
     Icon: IconMarkdown,
-    iconClassName: "text-sky-600 dark:text-sky-400",
+    iconClassName: "text-blue-400 dark:text-blue-300",
     language: "markdown",
     label: "MD",
   },
   mdx: {
     Icon: IconMarkdown,
-    iconClassName: "text-sky-600 dark:text-sky-400",
+    iconClassName: "text-blue-400 dark:text-blue-300",
     language: "mdx",
     label: "MDX",
   },
@@ -278,11 +280,21 @@ export function workspaceFileVisual(path: string): WorkspaceFileVisual {
 /** Renders the compact file-type glyph used by explorer and search rows. */
 export function WorkspaceFileIcon({
   path,
+  kind = "file",
   className = "size-4",
 }: {
   path: string;
+  kind?: "file" | "directory";
   className?: string;
 }) {
+  if (kind === "directory") {
+    return (
+      <IconFolder
+        aria-hidden="true"
+        className={`${className} shrink-0 text-amber-600 dark:text-amber-400`}
+      />
+    );
+  }
   const visual = workspaceFileVisual(path);
   return (
     <visual.Icon

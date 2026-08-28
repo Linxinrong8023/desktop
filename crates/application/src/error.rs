@@ -4,8 +4,7 @@ use crate::workflow_run::{
     EngineError, GraphError, StartPrerequisitesError, WorkflowValidationError,
 };
 use crate::{
-    BoxRepositorySource, BranchListingError, RepositoryError, TaskDiffCommentRepositoryError,
-    TaskDiffReaderError, TaskWorktreeProvisionerError,
+    BoxRepositorySource, BranchListingError, RepositoryError, TaskWorktreeProvisionerError,
 };
 use ora_domain::DomainModelError;
 use thiserror::Error;
@@ -27,6 +26,8 @@ pub enum ApplicationError {
     SkillNameConflict { namespace: String, name: String },
     #[error("skill not found: {skill_id}")]
     SkillNotFound { skill_id: String },
+    #[error("plugin-provided skills are read-only")]
+    SkillReadOnly,
     #[error("skill repository operation failed")]
     SkillRepository {
         #[source]
@@ -96,8 +97,8 @@ pub enum ApplicationError {
     TaskBaseBranchRequired,
     #[error("base branch not found: {branch_name}")]
     TaskBaseBranchNotFound { branch_name: String },
-    #[error("failed to generate a unique task worktree id after {attempts} attempts")]
-    TaskWorktreeIdExhausted { attempts: usize },
+    #[error("failed to generate a unique task workspace id after {attempts} attempts")]
+    TaskWorkspaceIdExhausted { attempts: usize },
     #[error("worktree root configuration is unavailable")]
     TaskWorktreeRootUnavailable,
     #[error("{context}")]
@@ -111,35 +112,15 @@ pub enum ApplicationError {
         #[from]
         source: TaskWorktreeProvisionerError,
     },
-    #[error("task diff operation failed")]
-    TaskDiff {
+    #[error("workspace diff operation failed")]
+    WorkspaceDiff {
         #[source]
         source: BoxRepositorySource,
     },
-    #[error("task diff commit message must not be blank")]
-    TaskDiffCommitMessageBlank,
-    #[error("task diff baseline is unavailable")]
-    TaskDiffBaselineUnavailable,
-    #[error("task diff is too large: {byte_count} bytes exceeds {max_byte_count} bytes")]
-    TaskDiffTooLarge {
-        byte_count: usize,
-        max_byte_count: usize,
-    },
-    #[error("task diff changed before the comment was created")]
-    TaskDiffStale,
-    #[error("task diff comment not found: {comment_id}")]
-    TaskDiffCommentNotFound { comment_id: String },
-    #[error("invalid task diff comment: {message}")]
-    TaskDiffCommentInvalid { message: String },
-    #[error("task diff comment conflicts with stored state: {message}")]
-    TaskDiffCommentConflict { message: String },
-    #[error("task diff comment repository operation failed")]
-    TaskDiffCommentRepository {
-        #[source]
-        source: BoxRepositorySource,
-    },
-    #[error("worktree not found: {worktree_id}")]
-    WorktreeNotFound { worktree_id: String },
+    #[error("workspace diff commit message must not be blank")]
+    WorkspaceDiffCommitMessageBlank,
+    #[error("worktree not found for workspace: {workspace_id}")]
+    WorktreeNotFound { workspace_id: String },
     #[error("worktree repository operation failed")]
     WorktreeRepository {
         #[source]
@@ -153,6 +134,11 @@ pub enum ApplicationError {
     SessionTitleTooLong,
     #[error("session repository operation failed")]
     SessionRepository {
+        #[source]
+        source: RepositoryError,
+    },
+    #[error("user configuration repository operation failed")]
+    UserConfigRepository {
         #[source]
         source: RepositoryError,
     },
@@ -210,6 +196,10 @@ pub enum ApplicationError {
     WorkflowRunNotRestartable,
     #[error("workflow run input can only be changed while the run is pending")]
     WorkflowRunNotEditable,
+    #[error("workflow node not found: {node_id}")]
+    WorkflowNodeNotFound { node_id: String },
+    #[error("workflow node is not awaiting input and cannot be completed: {node_id}")]
+    WorkflowNodeNotAwaitingInput { node_id: String },
     #[error("workflow run is active and cannot be deleted")]
     WorkflowRunActive,
     #[error("workflow repository operation failed")]
@@ -314,40 +304,11 @@ impl ApplicationError {
         }
     }
 
-    /// Maps task diff reader failures while preserving infrastructure diagnostics.
-    pub(crate) fn from_task_diff_reader_error(error: TaskDiffReaderError) -> Self {
-        match error {
-            TaskDiffReaderError::OperationFailed(source) => Self::TaskDiff { source },
-            TaskDiffReaderError::TooLarge {
-                byte_count,
-                max_byte_count,
-            } => Self::TaskDiffTooLarge {
-                byte_count,
-                max_byte_count,
-            },
-        }
-    }
-
-    /// Maps task diff comment persistence failures while preserving infrastructure diagnostics.
-    pub(crate) fn from_task_diff_comment_repository_error(
-        error: TaskDiffCommentRepositoryError,
+    /// Builds an internal workspace diff failure for an invariant that was violated below the handler.
+    pub(crate) fn workspace_diff_failure(
+        error: impl std::error::Error + Send + Sync + 'static,
     ) -> Self {
-        match error {
-            TaskDiffCommentRepositoryError::OperationFailed(source) => {
-                Self::TaskDiffCommentRepository { source }
-            }
-            TaskDiffCommentRepositoryError::Invalid(message) => {
-                Self::TaskDiffCommentInvalid { message }
-            }
-            TaskDiffCommentRepositoryError::Conflict(message) => {
-                Self::TaskDiffCommentConflict { message }
-            }
-        }
-    }
-
-    /// Builds an internal task diff failure for an invariant that was violated below the handler.
-    pub(crate) fn task_diff_failure(error: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self::TaskDiff {
+        Self::WorkspaceDiff {
             source: Box::new(error),
         }
     }
@@ -368,6 +329,11 @@ impl ApplicationError {
             ora_domain::SessionTitleError::Blank => Self::SessionTitleBlank,
             ora_domain::SessionTitleError::TooLong { .. } => Self::SessionTitleTooLong,
         }
+    }
+
+    /// Maps user-configuration persistence failures into stable application errors.
+    pub(crate) fn from_user_config_repository_error(error: RepositoryError) -> Self {
+        Self::UserConfigRepository { source: error }
     }
 
     /// Converts workflow-construction validation failures into application errors.
@@ -412,6 +378,16 @@ impl ApplicationError {
             StartPrerequisitesError::SkillMaterializationError { message } => {
                 Self::WorkflowRunStartFailed { message }
             }
+            StartPrerequisitesError::AgentSkillDeliveryUnsupported { agent_ref } => {
+                Self::WorkflowRunStartFailed {
+                    message: format!("agent {agent_ref} does not support workflow-managed skills"),
+                }
+            }
+            StartPrerequisitesError::AgentSkillDeliveryError { agent_ref, message } => {
+                Self::WorkflowRunStartFailed {
+                    message: format!("failed to resolve skill delivery for {agent_ref}: {message}"),
+                }
+            }
             StartPrerequisitesError::Repository(source) => Self::WorkflowRunRepository { source },
         }
     }
@@ -455,10 +431,10 @@ impl PartialEq for ApplicationError {
             | (ProjectBranchListing { .. }, ProjectBranchListing { .. })
             | (TaskRepository { .. }, TaskRepository { .. })
             | (TaskWorktreeProvisioner { .. }, TaskWorktreeProvisioner { .. })
-            | (TaskDiffStale, TaskDiffStale)
-            | (TaskDiffCommitMessageBlank, TaskDiffCommitMessageBlank)
+            | (WorkspaceDiffCommitMessageBlank, WorkspaceDiffCommitMessageBlank)
             | (WorktreeRepository { .. }, WorktreeRepository { .. })
             | (SessionRepository { .. }, SessionRepository { .. })
+            | (UserConfigRepository { .. }, UserConfigRepository { .. })
             | (WorkflowRepository { .. }, WorkflowRepository { .. })
             | (TaskFilesystem { .. }, TaskFilesystem { .. }) => true,
             (SkillNotFound { skill_id: left }, SkillNotFound { skill_id: right }) => left == right,
@@ -515,38 +491,17 @@ impl PartialEq for ApplicationError {
                 TaskBaseBranchNotFound { branch_name: left },
                 TaskBaseBranchNotFound { branch_name: right },
             ) => left == right,
-            (TaskDiff { .. }, TaskDiff { .. }) => true,
+            (WorkspaceDiff { .. }, WorkspaceDiff { .. }) => true,
             (
-                TaskDiffCommentInvalid { message: left },
-                TaskDiffCommentInvalid { message: right },
+                TaskWorkspaceIdExhausted { attempts: left },
+                TaskWorkspaceIdExhausted { attempts: right },
             ) => left == right,
             (
-                TaskDiffCommentConflict { message: left },
-                TaskDiffCommentConflict { message: right },
-            ) => left == right,
-            (TaskDiffCommentRepository { .. }, TaskDiffCommentRepository { .. }) => true,
-            (TaskDiffBaselineUnavailable, TaskDiffBaselineUnavailable) => true,
-            (
-                TaskDiffTooLarge {
-                    byte_count: left_bytes,
-                    max_byte_count: left_max,
+                WorktreeNotFound { workspace_id: left },
+                WorktreeNotFound {
+                    workspace_id: right,
                 },
-                TaskDiffTooLarge {
-                    byte_count: right_bytes,
-                    max_byte_count: right_max,
-                },
-            ) => left_bytes == right_bytes && left_max == right_max,
-            (
-                TaskDiffCommentNotFound { comment_id: left },
-                TaskDiffCommentNotFound { comment_id: right },
             ) => left == right,
-            (
-                TaskWorktreeIdExhausted { attempts: left },
-                TaskWorktreeIdExhausted { attempts: right },
-            ) => left == right,
-            (WorktreeNotFound { worktree_id: left }, WorktreeNotFound { worktree_id: right }) => {
-                left == right
-            }
             (SessionNotFound { session_id: left }, SessionNotFound { session_id: right }) => {
                 left == right
             }
@@ -577,6 +532,13 @@ impl PartialEq for ApplicationError {
             | (WorkflowRunValidation(_), WorkflowRunValidation(_))
             | (WorkflowRunNotRestartable, WorkflowRunNotRestartable)
             | (WorkflowRunNotEditable, WorkflowRunNotEditable) => true,
+            (WorkflowNodeNotFound { node_id: left }, WorkflowNodeNotFound { node_id: right }) => {
+                left == right
+            }
+            (
+                WorkflowNodeNotAwaitingInput { node_id: left },
+                WorkflowNodeNotAwaitingInput { node_id: right },
+            ) => left == right,
             (
                 WorkflowSkillNotFound { skill_id: left },
                 WorkflowSkillNotFound { skill_id: right },

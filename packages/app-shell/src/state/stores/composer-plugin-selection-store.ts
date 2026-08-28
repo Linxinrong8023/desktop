@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 interface ComposerPluginSelectionState {
   /**
-   * Plugin ids applied through "@" or "+", keyed by conversation (see `conversationKeyFor`).
+   * Plugin ids applied through "+", keyed by conversation (see `conversationKeyFor`).
    * The composer instance is reused across session switches rather than remounted, so this
    * state has to live outside the component or one conversation's picks would bleed into
    * another's. Keying on the session rather than the task is what keeps sibling sessions

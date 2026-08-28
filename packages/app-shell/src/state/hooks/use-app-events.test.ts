@@ -46,4 +46,43 @@ describe("useAppEvents", () => {
 
     unmount();
   });
+
+  it("invalidates the plugin snapshot and agent detection for lifecycle events", async () => {
+    const client = createMockClient(createMockClientState());
+    client.appEvents.watch = async function* (
+      _request,
+      options,
+    ): AsyncGenerator<AppEvent> {
+      yield { type: "ready" };
+      yield { type: "plugin_status_changed", plugin_id: "official/example" };
+      await new Promise<void>((resolve) => {
+        const signal = options?.signal;
+        if (signal === undefined || signal.aborted) {
+          resolve();
+          return;
+        }
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    };
+    const queryClient = createTestQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result, unmount } = renderHookWithClient(
+      () => useAppEvents(client),
+      client,
+      queryClient,
+    );
+
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: queryKeys.installedPlugins,
+      }),
+    );
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.agentRuntimeStatus,
+    });
+
+    unmount();
+  });
 });

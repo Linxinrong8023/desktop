@@ -10,7 +10,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { queryKeys } from "../../state/hooks/query-keys";
 import { SpecsContent, type SpecsContentHandle } from "../specs/specs-view";
-import { WorkspaceFilesView } from "./workspace-files-view";
+import {
+  WorkspaceFilesView,
+  type WorkspaceDirectoryRequest,
+  type WorkspaceArtifactRequest,
+  type WorkspaceFileRequest,
+} from "./workspace-files-view";
 
 export type FilesSurface = "explorer" | "search" | "specs";
 
@@ -18,57 +23,97 @@ interface WorkspaceReviewFilesPanelProps {
   projectId: string;
   taskId?: string;
   toolbar?: ReactNode;
+  fileRequest?: WorkspaceFileRequest;
+  onPreviewPathChange?: (path: string) => void;
+  directoryRequest?: WorkspaceDirectoryRequest;
+  artifactRequest?: WorkspaceArtifactRequest;
 }
 
-/** Hosts task file browsing and the read-only Spec catalog inside one review panel. */
+/** Hosts project/task file browsing and the read-only Spec catalog in one review panel. */
 export function WorkspaceReviewFilesPanel({
   projectId,
   taskId,
   toolbar,
+  fileRequest,
+  onPreviewPathChange,
+  directoryRequest,
+  artifactRequest,
 }: WorkspaceReviewFilesPanelProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const specsOnly = taskId === undefined;
-  const [surface, setSurface] = useState<FilesSurface>(
-    specsOnly ? "specs" : "explorer",
-  );
+  const [surface, setSurface] = useState<FilesSurface>("explorer");
+  const [appliedFileRequestId, setAppliedFileRequestId] = useState<
+    number | null
+  >(null);
+  const [appliedDirectoryRequestId, setAppliedDirectoryRequestId] = useState<
+    number | null
+  >(null);
+  const [appliedArtifactRequestId, setAppliedArtifactRequestId] = useState<
+    number | null
+  >(null);
   const specsRef = useRef<SpecsContentHandle>(null);
   const [specsRefreshing, setSpecsRefreshing] = useState(false);
 
+  if (
+    fileRequest !== undefined &&
+    fileRequest.requestId !== appliedFileRequestId
+  ) {
+    setAppliedFileRequestId(fileRequest.requestId);
+    setSurface("explorer");
+  }
+  if (
+    artifactRequest !== undefined &&
+    artifactRequest.requestId !== appliedArtifactRequestId
+  ) {
+    setAppliedArtifactRequestId(artifactRequest.requestId);
+    setSurface("explorer");
+  }
+  if (
+    directoryRequest !== undefined &&
+    directoryRequest.requestId !== appliedDirectoryRequestId
+  ) {
+    setAppliedDirectoryRequestId(directoryRequest.requestId);
+    setSurface("explorer");
+  }
+
   const refreshSpecs = () => void specsRef.current?.refresh();
   const refreshFiles = () => {
-    if (taskId === undefined) return;
+    if (taskId !== undefined) {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.workspaceFiles(taskId),
+      });
+      return;
+    }
     void queryClient.invalidateQueries({
-      queryKey: queryKeys.workspaceFiles(taskId),
+      queryKey: queryKeys.projectFiles(projectId),
     });
   };
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-3">
-        {!specsOnly && (
-          <>
-            <Button
-              size="sm"
-              variant={surface === "explorer" ? "secondary" : "ghost"}
-              onClick={() => setSurface("explorer")}
-            >
-              <IconFolderOpen />
-              {t("files.explorer")}
-            </Button>
-            <Button
-              size="sm"
-              variant={surface === "search" ? "secondary" : "ghost"}
-              onClick={() => setSurface("search")}
-            >
-              <IconSearch />
-              {t("files.search")}
-            </Button>
-          </>
-        )}
+        <Button
+          size="sm"
+          variant={surface === "explorer" ? "secondary" : "ghost"}
+          aria-pressed={surface === "explorer"}
+          onClick={() => setSurface("explorer")}
+        >
+          <IconFolderOpen />
+          {t("files.explorer")}
+        </Button>
+        <Button
+          size="sm"
+          variant={surface === "search" ? "secondary" : "ghost"}
+          aria-pressed={surface === "search"}
+          onClick={() => setSurface("search")}
+        >
+          <IconSearch />
+          {t("files.search")}
+        </Button>
         <Button
           size="sm"
           variant={surface === "specs" ? "secondary" : "ghost"}
+          aria-pressed={surface === "specs"}
           onClick={() => {
             if (surface === "specs") {
               specsRef.current?.clearSelection();
@@ -113,7 +158,16 @@ export function WorkspaceReviewFilesPanel({
             onRefreshingChange={setSpecsRefreshing}
           />
         ) : (
-          <WorkspaceFilesView taskId={taskId!} surface={surface} hideHeader />
+          <WorkspaceFilesView
+            projectId={projectId}
+            taskId={taskId}
+            surface={surface}
+            hideHeader
+            fileRequest={fileRequest}
+            onPreviewPathChange={onPreviewPathChange}
+            directoryRequest={directoryRequest}
+            artifactRequest={artifactRequest}
+          />
         )}
       </div>
     </section>

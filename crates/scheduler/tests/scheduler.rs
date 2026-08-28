@@ -382,7 +382,10 @@ async fn concurrent_shutdown_callers_wait_for_shared_completion() {
 }
 
 /// Verifies cancelling one shutdown waiter cannot detach the shared completion owner.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+///
+/// A current-thread runtime keeps the first manual poll deterministic: it can initiate shutdown
+/// without letting the spawned supervisor publish completion before the waiter is dropped.
+#[tokio::test(flavor = "current_thread")]
 async fn cancelled_shutdown_wait_does_not_detach_completion_owner() {
     let scheduler = Scheduler::new(chrono_tz::UTC);
     let first_scheduler = scheduler.clone();
@@ -423,7 +426,14 @@ async fn completed_delay_handle_reports_already_done() {
         })
         .expect("scheduler remains active");
     assert!(wait_for(|| completed.load(Ordering::SeqCst), 500).await);
-    // The future has finished; cancelling reports `AlreadyDone`.
-    assert_eq!(handle.cancel(), CancelOutcome::AlreadyDone);
+    // The worker may still hold RUNNING briefly after the future body returns;
+    // poll cancel until control settles on the terminal state.
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+    let mut outcome = handle.cancel();
+    while outcome == CancelOutcome::AlreadyRunning && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        outcome = handle.cancel();
+    }
+    assert_eq!(outcome, CancelOutcome::AlreadyDone);
     scheduler.shutdown().await;
 }

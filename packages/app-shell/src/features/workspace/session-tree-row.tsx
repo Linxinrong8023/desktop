@@ -18,7 +18,6 @@ import {
   IconPencil,
   IconTrash,
 } from "@tabler/icons-react";
-import type { TaskWorkspaceMode } from "@ora/contracts";
 import { AgentActivityDots } from "../../components/agent-activity-dots";
 import { useChatStore } from "../../chat-store-context";
 import { useRenameSession } from "../../state/hooks/use-workspace-mutations";
@@ -29,13 +28,12 @@ import { useInlineTreeRename } from "./use-inline-tree-rename";
 
 interface SessionTreeRowProps {
   sessionId: string;
-  taskId: string;
+  taskId: string | null;
   projectId: string;
   title: string;
   depth: 0 | 1 | 2;
-  /** Direct chats delete the wrapping task; worktree leaves delete the session. */
+  /** Worktree rows delete the session; every direct Workspace row deletes only the session. */
   deleteAs: "session" | "task";
-  workspaceMode?: TaskWorkspaceMode;
 }
 
 /**
@@ -52,7 +50,6 @@ export const SessionTreeRow = memo(function SessionTreeRow({
   title,
   depth,
   deleteAs,
-  workspaceMode,
 }: SessionTreeRowProps) {
   const { t } = useTranslation();
   const renameSession = useRenameSession();
@@ -66,9 +63,15 @@ export const SessionTreeRow = memo(function SessionTreeRow({
   const permissionRequired = useStore(chatStore, (s) =>
     Boolean(s.conversations[sessionId]?.pendingPermissions.length),
   );
-  const isResponding = useStore(chatStore, (s) =>
+  const isLoading = useStore(chatStore, (s) =>
+    Boolean(s.conversations[sessionId]?.isLoading),
+  );
+  const conversationResponding = useStore(chatStore, (s) =>
     Boolean(s.conversations[sessionId]?.isResponding),
   );
+  // Hide replay-time isResponding flashes while history loads. SessionStatus
+  // "running" only means the CLI connection is warm, not that a turn is in flight.
+  const isResponding = conversationResponding && !isLoading;
   const {
     renaming,
     draft,
@@ -86,17 +89,23 @@ export const SessionTreeRow = memo(function SessionTreeRow({
 
   /** Selects this session without depending on a parent callback identity. */
   function handleSelect() {
+    if (taskId === null) {
+      useWorkspaceSelectionStore
+        .getState()
+        .selectSessionBeforeTask(sessionId, projectId);
+      return;
+    }
     selectSession(sessionId, taskId, projectId);
   }
 
   /** Opens the existing delete confirmation, using the visible session title. */
   function handleDelete() {
     if (deleteAs === "task") {
+      if (taskId === null) return;
       setDeleteTarget({
         kind: "task",
         id: taskId,
         name: title,
-        workspaceMode: workspaceMode ?? "project_root",
         sessionIds: [sessionId],
       });
       return;

@@ -1,7 +1,9 @@
 use crate::{
-    HomepageUrl, InvalidFieldReason, ManifestError, ManifestField, PluginDependencies, PluginHead,
-    PluginKind, PluginManifest, PluginName, PluginNamespace, ReleaseUrl, RepositoryUrl,
-    Sha256Digest,
+    DownloadAction, DownloadDisposition, DownloadPolicy, DownloadRule, HomepageUrl,
+    HookTargetError, InvalidFieldReason, ManifestError, ManifestField, MethodName, MethodNameError,
+    Origin, PageMatcher, PathPrefix, PluginDependencies, PluginHead, PluginKind, PluginManifest,
+    PluginName, PluginNamespace, PluginReleaseSource, PluginWebview, PluginWorkbench, ReleaseUrl,
+    RepositoryUrl, RuleField, Sha256Digest, StartUrl,
 };
 use ora_utils::{GitBranchName, GitBranchNameError};
 use pretty_assertions::assert_eq;
@@ -10,7 +12,7 @@ use semver::{Version, VersionReq};
 const DIGEST: &str = "feab001d7e9ff4ce66011ebd70791de93eb1554d34d3ea44c33d102a25c1be0a";
 
 const MINIMAL_MANIFEST: &str = r#"resolver = 1
-name = "user.ora-weather"
+identifier = "user.ora-weather"
 namespace = "official"
 kind = "workbench"
 version = "1.2.0"
@@ -19,8 +21,19 @@ url = "https://example.com/ora-weather.orax"
 sha256 = "feab001d7e9ff4ce66011ebd70791de93eb1554d34d3ea44c33d102a25c1be0a"
 "#;
 
+/// The installed-package spelling of the minimal manifest: it drops the download fields and
+/// spells the name segment `identifier`, matching what a shipped `orax.toml` contains.
+const INSTALLED_MINIMAL_MANIFEST: &str = r#"resolver = 1
+identifier = "user.ora-weather"
+namespace = "official"
+kind = "workbench"
+version = "1.2.0"
+description = "????????? Ora ??"
+"#;
+
 const FULL_MANIFEST: &str = r#"resolver = 1
-name = "user.ora-weather"
+identifier = "user.ora-weather"
+title = "Ora Weather"
 namespace = "official"
 kind = "workbench"
 version = "1.2.0"
@@ -53,6 +66,7 @@ fn parses_complete_manifest_into_full_domain_object() {
     let expected = PluginManifest {
         resolver: 1,
         name: success(PluginName::parse("user.ora-weather"), "plugin name"),
+        title: "Ora Weather".to_owned(),
         namespace: PluginNamespace::Official,
         kind: PluginKind::Workbench,
         version: success(Version::parse("1.2.0"), "version"),
@@ -62,13 +76,13 @@ fn parses_complete_manifest_into_full_domain_object() {
             "homepage",
         )),
         license: Some("MIT".to_owned()),
-        url: success(
+        url: Some(success(
             ReleaseUrl::parse(
                 "https://github.com/user/ora-weather/releases/download/v1.2.0/ora-weather.orax?signature=abc",
             ),
             "release URL",
-        ),
-        sha256: success(Sha256Digest::parse(DIGEST), "digest"),
+        )),
+        sha256: Some(success(Sha256Digest::parse(DIGEST), "digest")),
         head: Some(PluginHead {
             repository: success(
                 RepositoryUrl::parse("https://github.com/user/ora-weather.git"),
@@ -79,6 +93,18 @@ fn parses_complete_manifest_into_full_domain_object() {
         dependencies: Some(PluginDependencies {
             ora: success(VersionReq::parse(">= 0.8.0"), "Ora requirement"),
         }),
+        workbench: None,
+        webview: None,
+        release_source: Some(PluginReleaseSource::Universal {
+            url: success(
+                ReleaseUrl::parse(
+                    "https://github.com/user/ora-weather/releases/download/v1.2.0/ora-weather.orax?signature=abc",
+                ),
+                "release URL",
+            ),
+            sha256: success(Sha256Digest::parse(DIGEST), "digest"),
+        }),
+        artifact: None,
     };
 
     assert_eq!(actual, expected);
@@ -91,6 +117,7 @@ fn parses_manifest_without_optional_fields() {
 
     assert_eq!(manifest.resolver(), 1);
     assert_eq!(manifest.name().as_str(), "user.ora-weather");
+    assert_eq!(manifest.title(), "user.ora-weather");
     assert_eq!(manifest.namespace(), PluginNamespace::Official);
     assert_eq!(manifest.kind(), PluginKind::Workbench);
     assert_eq!(
@@ -113,12 +140,229 @@ fn normalizes_empty_dependencies_table() {
     assert_eq!(manifest.dependencies(), None);
 }
 
+/// Verifies the agent kind is accepted and round-trips to its manifest spelling.
+#[test]
+fn parses_agent_kind_manifest() {
+    let manifest = success(
+        PluginManifest::parse(&MINIMAL_MANIFEST.replacen("workbench", "agent", 1)),
+        "agent-kind manifest",
+    );
+    assert_eq!(manifest.kind(), PluginKind::Agent);
+    assert_eq!(manifest.kind().as_str(), "agent");
+}
+
+/// Verifies the Skill kind is accepted by the marketplace manifest schema.
+#[test]
+fn parses_skill_kind_marketplace_manifest() {
+    let manifest = success(
+        PluginManifest::parse(&MINIMAL_MANIFEST.replacen("workbench", "skill", 1)),
+        "skill-kind marketplace manifest",
+    );
+
+    assert_eq!(manifest.kind(), PluginKind::Skill);
+    assert_eq!(manifest.kind().as_str(), "skill");
+}
+
+/// Verifies the MCP kind is accepted by the marketplace manifest schema.
+#[test]
+fn parses_mcp_kind_marketplace_manifest() {
+    let manifest = success(
+        PluginManifest::parse(&MINIMAL_MANIFEST.replacen("workbench", "mcp", 1)),
+        "mcp-kind marketplace manifest",
+    );
+
+    assert_eq!(manifest.kind(), PluginKind::Mcp);
+    assert_eq!(manifest.kind().as_str(), "mcp");
+}
+
+/// Verifies MCP plugins cannot smuggle either process-facing kind-specific section.
+#[test]
+fn mcp_kind_rejects_workbench_and_webview_sections() {
+    let workbench = WORKBENCH_MANIFEST.replacen("kind = \"workbench\"", "kind = \"mcp\"", 1);
+    let webview = WEBVIEW_MANIFEST.replacen("kind = \"webview\"", "kind = \"mcp\"", 1);
+
+    assert!(matches!(
+        PluginManifest::parse_installed(&workbench),
+        Err(ManifestError::InvalidField {
+            field: ManifestField::Workbench,
+            reason: InvalidFieldReason::NotAllowedForKind {
+                kind: PluginKind::Mcp
+            },
+        })
+    ));
+    assert!(matches!(
+        PluginManifest::parse_installed(&webview),
+        Err(ManifestError::InvalidField {
+            field: ManifestField::Webview,
+            reason: InvalidFieldReason::NotAllowedForKind {
+                kind: PluginKind::Mcp
+            },
+        })
+    ));
+}
+
+/// Verifies a local Skill plugin needs only the installed-manifest core fields.
+#[test]
+fn parses_installed_skill_manifest_without_resolver_or_download_fields() {
+    let installed = "identifier = \"user.skill-pack\"\nnamespace = \"official\"\nkind = \"skill\"\nversion = \"1.2.0\"\ndescription = \"A Skill package\"\n";
+    let manifest = success(
+        PluginManifest::parse_installed(installed),
+        "installed Skill manifest",
+    );
+
+    assert_eq!(manifest.resolver(), 1);
+    assert_eq!(manifest.kind(), PluginKind::Skill);
+    assert_eq!(manifest.release(), None);
+}
+
+/// Verifies Skill plugins cannot smuggle either existing kind-specific section.
+#[test]
+fn skill_kind_rejects_workbench_and_webview_sections() {
+    let workbench = WORKBENCH_MANIFEST.replacen("kind = \"workbench\"", "kind = \"skill\"", 1);
+    let webview = WEBVIEW_MANIFEST.replacen("kind = \"webview\"", "kind = \"skill\"", 1);
+
+    assert!(matches!(
+        PluginManifest::parse_installed(&workbench),
+        Err(ManifestError::InvalidField {
+            field: ManifestField::Workbench,
+            reason: InvalidFieldReason::NotAllowedForKind {
+                kind: PluginKind::Skill
+            },
+        })
+    ));
+    assert!(matches!(
+        PluginManifest::parse_installed(&webview),
+        Err(ManifestError::InvalidField {
+            field: ManifestField::Webview,
+            reason: InvalidFieldReason::NotAllowedForKind {
+                kind: PluginKind::Skill
+            },
+        })
+    ));
+}
+/// Verifies an installed package manifest omits download-only fields and still parses.
+#[test]
+fn parses_installed_manifest_without_download_fields() {
+    let installed = "identifier = \"user.ora-weather\"\nnamespace = \"official\"\nkind = \"workbench\"\nversion = \"1.2.0\"\ndescription = \"A test plugin\"\n";
+    let manifest = success(
+        PluginManifest::parse_installed(installed),
+        "installed manifest",
+    );
+
+    assert_eq!(manifest.resolver(), 1);
+    assert_eq!(manifest.name().as_str(), "user.ora-weather");
+    assert_eq!(manifest.title(), "user.ora-weather");
+    assert_eq!(manifest.kind(), PluginKind::Workbench);
+    assert_eq!(manifest.url(), None);
+    assert_eq!(manifest.sha256(), None);
+    assert_eq!(manifest.release(), None);
+}
+
+/// Verifies the current installed-package schema, which spells the name segment `identifier` and
+/// adds a human-readable `title`, parses into a manifest that exposes both.
+#[test]
+fn parses_new_installed_schema_with_title() {
+    let source = r#"resolver = 1
+title = "OpenCode"
+identifier = "ora-space.opencode"
+namespace = "official"
+kind = "agent"
+version = "0.1.2"
+description = "Ora Space OpenCode Agent"
+homepage = "https://github.com/ora-space/opencode-agent"
+license = "Apache-2.0"
+"#;
+    let manifest = success(
+        PluginManifest::parse_installed(source),
+        "new installed schema",
+    );
+    assert_eq!(manifest.title(), "OpenCode");
+    assert_eq!(manifest.name().as_str(), "ora-space.opencode");
+    assert_eq!(manifest.namespace(), PluginNamespace::Official);
+    assert_eq!(manifest.kind(), PluginKind::Agent);
+    assert_eq!(
+        manifest.homepage().map(HomepageUrl::as_str),
+        Some("https://github.com/ora-space/opencode-agent")
+    );
+    assert_eq!(manifest.license(), Some("Apache-2.0"));
+    assert_eq!(manifest.url(), None);
+    assert_eq!(manifest.sha256(), None);
+}
+
+/// Verifies the marketplace release form accepts the same new schema: `identifier`/`title` with
+/// no `.orax` download fields, so a synced registry entry is no longer skipped for display.
+#[test]
+fn parses_new_marketplace_schema_without_download_fields() {
+    let source = r#"resolver = 1
+title = "OpenCode"
+identifier = "ora-space.opencode"
+namespace = "official"
+kind = "agent"
+version = "0.1.2"
+description = "Ora Space OpenCode Agent"
+"#;
+    let manifest = success(PluginManifest::parse(source), "new marketplace schema");
+    assert_eq!(manifest.title(), "OpenCode");
+    assert_eq!(manifest.name().as_str(), "ora-space.opencode");
+    assert_eq!(manifest.namespace(), PluginNamespace::Official);
+    assert_eq!(manifest.kind(), PluginKind::Agent);
+    assert_eq!(manifest.url(), None);
+    assert_eq!(manifest.sha256(), None);
+    assert_eq!(manifest.release(), None);
+}
+
+/// Verifies the full marketplace release schema, including Markdown-linked `homepage`/`url`, parses
+/// and exposes the download metadata the installer needs.
+#[test]
+fn parses_full_new_marketplace_manifest_with_markdown_urls() {
+    let source = r#"resolver = 1
+title = "OpenCode"
+identifier = "ora-space.opencode"
+namespace = "official"
+kind = "agent"
+version = "0.1.2"
+description = "Ora Space OpenCode Agent"
+homepage = "[https://github.com/ora-space/opencode-agent](https://github.com/ora-space/opencode-agent)"
+license = "Apache-2.0"
+url = "[https://github.com/ora-space/opencode-agent/releases/download/v0.1.2/ora-space.opencode-v0.1.2.orax](https://github.com/ora-space/opencode-agent/releases/download/v0.1.2/ora-space.opencode-v0.1.2.orax)"
+sha256 = "18263de8e26fab1ea64d6c24913f0815d2151e0ae49cea9ef8aa46f453798558"
+"#;
+    let manifest = success(
+        PluginManifest::parse(source),
+        "full new marketplace manifest",
+    );
+
+    assert_eq!(manifest.title(), "OpenCode");
+    assert_eq!(manifest.name().as_str(), "ora-space.opencode");
+    assert_eq!(manifest.namespace(), PluginNamespace::Official);
+    assert_eq!(manifest.kind(), PluginKind::Agent);
+    assert_eq!(
+        manifest.homepage().map(HomepageUrl::as_str),
+        Some("https://github.com/ora-space/opencode-agent")
+    );
+    assert_eq!(
+        manifest.url().map(ReleaseUrl::as_str),
+        Some(
+            "https://github.com/ora-space/opencode-agent/releases/download/v0.1.2/ora-space.opencode-v0.1.2.orax"
+        )
+    );
+    assert_eq!(
+        manifest.sha256().map(ToString::to_string),
+        Some("18263de8e26fab1ea64d6c24913f0815d2151e0ae49cea9ef8aa46f453798558".to_owned())
+    );
+    assert!(manifest.release().is_some());
+}
+
 /// Verifies unsupported resolver versions take priority over semantic field validation.
 #[test]
 fn rejects_unsupported_resolver_before_fields() {
     let source = MINIMAL_MANIFEST
         .replacen("resolver = 1", "resolver = 2", 1)
-        .replacen("name = \"user.ora-weather\"", "name = \"INVALID\"", 1);
+        .replacen(
+            "identifier = \"user.ora-weather\"",
+            "identifier = \"INVALID\"",
+            1,
+        );
 
     assert!(matches!(
         PluginManifest::parse(&source),
@@ -148,21 +392,13 @@ fn reports_structural_toml_errors_with_spans() {
 fn rejects_missing_and_mistyped_required_fields() {
     let fields = [
         ("resolver = 1\n", "resolver = \"one\"\n"),
-        ("name = \"user.ora-weather\"\n", "name = true\n"),
+        ("identifier = \"user.ora-weather\"\n", "identifier = true\n"),
         ("namespace = \"official\"\n", "namespace = true\n"),
         ("kind = \"workbench\"\n", "kind = true\n"),
         ("version = \"1.2.0\"\n", "version = true\n"),
         (
             "description = \"获取实时天气信息的 Ora 插件\"\n",
             "description = true\n",
-        ),
-        (
-            "url = \"https://example.com/ora-weather.orax\"\n",
-            "url = true\n",
-        ),
-        (
-            "sha256 = \"feab001d7e9ff4ce66011ebd70791de93eb1554d34d3ea44c33d102a25c1be0a\"\n",
-            "sha256 = true\n",
         ),
     ];
 
@@ -183,9 +419,9 @@ fn rejects_missing_and_mistyped_required_fields() {
 fn rejects_empty_required_strings() {
     let fields = [
         (
-            "name = \"user.ora-weather\"",
-            "name = \"\"",
-            ManifestField::Name,
+            "identifier = \"user.ora-weather\"",
+            "identifier = \"\"",
+            ManifestField::Identifier,
         ),
         (
             "namespace = \"official\"",
@@ -228,13 +464,17 @@ fn rejects_empty_required_strings() {
 #[test]
 fn returns_first_root_field_error_deterministically() {
     let source = MINIMAL_MANIFEST
-        .replacen("name = \"user.ora-weather\"", "name = \"INVALID\"", 1)
+        .replacen(
+            "identifier = \"user.ora-weather\"",
+            "identifier = \"INVALID\"",
+            1,
+        )
         .replacen("namespace = \"official\"", "namespace = \"community\"", 1);
 
     assert!(matches!(
         PluginManifest::parse(&source),
         Err(ManifestError::InvalidField {
-            field: ManifestField::Name,
+            field: ManifestField::Identifier,
             reason: InvalidFieldReason::InvalidPluginName(_),
         })
     ));
@@ -420,9 +660,632 @@ fn parses_only_the_ora_dependency() {
 /// Verifies field paths have stable dotted representations for programmatic diagnostics.
 #[test]
 fn formats_structured_manifest_fields() {
-    assert_eq!(ManifestField::HeadRepository.as_str(), "head.repository");
+    assert_eq!(ManifestField::HeadRepository.to_string(), "head.repository");
+    assert_eq!(
+        ManifestField::WebviewDownloadRule {
+            index: 2,
+            field: RuleField::PagePathPrefix,
+        }
+        .to_string(),
+        "webview.downloads.rules[2].page.path_prefix"
+    );
     assert_eq!(
         ManifestField::DependenciesOra.to_string(),
         "dependencies.ora"
     );
+}
+
+const WORKBENCH_MANIFEST: &str = r#"resolver = 1
+identifier = "user.ora-weather"
+namespace = "official"
+kind = "workbench"
+version = "1.2.0"
+description = "Weather panel"
+
+[workbench]
+methods = ["weather/get_current", "weather/search_city"]
+"#;
+
+const WEBVIEW_MANIFEST: &str = r#"resolver = 1
+identifier = "acme.hub"
+namespace = "official"
+kind = "webview"
+version = "1.0.0"
+description = "An example marketplace surface"
+
+[webview]
+start_url = "https://www.example.com"
+allowed_origins = ["https://www.example.com", "https://example.com"]
+
+[webview.downloads]
+fallback = { prompt = ["save_as"] }
+
+[[webview.downloads.rules]]
+page = { origin = "https://www.example.com", path_prefix = "/skills/" }
+action = { auto = "import_skill" }
+
+[[webview.downloads.rules]]
+page = { origin = "https://www.example.com", path_prefix = "/downloads/" }
+action = { prompt = ["import_skill", "save_as"] }
+"#;
+
+/// Verifies a workbench manifest keeps its page-visible methods in declaration order.
+#[test]
+fn parses_workbench_section_into_method_list() {
+    let manifest = success(
+        PluginManifest::parse_installed(WORKBENCH_MANIFEST),
+        "workbench manifest",
+    );
+
+    assert_eq!(manifest.kind(), PluginKind::Workbench);
+    assert_eq!(
+        (manifest.workbench(), manifest.webview()),
+        (
+            Some(&PluginWorkbench {
+                methods: vec![
+                    success(MethodName::parse("weather/get_current"), "method"),
+                    success(MethodName::parse("weather/search_city"), "method"),
+                ],
+            }),
+            None,
+        )
+    );
+}
+
+/// Verifies a workbench plugin may omit `[workbench]` (a static page) while other kinds may
+/// not declare it.
+#[test]
+fn workbench_section_is_optional_and_kind_exclusive() {
+    let static_page = success(
+        PluginManifest::parse_installed(INSTALLED_MINIMAL_MANIFEST),
+        "static workbench",
+    );
+    assert_eq!(static_page.workbench(), None);
+
+    let agent = WORKBENCH_MANIFEST.replacen("kind = \"workbench\"", "kind = \"agent\"", 1);
+    assert!(matches!(
+        PluginManifest::parse_installed(&agent),
+        Err(ManifestError::InvalidField {
+            field: ManifestField::Workbench,
+            reason: InvalidFieldReason::NotAllowedForKind {
+                kind: PluginKind::Agent
+            },
+        })
+    ));
+}
+
+/// Verifies method names are validated per entry and duplicates are refused.
+#[test]
+fn rejects_invalid_and_duplicate_workbench_methods() {
+    let cases = [
+        (
+            "methods = [\"ora/storage/read\"]",
+            ManifestField::WorkbenchMethod { index: 0 },
+        ),
+        (
+            "methods = [\"weather/get_current\", \"Weather/Get\"]",
+            ManifestField::WorkbenchMethod { index: 1 },
+        ),
+        (
+            "methods = [\"weather/get_current\", \"weather/get_current\"]",
+            ManifestField::WorkbenchMethod { index: 1 },
+        ),
+        ("methods = []", ManifestField::WorkbenchMethods),
+    ];
+    for (broken, expected_field) in cases {
+        let source = WORKBENCH_MANIFEST.replacen(
+            "methods = [\"weather/get_current\", \"weather/search_city\"]",
+            broken,
+            1,
+        );
+        let Err(ManifestError::InvalidField { field, .. }) =
+            PluginManifest::parse_installed(&source)
+        else {
+            panic!("expected {broken} to produce a semantic field error");
+        };
+        assert_eq!(field, expected_field, "{broken}");
+    }
+
+    assert!(matches!(
+        MethodName::parse("ora/anything"),
+        Err(MethodNameError::ReservedPrefix)
+    ));
+    assert!(matches!(
+        MethodName::parse("weather//get"),
+        Err(MethodNameError::EmptySegment)
+    ));
+}
+
+/// Verifies a webview manifest maps to normalized origins, ordered rules, and its fallback.
+#[test]
+fn parses_webview_section_into_download_policy() {
+    let manifest = success(
+        PluginManifest::parse_installed(WEBVIEW_MANIFEST),
+        "webview manifest",
+    );
+    let origin = |value: &str| success(Origin::parse(value), "origin");
+    let rule = |prefix: &str, disposition: DownloadDisposition| DownloadRule {
+        page: PageMatcher {
+            origin: origin("https://www.example.com"),
+            path_prefix: success(PathPrefix::parse(prefix), "prefix"),
+        },
+        disposition,
+    };
+
+    assert_eq!(manifest.kind(), PluginKind::Webview);
+    assert_eq!(
+        manifest.webview(),
+        Some(&PluginWebview {
+            start_url: success(StartUrl::parse("https://www.example.com"), "start url"),
+            allowed_origins: vec![
+                origin("https://www.example.com"),
+                origin("https://example.com"),
+            ],
+            downloads: DownloadPolicy {
+                rules: vec![
+                    rule(
+                        "/skills/",
+                        DownloadDisposition::Auto {
+                            action: DownloadAction::ImportSkill,
+                        },
+                    ),
+                    rule(
+                        "/downloads/",
+                        DownloadDisposition::Prompt {
+                            actions: vec![DownloadAction::ImportSkill, DownloadAction::SaveAs],
+                        },
+                    ),
+                ],
+                fallback: DownloadDisposition::Prompt {
+                    actions: vec![DownloadAction::SaveAs],
+                },
+            },
+        })
+    );
+}
+
+/// Verifies omitting `[webview.downloads]` rejects every download rather than allowing any.
+#[test]
+fn webview_downloads_default_to_reject() {
+    let source = WEBVIEW_MANIFEST
+        .split("\n[webview.downloads]")
+        .next()
+        .unwrap_or_default();
+    let manifest = success(PluginManifest::parse_installed(source), "webview manifest");
+
+    assert_eq!(
+        manifest.webview().map(PluginWebview::downloads),
+        Some(&DownloadPolicy::default())
+    );
+}
+
+/// Verifies `[webview]` is required for webview plugins and refused for every other kind.
+#[test]
+fn pairs_webview_section_with_kind() {
+    let missing = WEBVIEW_MANIFEST
+        .split("\n[webview]")
+        .next()
+        .unwrap_or_default();
+    assert!(matches!(
+        PluginManifest::parse_installed(missing),
+        Err(ManifestError::InvalidField {
+            field: ManifestField::Webview,
+            reason: InvalidFieldReason::MissingForKind {
+                kind: PluginKind::Webview
+            },
+        })
+    ));
+
+    let workbench = WEBVIEW_MANIFEST.replacen("kind = \"webview\"", "kind = \"workbench\"", 1);
+    assert!(matches!(
+        PluginManifest::parse_installed(&workbench),
+        Err(ManifestError::InvalidField {
+            field: ManifestField::Webview,
+            reason: InvalidFieldReason::NotAllowedForKind {
+                kind: PluginKind::Workbench
+            },
+        })
+    ));
+}
+
+/// Verifies each webview value rule is attributed to its indexed field.
+#[test]
+fn rejects_invalid_webview_fields_with_index() {
+    let cases = [
+        (
+            (
+                "start_url = \"https://www.example.com\"",
+                "start_url = \"http://www.example.com\"",
+            ),
+            ManifestField::WebviewStartUrl,
+        ),
+        (
+            (
+                "start_url = \"https://www.example.com\"",
+                "start_url = \"https://www.example.com/#top\"",
+            ),
+            ManifestField::WebviewStartUrl,
+        ),
+        (
+            (
+                "\"https://example.com\"]",
+                "\"https://example.com/skills\"]",
+            ),
+            ManifestField::WebviewAllowedOrigin { index: 1 },
+        ),
+        (
+            (
+                "allowed_origins = [\"https://www.example.com\", \"https://example.com\"]",
+                "allowed_origins = []",
+            ),
+            ManifestField::WebviewAllowedOrigins,
+        ),
+        (
+            (
+                "fallback = { prompt = [\"save_as\"] }",
+                "fallback = { prompt = [] }",
+            ),
+            ManifestField::WebviewDownloadsFallback,
+        ),
+        (
+            (
+                "fallback = { prompt = [\"save_as\"] }",
+                "fallback = { auto = \"import_skill\", prompt = [\"save_as\"] }",
+            ),
+            ManifestField::WebviewDownloadsFallback,
+        ),
+        (
+            (
+                "action = { auto = \"import_skill\" }",
+                "action = { auto = \"run_binary\" }",
+            ),
+            ManifestField::WebviewDownloadRule {
+                index: 0,
+                field: RuleField::Action,
+            },
+        ),
+        // `save_as` needs a user-chosen destination, so it can never run automatically.
+        (
+            (
+                "action = { auto = \"import_skill\" }",
+                "action = { auto = \"save_as\" }",
+            ),
+            ManifestField::WebviewDownloadRule {
+                index: 0,
+                field: RuleField::Action,
+            },
+        ),
+        (
+            (
+                "action = { prompt = [\"import_skill\", \"save_as\"] }",
+                "action = { prompt = [\"save_as\", \"save_as\"] }",
+            ),
+            ManifestField::WebviewDownloadRule {
+                index: 1,
+                field: RuleField::Action,
+            },
+        ),
+        (
+            (
+                "path_prefix = \"/downloads/\"",
+                "path_prefix = \"downloads/\"",
+            ),
+            ManifestField::WebviewDownloadRule {
+                index: 1,
+                field: RuleField::PagePathPrefix,
+            },
+        ),
+        (
+            (
+                "page = { origin = \"https://www.example.com\", path_prefix = \"/downloads/\" }",
+                "page = { origin = \"https://www.example.com/x\", path_prefix = \"/downloads/\" }",
+            ),
+            ManifestField::WebviewDownloadRule {
+                index: 1,
+                field: RuleField::PageOrigin,
+            },
+        ),
+    ];
+    for ((valid, broken), expected_field) in cases {
+        let source = WEBVIEW_MANIFEST.replacen(valid, broken, 1);
+        assert_ne!(source, WEBVIEW_MANIFEST, "{broken} did not apply");
+        let Err(ManifestError::InvalidField { field, .. }) =
+            PluginManifest::parse_installed(&source)
+        else {
+            panic!("expected {broken} to produce a semantic field error");
+        };
+        assert_eq!(field, expected_field, "{broken}");
+    }
+}
+
+/// Verifies an unknown section field, a mistyped rule, and an unknown action key stay
+/// structural errors that name the offending TOML path.
+#[test]
+fn reports_structural_webview_errors_with_paths() {
+    let cases = [
+        (
+            WEBVIEW_MANIFEST.replacen(
+                "allowed_origins = [",
+                "user_agent = \"x\"\nallowed_origins = [",
+                1,
+            ),
+            "webview.user_agent",
+        ),
+        (
+            WEBVIEW_MANIFEST.replacen(
+                "action = { auto = \"import_skill\" }",
+                "action = { run = \"x\" }",
+                1,
+            ),
+            "webview.downloads.rules[0].action.run",
+        ),
+        (
+            WEBVIEW_MANIFEST.replacen(
+                "path_prefix = \"/skills/\" }",
+                "path_prefix = \"/skills/\", query = \"a\" }",
+                1,
+            ),
+            "webview.downloads.rules[0].page.query",
+        ),
+    ];
+    for (source, expected_path) in cases {
+        let Err(ManifestError::InvalidToml { path, .. }) = PluginManifest::parse_installed(&source)
+        else {
+            panic!("expected {expected_path} to fail structurally");
+        };
+        assert_eq!(path.as_deref(), Some(expected_path));
+    }
+}
+
+const TARGETED_HOOK_MANIFEST: &str = r#"resolver = 1
+identifier = "rtk-ai.rtk"
+namespace = "official"
+kind = "hook"
+version = "0.1.0"
+description = "RTK command rewrite hook"
+homepage = "https://github.com/rtk-ai/rtk"
+license = "Apache-2.0"
+
+[[targets]]
+target = "x86_64-pc-windows-msvc"
+url = "https://example.com/rtk.orax"
+sha256 = "feab001d7e9ff4ce66011ebd70791de93eb1554d34d3ea44c33d102a25c1be0a"
+"#;
+
+/// A hook kind manifest is parsed and carries its targeted release source.
+#[test]
+fn parses_targeted_hook_manifest() {
+    let manifest = success(
+        PluginManifest::parse(TARGETED_HOOK_MANIFEST),
+        "targeted hook manifest",
+    );
+
+    assert_eq!(manifest.kind(), PluginKind::Hook);
+    assert!(manifest.workbench().is_none());
+    assert!(manifest.webview().is_none());
+    let Some(PluginReleaseSource::Targets(targets)) = manifest.release_source() else {
+        panic!("expected a targeted release source");
+    };
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].target().as_str(), "x86_64-pc-windows-msvc");
+    assert_eq!(targets[0].url().as_str(), "https://example.com/rtk.orax");
+    assert_eq!(manifest.artifact(), None);
+}
+
+/// Unknown rustc triples never enter the domain model, so a packaging typo cannot look like a
+/// distinct installable architecture.
+#[test]
+fn rejects_unsupported_target_triples() {
+    let source = TARGETED_HOOK_MANIFEST.replace("x86_64-pc-windows-msvc", "not-a-real-triple");
+    let Err(ManifestError::InvalidField { field, reason }) = PluginManifest::parse(&source) else {
+        panic!("expected unsupported triple rejection");
+    };
+    assert_eq!(field, ManifestField::ReleaseTargetTarget { index: 0 });
+    assert!(matches!(
+        reason,
+        InvalidFieldReason::InvalidHookTarget(HookTargetError::Unsupported { ref found })
+            if found == "not-a-real-triple"
+    ));
+}
+
+/// A universal hook manifest is parsed and carries a universal release source.
+#[test]
+fn parses_universal_hook_manifest() {
+    let source = r#"resolver = 1
+identifier = "rtk-ai.rtk"
+namespace = "official"
+kind = "hook"
+version = "0.1.0"
+description = "RTK command rewrite hook"
+url = "https://example.com/rtk.orax"
+sha256 = "feab001d7e9ff4ce66011ebd70791de93eb1554d34d3ea44c33d102a25c1be0a"
+"#;
+    let manifest = success(PluginManifest::parse(source), "universal hook manifest");
+
+    assert!(matches!(
+        manifest.release_source(),
+        Some(PluginReleaseSource::Universal { .. })
+    ));
+}
+
+/// Declaring both a universal release and targeted artifacts is rejected.
+#[test]
+fn rejects_both_universal_and_targeted_release_sources() {
+    // The universal `url`/`sha256` fields must appear before the `[[targets]]` array; placing them
+    // after would attach them to the last target entry instead of the top level.
+    let source = r#"resolver = 1
+identifier = "rtk-ai.rtk"
+namespace = "official"
+kind = "hook"
+version = "0.1.0"
+description = "RTK command rewrite hook"
+url = "https://example.com/rtk.orax"
+sha256 = "feab001d7e9ff4ce66011ebd70791de93eb1554d34d3ea44c33d102a25c1be0a"
+
+[[targets]]
+target = "x86_64-pc-windows-msvc"
+url = "https://example.com/rtk.orax"
+sha256 = "feab001d7e9ff4ce66011ebd70791de93eb1554d34d3ea44c33d102a25c1be0a"
+"#;
+    let Err(ManifestError::InvalidField { field, reason }) = PluginManifest::parse(source) else {
+        panic!("expected duplicate release source rejection");
+    };
+    assert_eq!(field, ManifestField::Targets);
+    assert!(matches!(reason, InvalidFieldReason::DuplicateReleaseSource));
+}
+
+/// Duplicate target triples within the targeted form are rejected with an index path.
+#[test]
+fn rejects_duplicate_target_triples() {
+    let source = TARGETED_HOOK_MANIFEST.to_owned()
+        + "\n[[targets]]\ntarget = \"x86_64-pc-windows-msvc\"\nurl = \"https://example.com/rtk2.orax\"\nsha256 = \"feab001d7e9ff4ce66011ebd70791de93eb1554d34d3ea44c33d102a25c1be0a\"\n";
+    let Err(ManifestError::InvalidField { field, .. }) = PluginManifest::parse(&source) else {
+        panic!("expected duplicate target rejection");
+    };
+    assert_eq!(field, ManifestField::ReleaseTargetTarget { index: 1 });
+}
+
+/// The targeted form is exclusive to hook kind plugins; other kinds are rejected.
+#[test]
+fn rejects_targeted_release_for_non_hook_kinds() {
+    let source = r#"resolver = 1
+identifier = "weather"
+namespace = "official"
+kind = "agent"
+version = "1.0.0"
+description = "Weather agent"
+
+[[targets]]
+target = "x86_64-pc-windows-msvc"
+url = "https://example.com/weather.orax"
+sha256 = "feab001d7e9ff4ce66011ebd70791de93eb1554d34d3ea44c33d102a25c1be0a"
+"#;
+    let Err(ManifestError::InvalidField { field, .. }) = PluginManifest::parse(source) else {
+        panic!("expected targeted release rejection for non-hook kind");
+    };
+    assert_eq!(field, ManifestField::Targets);
+}
+
+/// An installed targeted package carries an artifact section, not a URL or sha256.
+#[test]
+fn parses_installed_hook_manifest_with_artifact() {
+    let source = r#"resolver = 1
+identifier = "rtk-ai.rtk"
+namespace = "official"
+kind = "hook"
+version = "0.1.0"
+description = "RTK command rewrite hook"
+
+[artifact]
+target = "x86_64-pc-windows-msvc"
+"#;
+    let manifest = success(
+        PluginManifest::parse_installed(source),
+        "installed hook manifest",
+    );
+
+    assert_eq!(manifest.kind(), PluginKind::Hook);
+    assert_eq!(manifest.release_source(), None);
+    let Some(artifact) = manifest.artifact() else {
+        panic!("expected an installed artifact target");
+    };
+    assert_eq!(artifact.target().as_str(), "x86_64-pc-windows-msvc");
+}
+
+/// A hook manifest rejects workbench and webview sections.
+#[test]
+fn hook_kind_rejects_workbench_and_webview_sections() {
+    let workbench = TARGETED_HOOK_MANIFEST.to_owned() + "\n[workbench]\nmethods = [\"hello\"]\n";
+    let Err(ManifestError::InvalidField { field, .. }) = PluginManifest::parse(&workbench) else {
+        panic!("expected workbench rejection for hook kind");
+    };
+    assert_eq!(field, ManifestField::Workbench);
+
+    let webview = TARGETED_HOOK_MANIFEST.to_owned()
+        + "\n[webview]\nstart_url = \"https://a.example\"\nallowed_origins = [\"https://a.example\"]\n";
+    let Err(ManifestError::InvalidField { field, .. }) = PluginManifest::parse(&webview) else {
+        panic!("expected webview rejection for hook kind");
+    };
+    assert_eq!(field, ManifestField::Webview);
+}
+
+/// A release manifest cannot carry the installed `[artifact]` self-declaration.
+#[test]
+fn rejects_artifact_section_on_release_manifest() {
+    let source =
+        TARGETED_HOOK_MANIFEST.to_owned() + "\n[artifact]\ntarget = \"x86_64-pc-windows-msvc\"\n";
+    let Err(ManifestError::InvalidField { field, reason }) = PluginManifest::parse(&source) else {
+        panic!("expected artifact rejection on release form");
+    };
+    assert_eq!(field, ManifestField::Artifact);
+    assert!(matches!(
+        reason,
+        InvalidFieldReason::ArtifactNotAllowedOnRelease
+    ));
+}
+
+/// An installed manifest cannot carry the marketplace `[[targets]]` download list.
+#[test]
+fn rejects_targets_section_on_installed_manifest() {
+    let Err(ManifestError::InvalidField { field, reason }) =
+        PluginManifest::parse_installed(TARGETED_HOOK_MANIFEST)
+    else {
+        panic!("expected targets rejection on installed form");
+    };
+    assert_eq!(field, ManifestField::Targets);
+    assert!(matches!(
+        reason,
+        InvalidFieldReason::TargetsNotAllowedOnInstalled
+    ));
+}
+
+/// `[artifact]` is exclusive to the hook kind on an installed package.
+#[test]
+fn rejects_artifact_section_for_non_hook_kinds() {
+    let source = r#"resolver = 1
+identifier = "weather"
+namespace = "official"
+kind = "agent"
+version = "1.0.0"
+description = "Weather agent"
+
+[artifact]
+target = "x86_64-pc-windows-msvc"
+"#;
+    let Err(ManifestError::InvalidField { field, reason }) =
+        PluginManifest::parse_installed(source)
+    else {
+        panic!("expected artifact rejection for non-hook kind");
+    };
+    assert_eq!(field, ManifestField::Artifact);
+    assert!(matches!(
+        reason,
+        InvalidFieldReason::NotAllowedForKind {
+            kind: PluginKind::Agent
+        }
+    ));
+}
+
+/// An installed hook package must self-declare `[artifact]`.
+#[test]
+fn rejects_installed_hook_without_artifact() {
+    let source = r#"resolver = 1
+identifier = "rtk-ai.rtk"
+namespace = "official"
+kind = "hook"
+version = "0.1.0"
+description = "RTK command rewrite hook"
+"#;
+    let Err(ManifestError::InvalidField { field, reason }) =
+        PluginManifest::parse_installed(source)
+    else {
+        panic!("expected missing artifact rejection");
+    };
+    assert_eq!(field, ManifestField::Artifact);
+    assert!(matches!(
+        reason,
+        InvalidFieldReason::MissingForKind {
+            kind: PluginKind::Hook
+        }
+    ));
 }

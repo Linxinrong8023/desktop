@@ -2,7 +2,12 @@ import type { GraphWorkflowNodeStatus, GraphWorkflowRunStatus } from "./types";
 
 /** Backend run lifecycle states that the adapter projection maps onto. */
 export type BackendRunStatus =
-  "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "awaitingInput";
 
 /** Backend node-run lifecycle states that the adapter projection maps onto. */
 export type BackendNodeStatus =
@@ -21,6 +26,9 @@ export function projectRunStatus(
 ): GraphWorkflowRunStatus {
   if (status === "pending") {
     return currentNodes.length > 0 ? "awaiting_input" : "pending";
+  }
+  if (status === "awaitingInput") {
+    return "awaiting_input";
   }
   return status;
 }

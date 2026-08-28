@@ -1,49 +1,62 @@
 [workspace]
 members = [
     "apps/desktop/src-tauri",
+    "apps/ora-reaper",
     "crates/application",
     "crates/acp",
     "crates/backend",
     "crates/contracts",
     "crates/db",
     "crates/domain",
+    "crates/effect",
     "crates/fs",
     "crates/gitlancer",
     "crates/history",
     "crates/logging",
+    "crates/plugin-config",
     "crates/plugin-manifest",
     "crates/plugin-lifecycle",
     "crates/plugin-manager",
     "crates/plugin-runtime",
+    "crates/plugin-registry",
     "crates/process",
     "crates/pty",
+    "crates/runtime-settings",
     "crates/scheduler",
     "crates/skill-package",
+    "crates/surface",
     "crates/test-support",
     "crates/utils",
+    "crates/user-config",
     "xtask",
 ]
 default-members = [
+    "apps/ora-reaper",
     "crates/application",
     "crates/acp",
     "crates/backend",
     "crates/contracts",
     "crates/db",
     "crates/domain",
+    "crates/effect",
     "crates/fs",
     "crates/gitlancer",
     "crates/history",
     "crates/logging",
+    "crates/plugin-config",
     "crates/plugin-manifest",
     "crates/plugin-lifecycle",
     "crates/plugin-manager",
     "crates/plugin-runtime",
+    "crates/plugin-registry",
     "crates/process",
     "crates/pty",
     "crates/scheduler",
     "crates/skill-package",
+    "crates/surface",
     "crates/test-support",
     "crates/utils",
+    "crates/user-config",
     "xtask",
 ]
 resolver = "2"
@@ -64,20 +77,26 @@ ora-backend = { path = "crates/backend" }
 ora-contracts = { path = "crates/contracts" }
 ora-db = { path = "crates/db" }
 ora-domain = { path = "crates/domain" }
+ora-effect = { path = "crates/effect" }
 ora-fs = { path = "crates/fs" }
 gitlancer = { path = "crates/gitlancer" }
 ora-history = { path = "crates/history" }
 ora-logging = { path = "crates/logging" }
+ora-plugin-config = { path = "crates/plugin-config" }
 ora-plugin-manifest = { path = "crates/plugin-manifest" }
 ora-plugin-lifecycle = { path = "crates/plugin-lifecycle" }
 ora-plugin-manager = { path = "crates/plugin-manager" }
+ora-plugin-registry = { path = "crates/plugin-registry" }
 ora-plugin-runtime = { path = "crates/plugin-runtime" }
 ora-process = { path = "crates/process" }
 ora-pty = { path = "crates/pty" }
+ora-runtime-settings = { path = "crates/runtime-settings" }
 ora-scheduler = { path = "crates/scheduler" }
 ora-skill-package = { path = "crates/skill-package" }
+ora-surface = { path = "crates/surface" }
 ora-test-support = { path = "crates/test-support" }
 ora-utils = { path = "crates/utils" }
+ora-user-config = { path = "crates/user-config" }
 
 # External
 agent-client-protocol-schema = "=1.6.0"
@@ -97,7 +116,10 @@ portable-pty = "0.9"
 pretty_assertions = "1"
 r2d2 = "0.8"
 regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "stream"] }
 semver = "1"
+quick-xml = "0.41"
+sha2 = "0.10"
 rusqlite = "0.37"
 serde = "1.0"
 similar = "2"
@@ -107,6 +129,7 @@ serde_with = { version = "3" }
 serde_yaml = "0.9"
 tar = "0.4"
 tempfile = "3"
+base64 = "0.22"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
 tokio = "1"

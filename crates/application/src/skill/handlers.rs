@@ -2,9 +2,9 @@ use crate::skill::mapper::{map_skill, map_skill_details};
 use crate::skill::package_health::{
     claim_untracked_name, commit_existing_package, commit_restored_package,
     commit_unclaimed_package, has_usable_package, manifest_is_usable, package_availability,
-    persist_promoted_package,
+    persist_promoted_package, read_skill_manifest,
 };
-use crate::skill::ports::{SkillIdGenerator, SkillRepository};
+use crate::skill::ports::{LocalSkillSourceRevision, SkillIdGenerator, SkillRepository};
 use crate::skill::storage::{SkillStorage, SkillStorageError};
 use crate::{ApplicationError, Clock};
 use gray_matter::{Matter, engine::YAML};
@@ -14,6 +14,7 @@ use ora_contracts::{
     UpdateSkillRequest, UpdateSkillResponse,
 };
 use ora_domain::{AuditFields, Namespace, Skill, SkillId};
+use ora_effect::Digest;
 use ora_skill_package::manifest::{render_manifest, rewrite_manifest, rewrite_manifest_body};
 
 /// Handles atomic creation of a reusable skill definition (database plus formal directory).
@@ -105,10 +106,19 @@ where
             .write_manifest(&staging, manifest.as_bytes())
             .map_err(ApplicationError::from_skill_storage_error)?;
         let promoted = commit_unclaimed_package(&self.storage, &skill.id, &skill.name, &staging)?;
-        let created = persist_promoted_package(&self.storage, &promoted, || {
-            self.repository.create_skill(skill)
-        })
-        .map_err(ApplicationError::from_skill_repository_error)?;
+        let source_revision = self
+            .storage
+            .formal_package_path(&skill.name)
+            .map(|package_root| LocalSkillSourceRevision {
+                skill_md_digest: Digest::sha256(manifest.as_bytes()),
+                package_root,
+            });
+        let created =
+            persist_promoted_package(&self.storage, &promoted, || match source_revision {
+                Some(source) => self.repository.create_skill_with_source(skill, source),
+                None => self.repository.create_skill(skill),
+            })
+            .map_err(ApplicationError::from_skill_repository_error)?;
 
         Ok(CreateSkillResponse {
             skill: map_skill(created, SkillAvailability::Available),
@@ -146,10 +156,7 @@ where
             .ok_or_else(|| ApplicationError::SkillNotFound {
                 skill_id: skill_id.to_string(),
             })?;
-        let manifest = self
-            .storage
-            .read_manifest(&skill.name)
-            .map_err(ApplicationError::from_skill_storage_error)?;
+        let manifest = read_skill_manifest(&self.storage, &skill)?;
         let Some(manifest) = manifest else {
             return Ok(GetSkillResponse {
                 skill: map_skill_details(skill, String::new(), SkillAvailability::Unavailable),
@@ -202,7 +209,7 @@ where
             .map_err(ApplicationError::from_skill_repository_error)?;
         let mut mapped = Vec::new();
         for skill in skills {
-            let availability = package_availability(&self.storage, &skill.name)?;
+            let availability = package_availability(&self.storage, &skill)?;
             mapped.push(map_skill(skill, availability));
         }
         Ok(ListSkillsResponse { skills: mapped })
@@ -246,6 +253,9 @@ where
             .ok_or_else(|| ApplicationError::SkillNotFound {
                 skill_id: skill_id.to_string(),
             })?;
+        if existing.is_read_only() {
+            return Err(ApplicationError::SkillReadOnly);
+        }
 
         let name = request.name.trim().to_string();
         reject_conflicting_name(&self.repository, &existing.namespace, &name, &existing.id)?;
@@ -316,10 +326,19 @@ where
             &existing.name,
             &staging,
         )?;
-        let updated = persist_promoted_package(&self.storage, &promoted, || {
-            self.repository.update_skill(skill)
-        })
-        .map_err(ApplicationError::from_skill_repository_error)?;
+        let source_revision = self
+            .storage
+            .formal_package_path(&skill.name)
+            .map(|package_root| LocalSkillSourceRevision {
+                skill_md_digest: Digest::sha256(rewritten.as_bytes()),
+                package_root,
+            });
+        let updated =
+            persist_promoted_package(&self.storage, &promoted, || match source_revision {
+                Some(source) => self.repository.update_skill_with_source(skill, source),
+                None => self.repository.update_skill(skill),
+            });
+        let updated = updated.map_err(ApplicationError::from_skill_repository_error)?;
 
         Ok(UpdateSkillResponse {
             skill: map_skill(updated, SkillAvailability::Available),
@@ -368,6 +387,9 @@ where
             .ok_or_else(|| ApplicationError::SkillNotFound {
                 skill_id: skill_id.to_string(),
             })?;
+        if existing.is_read_only() {
+            return Err(ApplicationError::SkillReadOnly);
+        }
 
         let handle = match self.storage.commit_delete(&existing.name, &skill_id) {
             Ok(handle) => Some(handle),
@@ -376,7 +398,7 @@ where
         };
         let deleted = self
             .repository
-            .soft_delete_skill(&skill_id, self.clock.now_timestamp_millis())
+            .soft_delete_skill_with_source(&skill_id, self.clock.now_timestamp_millis())
             .map_err(|error| {
                 if let Some(handle) = &handle {
                     let _ = self.storage.rollback_delete(handle);
@@ -485,7 +507,15 @@ where
         &existing.name,
         &staging,
     )?;
-    let updated = persist_promoted_package(storage, &promoted, || repository.update_skill(skill))
-        .map_err(ApplicationError::from_skill_repository_error)?;
-    Ok(updated)
+    let source_revision = storage
+        .formal_package_path(&skill.name)
+        .map(|package_root| LocalSkillSourceRevision {
+            skill_md_digest: Digest::sha256(manifest.as_bytes()),
+            package_root,
+        });
+    let updated = persist_promoted_package(storage, &promoted, || match source_revision {
+        Some(source) => repository.update_skill_with_source(skill, source),
+        None => repository.update_skill(skill),
+    });
+    updated.map_err(ApplicationError::from_skill_repository_error)
 }

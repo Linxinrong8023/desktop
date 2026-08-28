@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
-import type { AgentCli } from "@ora/contracts";
 import {
   Button,
   DropdownMenu,
@@ -10,7 +9,12 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@ora/ui";
-import { IconCheck, IconChevronDown, IconLoader2 } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconChevronDown,
+  IconLoader2,
+  IconRobot,
+} from "@tabler/icons-react";
 import { useChatStore } from "../../chat-store-context";
 import { useSettingsStore } from "../../state/stores/settings-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
@@ -21,24 +25,25 @@ import {
   warmTargetKey,
 } from "../../state/hooks/use-warm-session";
 import { useTargetAgentCli } from "../../state/hooks/use-target-agent-cli";
+import { useAvailableAgents } from "../../state/hooks/use-available-agents";
 import {
   usePendingAgentStore,
   usePendingSwitch,
 } from "../../state/stores/pending-agent-store";
 import { useAgentModelStore } from "../../state/stores/agent-model-store";
 import { currentValueName, findModelOption, selectableValues } from "@ora/chat";
-import { AGENT_CLI_LABELS, AGENT_CLI_ORDER } from "./model-catalog";
-import { ProviderLogo } from "./provider-logos";
+import { PluginLogoMark } from "../settings/plugin-logo";
 
 /**
  * The composer's agent and model picker.
  *
- * Both lists describe the session the composer will send into. Which CLIs exist
- * is static; which models are available is whatever that CLI reported for this
- * session, so the model list has three states rather than two — still arriving,
- * genuinely offering no choice, or a real set to pick from.
+ * Both lists describe the session the composer will send into. Which agents exist
+ * is whatever this installation can actually reach; which models are available is
+ * whatever the chosen agent reported for this session, so the model list has three
+ * states rather than two — still arriving, genuinely offering no choice, or a real
+ * set to pick from.
  *
- * With a session selected, choosing a different CLI moves that conversation onto
+ * With a session selected, choosing a different agent moves that conversation onto
  * it rather than only changing the default for the next one. Ora owns the
  * transcript, so the thread survives the move: the backend hands it to the new
  * agent with the user's next message. The move is *recorded* here and performed
@@ -48,13 +53,24 @@ import { ProviderLogo } from "./provider-logos";
  * anything is committed. Choosing a CLI therefore leaves the menu open: picking
  * one of those models is the other half of the same decision.
  */
-export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
+export function ModelSelector({
+  disabled = false,
+  sessionId,
+}: {
+  disabled?: boolean;
+  /** Session whose model configuration should be displayed instead of workspace selection. */
+  sessionId?: string;
+}) {
   const { t } = useTranslation();
   const updateSettings = useSettingsStore((state) => state.updateSettings);
   const selection = useWorkspaceSelectionStore((state) => state.selection);
   const chatStore = useChatStore();
   const setSessionConfig = useSetSessionConfig();
   const { data: sessions = [] } = useSessions();
+  // Workflow node sessions live inside the run workspace without becoming the global workspace
+  // selection. Binding the picker explicitly keeps its read-only label attached to that node.
+  const modelSelection =
+    sessionId === undefined ? selection : { ...selection, sessionId };
 
   // Having a binding is what makes a session persisted, and only a persisted one
   // can be rebound; a warm session has no row to move. The bound CLI is also what
@@ -62,9 +78,9 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
   // at all — the resolved agent below cannot answer that, since it already
   // reports whatever move is pending.
   const boundSession = sessions.find(
-    (session) => session.id === selection.sessionId,
+    (session) => session.id === modelSelection.sessionId,
   );
-  const targetKey = warmTargetKey(selection);
+  const targetKey = warmTargetKey(modelSelection);
   const setPickedForTarget = usePendingAgentStore(
     (state) => state.setPendingAgent,
   );
@@ -74,14 +90,25 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
   const clearPendingSwitch = usePendingAgentStore(
     (state) => state.clearPendingSwitch,
   );
-  const pendingSwitch = usePendingSwitch(selection.sessionId);
+  const pendingSwitch = usePendingSwitch(modelSelection.sessionId);
   // Resolved centrally so this and the composer cannot disagree: they share one
   // warm-session query key, and the CLI is part of that key.
-  const agentCli = useTargetAgentCli(selection);
+  const agentCli = useTargetAgentCli(modelSelection);
+  // Which agents the runtime actually reports reaching here. An agent whose
+  // plugin package was uninstalled, or whose own agent process is missing,
+  // drops out of the list rather than being offered and then failing on the
+  // first message.
+  const availableAgents = useAvailableAgents();
+  // Preserve the internal preference across temporary unavailability without
+  // presenting that unavailable runtime as the active picker identity.
+  const displayedAgent = availableAgents.find(
+    (agent) => agent.agentRef === agentCli,
+  );
+  const agentIsAvailable = displayedAgent !== undefined;
 
   // Shares the workspace's warm-session query key, so this is a cache read
   // rather than a second provider session.
-  const warmSession = useWarmSession(selection, agentCli);
+  const warmSession = useWarmSession(modelSelection, agentCli);
   // A warm session, when there is one, always describes the CLI on screen —
   // including the one a pending move is heading for, whose models and model
   // choice live on it rather than on the session being moved. While that
@@ -90,7 +117,7 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
   // incoming agent's.
   const activeSessionId =
     warmSession.sessionId ??
-    (pendingSwitch === undefined ? selection.sessionId : null);
+    (pendingSwitch === undefined ? modelSelection.sessionId : null);
   // Selected narrowly rather than as one conversation object, so a streaming
   // turn does not re-render the picker on every token.
   const liveOptions = useStore(chatStore, (state) =>
@@ -107,8 +134,22 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
   // for an answer that has not arrived is the whole point: the list barely
   // changes between sessions, and waiting for `session/new` to say so again is
   // what made opening a chat feel slow.
-  const cachedOptions = useAgentModelStore((state) => state.known[agentCli]);
-  const configOptions = liveOptions ?? cachedOptions;
+  const cachedOptions = useAgentModelStore((state) =>
+    agentCli === null ? undefined : state.known[agentCli],
+  );
+  // A session can retain the last options reported before its plugin stopped.
+  // They are no longer actionable once runtime availability drops, so do not
+  // let that session-local snapshot outlive the agent row that owned it.
+  // Workflow node conversations are scoped by an explicit session id and may
+  // not appear in the workspace session list. Their read-only picker must keep
+  // showing the model captured by that conversation even when no workspace
+  // Agent preference can be resolved for it.
+  const configOptions =
+    sessionId !== undefined
+      ? liveOptions
+      : agentIsAvailable
+        ? (liveOptions ?? cachedOptions)
+        : undefined;
   const modelOption = configOptions ? findModelOption(configOptions) : null;
 
   // An agent only reports its models as part of the handshake — warming this
@@ -121,9 +162,10 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
   // is not loading and still reports empty. A pending move reads as loading for
   // the same reason: it has no session to name until the incoming CLI answers.
   const isSettling =
-    activeSessionId === null
+    agentIsAvailable &&
+    (activeSessionId === null
       ? warmSession.isOpening || pendingSwitch !== undefined
-      : liveOptions === undefined || isReplayingHistory;
+      : liveOptions === undefined || isReplayingHistory);
   // Having a list to offer is what ends the wait, not having received this
   // surface's own answer: a cached list is a real answer to "what can I pick",
   // and showing it beats spinning while the handshake confirms it. Gating on the
@@ -136,7 +178,7 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
   // a choice from it to until the handshake produces one. The values are shown
   // but not selectable for that window rather than hidden, because what the user
   // is waiting to learn — which models this agent has — is already answered.
-  const canSelectModel = activeSessionId !== null;
+  const canSelectModel = agentIsAvailable && activeSessionId !== null;
 
   // The disabled cached list on its own reads as settled, not provisional — the
   // handshake could still replace it with a different set. This names that
@@ -170,11 +212,11 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
    * happened yet — this only points the surface at it. The list below settles
    * when that answers, which is why the menu is still open to see it.
    */
-  const selectAgent = (candidate: AgentCli) => {
+  const selectAgent = (candidate: string) => {
     if (candidate === agentCli) return;
     updateSettings({ agentCli: candidate });
     if (boundSession !== undefined) {
-      if (candidate === boundSession.agentCli) {
+      if (candidate === boundSession.agentRef) {
         clearPendingSwitch(boundSession.id);
       } else {
         setPendingSwitch(boundSession.id, candidate);
@@ -207,14 +249,18 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
           />
         }
       >
-        {agentCli && (
-          <ProviderLogo agentCli={agentCli} className="size-3.5 shrink-0" />
+        {displayedAgent && (
+          <PluginLogoMark
+            logo={displayedAgent.logo}
+            fallback={IconRobot}
+            className="size-3.5 shrink-0 object-contain"
+          />
         )}
         {/* The CLI name is width-animated in via a 0fr → 1fr grid so the
             button grows smoothly on hover instead of snapping wider. */}
         <span className="grid grid-cols-[0fr] opacity-0 transition-all duration-200 group-hover/model:grid-cols-[1fr] group-hover/model:opacity-100 group-aria-expanded/model:grid-cols-[1fr] group-aria-expanded/model:opacity-100">
           <span className="min-w-0 overflow-hidden whitespace-nowrap">
-            {agentCli ? AGENT_CLI_LABELS[agentCli] : ""}
+            {displayedAgent?.label ?? ""}
           </span>
         </span>
         <span className="whitespace-nowrap">{activeLabel}</span>
@@ -235,18 +281,22 @@ export function ModelSelector({ disabled = false }: { disabled?: boolean }) {
           <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
             {t("chat.modelSelector.agent")}
           </DropdownMenuLabel>
-          {AGENT_CLI_ORDER.map((candidate) => (
+          {availableAgents.map((candidate) => (
             <DropdownMenuItem
-              key={candidate}
+              key={candidate.agentRef}
               className="gap-1.5 rounded-sm px-2 py-1.5 text-xs"
-              // Choosing a CLI is only half the choice: its models replace the
+              // Choosing an agent is only half the choice: its models replace the
               // group below and the user still has to pick one from them.
               closeOnClick={false}
-              onClick={() => selectAgent(candidate)}
+              onClick={() => selectAgent(candidate.agentRef)}
             >
-              <ProviderLogo agentCli={candidate} className="size-3.5" />
-              {AGENT_CLI_LABELS[candidate]}
-              {candidate === agentCli && (
+              <PluginLogoMark
+                logo={candidate.logo}
+                fallback={IconRobot}
+                className="size-3.5 object-contain"
+              />
+              {candidate.label}
+              {candidate.agentRef === agentCli && (
                 <IconCheck className="ml-auto size-4" />
               )}
             </DropdownMenuItem>

@@ -9,7 +9,10 @@ import {
   WORKFLOW_NODE_WIDTH,
 } from "@ora/workflow-mock";
 import { formatRunClock } from "../../lib/format";
-import { WorkflowNodeCardShell } from "../workflow-node-chrome";
+import {
+  AgentExecutionModeMark,
+  WorkflowNodeCardShell,
+} from "../workflow-node-chrome";
 import { RunStatusBadge } from "./run-status-mark";
 import { isNodeWorking, runStatusTone } from "./run-status-style";
 import type {
@@ -93,6 +96,13 @@ export const RunOverviewNode = memo(function RunOverviewNode({
       density="run"
       selected={focused}
       width={WORKFLOW_NODE_WIDTH * 0.92}
+      titleAccessory={
+        data.kind === "agent" ? (
+          <AgentExecutionModeMark
+            interactive={data.agentConfig?.interactive === true}
+          />
+        ) : undefined
+      }
       ariaLabel={`${data.title}: ${t(tone.labelKey)}`}
       frameClassName={cn(
         tone.ring,

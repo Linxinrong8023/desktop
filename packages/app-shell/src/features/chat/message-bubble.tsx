@@ -7,12 +7,13 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@ora/ui";
 import { useTranslation } from "react-i18next";
+import type { ChatMessage } from "@ora/chat";
+import type * as acp from "@agentclientprotocol/sdk";
 import { OraMark } from "../../components/ora-mark";
 import { formatClock } from "../../lib/format";
 import { AnchorHighlight } from "./anchor-highlight";
-import { MarkdownMessage } from "./markdown-message";
-import type { ChatMessage } from "@ora/chat";
 import { ContentBlock } from "./content-block";
+import { MarkdownDocument, MarkdownMessage } from "./markdown-message";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -23,6 +24,50 @@ interface MessageBubbleProps {
   compact?: boolean;
   /** Lets an embedding surface own the highlight geometry for the whole message row. */
   showAnchorHighlight?: boolean;
+}
+
+/**
+ * Read-only user body today; `mode: "edit"` is reserved for mounting
+ * ComposerEditor on the same `documentPlainText` string later.
+ */
+type UserMessageBodyMode = "view" | "edit";
+
+interface UserMessageBodyProps {
+  content: string;
+  structuredContent?: Array<Exclude<acp.ContentBlock, { type: "text" }>>;
+  messageId: string;
+  showAnchorHighlight: boolean;
+  /** Edit mounts ComposerEditor; only view is wired this release. */
+  mode?: UserMessageBodyMode;
+}
+
+/**
+ * User prompt surface: MarkdownDocument for history, TipTap Composer when
+ * editing is enabled. Persistence stays `documentPlainText` either way.
+ */
+function UserMessageBody({
+  content,
+  structuredContent,
+  messageId,
+  showAnchorHighlight,
+  mode = "view",
+}: UserMessageBodyProps) {
+  return (
+    <>
+      {structuredContent?.map((block, index) => (
+        <ContentBlock key={`${messageId}-content-${index}`} content={block} />
+      ))}
+      {content.length > 0 && mode === "view" && (
+        <div className="relative w-fit max-w-full overflow-visible rounded-2xl rounded-br-md bg-secondary px-4 py-2.5">
+          {showAnchorHighlight && <AnchorHighlight />}
+          <div className="relative">
+            <MarkdownDocument content={content} density="compact" />
+          </div>
+        </div>
+      )}
+      {/* mode === "edit" -> ComposerEditor(initialText=content) when edit ships */}
+    </>
+  );
 }
 
 /** Copies message content to the clipboard and briefly confirms with a check. */
@@ -39,7 +84,7 @@ function useCopyMessage(content: string) {
   return { copied, copy };
 }
 
-/** A single chat message: avatar + content, with hover actions on replies. */
+/** A single chat message: avatar + content, with hover copy on both roles. */
 export function MessageBubble({
   message,
   userName,
@@ -51,6 +96,7 @@ export function MessageBubble({
   const { t } = useTranslation();
   const { copied, copy } = useCopyMessage(message.content);
   const isUser = message.role === "user";
+  const canCopy = message.content.length > 0;
 
   return (
     <div
@@ -62,25 +108,12 @@ export function MessageBubble({
         className={`flex min-w-0 flex-col gap-1.5 ${isUser ? "max-w-[85%] items-end" : "flex-1"}`}
       >
         {isUser ? (
-          <>
-            {message.structuredContent?.map((content, index) => (
-              <ContentBlock
-                key={`${message.id}-content-${index}`}
-                content={content}
-              />
-            ))}
-            {message.content && (
-              <div className="relative w-fit max-w-full overflow-visible rounded-2xl rounded-br-md bg-secondary px-4 py-2.5">
-                {showAnchorHighlight && <AnchorHighlight />}
-                <p
-                  data-selectable
-                  className="relative whitespace-pre-wrap break-words text-[14px] leading-6 text-foreground"
-                >
-                  {message.content}
-                </p>
-              </div>
-            )}
-          </>
+          <UserMessageBody
+            content={message.content}
+            structuredContent={message.structuredContent}
+            messageId={message.id}
+            showAnchorHighlight={showAnchorHighlight}
+          />
         ) : (
           <div className="relative">
             {showAnchorHighlight && <AnchorHighlight />}
@@ -90,13 +123,13 @@ export function MessageBubble({
 
         {!compact && (
           <div
-            className={`flex min-h-6 items-center gap-2 ${isUser ? "pr-1" : ""}`}
+            className={`flex min-h-6 items-center gap-2 ${isUser ? "flex-row-reverse pr-1" : ""}`}
           >
             <span className="text-xs text-muted-foreground">
               {formatClock(message.createdAt)}
             </span>
-            {!isUser && (
-              <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+            <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+              {canCopy && (
                 <Button
                   variant="ghost"
                   size="icon-xs"
@@ -109,22 +142,26 @@ export function MessageBubble({
                     <IconCopy className="size-3.5 text-muted-foreground" />
                   )}
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t("chat.goodResponse")}
-                >
-                  <IconThumbUp className="size-3.5 text-muted-foreground" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t("chat.badResponse")}
-                >
-                  <IconThumbDown className="size-3.5 text-muted-foreground" />
-                </Button>
-              </div>
-            )}
+              )}
+              {!isUser && (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={t("chat.goodResponse")}
+                  >
+                    <IconThumbUp className="size-3.5 text-muted-foreground" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={t("chat.badResponse")}
+                  >
+                    <IconThumbDown className="size-3.5 text-muted-foreground" />
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>

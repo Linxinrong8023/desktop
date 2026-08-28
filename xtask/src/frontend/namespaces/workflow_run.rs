@@ -48,6 +48,13 @@ pub(super) const ENDPOINTS: &[FrontendEndpoint] = &[
         response_type: "DeleteWorkflowRunResponse",
     },
     FrontendEndpoint {
+        operation_name: "renameWorkflowRun",
+        namespace: NAMESPACE,
+        member_name: "rename",
+        request_type: "RenameWorkflowRunRequest",
+        response_type: "RenameWorkflowRunResponse",
+    },
+    FrontendEndpoint {
         operation_name: "startWorkflowRun",
         namespace: NAMESPACE,
         member_name: "start",
@@ -74,5 +81,12 @@ pub(super) const ENDPOINTS: &[FrontendEndpoint] = &[
         member_name: "updateInput",
         request_type: "UpdateWorkflowRunInputRequest",
         response_type: "UpdateWorkflowRunInputResponse",
+    },
+    FrontendEndpoint {
+        operation_name: "completeWorkflowNode",
+        namespace: NAMESPACE,
+        member_name: "completeNode",
+        request_type: "CompleteWorkflowNodeRequest",
+        response_type: "CompleteWorkflowNodeResponse",
     },
 ];

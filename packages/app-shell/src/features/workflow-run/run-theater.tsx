@@ -53,7 +53,7 @@ interface RunTheaterProps {
   onOpenInspectorOnMountConsumed?: () => void;
   /**
    * When Changes/Files is open, suppress *automatic* inspector opens (seeded
-   * mount, artifact reveal). Intentional act clicks still open the rail so
+   * mount, artifact reveal). Intentional node-detail actions still open the rail so
    * Diff and the inspector can coexist on the stage.
    */
   reviewPanelOpen?: boolean;
@@ -62,6 +62,8 @@ interface RunTheaterProps {
   /** Which node's session dock is open — lifted across Overview remounts. */
   sessionConversationNodeId?: string | null;
   onSessionConversationNodeIdChange?: (nodeId: string | null) => void;
+  /** Reports a completed interactive node so the workspace can follow its successor. */
+  onNodeCompleted?: (nodeId: string) => void;
 }
 
 /**
@@ -84,6 +86,7 @@ export function RunTheater({
   onShowOverview,
   sessionConversationNodeId = null,
   onSessionConversationNodeIdChange,
+  onNodeCompleted,
 }: RunTheaterProps) {
   const { t } = useTranslation();
   const updateInput = useUpdateWorkflowRunInput();
@@ -263,7 +266,7 @@ export function RunTheater({
 
   /**
    * Opens the act inspector. Automatic triggers stay quiet while Diff/Files is
-   * open; user clicks always open so the rail can sit beside an open Diff.
+   * open; explicit user actions always open so the rail can sit beside an open Diff.
    */
   function openInspector(reason: "automatic" | "user"): void {
     if (reason === "automatic" && reviewPanelOpen) {
@@ -292,6 +295,15 @@ export function RunTheater({
       onFrame: applyInspectorWidth,
       targetWidth: 0,
     });
+  }
+
+  /** Uses the card's persistent header control as the single inspector toggle. */
+  function toggleInspector(): void {
+    if (inspectorCollapsed) {
+      openInspector("user");
+      return;
+    }
+    closeInspector();
   }
 
   // Commits the drafted start-node instruction to the run's kickoff input in one request and
@@ -422,6 +434,9 @@ export function RunTheater({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
   }, [showResultAct]);
 
+  const primaryConversationOpen =
+    primaryNode !== undefined && sessionConversationNodeId === primaryNode.id;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <RunTheaterPathRail
@@ -442,12 +457,25 @@ export function RunTheater({
 
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          <div className="absolute inset-0 flex flex-col overflow-auto p-6">
+          <div
+            className={cn(
+              "absolute inset-0 flex flex-col p-6",
+              primaryConversationOpen ? "overflow-hidden" : "overflow-auto",
+            )}
+            style={{ right: inspectorVisualWidth }}
+          >
             <div
               className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_30%,color-mix(in_oklch,var(--muted)_55%,transparent),transparent_65%)]"
               aria-hidden
             />
-            <div className="relative mx-auto my-auto w-full max-w-xl shrink-0">
+            <div
+              className={cn(
+                "relative w-full",
+                primaryConversationOpen
+                  ? "flex h-full min-h-0 max-w-none flex-1 flex-col"
+                  : "mx-auto my-auto max-w-xl shrink-0",
+              )}
+            >
               {showResultAct ? (
                 <RunResultAct
                   run={run}
@@ -466,17 +494,20 @@ export function RunTheater({
                       : undefined
                   }
                 />
-              ) : showParallelCarousel ? (
+              ) : showParallelCarousel && !primaryConversationOpen ? (
                 <div className="space-y-3">
                   <RunTheaterParallelStage
+                    runId={run.id}
                     acts={parallelActs}
                     primaryId={primaryId!}
                     onFocusNode={onFocusNode}
-                    onOpenInspector={() => openInspector("user")}
+                    inspectorOpen={!inspectorCollapsed}
+                    onToggleInspector={toggleInspector}
                     sessionConversationNodeId={sessionConversationNodeId}
                     onSessionConversationNodeIdChange={
                       onSessionConversationNodeIdChange
                     }
+                    onNodeCompleted={onNodeCompleted}
                     primaryInteraction={
                       primaryHasHitl
                         ? ({ accessory }) =>
@@ -491,11 +522,17 @@ export function RunTheater({
               ) : primaryNode && primaryState ? (
                 <div
                   key={primaryNode.id}
-                  className="animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] fill-mode-both motion-reduce:animate-none"
+                  className={cn(
+                    "animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] fill-mode-both motion-reduce:animate-none",
+                    primaryConversationOpen &&
+                      "flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden",
+                  )}
                 >
                   <RunTheaterActCard
                     data={primaryNode.data}
                     state={primaryState}
+                    runId={run.id}
+                    nodeId={primaryNode.id}
                     live={isNodeWorking(primaryState.status)}
                     artifactCount={primaryArtifacts.length}
                     conversation={primaryConversation}
@@ -507,8 +544,10 @@ export function RunTheater({
                         open ? primaryNode.id : null,
                       );
                     }}
+                    onNodeCompleted={onNodeCompleted}
                     variant="stage"
-                    onSelect={() => openInspector("user")}
+                    inspectorOpen={!inspectorCollapsed}
+                    onToggleInspector={toggleInspector}
                     interaction={
                       primaryHasHitl
                         ? ({ accessory }) =>
@@ -526,7 +565,7 @@ export function RunTheater({
                 </p>
               )}
 
-              {!showResultAct && (
+              {!showResultAct && !primaryConversationOpen && (
                 <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
                   {parallel && (
                     <Badge variant="secondary" className="tabular-nums">
@@ -537,7 +576,7 @@ export function RunTheater({
                   )}
                 </div>
               )}
-              {!showResultAct && (
+              {!showResultAct && !primaryConversationOpen && (
                 <p className="mt-3 text-center text-[10px] text-muted-foreground/70">
                   {hitlExpanded
                     ? t("workflowRun.theater.hitlHint")
@@ -648,7 +687,7 @@ export function RunTheater({
                 instructionSavePending={
                   isEditableStart ? updateInput.isPending : false
                 }
-                onClose={closeInspector}
+                onClose={primaryNode === undefined ? closeInspector : undefined}
               />
             </div>
           </aside>

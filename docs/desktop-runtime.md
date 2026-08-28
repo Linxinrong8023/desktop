@@ -14,11 +14,42 @@ The frontend injects `createTauriTransport()` into `createContractsClient`. The 
 
 Task workspace lookup and Spec review are part of that shared contract surface. `get_task_workspace` returns the authoritative task root with an optional branch, while `get_spec_catalog` and `read_spec` delegate unary work to the shared backend. `watch_specs` and `watchAppEvents` use the same channel framing, cancellation, and exactly-once completion lifecycle as other Desktop streams.
 
-Backend construction immediately attempts supervised `opencode acp`, `nga acp`, `codeagentcli acp`, `claude-agent-acp`, and `codex-acp` children in the user's home directory. Sessions share the connection selected by their current `agentCli` while retaining their own ACP session id and Task worktree `cwd`. `switch_session_agent` moves a live conversation to another CLI and `resume_session_history` recovers one whose history writes failed. Each CLI retries independently; failures leave the Desktop shell and healthy CLIs available, while operations targeting an unavailable CLI report `agent_runtime_unavailable`. Executable lookup is platform-specific — see [ACP Agent Runtime](agent-runtime.md).
+Developer preferences use four unary commands in a separate settings command module: `get_developer_mode`, `set_developer_mode`, `get_runtime_log_level`, and `set_runtime_log_level`. They use the same lifecycle and error projection as other Desktop commands; no HTTP endpoint is involved.
+
+Backend construction immediately attempts one supervised connection per installed agent plugin; there is no other source of agents. Plugin processes are started and stopped by the plugin lifecycle, which the agent runtime attaches to rather than spawning its own. Sessions share the connection selected by their current `agentCli` while retaining their own ACP session id and Task worktree `cwd`. `switch_session_agent` moves a live conversation to another agent and `resume_session_history` recovers one whose history writes failed. Each agent retries independently; failures leave the Desktop shell and healthy agents available, while operations targeting an unavailable agent report `agent_runtime_unavailable`. Agent process discovery is owned entirely by each plugin — see [ACP Agent Runtime](agent-runtime.md).
+
+Plugins of kind `ui` contribute surfaces: remote web sites shown in isolated native webviews. Desktop hosts them in `apps/desktop/src-tauri/src/surface/` on top of the `ora-surface` registry, exposes the `surface_*` commands to the main webview, emits `surface://event`, writes surface downloads into `<data-dir>/plugins/data/<namespace>/<name>/downloads/`, starts the plugin process on demand, and stops it 30 s after its last surface closes. Plugin processes have no filesystem access of their own; they read their data directory back through the `ora/storage/*` host methods served by `ora-plugin-lifecycle`. Disabling, stopping, or uninstalling a plugin closes its surfaces first through the lifecycle's `SurfaceCloser`. See [Plugin Surfaces](surface.md).
 
 The Desktop App Shell waits for the `Ready` frame before mounting normal queries and watchers. The application stream is a multi-subscriber, best-effort session-title invalidation broadcast rather than a persisted event log.
 
-Beyond the shared contract surface, Desktop registers four platform-only commands: `get_desktop_config`, `set_worktree_root`, `resolve_task_cwd`, and `open_location`.
+Beyond the shared contract surface, Desktop registers four platform-only commands: `get_worktree_root`, `set_worktree_root`, `resolve_task_cwd`, and `open_location`. `open_location` with target `explorer` reveals a file in the system file manager (`explorer.exe /select,` on Windows, `open -R` on macOS) so the default file association — often Cursor — is not launched. Existing directories still open as folder windows.
+
+## Desktop updates
+
+Release builds register the Tauri updater and an in-process `ora-scheduler` job. The job performs
+an initial delayed check and then checks the static GitHub Release manifest every six hours. The
+manifest is `https://github.com/ora-space/desktop/releases/latest/download/latest.json`; Tauri
+selects the current OS/architecture and verifies its signed updater artifact before the Desktop
+service writes identity-addressed artifacts below `~/.ora/cache/desktop-updates/v2/`. Development
+builds keep the commands available for integration tests but do not register network work. The
+updater status is exposed by `get_desktop_update_status` and installation is started by
+`install_desktop_update`; status changes are emitted as `desktop-update-status-changed`. A
+successful current-version check removes the
+committed artifact entry. On a later process start, a fresh manifest check can match that identity,
+re-verify the package with the configured updater public key, and reuse it without another
+download. The updater public key is configured in
+`apps/desktop/src-tauri/tauri.conf.json`; release artifacts still require the matching private
+key in the GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY`.
+
+A package that has already been downloaded stays installable: a later check that fails is logged
+and leaves the `Ready` status in place, because the verified bytes are still on disk. `Failed` is
+therefore only reported when nothing was installable to begin with, and a failed installation
+restores `Ready` so the user can retry.
+
+The static manifest advertises an AppImage for Linux, which the updater can only install into an
+AppImage installation. A `deb` or `rpm` installation, or a build running as a bare executable, is
+reported as `ManualUpdate` with the reason instead, before any download is spent; the shell then
+names the release and the channel to update through rather than offering an install action.
 
 ## Skill imports
 
@@ -39,13 +70,13 @@ The configured root is only a creation target. Existing worktree locations are r
 The Tauri identifier is `space.ora.desktop`. Tauri's system `app_data_dir` owns all default runtime state:
 
 - SQLite: `app_data_dir/ora.sqlite3`
-- Configuration: `app_data_dir/config.json`
+- User configuration, including `worktree_root` and `network_proxy_settings`: `app_data_dir/ora.sqlite3`, table `user_config`
 - Logs: `app_data_dir/logs/ora.log`
 - Default new-worktree root: `~/.ora/worktrees`
 - Session history: `app_data_dir/sessions`
 - Skill packages root: `app_data_dir/atoms/skills`
 
-On first launch, Desktop creates the app data directory, `~/.ora/worktrees`, and a versioned configuration file using an atomic sibling-temporary-file replacement. `config.json` currently holds version `1` and the `worktreeRoot`. Existing malformed, unknown-version, or otherwise invalid configuration is fatal; Desktop does not silently reset it.
+On first launch, Desktop creates the app data directory and `~/.ora/worktrees`, then persists the selected worktree root in SQLite when initialization completes. Existing installations are migrated once: if `config.json` contains a valid version-1 `worktreeRoot`, that value is written to `user_config.worktree_root` and the legacy file is removed. An existing SQLite value takes precedence. Invalid legacy configuration is fatal and is kept intact for diagnosis.
 
 `ORA_DATA_DIR` controls Desktop's runtime data root. `task run:desktop` points it at the repo `.data` directory for local development. Relative project roots stored in that database are resolved against the data directory's parent (the repo root), not the Tauri process cwd — `tauri dev` starts in `apps/desktop/src-tauri`, which would otherwise miss paths such as `.data/rustun`. Without `ORA_DATA_DIR`, runtime data paths come from Tauri's `app_data_dir`; the first-run worktree root remains `~/.ora/worktrees`, and folder-picker selections are already absolute.
 
@@ -55,7 +86,7 @@ The configured root is only a creation target. Existing worktree locations are r
 
 ## Logging
 
-Desktop initializes `ora-logging` before opening the backend and registers the Gitlancer logger bridge. Logs rotate daily and retain three files. Debug builds write to stdout and the file; release builds write to the file only. The logging guard remains managed for the application lifetime.
+Desktop initializes `ora-logging` before opening the backend and registers the Gitlancer logger bridge. It accepts `ORA_LOG_LEVEL` as a process-only startup override; otherwise it restores the SQLite `log_level` preference, defaulting to `info`. The reload control and persistence adapter are composed through `ora-runtime-settings`, which serializes updates and compensates the live filter when persistence fails. Logs rotate daily and retain three files. Debug builds write to stdout and the file; release builds write to the file only. The logging guard remains managed for the application lifetime.
 
 Each unary command or stream emits at most one request-completion event using the same request id as
 its public failure payload or error frame. Cancellation is completed at `DEBUG` and is not projected

@@ -2,8 +2,9 @@ use ora_application::{
     BACKUP_DIR_NAME, FilesystemSkillStorage, JournalOp, JournalPhase, STAGING_DIR_NAME,
     SkillRepository, SkillStorage, TransactionJournal,
 };
-use ora_db::{RepositoryPool, SqliteSkillRepository};
+use ora_db::{RepositoryPool, SourcePublication, SqliteEffectRepository, SqliteSkillRepository};
 use ora_domain::SkillId;
+use ora_effect::{DesiredSkillState, Digest, SkillName, SkillSource, SkillState, SourceVersion};
 use ora_logging::ora_warn;
 use std::collections::BTreeSet;
 use std::fs;
@@ -31,6 +32,7 @@ pub(crate) fn reconcile_skill_storage(
     skills_root: &Path,
 ) -> Result<(), SkillStorageReconciliationError> {
     let repository = SqliteSkillRepository::new(pool.clone());
+    let effect_repository = SqliteEffectRepository::new(pool.clone());
     let storage = FilesystemSkillStorage::new(skills_root.to_path_buf());
 
     let journals = storage.list_journals().map_err(operation_failed)?;
@@ -44,17 +46,53 @@ pub(crate) fn reconcile_skill_storage(
     let visible = repository.list_skills().map_err(operation_failed)?;
     let mut claimed = BTreeSet::new();
     for skill in visible {
+        if skill.is_read_only() {
+            continue;
+        }
         let has_directory = storage.formal_exists(&skill.name);
-        let has_manifest = storage
+        let manifest = storage
             .read_manifest(&skill.name)
-            .map_err(operation_failed)?
-            .is_some();
-        if !has_directory || !has_manifest {
+            .map_err(operation_failed)?;
+        if !has_directory || manifest.is_none() {
             ora_warn!(
                 message = "skill package is missing or incomplete; catalog row stays unavailable",
                 skill_id = skill.id.to_string(),
                 skill_name = skill.name.clone(),
             );
+        } else if let Some(manifest) = manifest {
+            let parsed = ora_skill_package::parse_manifest(
+                &manifest,
+                ora_skill_package::Limits::default().max_manifest_bytes,
+            );
+            if parsed
+                .as_ref()
+                .is_ok_and(|parsed| parsed.name == skill.name)
+            {
+                let state = DesiredSkillState::try_new(SkillState {
+                    name: SkillName::parse(skill.name.clone()).map_err(operation_failed)?,
+                    skill_md_digest: Digest::sha256(&manifest),
+                    source: SkillSource::Local {
+                        namespace: skill.namespace.clone(),
+                        version: SourceVersion::parse(skill.audit_fields.updated_at.to_string())
+                            .map_err(operation_failed)?,
+                    },
+                })
+                .map_err(operation_failed)?;
+                effect_repository
+                    .publish_source(
+                        &state,
+                        &skills_root.join(&skill.name),
+                        SourcePublication::Create,
+                        skill.audit_fields.updated_at,
+                    )
+                    .map_err(operation_failed)?;
+            } else {
+                ora_warn!(
+                    message = "skill package is invalid; source state stays unavailable",
+                    skill_id = skill.id.to_string(),
+                    skill_name = skill.name.clone(),
+                );
+            }
         }
         claimed.insert(skill.name);
     }
@@ -279,18 +317,20 @@ mod tests {
     use super::reconcile_skill_storage;
     use ora_application::{
         BACKUP_DIR_NAME, FilesystemSkillStorage, NoopSkillImportProgressPublisher,
-        SkillImportConfig, SkillImportService, SkillRepository, TransactionJournal,
-        UuidSkillImportIdGenerator,
+        ProjectRepository, SkillImportConfig, SkillImportService, SkillRepository,
+        TransactionJournal, UuidSkillImportIdGenerator,
     };
     use ora_contracts::{
         CommitSkillImportRequest, GetSkillImportSessionRequest, PrepareSkillImportRequest,
         SkillImportSource,
     };
     use ora_db::{
-        DatabaseBootstrapper, DatabaseLocation, RepositoryPool, SqliteSkillRepository,
-        default_migration_catalog,
+        DatabaseBootstrapper, DatabaseLocation, RepositoryPool, SqliteProjectRepository,
+        SqliteSkillRepository, default_migration_catalog,
     };
-    use ora_domain::{AuditFields, Namespace, Skill, SkillId};
+    use ora_domain::{
+        AuditFields, Namespace, Project, ProjectId, Skill, SkillId, WorkspaceLocation,
+    };
     use pretty_assertions::assert_eq;
     use std::fs;
     use std::path::Path;
@@ -839,6 +879,51 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+    }
+
+    /// Verifies startup can publish an older Skill into a Workspace created later.
+    #[test]
+    fn reconciles_skill_older_than_existing_workspace() {
+        let temp = TempDir::new().unwrap();
+        let skills_root = temp.path().join("atoms").join("skills");
+        let database_path = temp.path().join("ora.sqlite3");
+        let repository_pool = pool(&database_path);
+        let skill_timestamp = 100;
+        let workspace_timestamp = 200;
+
+        create_formal(
+            &skills_root,
+            "review",
+            "---\nname: review\ndescription: Reviews changes\n---\n",
+        );
+        SqliteSkillRepository::new(repository_pool.clone())
+            .create_skill(
+                Skill::new(
+                    SkillId::new("skill-1"),
+                    Namespace::local(),
+                    "review",
+                    "Reviews changes",
+                    AuditFields::new(skill_timestamp, skill_timestamp, /*is_deleted*/ false),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        SqliteProjectRepository::new(repository_pool.clone())
+            .create_project(
+                Project::new(
+                    ProjectId::new("project-1"),
+                    "Demo",
+                    AuditFields::new(
+                        workspace_timestamp,
+                        workspace_timestamp,
+                        /*is_deleted*/ false,
+                    ),
+                ),
+                WorkspaceLocation::local_filesystem(temp.path().to_string_lossy()),
+            )
+            .unwrap();
+
+        reconcile_skill_storage(&repository_pool, &skills_root).unwrap();
     }
 
     #[test]

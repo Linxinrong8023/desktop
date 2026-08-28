@@ -12,11 +12,11 @@
 | `SqliteWorktreeRepository`                  | `WorktreeRepository`                            |
 | `SqliteSkillRepository`                     | `SkillRepository`                               |
 | `SqliteAgentDefinitionRepository`           | `AgentDefinitionRepository`                     |
-| `SqliteTaskDiffCommentRepository`           | `TaskDiffCommentRepository`                     |
 | `SqliteWorkflowRepository`                  | `WorkflowRepository`                            |
 | `SqliteWorkflowRunRepository`               | `WorkflowRunRepository`                         |
 | `SqliteCascadeRepository`                   | aggregate deletion used by `ora-backend`        |
 | `SqliteTaskWorkspaceRepository`             | `TaskWorkspaceCommit`                           |
+| `SqliteUserConfigRepository`                | `UserConfigRepository`                          |
 | `SqliteWorktreeProvisioningLeaseRepository` | `WorktreeProvisioningLeaseStore`                |
 | `SqliteGitCleanupJobRepository`             | durable Git cleanup queue used by `ora-backend` |
 
@@ -48,12 +48,13 @@ File-backed parent directories are not created here. The Desktop composition roo
 
 Repositories map SQLite columns onto the current `ora-domain` shapes, including audit fields and enum-backed columns:
 
-- `tasks.worktree_id` becomes `Option<WorktreeId>`.
+- `worktrees.workspace_id` is both the primary key and the owning Workspace foreign key, so the row cannot acquire an identity independent from its Workspace.
 - `sessions.status` becomes `SessionStatus`; `sessions.agent_cli` text becomes `AgentCli` through the namespaced persisted value; nullable `sessions.title` becomes `Option<SessionTitle>` after domain validation; the nullable `sessions.history_degraded_reason` becomes `HistoryState`, where absence means writable.
 - `worktrees.is_active` becomes `WorktreeActivity`; `worktrees.branch_name` stays optional.
-- `task_diff_comments` maps root-thread columns and reply columns into the mutually exclusive `TaskDiffCommentKind` enum. Visible comments are returned in `(created_at, id)` order; malformed rows fail rather than being coerced.
 
 An unrecognized persisted category value is a mapping failure, not a silently coerced default.
+
+The `user_config` adapter implements the generic raw key/value port from `ora-user-config`; it owns only SQLite reads, upserts, and deletes. Typed interpretation stays above the adapter: the application layer owns developer-mode, log-level, and network-proxy defaults and validation, while Desktop Backend owns the `worktree_root` path policy. Malformed persisted values fail explicitly instead of being coerced, and each write updates only the requested key.
 
 ## Aggregate deletion
 

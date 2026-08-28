@@ -1,7 +1,5 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { AgentCli } from "@ora/contracts";
-
 export type ThemeMode = "system" | "light" | "dark";
 export type InterfaceDensity = "comfortable" | "compact";
 export type ApprovalPolicy = "always" | "risky" | "trusted";
@@ -10,7 +8,14 @@ export type HistoryRetention = "30-days" | "90-days" | "forever";
 export interface SettingsPreferences {
   theme: ThemeMode;
   density: InterfaceDensity;
-  agentCli: AgentCli;
+  /**
+   * Persisted namespaced identity of the agent the next untouched chat surface opens on.
+   *
+   * Deliberately an open string: which agents exist depends on installed plugins, so a stored
+   * identity naming one that is no longer installed is an ordinary state. The pickers resolve it
+   * against the live runtime rather than validating it here.
+   */
+  agentCli: string | null;
   approvalPolicy: ApprovalPolicy;
   terminalAccess: boolean;
   fileWriteAccess: boolean;
@@ -25,7 +30,7 @@ const SETTINGS_STORAGE_KEY = "ora.settings.v1";
 export const DEFAULT_SETTINGS: SettingsPreferences = {
   theme: "system",
   density: "comfortable",
-  agentCli: "open_code",
+  agentCli: null,
   approvalPolicy: "trusted",
   terminalAccess: true,
   fileWriteAccess: true,
@@ -52,8 +57,27 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: SETTINGS_STORAGE_KEY,
+      version: 2,
       storage: createJSONStorage(() => window.localStorage),
-      // Tolerate partial/corrupt persisted state by merging over defaults.
+      // Version 1 persisted the implicit OpenCode default together with unrelated
+      // preference changes, so that value cannot prove the user selected it. A
+      // different CLI could only have been written by an explicit picker action
+      // and is retained; the former default becomes the new unselected state.
+      migrate: (persisted, version) => {
+        if (version >= 2) return persisted as SettingsState;
+        const previous = persisted as Partial<SettingsState> | undefined;
+        const previousSettings = previous?.settings;
+        if (previousSettings?.agentCli !== "ora-space.opencode")
+          return persisted as SettingsState;
+        return {
+          ...previous,
+          settings: { ...previousSettings, agentCli: null },
+        } as SettingsState;
+      },
+      // Tolerate partial/corrupt persisted state by merging over defaults. A stored agent
+      // identity is carried forward unexamined: agents arrive with installed plugins, so this
+      // build cannot know which identities are real, and the pickers already resolve a stored one
+      // against the live runtime before offering or warming it.
       merge: (persisted, current) => {
         const persistedSettings = (
           persisted as Partial<SettingsState> | undefined

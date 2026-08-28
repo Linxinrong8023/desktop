@@ -25,7 +25,8 @@ type TauriStreamOperation =
   | "promptSession"
   | "watchAppEvents"
   | "watchSpecs"
-  | "watchWorkspace";
+  | "watchWorkspace"
+  | "watchProject";
 type SupportedTauriOperation = Exclude<EndpointOperation, TauriStreamOperation>;
 
 const tauriCommands = {
@@ -40,6 +41,14 @@ const tauriCommands = {
   deleteProject: "delete_project",
 
   // =============================================================================
+  // workspace
+  // =============================================================================
+  listWorkspaces: "list_workspaces",
+  getWorkspaceDiff: "get_workspace_diff",
+  commitWorkspaceChanges: "commit_workspace_changes",
+  pushWorkspaceBranch: "push_workspace_branch",
+
+  // =============================================================================
   // task
   // =============================================================================
   createTask: "create_task",
@@ -48,13 +57,6 @@ const tauriCommands = {
   updateTask: "update_task",
   deleteTask: "delete_task",
   getTaskWorkspace: "get_task_workspace",
-  getTaskDiff: "get_task_diff",
-  commitTaskChanges: "commit_task_changes",
-  pushTaskBranch: "push_task_branch",
-  listTaskDiffComments: "list_task_diff_comments",
-  createTaskDiffComment: "create_task_diff_comment",
-  replyTaskDiffComment: "reply_task_diff_comment",
-  setTaskDiffCommentStatus: "set_task_diff_comment_status",
 
   // =============================================================================
   // fileSystem
@@ -62,6 +64,9 @@ const tauriCommands = {
   listWorkspaceDirectory: "list_workspace_directory",
   readWorkspaceFile: "read_workspace_file",
   searchWorkspace: "search_workspace",
+  listProjectDirectory: "list_project_directory",
+  readProjectFile: "read_project_file",
+  searchProject: "search_project",
 
   // =============================================================================
   // spec
@@ -80,6 +85,7 @@ const tauriCommands = {
   switchSessionAgent: "switch_session_agent",
   resumeSessionHistory: "resume_session_history",
   respondToSessionPermission: "respond_to_session_permission",
+  cancelSessionPrompt: "cancel_session_prompt",
   stopSession: "stop_session",
   deleteSession: "delete_session",
   renameSession: "rename_session",
@@ -88,7 +94,6 @@ const tauriCommands = {
   // agentRuntime
   // =============================================================================
   getAgentRuntimeStatus: "get_agent_runtime_status",
-
   // =============================================================================
   // skill
   // =============================================================================
@@ -115,7 +120,24 @@ const tauriCommands = {
   // =============================================================================
   // plugin
   // =============================================================================
+  listAvailablePlugins: "list_available_plugins",
+  syncAvailablePlugins: "sync_available_plugins",
+  readPluginReadme: "read_plugin_readme",
+  listMarketplaceSources: "list_marketplace_sources",
+  addMarketplaceSource: "add_marketplace_source",
+  deleteMarketplaceSource: "delete_marketplace_source",
+  updateMarketplaceSource: "update_marketplace_source",
   listInstalledPlugins: "list_installed_plugins",
+  getPluginConfiguration: "get_plugin_configuration",
+  savePluginConfiguration: "save_plugin_configuration",
+  resetPluginConfiguration: "reset_plugin_configuration",
+  scanPlugins: "scan_plugins",
+  activatePlugin: "activate_plugin",
+  stopPlugin: "stop_plugin",
+  uninstallPlugin: "uninstall_plugin",
+  installPlugin: "install_plugin",
+  updatePlugin: "update_plugin",
+  importPlugin: "import_plugin",
 
   // =============================================================================
   // gitIdentity
@@ -148,11 +170,30 @@ const tauriCommands = {
   listWorkflowRuns: "list_workflow_runs",
   listWorkflowRunsByWorkflow: "list_workflow_runs_by_workflow",
   listWorkflowNodeRuns: "list_workflow_node_runs",
+  renameWorkflowRun: "rename_workflow_run",
   deleteWorkflowRun: "delete_workflow_run",
   startWorkflowRun: "start_workflow_run",
   cancelWorkflowRun: "cancel_workflow_run",
   restartWorkflowRun: "restart_workflow_run",
   updateWorkflowRunInput: "update_workflow_run_input",
+  // =============================================================================
+  // developerMode
+  // =============================================================================
+  getDeveloperMode: "get_developer_mode",
+  setDeveloperMode: "set_developer_mode",
+
+  // =============================================================================
+  // runtimeLogLevel
+  // =============================================================================
+  getRuntimeLogLevel: "get_runtime_log_level",
+  setRuntimeLogLevel: "set_runtime_log_level",
+
+  // =============================================================================
+  // proxy
+  // =============================================================================
+  getProxySettings: "get_proxy_settings",
+  setProxySettings: "set_proxy_settings",
+  completeWorkflowNode: "complete_workflow_node",
 } as const satisfies Record<SupportedTauriOperation, string>;
 
 /** Creates the Desktop contracts transport backed by unary commands and Tauri IPC channels. */
@@ -225,7 +266,8 @@ function isTauriStreamOperation(
     operation === "promptSession" ||
     operation === "watchAppEvents" ||
     operation === "watchSpecs" ||
-    operation === "watchWorkspace"
+    operation === "watchWorkspace" ||
+    operation === "watchProject"
   );
 }
 

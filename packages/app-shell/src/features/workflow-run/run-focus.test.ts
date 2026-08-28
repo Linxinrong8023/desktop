@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createMockWorkflow as createMockWorkflowFixture } from "@ora/workflow-mock";
 import {
+  resolveCompletionAdvanceNodeId,
   resolveFocusNodeId,
   resolveOverviewFocusedId,
   resolveStageFocusNodeId,
   resolveTheaterFocus,
+  shouldAdvanceAutomaticConversation,
   shouldReleaseFocusToFollow,
   shouldReleaseLivePinToFollow,
   shouldStealFocusForArtifactReveal,
@@ -34,6 +36,54 @@ function baseRun(overrides: Partial<GraphWorkflowRun> = {}): GraphWorkflowRun {
     ...overrides,
   };
 }
+
+describe("resolveCompletionAdvanceNodeId", () => {
+  it("waits for the completed node's refreshed terminal state", () => {
+    const run = baseRun({
+      nodeStates: {
+        start: { status: "succeeded", finishedAt: "a" },
+        understand: { status: "succeeded", finishedAt: "b" },
+        quality: { status: "awaiting_input", startedAt: "c" },
+        tests: { status: "running", startedAt: "d" },
+        review: { status: "idle" },
+        output: { status: "idle" },
+      },
+    });
+
+    expect(resolveCompletionAdvanceNodeId(run, "quality")).toBeNull();
+  });
+
+  it("chooses the first parallel active node in stable path order", () => {
+    const run = baseRun({
+      nodeStates: {
+        start: { status: "succeeded", finishedAt: "a" },
+        understand: { status: "succeeded", finishedAt: "b" },
+        quality: { status: "succeeded", finishedAt: "c" },
+        tests: { status: "running", startedAt: "d" },
+        review: { status: "running", startedAt: "d" },
+        output: { status: "idle" },
+      },
+    });
+
+    expect(resolveCompletionAdvanceNodeId(run, "quality")).toBe("tests");
+  });
+
+  it("returns no target when the workflow has no active successor", () => {
+    const run = baseRun({
+      status: "succeeded",
+      nodeStates: {
+        start: { status: "succeeded", finishedAt: "a" },
+        understand: { status: "succeeded", finishedAt: "b" },
+        quality: { status: "succeeded", finishedAt: "c" },
+        tests: { status: "succeeded", finishedAt: "d" },
+        review: { status: "succeeded", finishedAt: "d" },
+        output: { status: "succeeded", finishedAt: "e" },
+      },
+    });
+
+    expect(resolveCompletionAdvanceNodeId(run, "review")).toBeNull();
+  });
+});
 
 describe("shouldReleaseFocusToFollow", () => {
   it("releases when the same live focus just became terminal", () => {
@@ -110,6 +160,41 @@ describe("shouldReleaseFocusToFollow", () => {
         { nodeId: "understand", status: "running" },
         "understand",
         undefined,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("shouldAdvanceAutomaticConversation", () => {
+  it("advances an open automatic session when its running node finishes", () => {
+    expect(
+      shouldAdvanceAutomaticConversation(
+        { nodeId: "tests", status: "running" },
+        "tests",
+        "succeeded",
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves interactive completion to its explicit action", () => {
+    expect(
+      shouldAdvanceAutomaticConversation(
+        { nodeId: "quality", status: "running" },
+        "quality",
+        "succeeded",
+        true,
+      ),
+    ).toBe(false);
+  });
+
+  it("does not advance a historical session that was already terminal", () => {
+    expect(
+      shouldAdvanceAutomaticConversation(
+        { nodeId: "tests", status: "succeeded" },
+        "tests",
+        "succeeded",
+        false,
       ),
     ).toBe(false);
   });

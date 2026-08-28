@@ -9,8 +9,16 @@ pub enum DomainModelError {
     EmptyNamespace,
     #[error("worktree baseline commit must not be empty")]
     EmptyWorktreeBaseline,
-    #[error("invalid task type value: {0}")]
-    InvalidTaskType(i64),
+    #[error("invalid workspace kind value: {0}")]
+    InvalidWorkspaceKind(String),
+    #[error("invalid workspace lifecycle value: {0}")]
+    InvalidWorkspaceLifecycle(String),
+    #[error("invalid workspace location kind value: {0}")]
+    InvalidWorkspaceLocationKind(String),
+    #[error("invalid workspace provisioner kind value: {0}")]
+    InvalidWorkspaceProvisionerKind(String),
+    #[error("invalid workspace provisioning state value: {0}")]
+    InvalidWorkspaceProvisioningState(String),
     #[error("invalid workflow run status value: {0}")]
     InvalidWorkflowRunStatus(i64),
     #[error("invalid workflow node status value: {0}")]
@@ -21,10 +29,8 @@ pub enum DomainModelError {
     InvalidGitCleanupJobState(String),
     #[error("invalid session status value: {0}")]
     InvalidSessionStatus(i64),
-    #[error("invalid plugin enabled state value: {0}")]
-    InvalidPluginEnabledState(i64),
-    #[error("invalid agent CLI value: {0}")]
-    InvalidAgentCli(String),
+    #[error("invalid agent reference: {0}")]
+    InvalidAgentRef(String),
     #[error("invalid session title: {0}")]
     InvalidSessionTitle(#[from] SessionTitleError),
     #[error("skill name must not be blank")]

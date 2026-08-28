@@ -17,6 +17,14 @@ tasks:
   install:
     desc: Install all dependencies for the project
     cmds:
+      - |
+        {{if eq OS "windows"}}
+        if not exist specs git clone https://github.com/ora-space/specs specs
+        {{else}}
+        if [ ! -d specs ]; then
+          git clone https://github.com/ora-space/specs specs
+        fi
+        {{end}}
       - task: install:frontend
       - task: install:crates
       - task: build
@@ -46,9 +54,20 @@ tasks:
     cmds:
       - cargo build --workspace
 
+  build:reaper:
+    desc: Build the debug process reaper sidecar for the current target
+    cmds:
+      - node scripts/build-reaper.mjs
+
+  build:reaper:release:
+    desc: Build the release process reaper sidecar for the current target
+    cmds:
+      - node scripts/build-reaper.mjs --release
+
   build:desktop:
     desc: Build and bundle the Tauri desktop app installers
     cmds:
+      - task: build:reaper:release
       - task: export-contracts
       - pnpm --filter @ora/desktop tauri build
 
@@ -82,6 +101,7 @@ tasks:
     cmds:
       - pnpm --filter @ora/desktop format
       - pnpm --filter @ora/chat format
+      - pnpm --filter @ora/editor format
       - pnpm --filter @ora/workflow-runtime format
       - pnpm --filter @ora/app-shell format
       - pnpm --filter @ora-space/plugin-sdk format
@@ -102,16 +122,12 @@ tasks:
     desc: Run linters on all frontend packages
     silent: true
     cmds:
-      - pnpm --filter @ora/desktop format:check
       - pnpm --filter @ora/desktop lint
       - pnpm --filter @ora/contracts lint
-      - pnpm --filter @ora/chat format:check
       - pnpm --filter @ora/chat lint
-      - pnpm --filter @ora/workflow-runtime format:check
+      - pnpm --filter @ora/editor lint
       - pnpm --filter @ora/workflow-runtime lint
-      - pnpm --filter @ora/app-shell format:check
       - pnpm --filter @ora/app-shell lint
-      - pnpm --filter @ora-space/plugin-sdk format:check
       - pnpm --filter @ora-space/plugin-sdk lint
 
   lint:crates:
@@ -136,6 +152,7 @@ tasks:
       - pnpm --filter @ora/desktop test
       - pnpm --filter @ora/contracts test
       - pnpm --filter @ora/chat test
+      - pnpm --filter @ora/editor test
       - pnpm --filter @ora/workflow-runtime test
       - pnpm --filter @ora/app-shell test
       - pnpm --filter @ora-space/plugin-sdk test
@@ -166,6 +183,7 @@ tasks:
       ORA_DATA_DIR: "{{.ROOT_DIR}}/.data"
       VSLANG: "1033"
     cmds:
+      - task: build:reaper
       - pnpm --filter @ora/desktop tauri dev
 
   logdy:

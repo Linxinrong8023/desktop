@@ -1,9 +1,17 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Badge, cn } from "@ora/ui";
+import {
+  IconLayoutSidebarRightCollapse,
+  IconLayoutSidebarRightExpand,
+} from "@tabler/icons-react";
+import { Badge, Button, cn } from "@ora/ui";
 import { createMockWorkflowNodeType } from "@ora/workflow-mock";
 import { formatRunClock } from "../../lib/format";
-import { WorkflowNodeCardShell } from "../workflow-node-chrome";
+import { useAgentCatalog } from "../chat/agent-catalog";
+import {
+  AgentExecutionModeMark,
+  WorkflowNodeCardShell,
+} from "../workflow-node-chrome";
 import {
   resolveTheaterActDetail,
   resolveTheaterActInstruction,
@@ -15,7 +23,7 @@ import {
 import { RunBriefPopover } from "./run-brief-popover";
 import { RunStatusBadge } from "./run-status-mark";
 import { isNodeWorking, runStatusTone } from "./run-status-style";
-import { RunNodeConversation } from "./run-node-conversation";
+import { RunNodeSessionChat } from "./run-node-session-chat";
 import { shouldPreviewBrief } from "./should-preview-brief";
 import type {
   GraphWorkflowNodeState,
@@ -27,14 +35,20 @@ import "./theater-motion.css";
 interface RunTheaterActCardProps {
   data: WorkflowNodeData;
   state: GraphWorkflowNodeState;
+  /** Run identifier used by an interactive node's explicit completion action. */
+  runId?: string;
+  /** Node identifier used by an interactive node's explicit completion action. */
+  nodeId?: string;
   /** Soft emphasis when this act is live (running / awaiting). */
   live: boolean;
   /** Glanceable outcome count; detail lives in the act inspector. */
   artifactCount?: number;
   /** Large primary stage vs secondary parallel card. */
   variant?: "stage" | "compact";
-  /** Opens the act inspector (stage) or promotes a parallel act. */
-  onSelect?: () => void;
+  /** Whether the companion inspector is currently expanded. */
+  inspectorOpen?: boolean;
+  /** Toggles the companion inspector from the dedicated header control. */
+  onToggleInspector?: () => void;
   /** Stronger stage presence when this card is the focused parallel act. */
   emphasized?: boolean;
   /**
@@ -50,33 +64,40 @@ interface RunTheaterActCardProps {
   /** Controlled session-dock open state (workspace lifts this across view remounts). */
   conversationOpen?: boolean;
   onConversationOpenChange?: (open: boolean) => void;
+  /** Lets the workspace move an open session dock after interactive completion. */
+  onNodeCompleted?: (nodeId: string) => void;
 }
 
 /**
  * Theater act card: instruction + metrics on the stage surface.
- * Clicking the primary card opens the companion inspector for full config
- * and outcomes.
+ * A dedicated header control opens the companion inspector so nested session
+ * interactions never compete with a whole-card click target.
  */
 export function RunTheaterActCard({
   data,
   state,
+  runId,
+  nodeId,
   live,
   artifactCount = 0,
   variant = "stage",
-  onSelect,
+  inspectorOpen = false,
+  onToggleInspector,
   emphasized = true,
   interaction,
   conversation = [],
   conversationEnabled = true,
   conversationOpen: conversationOpenProp,
   onConversationOpenChange,
+  onNodeCompleted,
 }: RunTheaterActCardProps) {
   const { i18n, t } = useTranslation();
   const locale =
     i18n.resolvedLanguage === "en-US" ? ("en-US" as const) : ("zh-CN" as const);
+  const agentCatalog = useAgentCatalog();
   const kindLabel = createMockWorkflowNodeType(data.kind, locale).label;
   const tone = runStatusTone(state.status);
-  const detail = resolveTheaterActDetail(data);
+  const detail = resolveTheaterActDetail(data, agentCatalog);
   const instruction = resolveTheaterActInstruction(data);
   const compact = variant === "compact";
   const [uncontrolledConversationOpen, setUncontrolledConversationOpen] =
@@ -96,7 +117,17 @@ export function RunTheaterActCard({
   // node messages before answering a permission or clarify gate.
   const canUseConversation = !compact && conversationEnabled;
   const isConversationOpen = conversationOpen && canUseConversation;
-  const interactive = onSelect !== undefined && !isConversationOpen;
+  const sessionChatIdentity =
+    isConversationOpen && state.sessionId != null
+      ? { sessionId: state.sessionId }
+      : null;
+  const sessionInteraction =
+    sessionChatIdentity !== null &&
+    data.agentConfig?.interactive === true &&
+    runId !== undefined &&
+    nodeId !== undefined
+      ? { runId, nodeId }
+      : undefined;
   const hasHitl = interaction !== undefined;
   const timingRange =
     state.startedAt !== undefined || state.finishedAt !== undefined
@@ -175,15 +206,20 @@ export function RunTheaterActCard({
       description={data.description}
       kindLabel={kindLabel}
       density={compact ? "compact" : "stage"}
+      titleAccessory={
+        data.kind === "agent" ? (
+          <AgentExecutionModeMark
+            interactive={data.agentConfig?.interactive === true}
+          />
+        ) : undefined
+      }
       className={cn(
-        compact ? "w-full" : "mx-auto w-full max-w-xl",
+        compact
+          ? "w-full"
+          : isConversationOpen
+            ? "flex h-full min-h-0 w-full max-w-none flex-col overflow-hidden"
+            : "mx-auto w-full max-w-xl",
         "transition-[border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none",
-        interactive &&
-          "cursor-pointer hover:border-foreground/25 hover:shadow-sm",
-        // Scale only when the whole card is the hit target —not when HITL
-        // lives in the footer (CSS :active would otherwise shake the card
-        // while pressing the composer).
-        interactive && interaction === undefined && "active:scale-[0.99]",
         emphasized &&
           live &&
           state.status === "running" &&
@@ -193,11 +229,7 @@ export function RunTheaterActCard({
           state.status === "awaiting_input" &&
           "theater-live-breathe-amber",
       )}
-      ariaLabel={
-        interactive
-          ? `${data.title}: ${t(tone.labelKey)}. ${t("workflowRun.theater.inspectorHint")}`
-          : `${data.title}: ${t(tone.labelKey)}`
-      }
+      ariaLabel={`${data.title}: ${t(tone.labelKey)}`}
       aria-live={compact ? undefined : "polite"}
       frameClassName={cn(
         tone.ring,
@@ -205,6 +237,9 @@ export function RunTheaterActCard({
         live && state.status === "running" && "ring-sky-500/35",
         live && state.status === "awaiting_input" && "ring-amber-500/35",
       )}
+      detailsClassName={
+        isConversationOpen ? "min-h-0 flex-1 overflow-hidden" : undefined
+      }
       headerAccessory={
         <div className="flex items-center gap-1.5">
           {artifactCount > 0 && (
@@ -222,6 +257,40 @@ export function RunTheaterActCard({
             </span>
           )}
         </div>
+      }
+      headerEnd={
+        onToggleInspector !== undefined ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className={cn(
+              "size-9 shrink-0 rounded-full border shadow-sm",
+              inspectorOpen
+                ? "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
+                : "border-border/80 bg-background hover:border-primary/30 hover:bg-primary/5",
+            )}
+            aria-label={t(
+              inspectorOpen
+                ? "workflowRun.inspector.collapse"
+                : "workflowRun.theater.openInspector",
+            )}
+            title={t(
+              inspectorOpen
+                ? "workflowRun.inspector.collapse"
+                : "workflowRun.theater.openInspector",
+            )}
+            aria-pressed={inspectorOpen}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={onToggleInspector}
+          >
+            {inspectorOpen ? (
+              <IconLayoutSidebarRightCollapse className="size-4" />
+            ) : (
+              <IconLayoutSidebarRightExpand className="size-4" />
+            )}
+          </Button>
+        ) : undefined
       }
       body={
         isConversationOpen ? (
@@ -275,22 +344,35 @@ export function RunTheaterActCard({
       details={
         isConversationOpen ? (
           <div
-            className="px-3 pb-1 pt-2 animate-in fade-in slide-in-from-bottom-1 duration-200 motion-reduce:animate-none"
+            className="flex h-full min-h-0 flex-col px-3 pb-1 pt-2 animate-in fade-in slide-in-from-bottom-1 duration-200 motion-reduce:animate-none"
             onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
           >
-            <RunNodeConversation
-              input={state.input}
-              conversation={conversation}
-              status={state.status}
-            />
+            {sessionChatIdentity !== null ? (
+              <RunNodeSessionChat
+                sessionId={sessionChatIdentity.sessionId}
+                status={state.status}
+                interaction={sessionInteraction}
+                onNodeCompleted={onNodeCompleted}
+                sessionActions={
+                  sessionInteraction !== undefined || hitlFooter === undefined
+                    ? stageDock
+                    : undefined
+                }
+              />
+            ) : (
+              <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
+                {t("workflowRun.conversation.waiting")}
+              </div>
+            )}
           </div>
         ) : undefined
       }
       footer={
-        hitlFooter !== undefined ? (
+        sessionInteraction !== undefined ? undefined : hitlFooter !==
+          undefined ? (
           hitlFooter
-        ) : isConversationOpen ? (
+        ) : sessionChatIdentity !== null ? undefined : isConversationOpen ? (
           <div className="flex items-center">{stageDock}</div>
         ) : (
           <div className="flex items-end gap-3">
@@ -299,19 +381,6 @@ export function RunTheaterActCard({
           </div>
         )
       }
-      onClick={interactive ? onSelect : undefined}
-      onKeyDown={
-        interactive
-          ? (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onSelect?.();
-              }
-            }
-          : undefined
-      }
-      role={interactive ? "button" : undefined}
-      tabIndex={interactive ? 0 : undefined}
     />
   );
 }

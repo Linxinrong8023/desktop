@@ -111,6 +111,11 @@ pub enum SkillStorageError {
 /// onto a transaction root and startup reconciliation would delete its package as a leftover, so
 /// a new reserved directory must keep the leading dot rather than needing a validation change.
 pub trait SkillStorage {
+    /// Returns the formal package root used by source-state readers after a successful promote.
+    fn formal_package_path(&self, _name: &str) -> Option<PathBuf> {
+        None
+    }
+
     /// Reserves a unique staging directory for one transaction.
     fn create_staging(&self) -> Result<PathBuf, SkillStorageError>;
 
@@ -187,6 +192,22 @@ pub trait SkillStorage {
 
     /// Returns whether a formal directory exists for the name.
     fn formal_exists(&self, name: &str) -> bool;
+
+    /// Reads `SKILL.md` from an immutable package root outside local formal storage.
+    fn read_package_manifest(
+        &self,
+        package_root: &Path,
+    ) -> Result<Option<Vec<u8>>, SkillStorageError> {
+        let manifest = package_root.join("SKILL.md");
+        if !manifest.is_file() {
+            return Ok(None);
+        }
+        std::fs::read(&manifest)
+            .map(Some)
+            .map_err(|error| SkillStorageError::OperationFailed {
+                message: format!("failed to read {}: {error}", manifest.display()),
+            })
+    }
 
     /// Reads the formal `SKILL.md` bytes, if the directory exists.
     fn read_manifest(&self, name: &str) -> Result<Option<Vec<u8>>, SkillStorageError>;

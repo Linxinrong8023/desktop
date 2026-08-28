@@ -6,13 +6,17 @@ use std::path::{Path, PathBuf};
 pub enum PluginDiscoveryIssueKind {
     RootUnreadable,
     EntryUnreadable,
+    InvalidInstallPath,
     MissingManifest,
     ManifestNotFile,
     ManifestTooLarge,
     ManifestUnreadable,
-    InvalidJson,
+    InvalidToml,
     InvalidManifest,
+    /// Two package directories declare the same `<namespace>/<name>`; only the first in path
+    /// order is kept.
     DuplicatePluginId,
+    UnusableLogo,
 }
 
 impl PluginDiscoveryIssueKind {
@@ -21,13 +25,15 @@ impl PluginDiscoveryIssueKind {
         match self {
             Self::RootUnreadable => "root_unreadable",
             Self::EntryUnreadable => "entry_unreadable",
+            Self::InvalidInstallPath => "invalid_install_path",
             Self::MissingManifest => "missing_manifest",
             Self::ManifestNotFile => "manifest_not_file",
             Self::ManifestTooLarge => "manifest_too_large",
             Self::ManifestUnreadable => "manifest_unreadable",
-            Self::InvalidJson => "invalid_json",
+            Self::InvalidToml => "invalid_toml",
             Self::InvalidManifest => "invalid_manifest",
             Self::DuplicatePluginId => "duplicate_plugin_id",
+            Self::UnusableLogo => "unusable_logo",
         }
     }
 }

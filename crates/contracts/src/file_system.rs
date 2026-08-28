@@ -50,6 +50,15 @@ pub struct ReadWorkspaceFileRequest {
     pub path: String,
 }
 
+/// Identifies one text file inside a project's checkout root.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "file-system.ts")]
+pub struct ReadProjectFileRequest {
+    pub project_id: String,
+    pub path: String,
+}
+
 /// Returns one bounded UTF-8 file for the read-only workspace viewer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -100,6 +109,27 @@ pub struct SearchWorkspaceRequest {
     pub kind: WorkspaceSearchKind,
 }
 
+/// Requests one immediate directory inside a project's checkout root.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "file-system.ts")]
+pub struct ListProjectDirectoryRequest {
+    pub project_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub path: Option<String>,
+}
+
+/// Requests a bounded ripgrep search inside a project's checkout root.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "file-system.ts")]
+pub struct SearchProjectRequest {
+    pub project_id: String,
+    pub query: String,
+    pub kind: WorkspaceSearchKind,
+}
+
 /// Returns ordered search results and indicates output truncated by the server limit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +145,14 @@ pub struct SearchWorkspaceResponse {
 #[ts(export_to = "file-system.ts")]
 pub struct WatchWorkspaceRequest {
     pub task_id: String,
+}
+
+/// Starts one workspace watcher stream scoped to a project's checkout root.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "file-system.ts")]
+pub struct WatchProjectRequest {
+    pub project_id: String,
 }
 
 /// Describes cache-invalidating changes emitted by the native workspace watcher.
@@ -144,12 +182,16 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     ListWorkspaceDirectoryRequest::export(config)?;
     ListWorkspaceDirectoryResponse::export(config)?;
     ReadWorkspaceFileRequest::export(config)?;
+    ReadProjectFileRequest::export(config)?;
     ReadWorkspaceFileResponse::export(config)?;
     WorkspaceSearchKind::export(config)?;
     WorkspaceSearchResult::export(config)?;
     SearchWorkspaceRequest::export(config)?;
+    ListProjectDirectoryRequest::export(config)?;
+    SearchProjectRequest::export(config)?;
     SearchWorkspaceResponse::export(config)?;
     WatchWorkspaceRequest::export(config)?;
+    WatchProjectRequest::export(config)?;
     WorkspaceFileChange::export(config)?;
     WorkspaceFileEventBatch::export(config)?;
     Ok(())

@@ -5,18 +5,27 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   PathSelectionInProgressError,
   type LocationActionsCapability,
+  type DesktopUpdateCapability,
+  type DesktopUpdateStatus,
   type LocationTarget,
   type PlatformAdapter,
   type SelectPathOptions,
   type SaveTextFileOptions,
-  type SkillMarketplaceCapability,
-  type SkillMarketplaceProvider,
-  type SkillMarketplaceStatus,
+  type SelectSavePathOptions,
+  type DownloadAction,
+  type ResolveDownloadOutcome,
+  type SurfaceBounds,
+  type SurfaceCapability,
+  type SurfaceEvent,
+  type SurfaceOpenTarget,
+  type SurfaceRecord,
+  type SurfaceTarget,
   type WindowControlsCapability,
   type WindowManagerOs,
 } from "@ora/app-shell/platform";
 
-const SKILL_MARKETPLACE_STATUS_EVENT = "skill-marketplace://status";
+const SURFACE_EVENT = "surface://event";
+const DESKTOP_UPDATE_EVENT = "desktop-update-status-changed";
 
 /** Reads the host OS from the webview user agent without an async Tauri call. */
 function detectWindowManagerOs(): WindowManagerOs | null {
@@ -72,8 +81,66 @@ function createTauriLocationActions(): LocationActionsCapability {
       invoke<{ path: string }>("resolve_task_cwd", {
         request: { taskId },
       }).then((response) => response.path),
+    resolveWorkspaceCwd: (workspaceId) =>
+      invoke<{ path: string }>("resolve_workspace_cwd", {
+        request: { workspaceId },
+      }).then((response) => response.path),
     open: (target: LocationTarget, path: string) =>
       invoke("open_location", { request: { target, path } }),
+  };
+}
+
+/** Wires the native updater status and installation commands into the shared shell. */
+function createTauriUpdates(): DesktopUpdateCapability {
+  return {
+    getStatus: () => invoke<DesktopUpdateStatus>("get_desktop_update_status"),
+    install: () => invoke("install_desktop_update"),
+    check: () => invoke("check_desktop_update"),
+    onStatus: (listener) =>
+      listen<DesktopUpdateStatus>(DESKTOP_UPDATE_EVENT, (event) => {
+        listener(event.payload);
+      }),
+  };
+}
+
+/** Wires the plugin surface commands and lifecycle event stream exposed by the Desktop runtime. */
+function createTauriSurfaces(): SurfaceCapability {
+  return {
+    capabilities: () => invoke<{ embedded: boolean }>("surface_capabilities"),
+    list: () => invoke<SurfaceRecord[]>("surface_list"),
+    open: (target: SurfaceOpenTarget, mount: SurfaceTarget) =>
+      invoke<SurfaceRecord>("surface_open", {
+        request: {
+          pluginId: target.pluginId,
+          target: mount,
+        },
+      }),
+    close: (instance: number) =>
+      invoke("surface_close", { request: { instance } }),
+    resolveDownload: (
+      downloadId: number,
+      action: DownloadAction,
+      destination?: string,
+    ) =>
+      invoke<ResolveDownloadOutcome>("surface_resolve_download", {
+        request: { downloadId, action, destination },
+      }),
+    discardDownload: (downloadId: number) =>
+      invoke("surface_discard_download", { request: { downloadId } }),
+    setBounds: (instance: number, bounds: SurfaceBounds) =>
+      invoke("surface_set_bounds", { request: { instance, ...bounds } }),
+    setVisible: (instance: number, visible: boolean) =>
+      invoke("surface_set_visible", { request: { instance, visible } }),
+    popout: (instance: number) =>
+      invoke("surface_popout", { request: { instance } }),
+    dock: (instance: number) =>
+      invoke("surface_dock", { request: { instance } }),
+    reload: (instance: number) =>
+      invoke("surface_reload", { request: { instance } }),
+    onEvent: (listener) =>
+      listen<SurfaceEvent>(SURFACE_EVENT, (event) => {
+        listener(event.payload);
+      }),
   };
 }
 
@@ -87,22 +154,14 @@ export class TauriPlatformAdapter implements PlatformAdapter {
   readonly locationActions: LocationActionsCapability =
     createTauriLocationActions();
 
-  readonly skillMarketplace: SkillMarketplaceCapability = {
-    open: (provider: SkillMarketplaceProvider) =>
-      invoke("open_skill_marketplace", { request: { provider } }),
-    onStatus: (listener) =>
-      listen<SkillMarketplaceStatus>(
-        SKILL_MARKETPLACE_STATUS_EVENT,
-        (event) => {
-          listener(event.payload);
-        },
-      ),
-  };
+  readonly surfaces: SurfaceCapability = createTauriSurfaces();
+
+  readonly updates: DesktopUpdateCapability = createTauriUpdates();
 
   readonly worktreeStorage = {
     getRoot: async (): Promise<string> => {
       const config = await invoke<{ worktreeRoot: string }>(
-        "get_desktop_config",
+        "get_worktree_root",
         {
           request: {},
         },
@@ -134,6 +193,20 @@ export class TauriPlatformAdapter implements PlatformAdapter {
     }
   }
 
+  /** Opens the native save dialog and hands the chosen path back to the caller. */
+  async selectSavePath(options: SelectSavePathOptions): Promise<string | null> {
+    if (this.selectionInProgress) {
+      throw new PathSelectionInProgressError();
+    }
+
+    this.selectionInProgress = true;
+    try {
+      return await save({ defaultPath: options.defaultFileName });
+    } finally {
+      this.selectionInProgress = false;
+    }
+  }
+
   /** Opens the native save dialog, then writes the user-selected workflow export. */
   async saveTextFile(options: SaveTextFileOptions): Promise<boolean> {
     if (this.selectionInProgress) {
@@ -156,6 +229,11 @@ export class TauriPlatformAdapter implements PlatformAdapter {
     } finally {
       this.selectionInProgress = false;
     }
+  }
+
+  /** Hands an http(s)/mailto URL to the host browser instead of a new webview. */
+  async openExternalUrl(url: string): Promise<void> {
+    await invoke("open_external_url", { request: { url } });
   }
 }
 

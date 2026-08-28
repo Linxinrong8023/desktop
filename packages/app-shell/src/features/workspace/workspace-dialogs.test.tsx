@@ -14,7 +14,6 @@ import {
   RemoteContractError,
   type ContractsClient,
   type Session,
-  type TaskWorkspaceMode,
 } from "@ora/contracts";
 import {
   createMockClient,
@@ -22,12 +21,14 @@ import {
 } from "../../test/mock-client";
 import { useUiStore } from "../../state/stores/ui-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
+import { useDraftSessionsStore } from "../../state/stores/draft-sessions-store";
 import { WorkspaceDialogs } from "./workspace-dialogs";
 
 beforeEach(() => {
   useUiStore.getState().setDialog(null);
   useUiStore.getState().setDeleteTarget(null);
   useWorkspaceSelectionStore.getState().clearSelection();
+  useDraftSessionsStore.getState().clear();
 });
 
 describe("WorkspaceDialogs project creation", () => {
@@ -77,17 +78,19 @@ describe("WorkspaceDialogs project creation", () => {
         {
           id: "p1",
           name: expectedName,
-          rootPath,
         },
       ]);
       expect(useUiStore.getState().dialog).toBeNull();
     });
-    expect(useWorkspaceSelectionStore.getState().selection).toEqual({
+    expect(useWorkspaceSelectionStore.getState().selection).toMatchObject({
       projectId: "p1",
       taskId: null,
       sessionId: null,
       workflowRunId: null,
     });
+    expect(useWorkspaceSelectionStore.getState().selection.draftId).toEqual(
+      expect.any(String),
+    );
   });
 });
 
@@ -160,10 +163,8 @@ describe("WorkspaceDialogs task creation", () => {
         {
           id: "t1",
           projectId: "p1",
+          workspaceId: "workspace-t1",
           title: "Worktree task",
-          workspaceMode: "worktree",
-          type: "default",
-          workflowRunId: null,
         },
       ]),
     );
@@ -234,10 +235,8 @@ describe("WorkspaceDialogs task creation", () => {
         {
           id: "t1",
           projectId: "p1",
+          workspaceId: "workspace-t1",
           title: "Slow worktree",
-          workspaceMode: "worktree",
-          type: "default",
-          workflowRunId: null,
         },
       ]),
     );
@@ -299,24 +298,78 @@ describe("WorkspaceDialogs task creation", () => {
   });
 });
 
+describe("WorkspaceDialogs workflow run creation", () => {
+  it("creates the run in the Workspace selected by the sidebar row", async () => {
+    const user = userEvent.setup();
+    const state = createMockClientState();
+    const baseClient = createMockClient(state);
+    let submittedWorkspaceId: string | undefined;
+    const client: ContractsClient = {
+      ...baseClient,
+      workflowRun: {
+        ...baseClient.workflowRun,
+        create: async (request, options) => {
+          submittedWorkspaceId = request.workspaceId;
+          return baseClient.workflowRun.create(request, options);
+        },
+      },
+    };
+    const Wrapper = createHookWrapper(
+      client,
+      createTestQueryClient(),
+      createChatStore(client.session),
+    );
+    useUiStore.getState().setDialog({
+      kind: "runWorkflow",
+      projectId: "p1",
+      workspaceId: "workspace-t1",
+      workflowId: "wf1",
+      workflowName: "Review",
+    });
+
+    render(
+      <Wrapper>
+        <AppI18nProvider>
+          <PlatformProvider adapter={createStubPlatform()}>
+            <TooltipProvider>
+              <WorkspaceDialogs />
+            </TooltipProvider>
+          </PlatformProvider>
+        </AppI18nProvider>
+      </Wrapper>,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /创建运行|Create run/ }),
+    );
+
+    await waitFor(() => {
+      expect(submittedWorkspaceId).toBe("workspace-t1");
+      expect(state.workflowRuns).toHaveLength(1);
+      expect(useUiStore.getState().dialog).toBeNull();
+    });
+    expect(state.workflowRuns[0]?.workspaceId).toBe("workspace-t1");
+  });
+});
+
 describe("WorkspaceDialogs project deletion", () => {
   it("deletes every descendant session before deleting the project", async () => {
     const user = userEvent.setup();
     const state = createMockClientState();
-    state.projects = [{ id: "p1", name: "Ora", rootPath: "/ora" }];
+    state.projects = [{ id: "p1", name: "Ora" }];
     state.sessions = [
       {
         id: "s1",
-        taskId: "t1",
-        agentCli: "open_code",
+        workspaceId: "workspace-t1",
+        agentRef: "ora-space.opencode",
         status: "running",
         title: null,
         historyState: { type: "writable" },
       },
       {
         id: "s2",
-        taskId: "t2",
-        agentCli: "open_code",
+        workspaceId: "workspace-t2",
+        agentRef: "ora-space.opencode",
         status: "running",
         title: null,
         historyState: { type: "writable" },
@@ -376,153 +429,131 @@ describe("WorkspaceDialogs project deletion", () => {
 });
 
 describe("WorkspaceDialogs task deletion", () => {
-  it.each([
-    [
-      "direct chat",
-      "project_root",
-      ["s1"],
-      "仅删除该会话记录；项目目录本身不受影响，此操作无法撤销。",
-    ],
-    [
-      "worktree",
-      "worktree",
-      ["s1", "s2"],
-      "该任务的会话记录、Git 工作树及其 ora/* 分支将被删除。未提交的修改和仅存在于该分支的提交将永久丢失，此操作无法撤销。",
-    ],
-  ] as const)(
-    "deletes every %s session before deleting its task",
-    async (_label, workspaceMode, sessionIds, description) => {
-      const user = userEvent.setup();
-      const state = createMockClientState();
-      state.tasks = [
-        {
-          id: "t1",
-          projectId: "p1",
-          title: "Delete me",
-          workspaceMode: workspaceMode as TaskWorkspaceMode,
-          type: "default",
-          workflowRunId: null,
-        },
-      ];
-      state.sessions = sessionIds.map((id): Session => ({
-        id,
-        taskId: "t1",
-        agentCli: "open_code",
-        status: "running",
-        title: null,
-        historyState: { type: "writable" },
-      }));
-      const calls: string[] = [];
-      const baseClient = createMockClient(state);
-      const client: ContractsClient = {
-        ...baseClient,
-        task: {
-          ...baseClient.task,
-          delete: async (request, options) => {
-            calls.push(`task:${request.taskId}`);
-            return baseClient.task.delete(request, options);
-          },
-        },
-        session: {
-          ...baseClient.session,
-          delete: async (request, options) => {
-            calls.push(`session:${request.sessionId}`);
-            return baseClient.session.delete(request, options);
-          },
-        },
-      };
-      const Wrapper = createHookWrapper(
-        client,
-        createTestQueryClient(),
-        createChatStore(client.session),
-      );
-      useUiStore.getState().setDeleteTarget({
-        kind: "task",
+  it("deletes every task session before deleting its worktree task", async () => {
+    const sessionIds = ["s1", "s2"] as const;
+    const description =
+      "该任务的会话记录、Git 工作树及其 ora/* 分支将被删除。未提交的修改和仅存在于该分支的提交将永久丢失，此操作无法撤销。";
+    const user = userEvent.setup();
+    const state = createMockClientState();
+    state.tasks = [
+      {
         id: "t1",
-        name: "Delete me",
-        workspaceMode,
-        sessionIds: [...sessionIds],
-      });
-
-      render(
-        <Wrapper>
-          <AppI18nProvider>
-            <PlatformProvider adapter={createStubPlatform()}>
-              <TooltipProvider>
-                <WorkspaceDialogs />
-              </TooltipProvider>
-            </PlatformProvider>
-          </AppI18nProvider>
-        </Wrapper>,
-      );
-
-      expect(screen.getByText(description)).not.toBeNull();
-      await user.click(screen.getByRole("button", { name: /^删除$|^Delete$/ }));
-
-      await waitFor(() => {
-        expect(calls).toEqual([
-          ...sessionIds.map((id) => `session:${id}`),
-          "task:t1",
-        ]);
-        expect(state.sessions).toEqual([]);
-        expect(state.tasks).toEqual([]);
-      });
-    },
-  );
-
-  it.each([
-    ["project_root", /直聊会话仍在停止|direct-chat session is still stopping/],
-    ["worktree", /无法删除，请先停止正在运行的会话|Unable to delete/],
-  ] as const)(
-    "uses a mode-specific resource-in-use error for %s tasks",
-    async (workspaceMode, expectedError) => {
-      const user = userEvent.setup();
-      const state = createMockClientState();
-      const baseClient = createMockClient(state);
-      const client: ContractsClient = {
-        ...baseClient,
-        task: {
-          ...baseClient.task,
-          delete: async () => {
-            throw new RemoteContractError(
-              {
-                code: "resource_in_use",
-                params: {},
-                requestId: "550e8400-e29b-41d4-a716-446655440000",
-              },
-              null,
-            );
-          },
+        projectId: "p1",
+        workspaceId: "workspace-t1",
+        title: "Delete me",
+      },
+    ];
+    state.sessions = sessionIds.map((id): Session => ({
+      id,
+      workspaceId: "workspace-t1",
+      agentRef: "ora-space.opencode",
+      status: "running",
+      title: null,
+      historyState: { type: "writable" },
+    }));
+    const calls: string[] = [];
+    const baseClient = createMockClient(state);
+    const client: ContractsClient = {
+      ...baseClient,
+      task: {
+        ...baseClient.task,
+        delete: async (request, options) => {
+          calls.push(`task:${request.taskId}`);
+          return baseClient.task.delete(request, options);
         },
-      };
-      const Wrapper = createHookWrapper(
-        client,
-        createTestQueryClient(),
-        createChatStore(client.session),
-      );
-      useUiStore.getState().setDeleteTarget({
-        kind: "task",
-        id: "t1",
-        name: "Delete me",
-        workspaceMode,
-        sessionIds: [],
-      });
+      },
+      session: {
+        ...baseClient.session,
+        delete: async (request, options) => {
+          calls.push(`session:${request.sessionId}`);
+          return baseClient.session.delete(request, options);
+        },
+      },
+    };
+    const Wrapper = createHookWrapper(
+      client,
+      createTestQueryClient(),
+      createChatStore(client.session),
+    );
+    useUiStore.getState().setDeleteTarget({
+      kind: "task",
+      id: "t1",
+      name: "Delete me",
+      sessionIds: [...sessionIds],
+    });
 
-      render(
-        <Wrapper>
-          <AppI18nProvider>
-            <PlatformProvider adapter={createStubPlatform()}>
-              <TooltipProvider>
-                <WorkspaceDialogs />
-              </TooltipProvider>
-            </PlatformProvider>
-          </AppI18nProvider>
-        </Wrapper>,
-      );
+    render(
+      <Wrapper>
+        <AppI18nProvider>
+          <PlatformProvider adapter={createStubPlatform()}>
+            <TooltipProvider>
+              <WorkspaceDialogs />
+            </TooltipProvider>
+          </PlatformProvider>
+        </AppI18nProvider>
+      </Wrapper>,
+    );
 
-      await user.click(screen.getByRole("button", { name: /^删除$|^Delete$/ }));
+    expect(screen.getByText(description)).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: /^删除$|^Delete$/ }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent(expectedError);
-    },
-  );
+    await waitFor(() => {
+      expect(calls).toEqual([
+        ...sessionIds.map((id) => `session:${id}`),
+        "task:t1",
+      ]);
+      expect(state.sessions).toEqual([]);
+      expect(state.tasks).toEqual([]);
+    });
+  });
+
+  it("uses the standard resource-in-use error for worktree tasks", async () => {
+    const expectedError = /无法删除，请先停止正在运行的会话|Unable to delete/;
+    const user = userEvent.setup();
+    const state = createMockClientState();
+    const baseClient = createMockClient(state);
+    const client: ContractsClient = {
+      ...baseClient,
+      task: {
+        ...baseClient.task,
+        delete: async () => {
+          throw new RemoteContractError(
+            {
+              code: "resource_in_use",
+              params: {},
+              requestId: "550e8400-e29b-41d4-a716-446655440000",
+            },
+            null,
+          );
+        },
+      },
+    };
+    const Wrapper = createHookWrapper(
+      client,
+      createTestQueryClient(),
+      createChatStore(client.session),
+    );
+    useUiStore.getState().setDeleteTarget({
+      kind: "task",
+      id: "t1",
+      name: "Delete me",
+      sessionIds: [],
+    });
+
+    render(
+      <Wrapper>
+        <AppI18nProvider>
+          <PlatformProvider adapter={createStubPlatform()}>
+            <TooltipProvider>
+              <WorkspaceDialogs />
+            </TooltipProvider>
+          </PlatformProvider>
+        </AppI18nProvider>
+      </Wrapper>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /^删除$|^Delete$/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(expectedError);
+  });
 });

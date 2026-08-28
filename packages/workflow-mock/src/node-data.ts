@@ -37,6 +37,13 @@ export interface WorkflowAgentConfig {
   /** Optional MCP attachments; empty means the node uses no MCP servers. */
   mcps: WorkflowAgentMcpConfig[];
   prompt: string;
+  /** Opt the node into a persistent interactive session that pauses for human input. */
+  interactive?: boolean;
+  /**
+   * Whether the node's final assistant response becomes its run output. Absent defaults to
+   * `"none"`, so a node withholds its output unless opted in.
+   */
+  outputPolicy?: "none" | "final_agent_response";
 }
 
 /** One named input variable exposed to a Prompt node's template. */

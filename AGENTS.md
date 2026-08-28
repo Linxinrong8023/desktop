@@ -5,7 +5,7 @@
 3. **Design for Testability (DfT)**: Favor Dependency Injection and decoupled components. Define interfaces via Traits to allow easy mocking, and prefer small, pure functions that can be unit-tested in isolation.
 4. **Prefer Static Dispatch**: Use Generics and Trait Bounds over Trait Objects (e.g., `Box<dyn Trait>`) to leverage monomorphization and compiler optimizations, unless runtime polymorphism is strictly necessary.
 5. **Make Illegal States Unrepresentable**: Use Enums with associated data to model state machines, rather than Structs with many optional fields.
-6. **No Backward Compatibility**: Prioritize clean design over legacy support. Do **not** preserve compatibility layers "just in case." Break old patterns, remove deprecated code—adapt old to new, never vice versa.
+6. **Backward Compatibility for Existing Users**: The product has existing users, so preserve compatibility for user-facing behavior, persisted data, public APIs, IPC/protocols, and other established integrations. When a breaking change is necessary, provide an explicit migration or deprecation path, document the impact, and remove compatibility code only after the supported transition period. Keep internal code clean by adapting old inputs at well-defined boundaries rather than spreading compatibility concerns through new code.
 
 Ora is an IDE for AI Agent. In the crates folder where the rust code lives:
 
@@ -37,6 +37,7 @@ Ora is an IDE for AI Agent. In the crates folder where the rust code lives:
 - Use ora-logging wrapper macros instead of `tracing` macros. Use `ora_logging::clock::now_local` instead of `OffsetDateTime::now_local()`.
 - Put logic that is generic — independent of any Ora domain concept, transport, or runtime — in `ora-utils` (`crates/utils`) instead of the calling crate. If you believe a piece of logic is generic, default to placing it in `ora-utils`. `ora-utils` must not depend on any other `ora-*` crate and must not carry domain vocabulary; gate heavier optional dependencies (such as archive formats) behind Cargo features so path-only consumers stay light.
 - Before implementing path validation, normalization, or archive extraction, prefer the shared `ora-utils::path` and `ora-utils::archive` capabilities over crate-local logic. If `ora-utils` does not yet provide the required capability, extend `ora-utils` and then consume it instead of implementing it locally in the caller.
+- When adding a Workspace-scoped consumer kind (Effect surfaces, MCP, anything materialized per Workspace), implement **both** directions of the pairing: new consumer → existing Workspaces, and new Workspace → existing consumers. Derive the second one by convergence in a worker, never from a process start or any other one-shot event — a consumer declaring at startup cannot see a Workspace created later, and the resulting gap is silent because a wakeup that iterates zero surfaces is a successful no-op. Register every consumer kind into the single declaration snapshot the convergence pass reads (`PluginApi::agent_effect_surface_declarations`), rather than adding a second source it must remember to consult.
 
 ## Module READMEs
 
@@ -62,9 +63,48 @@ authoritative list of available tasks.
 - All lint tasks: `task lint`
 - All lint and test tasks (long-running): `task test`
 
+### Frontend React / TipTap tests and the stderr gate
+
+Frontend package tests run under `scripts/run-with-clean-stderr.mjs`. Any React
+Testing Library warning on stderr — especially `An update to … was not wrapped
+in act(...)` — fails the whole `task test` run even when Vitest reports green.
+
+TipTap / ProseMirror `setContent` can call `flushSync` (React node views). That
+creates two hard constraints:
+
+1. **Do not call programmatic `setContent` / `clear` / `replaceDocument` inside
+   `useLayoutEffect` (or other React commit/layout work).** Nested `flushSync`
+   also fails the stderr gate.
+2. **Do not let those deferred editor transactions call parent `setState`.**
+   Session / draft switches often schedule TipTap updates on a microtask after
+   `act(() => selectSession(…))` returns. If `onUpdate` still drives
+   `onQueryChange` / attachment React state from that microtask, the update
+   lands outside `act` and the suite fails.
+
+Preferred product pattern (chat composer already follows this):
+
+- Treat conversation-keyed **React** state (attachments, slash/@ query, menu
+  dismiss) as derived from the selection key and sync it during render (or
+  another path that stays inside the same `act` as the selection change).
+- Keep TipTap document restore on a deferred path when needed, but suppress
+  parent notify for programmatic `replaceText` / `replaceDocument` / `clear`
+  (still update `dataset.composerText` for tests). User typing continues to
+  emit query/doc/text callbacks normally.
+- Skip no-op attachment `setState` when the parked image id list is unchanged.
+
+Do **not** rely on sprinkling `flushComposerEffects` / extra `act` +
+`Promise.resolve` in every test as the primary fix. Use those flushes only to
+assert after a deferred TipTap document apply, not to hide parent `setState`
+escaping `act`. When a send-failure / abandon test awaits a rejected promise,
+keep that await inside `act` so restore that still updates React stays covered.
+
 ### Test assertions
 
 - Tests should use pretty_assertions::assert_eq for clearer diffs. Import this at the top of the test module if it isn't already.
 - Prefer deep equals comparisons whenever possible. Perform `assert_eq!()` on entire objects, rather than individual fields.
 - Avoid mutating process environment in tests; prefer passing environment-derived flags or dependencies from above.
 - When testing structured events, logs, or spans using `tracing`, always install a test-scoped subscriber/dispatcher with an explicit `LevelFilter::TRACE` (or the required minimum level). Use `tracing::subscriber::with_default` or `tracing::dispatcher::with_default` to isolate the subscriber to the current test thread. Keep every operation that can emit the same `tracing` callsites under that scoped subscriber, including setup helpers, bootstrap code, repository fixtures, and API-surface smoke checks that create spans or events. This matters even for tests that do not assert logs directly: `tracing` caches callsite interest, so a normal test that touches a callsite first can make a later structured-log assertion fail intermittently. Prefer shared helpers such as `with_trace_logging` / `with_recorded_trace_logging` so ordinary tests and recording tests use the same scoped TRACE setup.
+
+# TypeScript/packages
+
+- A test that renders anything calling `useTranslation` must import `appI18n` itself: react-i18next keeps its instance in a `node_modules` module that Vitest loads once per worker, so a file relying on an earlier file in the same worker to have initialized it passes locally and fails on CI, where a different worker split leaves it first and the missing-instance warning trips the clean-stderr gate on an otherwise green run.

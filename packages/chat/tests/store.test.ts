@@ -1,10 +1,11 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import assert from "node:assert/strict";
 import test from "node:test";
-import type {
-  LoadSessionEvent,
-  PromptSessionEvent,
-  PromptSessionRequest,
+import {
+  type LoadSessionEvent,
+  type PromptSessionEvent,
+  type PromptSessionRequest,
+  RemoteContractError,
 } from "@ora/contracts";
 import { createChatStore, type ChatSessionClient } from "../src/index.js";
 
@@ -107,6 +108,185 @@ test("loads provider history and reconstructs turns from message boundaries", as
     pendingPermissions: [],
     error: null,
   });
+});
+
+test("publishes an active prompt incrementally while its session loads", async () => {
+  let finishStream: () => void = () => {};
+  const streamFinished = new Promise<void>((resolve) => {
+    finishStream = resolve;
+  });
+  let finishLoad: () => void = () => {};
+  const loadFinished = new Promise<void>((resolve) => {
+    finishLoad = resolve;
+  });
+  const client: ChatSessionClient = {
+    load: () => ({
+      async *[Symbol.asyncIterator]() {
+        yield textEvent("user_message_chunk", "automated prompt", "user-1");
+        yield textEvent("agent_message_chunk", "partial ", "agent-1");
+        yield textEvent("agent_message_chunk", "rep", "agent-1");
+        yield textEvent("agent_message_chunk", "ly", "agent-1");
+        await streamFinished;
+        yield textEvent("agent_message_chunk", " final", "agent-1");
+        yield { type: "turn_ended", stopReason: "end_turn" } as const;
+        await loadFinished;
+        yield { type: "completed" } as const;
+      },
+    }),
+    prompt: () => events<PromptSessionEvent>([]),
+    respondToPermission: async () => ({}),
+    setConfig: async () => ({ configOptions: [] }),
+  };
+  const store = createChatStore(client, {
+    createId: () => "local",
+    now: () => 42,
+  });
+  let livePublicationCount = 0;
+  const unsubscribe = store.subscribe((state) => {
+    if (state.conversations["ora-1"]?.isResponding) {
+      livePublicationCount += 1;
+    }
+  });
+
+  const loading = store.getState().loadSession("ora-1");
+  await new Promise<void>((resolve) => setTimeout(resolve, 25));
+
+  const live = store.getState().conversations["ora-1"];
+  assert.equal(live?.isLoaded, false);
+  assert.equal(live?.isLoading, true);
+  assert.equal(live?.isResponding, true);
+  assert.equal(live?.turns[0]?.userMessage.content, "automated prompt");
+  assert.equal(
+    live?.turns[0]?.items[0]?.kind === "message" &&
+      live.turns[0].items[0].content,
+    "partial reply",
+  );
+  assert.equal(livePublicationCount, 1);
+
+  finishStream();
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  const atTurnBoundary = store.getState().conversations["ora-1"];
+  assert.equal(
+    atTurnBoundary?.turns[0]?.items[0]?.kind === "message" &&
+      atTurnBoundary.turns[0].items[0].content,
+    "partial reply final",
+  );
+  assert.equal(livePublicationCount, 2);
+
+  finishLoad();
+  await loading;
+  unsubscribe();
+
+  const completed = store.getState().conversations["ora-1"];
+  assert.equal(completed?.isLoading, false);
+  assert.equal(completed?.isResponding, false);
+  assert.equal(completed?.turns[0]?.status, "completed");
+  assert.equal(completed?.turns[0]?.stopReason, "end_turn");
+});
+
+test("clears isResponding at each turn_ended during history replay", async () => {
+  let finishAfterFirstTurn: () => void = () => {};
+  const afterFirstTurn = new Promise<void>((resolve) => {
+    finishAfterFirstTurn = resolve;
+  });
+  let finishAfterSecondOpen: () => void = () => {};
+  const afterSecondOpen = new Promise<void>((resolve) => {
+    finishAfterSecondOpen = resolve;
+  });
+  const client: ChatSessionClient = {
+    load: () => ({
+      async *[Symbol.asyncIterator]() {
+        yield textEvent("user_message_chunk", "hello", "user-1");
+        yield textEvent("agent_message_chunk", "hi", "agent-1");
+        yield { type: "turn_ended", stopReason: "end_turn" } as const;
+        await afterFirstTurn;
+        yield textEvent("user_message_chunk", "again", "user-2");
+        yield textEvent("agent_message_chunk", "there", "agent-2");
+        await afterSecondOpen;
+        yield { type: "turn_ended", stopReason: "end_turn" } as const;
+        yield { type: "completed" } as const;
+      },
+    }),
+    prompt: () => events<PromptSessionEvent>([]),
+    respondToPermission: async () => ({}),
+    setConfig: async () => ({ configOptions: [] }),
+  };
+  const store = createChatStore(client, {
+    createId: () => "local",
+    now: () => 42,
+  });
+
+  const loading = store.getState().loadSession("ora-1");
+  await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  // Completed historical turns must not leave the working flag stuck.
+  assert.equal(store.getState().conversations["ora-1"]?.isLoading, true);
+  assert.equal(store.getState().conversations["ora-1"]?.isResponding, false);
+
+  finishAfterFirstTurn();
+  await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  assert.equal(store.getState().conversations["ora-1"]?.isResponding, true);
+
+  finishAfterSecondOpen();
+  await loading;
+
+  assert.equal(store.getState().conversations["ora-1"]?.isResponding, false);
+  assert.equal(store.getState().conversations["ora-1"]?.isLoaded, true);
+});
+
+test("flushes batched replay text together with a following tool boundary", async () => {
+  let finishStream: () => void = () => {};
+  const streamFinished = new Promise<void>((resolve) => {
+    finishStream = resolve;
+  });
+  const client: ChatSessionClient = {
+    load: () => ({
+      async *[Symbol.asyncIterator]() {
+        yield textEvent("user_message_chunk", "inspect", "user-1");
+        yield textEvent("agent_message_chunk", "checking", "agent-1");
+        yield {
+          type: "session_update",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "tool-1",
+            title: "Read file",
+            status: "in_progress",
+          },
+        } as const;
+        await streamFinished;
+        yield { type: "turn_ended", stopReason: "end_turn" } as const;
+        yield { type: "completed" } as const;
+      },
+    }),
+    prompt: () => events<PromptSessionEvent>([]),
+    respondToPermission: async () => ({}),
+    setConfig: async () => ({ configOptions: [] }),
+  };
+  const store = createChatStore(client, {
+    createId: () => "local",
+    now: () => 42,
+  });
+
+  const loading = store.getState().loadSession("ora-1");
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(
+    store
+      .getState()
+      .conversations["ora-1"]?.turns[0]?.items.map((item) =>
+        item.kind === "toolCall"
+          ? [item.kind, item.title]
+          : item.kind === "message"
+            ? [item.kind, item.content]
+            : [item.kind, null],
+      ),
+    [
+      ["message", "checking"],
+      ["toolCall", "Read file"],
+    ],
+  );
+
+  finishStream();
+  await loading;
 });
 
 test("retains durable-history notices after a successful replay", async () => {
@@ -1247,4 +1427,136 @@ test("keeps one marker per point in the thread while the model is cycled", async
   assert.deepEqual(store.getState().conversations["ora-1"]?.modelChanges, [
     { id: "local-4", afterTurnCount: 1, modelName: "Fast", createdAt: 42 },
   ]);
+});
+
+/** Builds the backend's refusal of a session that currently holds no live route. */
+function sessionStoppedError(): RemoteContractError {
+  return new RemoteContractError(
+    {
+      code: "session_stopped",
+      params: {},
+      requestId: "00000000-0000-4000-8000-000000000000",
+    },
+    null,
+  );
+}
+
+test("re-attaches and retries once when the route died before the prompt was accepted", async () => {
+  let loads = 0;
+  let prompts = 0;
+  const client: ChatSessionClient = {
+    load: () => {
+      loads += 1;
+      return events<LoadSessionEvent>([{ type: "completed" }]);
+    },
+    // The provider process restarted between turns, so the first send is refused
+    // before a single event exists; the second runs against the rebuilt route.
+    prompt: () => {
+      prompts += 1;
+      if (prompts === 1) throw sessionStoppedError();
+      return events<PromptSessionEvent>([
+        textEvent(
+          "agent_message_chunk",
+          "back online",
+          "agent-1",
+        ) as PromptSessionEvent,
+        { type: "completed", stopReason: "end_turn" },
+      ]);
+    },
+    respondToPermission: async () => ({}),
+    setConfig: async () => ({ configOptions: [] }),
+  };
+  let nextId = 0;
+  const store = createChatStore(client, {
+    createId: () => `local-${++nextId}`,
+    now: () => 42,
+  });
+
+  await store.getState().loadSession("ora-1");
+  await store.getState().sendMessage({ oraSessionId: "ora-1", text: "hello" });
+
+  // One load opened the conversation and one rebuilt the route the send needed.
+  assert.equal(loads, 2);
+  assert.equal(prompts, 2);
+  const conversation = store.getState().conversations["ora-1"]!;
+  // The reconnect never reaches the user: the optimistic turn streams straight
+  // through and the conversation carries no error.
+  assert.equal(conversation.error, null);
+  assert.equal(conversation.turns.length, 1);
+  const [turn] = conversation.turns;
+  assert.equal(turn?.status, "completed");
+  assert.deepEqual(
+    turn?.items.map((item) => item.kind === "message" && item.content),
+    ["back online"],
+  );
+});
+
+test("does not retry a stopped session once the prompt has streamed anything", async () => {
+  let loads = 0;
+  let prompts = 0;
+  const client: ChatSessionClient = {
+    load: () => {
+      loads += 1;
+      return events<LoadSessionEvent>([{ type: "completed" }]);
+    },
+    prompt: async function* () {
+      prompts += 1;
+      yield textEvent(
+        "agent_message_chunk",
+        "partial",
+        "agent-1",
+      ) as PromptSessionEvent;
+      throw sessionStoppedError();
+    },
+    respondToPermission: async () => ({}),
+    setConfig: async () => ({ configOptions: [] }),
+  };
+  let nextId = 0;
+  const store = createChatStore(client, {
+    createId: () => `local-${++nextId}`,
+    now: () => 42,
+  });
+
+  await store.getState().loadSession("ora-1");
+  await assert.rejects(
+    store.getState().sendMessage({ oraSessionId: "ora-1", text: "hello" }),
+  );
+
+  // Half a turn is already on screen, so resending would duplicate it.
+  assert.equal(loads, 1);
+  assert.equal(prompts, 1);
+  assert.equal(
+    store.getState().conversations["ora-1"]?.turns[0]?.status,
+    "failed",
+  );
+});
+
+test("does not re-attach for a failure that is not a stopped session", async () => {
+  let loads = 0;
+  let prompts = 0;
+  const client: ChatSessionClient = {
+    load: () => {
+      loads += 1;
+      return events<LoadSessionEvent>([{ type: "completed" }]);
+    },
+    prompt: () => {
+      prompts += 1;
+      throw new Error("agent runtime is unavailable");
+    },
+    respondToPermission: async () => ({}),
+    setConfig: async () => ({ configOptions: [] }),
+  };
+  let nextId = 0;
+  const store = createChatStore(client, {
+    createId: () => `local-${++nextId}`,
+    now: () => 42,
+  });
+
+  await store.getState().loadSession("ora-1");
+  await assert.rejects(
+    store.getState().sendMessage({ oraSessionId: "ora-1", text: "hello" }),
+  );
+
+  assert.equal(loads, 1);
+  assert.equal(prompts, 1);
 });

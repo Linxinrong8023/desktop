@@ -1,16 +1,16 @@
 use crate::workflow_run::mapper::map_run;
 use crate::workflow_run::{
-    CancelWorkflowRunResult, NodeExecutor, RestartWorkflowRunResult, UpdateWorkflowRunInputResult,
-    WorkflowNodeRunIdGenerator, WorkflowRunEngine, WorkflowRunEngineRepository,
-    WorkflowRunRepository,
+    CancelWorkflowRunResult, FileChange, NodeExecutor, RestartWorkflowRunResult,
+    UpdateWorkflowRunInputResult, WorkflowNodeRunIdGenerator, WorkflowRunEngine,
+    WorkflowRunEngineRepository, WorkflowRunRepository,
 };
 use crate::{ApplicationError, Clock};
 use ora_contracts::{
-    CancelWorkflowRunRequest, CancelWorkflowRunResponse, RestartWorkflowRunRequest,
-    RestartWorkflowRunResponse, StartWorkflowRunRequest, StartWorkflowRunResponse,
-    UpdateWorkflowRunInputRequest, UpdateWorkflowRunInputResponse,
+    CancelWorkflowRunRequest, CancelWorkflowRunResponse, CompleteWorkflowNodeResponse,
+    RestartWorkflowRunRequest, RestartWorkflowRunResponse, StartWorkflowRunRequest,
+    StartWorkflowRunResponse, UpdateWorkflowRunInputRequest, UpdateWorkflowRunInputResponse,
 };
-use ora_domain::{WorkflowRun, WorkflowRunId};
+use ora_domain::{WorkflowNodeRunId, WorkflowRun, WorkflowRunId};
 use std::sync::Arc;
 
 /// Exposes the engine's start/cancel/restart operations as application handlers.
@@ -120,6 +120,25 @@ where
         }
         let run = self.find_run(&run_id)?;
         Ok(UpdateWorkflowRunInputResponse { run: map_run(run) })
+    }
+
+    /// Completes one awaiting interactive node whose output the backend has already assembled.
+    ///
+    /// The engine transition is idempotent: a late call against an already-completed or cancelled
+    /// node becomes a no-op and the current run is returned.
+    pub fn complete_node(
+        &self,
+        run_id: &WorkflowRunId,
+        node_run_id: &WorkflowNodeRunId,
+        output: Option<String>,
+        stop_reason: Option<String>,
+        file_changes: Vec<FileChange>,
+    ) -> Result<CompleteWorkflowNodeResponse, ApplicationError> {
+        self.engine
+            .complete_node(run_id, node_run_id, output, stop_reason, file_changes)
+            .map_err(ApplicationError::from_workflow_engine_error)?;
+        let run = self.find_run(run_id)?;
+        Ok(CompleteWorkflowNodeResponse { run: map_run(run) })
     }
 
     /// Loads one visible run or reports it missing.

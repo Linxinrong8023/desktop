@@ -2,11 +2,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentActivityDots } from "../../components/agent-activity-dots";
 import { useTranslation } from "react-i18next";
 import { AnchorHighlight } from "./anchor-highlight";
-import { ConversationNavigator } from "./conversation-navigator";
+import {
+  ConversationNavigator,
+  type ConversationNavigationPresentation,
+} from "./conversation-navigator";
 import { useConversationNavigation } from "./conversation-navigation";
 import { MessageBubble } from "./message-bubble";
 import { ResponseTurn } from "./response-turn";
 import type { ChatModelChange, ChatTurn } from "@ora/chat";
+import { useTaskWorkspace } from "../../state/hooks/use-task-workspace";
+import { useWorkspaceCwd } from "../../state/hooks/use-workspace-cwd";
+import {
+  collectCumulativeArtifactIndices,
+  type TurnArtifactCacheEntry,
+} from "./chat-link/artifact-index";
+import { ChatLinkContext } from "./chat-link/context";
 
 interface MessageListProps {
   turns: ChatTurn[];
@@ -14,17 +24,52 @@ interface MessageListProps {
   modelChanges?: ChatModelChange[];
   userName: string;
   isResponding: boolean;
+  taskId?: string;
+  projectId?: string;
+  workspaceId?: string;
+  /** Optional presentation override for chats embedded inside another surface. */
+  conversationNavigation?: ConversationNavigationPresentation;
 }
 
+const EMPTY_MODEL_CHANGES: ChatModelChange[] = [];
 /** The scrollable turn thread, kept pinned to live ACP activity unless the reader scrolls away. */
 export function MessageList({
   turns,
-  modelChanges = [],
+  modelChanges = EMPTY_MODEL_CHANGES,
   userName,
   isResponding,
+  taskId,
+  projectId,
+  workspaceId,
+  conversationNavigation,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const workspaceQuery = useTaskWorkspace(taskId);
+  const workspaceCwdQuery = useWorkspaceCwd(
+    taskId === undefined ? workspaceId : undefined,
+  );
+  const cwd = workspaceQuery.data?.rootPath ?? workspaceCwdQuery.data ?? null;
+  const [artifactCache] = useState(
+    () => new Map<string, TurnArtifactCacheEntry>(),
+  );
+  const artifactIndices = useMemo(
+    () => collectCumulativeArtifactIndices(turns, artifactCache),
+    [artifactCache, turns],
+  );
+  const artifactIndex = useMemo(
+    () => artifactIndices.at(-1) ?? { edited: [], referenced: [] },
+    [artifactIndices],
+  );
+  const chatLinkValue = useMemo(() => {
+    if (taskId !== undefined) {
+      return { index: artifactIndex, taskId, cwd };
+    }
+    if (projectId !== undefined) {
+      return { index: artifactIndex, cwd };
+    }
+    return null;
+  }, [artifactIndex, cwd, projectId, taskId]);
   const lastTurn = turns.at(-1);
   const lastAnchorId =
     lastTurn === undefined
@@ -46,74 +91,91 @@ export function MessageList({
   });
 
   return (
-    <div className="relative min-h-0 flex-1">
-      <div
-        ref={scrollRef}
-        onScroll={navigation.handleScroll}
-        onWheel={(event) => navigation.handleWheel(event.deltaY)}
-        onPointerDown={navigation.beginPointerScroll}
-        onPointerUp={navigation.endPointerScroll}
-        onPointerCancel={navigation.endPointerScroll}
-        onTouchStart={navigation.beginPointerScroll}
-        onTouchEnd={navigation.endPointerScroll}
-        onTouchCancel={navigation.endPointerScroll}
-        data-testid="message-list"
-        aria-live="polite"
-        className="scrollbar-hide h-full min-h-0 animate-in overflow-y-auto fade-in duration-500"
-      >
+    <ChatLinkContext.Provider value={chatLinkValue}>
+      <div className="relative min-h-0 flex-1">
         <div
-          ref={contentRef}
-          className="mx-auto w-full max-w-[760px] px-3 pb-4 pt-5 sm:px-5 sm:pt-8"
+          ref={scrollRef}
+          onScroll={navigation.handleScroll}
+          onWheel={(event) => navigation.handleWheel(event.deltaY)}
+          onPointerDown={navigation.beginPointerScroll}
+          onPointerUp={navigation.endPointerScroll}
+          onPointerCancel={navigation.endPointerScroll}
+          onTouchStart={navigation.beginPointerScroll}
+          onTouchEnd={navigation.endPointerScroll}
+          onTouchCancel={navigation.endPointerScroll}
+          data-testid="message-list"
+          aria-live="polite"
+          className="scrollbar-hide h-full min-h-0 animate-in overflow-y-auto fade-in duration-500"
         >
-          {turns.map((turn, index) => (
-            <div key={turn.id}>
-              {/* Markers sit between turns rather than inside them, so they are
-                  rendered here instead of carrying a turn anchor: the navigator
-                  maps prompts and responses, and a divider is neither. */}
-              {modelChangesAt(modelChanges, index).map((change) => (
-                <ModelChangeDivider
-                  key={change.id}
-                  modelName={change.modelName}
-                />
-              ))}
-              <div data-turn-anchor={turn.id}>
-                <div
-                  data-turn-user
-                  data-conversation-anchor={`${turn.id}:user`}
-                >
-                  <MessageBubble
-                    message={turn.userMessage}
-                    userName={userName}
-                  />
-                </div>
-                {(turn.items.length > 0 || turn.status !== "streaming") && (
-                  <div
-                    data-turn-response
-                    data-conversation-anchor={`${turn.id}:response`}
-                    className="relative overflow-visible rounded-xl"
-                  >
-                    <AnchorHighlight />
-                    <ResponseTurn turn={turn} userName={userName} />
+          <div
+            ref={contentRef}
+            className="mx-auto w-full max-w-[760px] px-3 pb-4 pt-5 sm:px-5 sm:pt-8"
+          >
+            {turns.map((turn, index) => {
+              const turnIndex = artifactIndices[index] ?? {
+                edited: [],
+                referenced: [],
+              };
+              const turnChatLinkValue =
+                taskId !== undefined
+                  ? { index: turnIndex, taskId, cwd }
+                  : projectId !== undefined
+                    ? { index: turnIndex, cwd }
+                    : null;
+              return (
+                <div key={turn.id}>
+                  {modelChangesAt(modelChanges, index).map((change) => (
+                    <ModelChangeDivider
+                      key={change.id}
+                      modelName={change.modelName}
+                    />
+                  ))}
+                  <div data-turn-anchor={turn.id}>
+                    <div
+                      data-turn-user
+                      data-conversation-anchor={`${turn.id}:user`}
+                    >
+                      <MessageBubble
+                        message={turn.userMessage}
+                        userName={userName}
+                      />
+                    </div>
+                    {(turn.items.length > 0 || turn.status !== "streaming") && (
+                      <ChatLinkContext.Provider value={turnChatLinkValue}>
+                        <div
+                          data-turn-response
+                          data-conversation-anchor={`${turn.id}:response`}
+                          className="relative overflow-visible rounded-xl"
+                        >
+                          <AnchorHighlight />
+                          <ResponseTurn turn={turn} userName={userName} />
+                        </div>
+                      </ChatLinkContext.Provider>
+                    )}
                   </div>
-                )}
-              </div>
-            </div>
-          ))}
-          {modelChangesAt(modelChanges, turns.length).map((change) => (
-            <ModelChangeDivider key={change.id} modelName={change.modelName} />
-          ))}
-          {showRunning && <RunningIndicator />}
-          <div className="h-8" />
+                </div>
+              );
+            })}
+            {modelChangesAt(modelChanges, turns.length).map((change) => (
+              <ModelChangeDivider
+                key={change.id}
+                modelName={change.modelName}
+              />
+            ))}
+            {showRunning && <RunningIndicator />}
+            <div className="h-8" />
+          </div>
         </div>
+        <ConversationNavigator
+          {...conversationNavigation}
+          turns={turns}
+          activeAnchorId={navigation.activeAnchorId}
+          isAtTail={navigation.isAtTail}
+          onNavigate={navigation.navigateToAnchor}
+          onNavigateToTail={navigation.navigateToTail}
+        />
       </div>
-      <ConversationNavigator
-        turns={turns}
-        activeAnchorId={navigation.activeAnchorId}
-        isAtTail={navigation.isAtTail}
-        onNavigate={navigation.navigateToAnchor}
-        onNavigateToTail={navigation.navigateToTail}
-      />
-    </div>
+    </ChatLinkContext.Provider>
   );
 }
 

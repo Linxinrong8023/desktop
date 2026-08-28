@@ -1,4 +1,3 @@
-import type { AgentCli } from "@ora/contracts";
 import { useSettingsStore } from "../stores/settings-store";
 import { usePendingAgentStore } from "../stores/pending-agent-store";
 import { warmTargetKey } from "./use-warm-session";
@@ -32,8 +31,14 @@ interface AgentSelection {
  * bound, so the pick recorded for this exact target answers instead; reading the
  * shared default directly would let picking an agent for one not-yet-started chat
  * repaint every other one the moment it is visited.
+ *
+ * A binding or preference is reported as written even when that agent can no
+ * longer be reached. Agent availability is allowed to change while a surface is
+ * open, and using the first available agent as a fallback would silently change
+ * the user's selection when a plugin is installed or removed. A surface that has
+ * never chosen an agent therefore resolves to `null` instead of inventing one.
  */
-export function useTargetAgentCli(selection: AgentSelection): AgentCli {
+export function useTargetAgentCli(selection: AgentSelection): string | null {
   const defaultAgentCli = useSettingsStore((state) => state.settings.agentCli);
   const { data: sessions = [] } = useSessions();
   const targetKey = warmTargetKey(selection);
@@ -47,6 +52,8 @@ export function useTargetAgentCli(selection: AgentSelection): AgentCli {
   );
   const boundAgentCli = sessions.find(
     (session) => session.id === selection.sessionId,
-  )?.agentCli;
-  return pendingSwitch ?? boundAgentCli ?? pickedForTarget ?? defaultAgentCli;
+  )?.agentRef;
+  if (pendingSwitch !== undefined) return pendingSwitch;
+  if (boundAgentCli !== undefined) return boundAgentCli;
+  return pickedForTarget ?? defaultAgentCli;
 }

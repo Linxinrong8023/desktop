@@ -34,4 +34,32 @@ pub(super) const ENDPOINTS: &[FrontendEndpoint] = &[
         request_type: "WatchWorkspaceRequest",
         response_type: "WorkspaceFileEventBatch",
     },
+    FrontendEndpoint {
+        operation_name: "listProjectDirectory",
+        namespace: NAMESPACE,
+        member_name: "listProjectDirectory",
+        request_type: "ListProjectDirectoryRequest",
+        response_type: "ListWorkspaceDirectoryResponse",
+    },
+    FrontendEndpoint {
+        operation_name: "readProjectFile",
+        namespace: NAMESPACE,
+        member_name: "readProjectFile",
+        request_type: "ReadProjectFileRequest",
+        response_type: "ReadWorkspaceFileResponse",
+    },
+    FrontendEndpoint {
+        operation_name: "searchProject",
+        namespace: NAMESPACE,
+        member_name: "searchProject",
+        request_type: "SearchProjectRequest",
+        response_type: "SearchWorkspaceResponse",
+    },
+    FrontendEndpoint {
+        operation_name: "watchProject",
+        namespace: NAMESPACE,
+        member_name: "watchProject",
+        request_type: "WatchProjectRequest",
+        response_type: "WorkspaceFileEventBatch",
+    },
 ];

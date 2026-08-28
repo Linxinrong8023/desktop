@@ -70,6 +70,20 @@ function orderedActiveIds(run: GraphWorkflowRun): string[] {
   });
 }
 
+/** Picks the first active successor surface using the Theater's stable path ordering. */
+export function resolveCompletionAdvanceNodeId(
+  run: GraphWorkflowRun,
+  completedNodeId: string,
+): string | null {
+  const completedStatus = run.nodeStates[completedNodeId]?.status;
+  if (completedStatus === undefined || !isTerminalNodeStatus(completedStatus)) {
+    return null;
+  }
+  return (
+    orderedActiveIds(run).find((nodeId) => nodeId !== completedNodeId) ?? null
+  );
+}
+
 /**
  * Among active acts, prefer awaiting_input, then latest startedAt, then path order.
  */
@@ -183,6 +197,22 @@ export function shouldReleaseLivePinToFollow(
     return false;
   }
   return shouldReleaseFocusToFollow(prev, focusNodeId, currentStatus);
+}
+
+/**
+ * True when an open non-interactive session just finished and should follow the workflow onward.
+ * Interactive sessions advance through their explicit completion action instead.
+ */
+export function shouldAdvanceAutomaticConversation(
+  prev: TheaterFocusStatusSample | null,
+  conversationNodeId: string | null,
+  currentStatus: GraphWorkflowNodeStatus | undefined,
+  interactive: boolean,
+): boolean {
+  return (
+    !interactive &&
+    shouldReleaseFocusToFollow(prev, conversationNodeId, currentStatus)
+  );
 }
 
 /**

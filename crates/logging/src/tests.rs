@@ -10,9 +10,45 @@ use tracing::dispatcher::with_default;
 
 use crate::file_output::{ActiveLogPath, cleanup_old_logs};
 use crate::{
-    FileLoggingConfig, LogLevel, LogOutput, LoggingConfig, LoggingInitError, RotationPolicy,
-    build_dispatch, init_logging, runtime_span, span_with_correlation,
+    FileLoggingConfig, LogLevel, LogOutput, LoggingConfig, LoggingInitError, ParseLogLevelError,
+    RotationPolicy, build_dispatch, init_logging, runtime_span, span_with_correlation,
 };
+
+/// Verifies every supported level uses one stable environment and serialized representation.
+#[test]
+fn parses_and_formats_supported_log_levels() {
+    let cases = [
+        ("trace", LogLevel::Trace),
+        (" DEBUG ", LogLevel::Debug),
+        ("Info", LogLevel::Info),
+        ("wArN", LogLevel::Warn),
+        ("ERROR", LogLevel::Error),
+    ];
+
+    for (raw, expected) in cases {
+        let parsed = raw.parse::<LogLevel>().unwrap();
+
+        assert_eq!(parsed, expected);
+        assert_eq!(parsed.to_string(), expected.as_str());
+        assert_eq!(
+            serde_json::to_value(parsed).unwrap(),
+            serde_json::json!(expected.as_str())
+        );
+        assert_eq!(
+            serde_json::from_value::<LogLevel>(serde_json::json!(expected.as_str())).unwrap(),
+            expected
+        );
+    }
+}
+
+/// Verifies unsupported names preserve the original value for runtime-specific error mapping.
+#[test]
+fn rejects_unsupported_log_levels() {
+    let error = " verbose ".parse::<LogLevel>().unwrap_err();
+
+    assert_eq!(error, ParseLogLevelError::new(" verbose "));
+    assert_eq!(error.value(), " verbose ");
+}
 
 /// Verifies the public configuration model stays small, explicit, and equality-friendly.
 #[test]
@@ -92,6 +128,42 @@ fn filters_events_at_warn_level() {
     assert_eq!(
         events[1]["message"],
         Value::String("kept error".to_string())
+    );
+}
+
+/// Verifies reload increases and decreases apply only to events emitted after each update.
+#[test]
+fn reloads_the_level_for_future_events() {
+    let stdout = SharedBuffer::default();
+    let (dispatch, initialized) = build_dispatch(
+        &LoggingConfig::new(LogLevel::Info, LogOutput::Stdout, chrono_tz::UTC),
+        stdout.make_writer(),
+    )
+    .unwrap();
+    let (guard, level_control) = initialized.into_parts();
+
+    with_default(&dispatch, || {
+        tracing::debug!(message = "filtered before increase");
+        level_control.set_level(LogLevel::Debug).unwrap();
+        tracing::debug!(message = "kept after increase");
+        level_control.set_level(LogLevel::Error).unwrap();
+        tracing::warn!(message = "filtered after decrease");
+        tracing::error!(message = "kept after decrease");
+    });
+    assert_eq!(level_control.current_level().unwrap(), LogLevel::Error);
+    drop(dispatch);
+    drop(guard);
+
+    assert_eq!(
+        stdout
+            .json_lines()
+            .into_iter()
+            .map(|event| event["message"].clone())
+            .collect::<Vec<_>>(),
+        vec![
+            Value::String("kept after increase".to_string()),
+            Value::String("kept after decrease".to_string()),
+        ]
     );
 }
 
@@ -179,11 +251,12 @@ fn formats_json_events_with_context_and_error_objects() {
 #[test]
 fn emits_method_field_from_wrapper_macros() {
     let stdout = SharedBuffer::default();
-    let (dispatch, guard) = build_dispatch(
+    let (dispatch, initialized) = build_dispatch(
         &LoggingConfig::new(LogLevel::Info, LogOutput::Stdout, chrono_tz::UTC),
         stdout.make_writer(),
     )
     .unwrap();
+    let (guard, _level_control) = initialized.into_parts();
 
     with_default(&dispatch, || {
         crate::ora_info!(message = "macro event");
@@ -204,11 +277,12 @@ fn emits_method_field_from_wrapper_macros() {
 #[test]
 fn emits_helper_api_correlation_fields_consistently() {
     let stdout = SharedBuffer::default();
-    let (dispatch, guard) = build_dispatch(
+    let (dispatch, initialized) = build_dispatch(
         &LoggingConfig::new(LogLevel::Info, LogOutput::Stdout, chrono_tz::UTC),
         stdout.make_writer(),
     )
     .unwrap();
+    let (guard, _level_control) = initialized.into_parts();
 
     with_default(&dispatch, || {
         let span = span_with_correlation("bootstrap", Some("trace-9"), None);
@@ -229,11 +303,12 @@ fn emits_helper_api_correlation_fields_consistently() {
 #[test]
 fn selects_stdout_only_sink_behavior() {
     let stdout = SharedBuffer::default();
-    let (dispatch, guard) = build_dispatch(
+    let (dispatch, initialized) = build_dispatch(
         &LoggingConfig::new(LogLevel::Info, LogOutput::Stdout, chrono_tz::UTC),
         stdout.make_writer(),
     )
     .unwrap();
+    let (guard, _level_control) = initialized.into_parts();
 
     with_default(&dispatch, || {
         tracing::info!(message = "stdout only");
@@ -255,14 +330,17 @@ fn selects_file_only_sink_behavior() {
         NonZeroUsize::new(3).unwrap(),
     );
     let stdout = SharedBuffer::default();
-    let (dispatch, guard) = build_dispatch(
+    let (dispatch, initialized) = build_dispatch(
         &LoggingConfig::new(LogLevel::Info, LogOutput::File(file_config), chrono_tz::UTC),
         stdout.make_writer(),
     )
     .unwrap();
+    let (guard, level_control) = initialized.into_parts();
 
     with_default(&dispatch, || {
         tracing::info!(message = "file only");
+        level_control.set_level(LogLevel::Debug).unwrap();
+        tracing::debug!(message = "file after reload");
     });
     drop(dispatch);
 
@@ -270,7 +348,7 @@ fn selects_file_only_sink_behavior() {
     drop(guard);
 
     assert_eq!(stdout.json_lines(), Vec::<Value>::new());
-    assert_eq!(read_rotated_log_lines(temp_dir.path(), "ora.log").len(), 1);
+    assert_eq!(read_rotated_log_lines(temp_dir.path(), "ora.log").len(), 2);
 }
 
 /// Verifies combined logging emits each event to stdout and the rotating file sink with the same envelope.
@@ -283,7 +361,7 @@ fn selects_stdout_and_file_sink_behavior() {
         NonZeroUsize::new(3).unwrap(),
     );
     let stdout = SharedBuffer::default();
-    let (dispatch, guard) = build_dispatch(
+    let (dispatch, initialized) = build_dispatch(
         &LoggingConfig::new(
             LogLevel::Info,
             LogOutput::StdoutAndFile(file_config),
@@ -292,9 +370,12 @@ fn selects_stdout_and_file_sink_behavior() {
         stdout.make_writer(),
     )
     .unwrap();
+    let (guard, level_control) = initialized.into_parts();
 
     with_default(&dispatch, || {
         tracing::info!(message = "both sinks");
+        level_control.set_level(LogLevel::Error).unwrap();
+        tracing::error!(message = "both sinks after reload");
     });
     drop(dispatch);
 
@@ -306,8 +387,8 @@ fn selects_stdout_and_file_sink_behavior() {
 
     // A single formatting pass fans the same bytes to both sinks, so each side receives
     // exactly one event with an identical envelope rather than two serialized copies.
-    assert_eq!(stdout_events.len(), 1);
-    assert_eq!(file_events.len(), 1);
+    assert_eq!(stdout_events.len(), 2);
+    assert_eq!(file_events.len(), 2);
     assert_eq!(stdout_events, file_events);
 }
 

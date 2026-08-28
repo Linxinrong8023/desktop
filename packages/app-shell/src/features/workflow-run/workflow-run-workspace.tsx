@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
@@ -31,12 +31,11 @@ import {
   useRestartWorkflowRun,
   useStartWorkflowRun,
 } from "../../state/hooks/use-workflow-runs";
-import { useProjects } from "../../state/hooks/use-projects";
-import { useTaskDiff } from "../../state/hooks/use-task-diff";
-import { parseTaskDiffPatch } from "../diff/task-diff-data";
 import {
+  resolveCompletionAdvanceNodeId,
   resolveStageFocusNodeId,
   resolveTheaterFocus,
+  shouldAdvanceAutomaticConversation,
   shouldReleaseLivePinToFollow,
   shouldStealFocusForArtifactReveal,
   type TheaterFocusStatusSample,
@@ -71,22 +70,12 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
     (s) => s.selectWorkflowRun,
   );
   const projectId = useWorkspaceSelectionStore((s) => s.selection.projectId);
-  const projectsQuery = useProjects();
-  const project = projectsQuery.data?.find((item) => item.id === projectId);
   const runQuery = useRealWorkflowRun(runId);
   const run = runQuery.data?.run ?? null;
-  const runTaskId = runQuery.data?.taskId ?? null;
-  // Total files the run-task worktree changed, shown on the terminal result act.
-  // Shares the task-diff cache with the Changes panel once it has been opened.
-  const taskDiffQuery = useTaskDiff(
-    runTaskId ?? "",
-    "branch",
-    runTaskId != null,
-  );
-  const changedFileCount =
-    taskDiffQuery.data !== undefined
-      ? parseTaskDiffPatch(taskDiffQuery.data.patch).length
-      : 0;
+  const workspaceId = runQuery.data?.workspaceId ?? null;
+  // WorkflowRun is Workspace-owned and no longer creates an implicit Task
+  // projection, so its generic project review surface has no task diff count.
+  const changedFileCount = 0;
   const startRun = useStartWorkflowRun();
   const cancelRun = useCancelWorkflowRun();
   const rerun = useRestartWorkflowRun();
@@ -97,6 +86,9 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
   const [conversationNodeId, setConversationNodeId] = useState<string | null>(
     null,
   );
+  /** Node completion held until refreshed state exposes its next active node. */
+  const [completionAdvanceFromNodeId, setCompletionAdvanceFromNodeId] =
+    useState<string | null>(null);
   const [stopOpen, setStopOpen] = useState(false);
   /** One-shot: Overview node click should open Theater's act inspector. */
   const [openInspectorOnTheaterEnter, setOpenInspectorOnTheaterEnter] =
@@ -109,6 +101,10 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
 
   /** Same-node status edge: live pin just finished -> resume auto-follow. */
   const focusStatusSampleRef = useRef<TheaterFocusStatusSample | null>(null);
+  /** Open automatic-session edge: its running turn just finished -> open its successor. */
+  const conversationStatusSampleRef = useRef<TheaterFocusStatusSample | null>(
+    null,
+  );
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
 
@@ -136,6 +132,7 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
       // because they happen after this clear.
       setFocusNodeId(null);
       setConversationNodeId(null);
+      setCompletionAdvanceFromNodeId(null);
       if (viewModeRef.current === "overview") {
         toast.message(t("workflowRun.result.finishedToastTitle"), {
           description: t("workflowRun.result.finishedToastDescription"),
@@ -158,16 +155,70 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
     setPreviousRunId(runId);
     setFocusNodeId(null);
     setConversationNodeId(null);
+    setCompletionAdvanceFromNodeId(null);
     setStopOpen(false);
     setOpenInspectorOnTheaterEnter(false);
     setReviewPanelOpen(false);
   }
   useEffect(() => {
     focusStatusSampleRef.current = null;
+    conversationStatusSampleRef.current = null;
   }, [runId]);
+
+  // Interactive completion and automatic-session status edges share this intent. Consume it
+  // exactly when refreshed state exposes the successor, without another effect-driven render.
+  if (run !== null && completionAdvanceFromNodeId !== null) {
+    const nextNodeId = resolveCompletionAdvanceNodeId(
+      run,
+      completionAdvanceFromNodeId,
+    );
+    if (nextNodeId !== null) {
+      setCompletionAdvanceFromNodeId(null);
+      setConversationNodeId(nextNodeId);
+      setFocusNodeId(nextNodeId);
+      setOpenInspectorOnTheaterEnter(false);
+      setViewMode("theater");
+    } else if (isTerminalRunStatus(run.status)) {
+      setCompletionAdvanceFromNodeId(null);
+      setConversationNodeId(null);
+      setFocusNodeId(null);
+    }
+  }
 
   const conversationNodeIdRef = useRef<string | null>(null);
   conversationNodeIdRef.current = conversationNodeId;
+
+  // An open automatic node has no completion button to create the existing advance intent.
+  // Detect the same running -> terminal edge and feed it into that shared successor resolver.
+  useEffect(() => {
+    if (run === null || conversationNodeId === null) {
+      conversationStatusSampleRef.current = null;
+      return;
+    }
+    const currentStatus = run.nodeStates[conversationNodeId]?.status;
+    const interactive =
+      run.definitionSnapshot.nodes.find(
+        (node) => node.id === conversationNodeId,
+      )?.data.agentConfig?.interactive === true;
+    if (
+      shouldAdvanceAutomaticConversation(
+        conversationStatusSampleRef.current,
+        conversationNodeId,
+        currentStatus,
+        interactive,
+      )
+    ) {
+      conversationStatusSampleRef.current = null;
+      setCompletionAdvanceFromNodeId(conversationNodeId);
+      return;
+    }
+    if (currentStatus !== undefined) {
+      conversationStatusSampleRef.current = {
+        nodeId: conversationNodeId,
+        status: currentStatus,
+      };
+    }
+  }, [run, conversationNodeId]);
 
   /**
    * Session dock is sticky attention: pin the act and ignore auto-follow /
@@ -303,15 +354,14 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
   const actionBusy =
     startRun.isPending || cancelRun.isPending || rerun.isPending;
 
-  // Run-task worktree Diff / Files — same surface as chat Task Changes.
-  const reviewContext: WorkspaceReviewContext =
-    runTaskId !== null && projectId !== null && project !== undefined
-      ? {
-          kind: "task",
-          taskId: runTaskId,
-          projectId,
-        }
+  // WorkflowRun has no implicit worktree Task. Its detail already carries the
+  // project projection needed to scope the generic review surface.
+  const reviewContext = useMemo<WorkspaceReviewContext>(() => {
+    const runProjectId = runQuery.data?.projectId ?? projectId;
+    return runProjectId !== null
+      ? { kind: "project", projectId: runProjectId }
       : { kind: "none" };
+  }, [projectId, runQuery.data?.projectId]);
 
   // If the run finishes while the stop dialog is open, dismiss it so Confirm
   // (which preventDefault + early-returns when !canStop) cannot leave a stuck modal.
@@ -536,11 +586,7 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
             </Button>
           )}
         </div>
-        {/* Prefer the run-task worktree; project root is the fallback before taskId loads. */}
-        <LocationActionsButton
-          taskId={runTaskId}
-          projectPath={project?.rootPath}
-        />
+        <LocationActionsButton workspaceId={workspaceId} />
         <WindowControls />
       </header>
 
@@ -558,6 +604,7 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
           key={runId}
           context={reviewContext}
           onOpenChange={setReviewPanelOpen}
+          preserveWorkspaceOnReviewOpen
         >
           <div
             ref={stageAreaRef}
@@ -580,6 +627,7 @@ export function WorkflowRunWorkspace({ runId }: WorkflowRunWorkspaceProps) {
                 reviewPanelOpen={reviewPanelOpen}
                 sessionConversationNodeId={conversationNodeId}
                 onSessionConversationNodeIdChange={setSessionConversationNodeId}
+                onNodeCompleted={setCompletionAdvanceFromNodeId}
                 onShowOverview={() => {
                   setOpenInspectorOnTheaterEnter(false);
                   setViewMode("overview");

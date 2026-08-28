@@ -17,6 +17,36 @@ describe("createTauriTransport", () => {
     expect(invoke).toHaveBeenCalledWith("list_projects", { request: {} });
   });
 
+  it("maps workspace listing to the Desktop command", async () => {
+    const response = { workspaces: [] };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "listWorkspaces",
+        request: {},
+      }),
+    ).resolves.toEqual(response);
+    expect(invoke).toHaveBeenCalledWith("list_workspaces", { request: {} });
+  });
+
+  it("maps workflow run rename to the Desktop command", async () => {
+    const response = { workflowRun: {} };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "renameWorkflowRun",
+        request: {},
+      }),
+    ).resolves.toEqual(response);
+    expect(invoke).toHaveBeenCalledWith("rename_workflow_run", {
+      request: {},
+    });
+  });
+
   it("maps installed plugin discovery to the Desktop snapshot command", async () => {
     const response = { plugins: [] };
     const invoke = vi.fn().mockResolvedValue(response);
@@ -30,6 +60,111 @@ describe("createTauriTransport", () => {
     ).resolves.toEqual(response);
     expect(invoke).toHaveBeenCalledWith("list_installed_plugins", {
       request: {},
+    });
+  });
+  it("maps available plugin discovery to the Desktop registry command", async () => {
+    const response = { updatedAt: 0n, plugins: [] };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "listAvailablePlugins",
+        request: {},
+      }),
+    ).resolves.toEqual(response);
+    expect(invoke).toHaveBeenCalledWith("list_available_plugins", {
+      request: {},
+    });
+  });
+  it("maps marketplace sync to the Desktop registry command", async () => {
+    const response = { updatedAt: 0n, plugins: [] };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "syncAvailablePlugins",
+        request: {},
+      }),
+    ).resolves.toEqual(response);
+    expect(invoke).toHaveBeenCalledWith("sync_available_plugins", {
+      request: {},
+    });
+  });
+  it("reads a marketplace plugin README through the Desktop plugin command", async () => {
+    const response = { readme: "# Weather" };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "readPluginReadme",
+        request: { pluginId: "official/weather" },
+      }),
+    ).resolves.toEqual(response);
+    expect(invoke).toHaveBeenCalledWith("read_plugin_readme", {
+      request: { pluginId: "official/weather" },
+    });
+  });
+  it("lists marketplace sources through the Desktop plugin command", async () => {
+    const response = { sources: [] };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "listMarketplaceSources",
+        request: {},
+      }),
+    ).resolves.toEqual(response);
+    expect(invoke).toHaveBeenCalledWith("list_marketplace_sources", {
+      request: {},
+    });
+  });
+  it("maps marketplace install to the Desktop plugin command", async () => {
+    const response = { pluginId: "official/weather" };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "installPlugin",
+        request: { pluginId: "official/weather" },
+      }),
+    ).resolves.toEqual(response);
+    expect(invoke).toHaveBeenCalledWith("install_plugin", {
+      request: { pluginId: "official/weather" },
+    });
+  });
+  it("maps marketplace plugin updates to the Desktop plugin command", async () => {
+    const response = { pluginId: "official/weather" };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "updatePlugin",
+        request: { pluginId: "official/weather" },
+      }),
+    ).resolves.toEqual(response);
+    expect(invoke).toHaveBeenCalledWith("update_plugin", {
+      request: { pluginId: "official/weather" },
+    });
+  });
+  it("maps local archive import to the Desktop plugin command", async () => {
+    const response = { pluginId: "official/weather" };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "importPlugin",
+        request: { path: "C:/downloads/weather.orax" },
+      }),
+    ).resolves.toEqual(response);
+    expect(invoke).toHaveBeenCalledWith("import_plugin", {
+      request: { path: "C:/downloads/weather.orax" },
     });
   });
   it("maps workspace directory reads to the dedicated desktop command", async () => {
@@ -48,31 +183,30 @@ describe("createTauriTransport", () => {
     });
   });
 
-  it("maps task diff reads to the shared desktop backend command", async () => {
+  it("maps workspace diff reads to the shared desktop backend command", async () => {
     const response = {
       baseCommitId: "base",
       headCommitId: "head",
-      diffId: "diff-1",
       patch: "diff --git a/README.md b/README.md",
     };
     const invoke = vi.fn().mockResolvedValue(response);
     const transport = createTauriTransport(invoke);
-    const request = { taskId: "task-1", scope: "branch" as const };
+    const request = { workspaceId: "workspace-1", scope: "branch" as const };
 
     await expect(
       transport.send({
-        operationName: "getTaskDiff",
+        operationName: "getWorkspaceDiff",
         request,
       }),
     ).resolves.toEqual(response);
-    expect(invoke).toHaveBeenCalledWith("get_task_diff", { request });
+    expect(invoke).toHaveBeenCalledWith("get_workspace_diff", { request });
   });
 
   it.each([
     [
       "switchSessionAgent",
       "switch_session_agent",
-      { sessionId: "s1", agentCli: "claude" },
+      { sessionId: "s1", agentRef: "ora-space.claude" },
     ],
     ["resumeSessionHistory", "resume_session_history", { sessionId: "s1" }],
     ["prepareAgentImport", "prepare_agent_import", { content: "# Role" }],
@@ -91,7 +225,7 @@ describe("createTauriTransport", () => {
     [
       "createWorkflowRun",
       "create_workflow_run",
-      { workflowId: "wf-1", projectId: "project-1" },
+      { workflowId: "wf-1", projectId: "project-1", locale: "zh-CN" },
     ],
     ["listWorkflowNodeRuns", "list_workflow_node_runs", { runId: "run-1" }],
   ] as const)(
@@ -138,6 +272,62 @@ describe("createTauriTransport", () => {
     });
     expect(invoke).toHaveBeenNthCalledWith(2, "get_spec_catalog", {
       request: { target: { kind: "task", taskId: "task-1" } },
+    });
+  });
+
+  it("maps runtime log-level reads and updates to Desktop commands", async () => {
+    const response = {
+      configuredLevel: "debug",
+      effectiveLevel: "debug",
+      startupOverride: null,
+    };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "getRuntimeLogLevel",
+        request: {},
+      }),
+    ).resolves.toEqual(response);
+    await expect(
+      transport.send({
+        operationName: "setRuntimeLogLevel",
+        request: { level: "debug" },
+      }),
+    ).resolves.toEqual(response);
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "get_runtime_log_level", {
+      request: {},
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "set_runtime_log_level", {
+      request: { level: "debug" },
+    });
+  });
+
+  it("maps developer-mode reads and updates to Desktop commands", async () => {
+    const response = { enabled: true };
+    const invoke = vi.fn().mockResolvedValue(response);
+    const transport = createTauriTransport(invoke);
+
+    await expect(
+      transport.send({
+        operationName: "getDeveloperMode",
+        request: {},
+      }),
+    ).resolves.toEqual(response);
+    await expect(
+      transport.send({
+        operationName: "setDeveloperMode",
+        request: { enabled: true },
+      }),
+    ).resolves.toEqual(response);
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "get_developer_mode", {
+      request: {},
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "set_developer_mode", {
+      request: { enabled: true },
     });
   });
 

@@ -6,6 +6,7 @@ use crate::record::{HistoryLine, HistoryRecord};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Appends settled records to one session's history file.
 ///
@@ -19,18 +20,34 @@ use std::path::{Path, PathBuf};
 pub struct HistoryWriter<C: HistoryClock> {
     path: PathBuf,
     clock: C,
+    /// Number of bytes this writer has durably appended (plus the file's initial length). This is
+    /// a line-boundary-exact cutoff a load can use to replay only what was written at a given
+    /// moment, before later appends land.
+    durable_bytes: AtomicU64,
 }
 
 impl<C: HistoryClock> HistoryWriter<C> {
-    /// Resolves where one session's history lives without touching the filesystem.
+    /// Resolves where one session's history lives and records its current length.
     ///
     /// Nothing is created until there is something to write, so a session opened
     /// and never prompted leaves no empty directories behind.
     pub fn open(root: &Path, session_id: &str, clock: C) -> Result<Self, HistoryError> {
+        let path = history_path(root, session_id)?;
+        // A resumed session already has durable bytes; a fresh one starts at zero.
+        let durable_bytes = std::fs::metadata(&path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
         Ok(Self {
-            path: history_path(root, session_id)?,
+            path,
             clock,
+            durable_bytes: AtomicU64::new(durable_bytes),
         })
+    }
+
+    /// Returns the byte length of the history file after every append so far, which always falls on
+    /// a record boundary because appends write whole newline-terminated records.
+    pub fn durable_bytes(&self) -> u64 {
+        self.durable_bytes.load(Ordering::Relaxed)
     }
 
     /// Returns the file this writer appends to.
@@ -70,7 +87,12 @@ impl<C: HistoryClock> HistoryWriter<C> {
         file.flush().map_err(|source| HistoryError::Append {
             path: self.path.clone(),
             source,
-        })
+        })?;
+        // Only advance the cutoff once the bytes are actually on disk, so a load that observes the
+        // cutoff never sees a record that is not yet durable.
+        self.durable_bytes
+            .fetch_add(buffer.len() as u64, Ordering::Relaxed);
+        Ok(())
     }
 
     /// Opens the file, creating its shard directories only if they are missing.

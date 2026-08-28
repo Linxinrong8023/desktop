@@ -1,5 +1,4 @@
-use crate::config::validate_worktree_root;
-use crate::error::{CommandError, desktop_config_backend_error};
+use crate::error::CommandError;
 use crate::state::DesktopState;
 use crate::stream_forwarding::{forward_contract_stream, forward_workspace_watch};
 use crate::workspace_files::{WorkspaceFileApi, workspace_file_backend_error};
@@ -193,6 +192,13 @@ backend_command!(
     "Lists projects through the shared Backend."
 );
 backend_command!(
+    list_workspaces,
+    ListWorkspacesRequest,
+    ListWorkspacesResponse,
+    list_workspaces,
+    "Lists workspaces through the shared Backend."
+);
+backend_command!(
     list_project_branches,
     ListProjectBranchesRequest,
     ListProjectBranchesResponse,
@@ -270,53 +276,25 @@ pub async fn delete_task(
         .map_err(CommandError::from)
 }
 backend_command!(
-    get_task_diff,
-    GetTaskDiffRequest,
-    GetTaskDiffResponse,
-    get_task_diff,
-    "Reads one task diff through the shared Backend."
+    get_workspace_diff,
+    GetWorkspaceDiffRequest,
+    GetWorkspaceDiffResponse,
+    get_workspace_diff,
+    "Reads one workspace diff through the shared Backend."
 );
 backend_command!(
-    commit_task_changes,
-    CommitTaskChangesRequest,
-    CommitTaskChangesResponse,
-    commit_task_changes,
-    "Commits one task worktree through the shared Backend."
+    commit_workspace_changes,
+    CommitWorkspaceChangesRequest,
+    CommitWorkspaceChangesResponse,
+    commit_workspace_changes,
+    "Commits one workspace checkout through the shared Backend."
 );
 backend_command!(
-    push_task_branch,
-    PushTaskBranchRequest,
-    PushTaskBranchResponse,
-    push_task_branch,
-    "Pushes one task worktree branch through the shared Backend."
-);
-backend_command!(
-    list_task_diff_comments,
-    ListTaskDiffCommentsRequest,
-    ListTaskDiffCommentsResponse,
-    list_task_diff_comments,
-    "Lists task diff discussions through the shared Backend."
-);
-backend_command!(
-    create_task_diff_comment,
-    CreateTaskDiffCommentRequest,
-    CreateTaskDiffCommentResponse,
-    create_task_diff_comment,
-    "Creates one task diff discussion through the shared Backend."
-);
-backend_command!(
-    reply_task_diff_comment,
-    ReplyTaskDiffCommentRequest,
-    ReplyTaskDiffCommentResponse,
-    reply_task_diff_comment,
-    "Replies to one task diff discussion through the shared Backend."
-);
-backend_command!(
-    set_task_diff_comment_status,
-    SetTaskDiffCommentStatusRequest,
-    SetTaskDiffCommentStatusResponse,
-    set_task_diff_comment_status,
-    "Updates one task diff discussion through the shared Backend."
+    push_workspace_branch,
+    PushWorkspaceBranchRequest,
+    PushWorkspaceBranchResponse,
+    push_workspace_branch,
+    "Pushes one workspace checkout's branch through the shared Backend."
 );
 
 // =============================================================================
@@ -409,6 +387,93 @@ fn read_workspace_file_backend(
         .map_err(workspace_file_backend_error)
 }
 
+/// Lists one immediate directory in the selected project checkout root.
+#[tauri::command]
+pub async fn list_project_directory(
+    state: State<'_, DesktopState>,
+    request: ListProjectDirectoryRequest,
+) -> Result<ListWorkspaceDirectoryResponse, CommandError> {
+    run_workspace_backend(
+        "list_project_directory",
+        state.backend.clone(),
+        state.workspace_files.clone(),
+        request,
+        list_project_directory_backend,
+    )
+    .await
+}
+
+/// Reads one bounded UTF-8 file in the selected project checkout root.
+#[tauri::command]
+pub async fn read_project_file(
+    state: State<'_, DesktopState>,
+    request: ReadProjectFileRequest,
+) -> Result<ReadWorkspaceFileResponse, CommandError> {
+    run_workspace_backend(
+        "read_project_file",
+        state.backend.clone(),
+        state.workspace_files.clone(),
+        request,
+        read_project_file_backend,
+    )
+    .await
+}
+
+/// Searches the selected project checkout with bounded ripgrep output.
+#[tauri::command]
+pub async fn search_project(
+    state: State<'_, DesktopState>,
+    request: SearchProjectRequest,
+) -> Result<SearchWorkspaceResponse, CommandError> {
+    let backend = state.backend.clone();
+    let workspace_files = state.workspace_files.clone();
+    let project_id = request.project_id;
+    let query = request.query;
+    let kind = request.kind;
+    run_async_backend("search_project", async move {
+        let root =
+            tauri::async_runtime::spawn_blocking(move || backend.resolve_project_cwd(&project_id))
+                .await
+                .map_err(|source| {
+                    BackendError::internal("Desktop workspace location resolution failed", source)
+                })??;
+        workspace_files
+            .search(&root, &query, kind)
+            .await
+            .map_err(workspace_file_backend_error)
+    })
+    .await
+}
+
+/// Resolves a project checkout and lists the requested relative directory.
+fn list_project_directory_backend(
+    backend: &Backend,
+    workspace_files: &WorkspaceFileApi,
+    request: ListProjectDirectoryRequest,
+) -> Result<ListWorkspaceDirectoryResponse, BackendError> {
+    let root = backend.resolve_project_cwd(&request.project_id)?;
+    let path = request
+        .path
+        .as_deref()
+        .map(Path::new)
+        .unwrap_or_else(|| Path::new(""));
+    workspace_files
+        .list_directory(&root, path)
+        .map_err(workspace_file_backend_error)
+}
+
+/// Resolves a project checkout and reads the requested relative file.
+fn read_project_file_backend(
+    backend: &Backend,
+    workspace_files: &WorkspaceFileApi,
+    request: ReadProjectFileRequest,
+) -> Result<ReadWorkspaceFileResponse, BackendError> {
+    let root = backend.resolve_project_cwd(&request.project_id)?;
+    workspace_files
+        .read_file(&root, Path::new(&request.path))
+        .map_err(workspace_file_backend_error)
+}
+
 // =============================================================================
 // session
 // =============================================================================
@@ -477,6 +542,21 @@ pub async fn stop_session(
     request: StopSessionRequest,
 ) -> Result<StopSessionResponse, CommandError> {
     run_async_backend("stop_session", state.backend.stop_session(request)).await
+}
+
+/// Cancels the active prompt without unloading the reusable session.
+#[tauri::command]
+pub async fn cancel_session_prompt(
+    state: State<'_, DesktopState>,
+    request: CancelSessionPromptRequest,
+) -> Result<CancelSessionPromptResponse, CommandError> {
+    run_backend(
+        "cancel_session_prompt",
+        state.backend.clone(),
+        request,
+        Backend::cancel_session_prompt,
+    )
+    .await
 }
 
 /// Moves one conversation onto a different agent CLI without changing its identity.
@@ -627,36 +707,46 @@ pub async fn stream_contract(
                     .map_err(|error| {
                         CommandError::from_backend_with_lifecycle(error, &lifecycle)
                     })?;
-            let workspace_files = state.workspace_files.clone();
-            let watcher =
-                tauri::async_runtime::spawn_blocking(move || workspace_files.watch(&root))
-                    .await
-                    .map_err(|source| {
-                        CommandError::from_backend_with_lifecycle(
-                            BackendError::internal(
-                                "Desktop workspace watcher setup failed",
-                                source,
-                            ),
-                            &lifecycle,
-                        )
-                    })?
-                    .map_err(|error| {
-                        CommandError::from_backend_with_lifecycle(
-                            workspace_file_backend_error(error),
-                            &lifecycle,
-                        )
-                    })?;
-            register_contract_stream(&state, &stream_call_id, &cancellation)
-                .map_err(|error| CommandError::from_backend_with_lifecycle(error, &lifecycle))?;
-            let registry = state.stream_cancellations.clone();
-            tauri::async_runtime::spawn(forward_workspace_watch(
-                watcher,
-                cancellation,
+            start_workspace_watch(
+                state,
+                root,
                 stream_call_id,
-                registry,
                 on_event,
                 lifecycle,
-            ));
+                cancellation,
+            )
+            .await?;
+        }
+        "watchProject" => {
+            let request =
+                serde_json::from_value::<WatchProjectRequest>(request).map_err(|source| {
+                    CommandError::from_backend_with_lifecycle(
+                        BackendError::internal("failed to decode stream request", source),
+                        &lifecycle,
+                    )
+                })?;
+            let project_id = request.project_id;
+            let backend = state.backend.clone();
+            let root = tauri::async_runtime::spawn_blocking(move || {
+                backend.resolve_project_cwd(&project_id)
+            })
+            .await
+            .map_err(|source| {
+                CommandError::from_backend_with_lifecycle(
+                    BackendError::internal("Desktop workspace location resolution failed", source),
+                    &lifecycle,
+                )
+            })?
+            .map_err(|error| CommandError::from_backend_with_lifecycle(error, &lifecycle))?;
+            start_workspace_watch(
+                state,
+                root,
+                stream_call_id,
+                on_event,
+                lifecycle,
+                cancellation,
+            )
+            .await?;
         }
         "watchSpecs" => {
             return crate::spec_commands::start_watch(
@@ -680,6 +770,44 @@ pub async fn stream_contract(
             ));
         }
     }
+    Ok(())
+}
+
+/// Starts a native filesystem watcher for an already-resolved checkout root.
+async fn start_workspace_watch(
+    state: State<'_, DesktopState>,
+    root: PathBuf,
+    stream_call_id: String,
+    on_event: Channel<serde_json::Value>,
+    lifecycle: RequestLifecycle,
+    cancellation: CancellationToken,
+) -> Result<(), CommandError> {
+    let workspace_files = state.workspace_files.clone();
+    let watcher = tauri::async_runtime::spawn_blocking(move || workspace_files.watch(&root))
+        .await
+        .map_err(|source| {
+            CommandError::from_backend_with_lifecycle(
+                BackendError::internal("Desktop workspace watcher setup failed", source),
+                &lifecycle,
+            )
+        })?
+        .map_err(|error| {
+            CommandError::from_backend_with_lifecycle(
+                workspace_file_backend_error(error),
+                &lifecycle,
+            )
+        })?;
+    register_contract_stream(&state, &stream_call_id, &cancellation)
+        .map_err(|error| CommandError::from_backend_with_lifecycle(error, &lifecycle))?;
+    let registry = state.stream_cancellations.clone();
+    tauri::async_runtime::spawn(forward_workspace_watch(
+        watcher,
+        cancellation,
+        stream_call_id,
+        registry,
+        on_event,
+        lifecycle,
+    ));
     Ok(())
 }
 
@@ -754,6 +882,14 @@ backend_command!(
     GetAgentRuntimeStatusResponse,
     get_agent_runtime_status,
     "Reports the live detection status of every application-scoped CLI runtime through the shared Backend."
+);
+
+backend_command!(
+    list_agent_models,
+    ListAgentModelsRequest,
+    ListAgentModelsResponse,
+    list_agent_models,
+    "Lists the models one agent advertises outside any session through the shared Backend."
 );
 
 // =============================================================================
@@ -889,6 +1025,77 @@ backend_command!(
     list_installed_plugins,
     "Lists the cached installed-plugin lifecycle snapshot."
 );
+backend_command!(
+    get_plugin_configuration,
+    GetPluginConfigurationRequest,
+    GetPluginConfigurationResponse,
+    get_plugin_configuration,
+    "Loads one typed Plugin Configuration editor snapshot."
+);
+backend_command!(
+    save_plugin_configuration,
+    SavePluginConfigurationRequest,
+    SavePluginConfigurationResponse,
+    save_plugin_configuration,
+    "Persists one revision-checked Plugin Configuration replacement."
+);
+backend_command!(
+    reset_plugin_configuration,
+    ResetPluginConfigurationRequest,
+    ResetPluginConfigurationResponse,
+    reset_plugin_configuration,
+    "Resets explicit overrides or recovers a damaged Plugin Configuration."
+);
+backend_command!(
+    list_available_plugins,
+    ListAvailablePluginsRequest,
+    ListAvailablePluginsResponse,
+    list_available_plugins,
+    "Lists the cached marketplace registry index."
+);
+backend_command!(
+    sync_available_plugins,
+    SyncAvailablePluginsRequest,
+    SyncAvailablePluginsResponse,
+    sync_available_plugins,
+    "Pulls the marketplace source and rebuilds the cached registry index."
+);
+backend_command!(
+    read_plugin_readme,
+    ReadPluginReadmeRequest,
+    ReadPluginReadmeResponse,
+    read_plugin_readme,
+    "Reads one marketplace plugin's published README for its detail page."
+);
+
+backend_command!(
+    list_marketplace_sources,
+    ListMarketplaceSourcesRequest,
+    ListMarketplaceSourcesResponse,
+    list_marketplace_sources,
+    "Lists the configured marketplace source repositories."
+);
+backend_command!(
+    add_marketplace_source,
+    AddMarketplaceSourceRequest,
+    AddMarketplaceSourceResponse,
+    add_marketplace_source,
+    "Adds one marketplace source repository."
+);
+backend_command!(
+    delete_marketplace_source,
+    DeleteMarketplaceSourceRequest,
+    DeleteMarketplaceSourceResponse,
+    delete_marketplace_source,
+    "Removes one marketplace source repository."
+);
+backend_command!(
+    update_marketplace_source,
+    UpdateMarketplaceSourceRequest,
+    UpdateMarketplaceSourceResponse,
+    update_marketplace_source,
+    "Updates one marketplace source's proxy policy."
+);
 async_backend_command!(
     scan_plugins,
     ScanPluginsRequest,
@@ -897,32 +1104,18 @@ async_backend_command!(
     "Explicitly scans and reconciles installed plugins."
 );
 async_backend_command!(
-    enable_plugin,
-    EnablePluginRequest,
-    EnablePluginResponse,
-    enable_plugin,
-    "Persists plugin eligibility without activating it."
-);
-async_backend_command!(
-    disable_plugin,
-    DisablePluginRequest,
-    DisablePluginResponse,
-    disable_plugin,
-    "Stops and disables one installed plugin."
-);
-async_backend_command!(
     activate_plugin,
     ActivatePluginRequest,
     ActivatePluginResponse,
     activate_plugin,
-    "Activates one enabled plugin."
+    "Activates one installed plugin."
 );
 async_backend_command!(
     stop_plugin,
     StopPluginRequest,
     StopPluginResponse,
     stop_plugin,
-    "Stops one plugin without changing eligibility."
+    "Stops one plugin process."
 );
 async_backend_command!(
     uninstall_plugin,
@@ -930,6 +1123,27 @@ async_backend_command!(
     UninstallPluginResponse,
     uninstall_plugin,
     "Stops and removes one installed plugin."
+);
+async_backend_command!(
+    install_plugin,
+    InstallPluginRequest,
+    InstallPluginResponse,
+    install_plugin,
+    "Installs one marketplace plugin by downloading, verifying, and extracting it."
+);
+async_backend_command!(
+    update_plugin,
+    UpdatePluginRequest,
+    UpdatePluginResponse,
+    update_plugin,
+    "Updates one installed plugin to the version its marketplace source publishes."
+);
+async_backend_command!(
+    import_plugin,
+    ImportPluginRequest,
+    ImportPluginResponse,
+    import_plugin,
+    "Imports one local .orax release archive; the installed plugin is immediately available."
 );
 
 // =============================================================================
@@ -1094,6 +1308,13 @@ backend_command!(
     "Deletes one workflow run through the shared Backend."
 );
 backend_command!(
+    rename_workflow_run,
+    RenameWorkflowRunRequest,
+    RenameWorkflowRunResponse,
+    rename_workflow_run,
+    "Renames one workflow run through the shared Backend."
+);
+backend_command!(
     start_workflow_run,
     StartWorkflowRunRequest,
     StartWorkflowRunResponse,
@@ -1129,20 +1350,35 @@ backend_command!(
     update_workflow_run_input,
     "Updates the kickoff input of one workflow run through the shared Backend."
 );
+/// Completes one awaiting interactive workflow node through the shared Backend.
+///
+/// Not a `backend_command!` because completion also stops the node's session, which is
+/// asynchronous.
+#[tauri::command]
+pub async fn complete_workflow_node(
+    state: State<'_, DesktopState>,
+    request: CompleteWorkflowNodeRequest,
+) -> Result<CompleteWorkflowNodeResponse, CommandError> {
+    state
+        .backend
+        .complete_workflow_node(request)
+        .await
+        .map_err(CommandError::from)
+}
 
 // =============================================================================
 // desktop
 // =============================================================================
 
-/// Carries the empty request used to read Desktop runtime configuration consistently.
+/// Carries the empty request used to read the active worktree root.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetDesktopConfigRequest {}
+pub struct GetWorktreeRootRequest {}
 
-/// Returns the current non-sensitive Desktop runtime configuration.
+/// Returns the active worktree creation root.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GetDesktopConfigResponse {
+pub struct GetWorktreeRootResponse {
     pub worktree_root: String,
 }
 
@@ -1171,6 +1407,20 @@ pub struct ResolveTaskCwdRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolveTaskCwdResponse {
+    pub path: String,
+}
+
+/// Identifies the Workspace whose local directory should be resolved.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveWorkspaceCwdRequest {
+    pub workspace_id: String,
+}
+
+/// Returns the absolute local directory backing a Workspace.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveWorkspaceCwdResponse {
     pub path: String,
 }
 
@@ -1212,252 +1462,79 @@ fn resolve_task_cwd_backend(
         })
 }
 
-/// Names the host application a location can be handed off to.
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LocationTarget {
-    Explorer,
-    Terminal,
-    VsCode,
-}
-
-/// Carries the target application and the absolute path it should open.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OpenLocationRequest {
-    pub target: LocationTarget,
-    pub path: String,
-}
-
-/// Opens one absolute path in the file manager, a terminal, or VS Code on the host OS.
+/// Resolves a Workspace's local directory off the API surface.
 #[tauri::command]
-pub async fn open_location(request: OpenLocationRequest) -> Result<(), CommandError> {
-    let lifecycle = RequestLifecycle::start("open_location", &UuidRequestIdGenerator);
-    let request_span =
-        ora_logging::span_with_request_id("tauri_command", &lifecycle.request_id().to_string());
-    let blocking_span = request_span.clone();
-    let result = match tauri::async_runtime::spawn_blocking(move || {
-        blocking_span.in_scope(|| open_location_blocking(request.target, &request.path))
-    })
-    .await
-    {
-        Ok(result) => result,
-        Err(source) => Err(BackendError::internal(
-            "Desktop command execution failed",
-            source,
-        )),
-    };
-    async move {
-        match result {
-            Ok(()) => {
-                lifecycle.complete_success();
-                Ok(())
-            }
-            Err(error) => Err(CommandError::from_backend_with_lifecycle(error, &lifecycle)),
-        }
-    }
-    .instrument(request_span)
-    .await
-}
-
-/// Reports a location handoff that the host OS refused or could not launch.
-fn open_location_error(
-    target: LocationTarget,
-    source: impl std::error::Error + Send + Sync + 'static,
-) -> BackendError {
-    BackendError::with_source(
-        ora_backend::ErrorClassification::Internal,
-        PublicError::OpenLocationFailed(OpenLocationFailedParams {
-            target: match target {
-                LocationTarget::Explorer => OpenLocationTarget::Explorer,
-                LocationTarget::Terminal => OpenLocationTarget::Terminal,
-                LocationTarget::VsCode => OpenLocationTarget::Vscode,
-            },
-        }),
-        "failed to open the requested location",
-        source,
-    )
-}
-
-/// Launches the host handler for one location, branching per OS since only desktop hosts call this.
-#[cfg(target_os = "windows")]
-fn open_location_blocking(target: LocationTarget, path: &str) -> Result<(), BackendError> {
-    use std::os::windows::process::CommandExt;
-    use std::process::Command;
-    // CREATE_NO_WINDOW: keep the `cmd` shim that resolves `code.cmd` from flashing a console.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    // Git reports worktree paths with forward slashes; explorer.exe only navigates
-    // backslash paths and silently falls back to a parent otherwise. Normalize once -
-    // `wt`, PowerShell, and `code` all accept backslashes too.
-    let normalized = path.replace('/', "\\");
-    let path = normalized.as_str();
-
-    match target {
-        // explorer.exe returns a non-zero exit code even on success, so a clean spawn is the only
-        // signal worth trusting here.
-        LocationTarget::Explorer => Command::new("explorer")
-            .arg(path)
-            .spawn()
-            .map(|_| ())
-            .map_err(|source| open_location_error(target, source)),
-        // `code` ships as `code.cmd`, which CreateProcess will not resolve directly; route it
-        // through `cmd` and wait so a missing install surfaces as a failure the UI can report.
-        LocationTarget::VsCode => {
-            let status = Command::new("cmd")
-                .args(["/C", "code", path])
-                .creation_flags(CREATE_NO_WINDOW)
-                .status()
-                .map_err(|source| open_location_error(target, source))?;
-            if status.success() {
-                Ok(())
-            } else {
-                Err(open_location_error(
-                    target,
-                    std::io::Error::other(format!("VS Code exited with {status}")),
-                ))
-            }
-        }
-        // Prefer Windows Terminal; fall back to a PowerShell window opened in the target directory.
-        LocationTarget::Terminal => {
-            if Command::new("wt").args(["-d", path]).spawn().is_ok() {
-                return Ok(());
-            }
-            Command::new("cmd")
-                .args(["/C", "start", "", "/D", path, "powershell", "-NoExit"])
-                .spawn()
-                .map(|_| ())
-                .map_err(|source| open_location_error(target, source))
-        }
-    }
-}
-
-/// Launches the host handler for one location through macOS `open`, which fails loudly when absent.
-#[cfg(target_os = "macos")]
-fn open_location_blocking(target: LocationTarget, path: &str) -> Result<(), BackendError> {
-    use std::process::Command;
-
-    let mut command = Command::new("open");
-    match target {
-        LocationTarget::Explorer => {
-            command.arg(path);
-        }
-        LocationTarget::Terminal => {
-            command.args(["-a", "Terminal", path]);
-        }
-        LocationTarget::VsCode => {
-            command.args(["-a", "Visual Studio Code", path]);
-        }
-    }
-    let status = command
-        .status()
-        .map_err(|source| open_location_error(target, source))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(open_location_error(
-            target,
-            std::io::Error::other(format!("open command exited with {status}")),
-        ))
-    }
-}
-
-/// Rejects location handoffs on hosts that never run the desktop shell (only Web runs on Linux).
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-fn open_location_blocking(target: LocationTarget, _path: &str) -> Result<(), BackendError> {
-    Err(open_location_error(
-        target,
-        std::io::Error::other("opening locations is unsupported on this platform"),
-    ))
-}
-
-/// Reads the current Desktop worktree configuration without touching the Web API surface.
-#[tauri::command]
-pub async fn get_desktop_config(
+pub async fn resolve_workspace_cwd(
     state: State<'_, DesktopState>,
-    request: GetDesktopConfigRequest,
-) -> Result<GetDesktopConfigResponse, CommandError> {
-    let _ = request;
-    let lifecycle = RequestLifecycle::start("get_desktop_config", &UuidRequestIdGenerator);
-    let result = state
-        .config
-        .snapshot()
-        .map_err(desktop_config_backend_error)
-        .map(|config| GetDesktopConfigResponse {
-            worktree_root: config.worktree_root().to_string_lossy().into_owned(),
-        });
-    match result {
-        Ok(response) => {
-            lifecycle.complete_success();
-            Ok(response)
-        }
-        Err(error) => Err(CommandError::from_backend_with_lifecycle(error, &lifecycle)),
-    }
+    request: ResolveWorkspaceCwdRequest,
+) -> Result<ResolveWorkspaceCwdResponse, CommandError> {
+    run_backend(
+        "resolve_workspace_cwd",
+        state.backend.clone(),
+        request,
+        resolve_workspace_cwd_backend,
+    )
+    .await
 }
 
-/// Persists a new creation root and updates Backend configuration without interrupting in-flight work.
+/// Resolves a Workspace's local directory through the composed backend.
+fn resolve_workspace_cwd_backend(
+    backend: &Backend,
+    request: ResolveWorkspaceCwdRequest,
+) -> Result<ResolveWorkspaceCwdResponse, BackendError> {
+    backend
+        .resolve_workspace_cwd(&request.workspace_id)
+        .map(|path| ResolveWorkspaceCwdResponse {
+            path: to_native_path_string(&path),
+        })
+}
+
+/// Reads the active worktree root through Backend's SQLite-backed configuration.
+#[tauri::command]
+pub async fn get_worktree_root(
+    state: State<'_, DesktopState>,
+    request: GetWorktreeRootRequest,
+) -> Result<GetWorktreeRootResponse, CommandError> {
+    run_backend(
+        "get_worktree_root",
+        state.backend.clone(),
+        request,
+        get_worktree_root_backend,
+    )
+    .await
+}
+
+fn get_worktree_root_backend(
+    backend: &Backend,
+    _request: GetWorktreeRootRequest,
+) -> Result<GetWorktreeRootResponse, BackendError> {
+    backend.worktree_root().map(|root| GetWorktreeRootResponse {
+        worktree_root: root.to_string_lossy().into_owned(),
+    })
+}
+
+/// Persists a new creation root without interrupting in-flight task creation.
 #[tauri::command]
 pub async fn set_worktree_root(
     state: State<'_, DesktopState>,
     request: SetWorktreeRootRequest,
 ) -> Result<SetWorktreeRootResponse, CommandError> {
-    let backend = state.backend.clone();
-    let config_store = state.config.clone();
-    let lifecycle = RequestLifecycle::start("set_worktree_root", &UuidRequestIdGenerator);
-    let request_span =
-        ora_logging::span_with_request_id("tauri_command", &lifecycle.request_id().to_string());
-    let blocking_span = request_span.clone();
-    let secondary_lifecycle = lifecycle.clone();
-    let result = match tauri::async_runtime::spawn_blocking(move || {
-        blocking_span.in_scope(|| {
-            let previous = config_store
-                .snapshot()
-                .map_err(desktop_config_backend_error)?;
-            let worktree_root = PathBuf::from(request.worktree_root);
+    run_backend(
+        "set_worktree_root",
+        state.backend.clone(),
+        request,
+        set_worktree_root_backend,
+    )
+    .await
+}
 
-            validate_worktree_root(&worktree_root).map_err(desktop_config_backend_error)?;
-            backend.set_worktree_root(worktree_root.clone())?;
-            if let Err(error) = config_store.set_worktree_root(worktree_root.clone()) {
-                if let Err(rollback_error) =
-                    backend.set_worktree_root(previous.worktree_root().to_path_buf())
-                {
-                    let report = ora_logging::ErrorReport::from_error(&rollback_error);
-                    ora_logging::ora_error!(
-                        operation = "set_worktree_root.rollback",
-                        request_id = %secondary_lifecycle.request_id(),
-                        outcome = "secondary_failure",
-                        error.code = rollback_error.public_error().code(),
-                        error.message = report.message(),
-                        error.chain = report.chain(),
-                        error.chain_depth = report.chain_depth(),
-                        "secondary cleanup failed"
-                    );
-                }
-                return Err(desktop_config_backend_error(error));
-            }
-
-            Ok(SetWorktreeRootResponse {
-                worktree_root: worktree_root.to_string_lossy().into_owned(),
-            })
-        })
+fn set_worktree_root_backend(
+    backend: &Backend,
+    request: SetWorktreeRootRequest,
+) -> Result<SetWorktreeRootResponse, BackendError> {
+    let worktree_root = PathBuf::from(request.worktree_root);
+    backend.set_worktree_root(worktree_root.clone())?;
+    Ok(SetWorktreeRootResponse {
+        worktree_root: worktree_root.to_string_lossy().into_owned(),
     })
-    .await
-    {
-        Ok(result) => result,
-        Err(source) => Err(BackendError::internal(
-            "Desktop command execution failed",
-            source,
-        )),
-    };
-    async move {
-        match result {
-            Ok(response) => {
-                lifecycle.complete_success();
-                Ok(response)
-            }
-            Err(error) => Err(CommandError::from_backend_with_lifecycle(error, &lifecycle)),
-        }
-    }
-    .instrument(request_span)
-    .await
 }

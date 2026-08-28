@@ -13,7 +13,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@ora/ui";
 import { ConversationPreviewMarkdown } from "./conversation-preview-markdown";
 import type { ConversationAnchor } from "./conversation-navigation";
 
-interface ConversationNavigatorProps {
+export interface ConversationNavigationPresentation {
+  /** Positions the rail against either the browser viewport or its nearest relative container. */
+  placement?: "viewport" | "container";
+  /** Minimum number of prompt/response anchors required before the rail appears. */
+  minAnchors?: number;
+}
+
+interface ConversationNavigatorProps extends ConversationNavigationPresentation {
   /** Full-chat turns; embedded callers can provide already-projected anchors instead. */
   turns?: ChatTurn[];
   /** Role-aware anchors rendered by the shared navigation skin. */
@@ -22,10 +29,6 @@ interface ConversationNavigatorProps {
   isAtTail: boolean;
   onNavigate: (anchorId: string) => void;
   onNavigateToTail: () => void;
-  /** Keeps the full chat viewport skin while allowing an in-card rail. */
-  placement?: "viewport" | "container";
-  /** Full chat stays quiet until three anchors; compact node views can use two. */
-  minAnchors?: number;
 }
 
 interface AnchorPreview {

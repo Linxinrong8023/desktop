@@ -13,9 +13,8 @@ import { useContractsClient } from "../../contracts-client-context";
 import { isTerminalRunStatus } from "../../features/workflow-run/run-status-style";
 import { useWorkspaceSelectionStore } from "../stores/workspace-selection-store";
 import type { WorkflowRunSummary } from "@ora/contracts";
+import { activeLocale } from "../../i18n/i18n-instance";
 
-const runsByWorkflowKey = (workflowId: string) =>
-  ["workflowRun", "byWorkflow", workflowId] as const;
 const runsByProjectKey = (projectId: string) =>
   ["workflowRun", "byProject", projectId] as const;
 const runDetailKey = (runId: string) =>
@@ -29,56 +28,48 @@ function hasActiveRun(runs: WorkflowRunSummary[] | undefined): boolean {
   );
 }
 
-/**
- * Lists the runs of one workflow so the deploy dialog can derive the projects the
- * workflow already runs in (a run-task's project is the deploy target).
- */
-export function useWorkflowRunsByWorkflow(
-  workflowId: string | null | undefined,
+/** Lists the persisted workflow runs of one project. */
+export function useWorkflowRunsByProject(
+  projectId: string | null | undefined,
+  options?: { enabled?: boolean },
 ) {
   const client = useContractsClient();
-  return useQuery({
-    queryKey: runsByWorkflowKey(workflowId ?? ""),
-    queryFn: async () =>
-      (await client.workflowRun.listByWorkflow({ workflowId: workflowId! }))
-        .runs,
-    enabled: workflowId != null && workflowId !== "",
-    // Completion is backend-driven with no frontend event, so poll while any run is active.
-    refetchInterval: (query) => (hasActiveRun(query.state.data) ? 4000 : false),
-  });
-}
-
-/** Lists the persisted workflow runs of one project. */
-export function useWorkflowRunsByProject(projectId: string | null | undefined) {
-  const client = useContractsClient();
+  const enabled =
+    projectId != null && projectId !== "" && (options?.enabled ?? true);
   return useQuery({
     queryKey: runsByProjectKey(projectId ?? ""),
     queryFn: async () =>
       (await client.workflowRun.list({ projectId: projectId! })).runs,
-    enabled: projectId != null && projectId !== "",
+    enabled,
     // Completion is backend-driven with no frontend event, so poll while any run is active.
-    refetchInterval: (query) => (hasActiveRun(query.state.data) ? 4000 : false),
+    refetchInterval: (query) =>
+      enabled && hasActiveRun(query.state.data) ? 4000 : false,
   });
 }
 
-/** Creates one pending workflow run against a published snapshot with a required name. */
+/** Creates one pending WorkflowRun directly against the selected Workspace. */
 export function useCreateWorkflowRun() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: {
-      projectId: string;
+      workspaceId: string;
       workflowId: string;
       name: string;
-      baseBranch?: string;
-    }) => client.workflowRun.create(input),
+      projectId?: string;
+    }) =>
+      client.workflowRun.create({
+        workspaceId: input.workspaceId,
+        workflowId: input.workflowId,
+        name: input.name,
+        locale: activeLocale(),
+      }),
     onSuccess: (_result, variables) => {
-      void queryClient.invalidateQueries({
-        queryKey: runsByProjectKey(variables.projectId),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: runsByWorkflowKey(variables.workflowId),
-      });
+      if (variables.projectId !== undefined) {
+        void queryClient.invalidateQueries({
+          queryKey: runsByProjectKey(variables.projectId),
+        });
+      }
     },
   });
 }
@@ -177,29 +168,34 @@ export function useUpdateWorkflowRunInput() {
   });
 }
 
-/**
- * Renames one persisted workflow run through its run-task title.
- *
- * The run's display name is the run-task title, so the adapter resolves the run-task id
- * from the run detail and updates that task.
- */
+/** Completes one awaiting interactive node so the workflow advances. */
+export function useCompleteWorkflowNode() {
+  const client = useContractsClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { runId: string; nodeId: string }) =>
+      client.workflowRun.completeNode({
+        runId: input.runId,
+        nodeId: input.nodeId,
+      }),
+    onSuccess: (_result, variables) =>
+      queryClient.invalidateQueries({
+        queryKey: runDetailKey(variables.runId),
+      }),
+  });
+}
+
+/** Renames one persisted workflow run in its Workspace-owned display name field. */
 export function useRenameWorkflowRun() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: {
-      runId: string;
-      name: string;
-      projectId?: string;
-    }) => {
-      const detail = await client.workflowRun.get({ runId: input.runId });
-      await client.task.update({
-        taskId: detail.taskId,
-        title: input.name,
-      });
-      return input;
-    },
-    onSuccess: (_result, variables) => {
+    mutationFn: (input: { runId: string; name: string; projectId?: string }) =>
+      client.workflowRun.rename({
+        runId: input.runId,
+        name: input.name,
+      }),
+    onSuccess: (result, variables) => {
       if (variables.projectId) {
         queryClient.setQueryData<WorkflowRunSummary[]>(
           runsByProjectKey(variables.projectId),
@@ -211,6 +207,19 @@ export function useRenameWorkflowRun() {
             ),
         );
       }
+      queryClient.setQueryData<RealWorkflowRunDetail>(
+        runDetailKey(variables.runId),
+        (current) =>
+          current === undefined
+            ? current
+            : {
+                ...current,
+                run: {
+                  ...current.run,
+                  name: result.run.name,
+                },
+              },
+      );
       void queryClient.invalidateQueries({
         queryKey: runDetailKey(variables.runId),
       });
@@ -229,7 +238,7 @@ export function useRenameWorkflowRun() {
  *
  * The backend run is lean (no name, graph, or node state), so the adapter composes the run
  * detail with its frozen snapshot graph and node-runs to satisfy the Theater/Overview canvas.
- * `taskId` is the run-task that owns the Git worktree used by Task Diff.
+ * The run keeps its direct Workspace identity; no Task projection is involved.
  */
 export function useRealWorkflowRun(runId: string | null | undefined) {
   const client = useContractsClient();
@@ -242,7 +251,8 @@ export function useRealWorkflowRun(runId: string | null | undefined) {
       });
       return {
         run: buildDisplayRun(detail, snapshot.graph),
-        taskId: detail.taskId,
+        workspaceId: detail.workspaceId,
+        projectId: detail.projectId,
       };
     },
     enabled: runId != null && runId !== "",
@@ -254,10 +264,11 @@ export function useRealWorkflowRun(runId: string | null | undefined) {
   });
 }
 
-/** Persisted run detail plus the run-task id used for worktree Diff / Files. */
+/** Persisted run detail plus its direct Workspace identity. */
 export type RealWorkflowRunDetail = {
   run: GraphWorkflowRun;
-  taskId: string;
+  workspaceId: string;
+  projectId: string;
 };
 
 /** Projects a persisted run detail onto the Theater/Overview display model. */
@@ -368,7 +379,12 @@ export function buildDisplayRun(
     name: detail.name,
     status: projectRunStatus(
       detail.run.status as
-        "pending" | "running" | "succeeded" | "failed" | "cancelled",
+        | "pending"
+        | "running"
+        | "succeeded"
+        | "failed"
+        | "cancelled"
+        | "awaitingInput",
       currentNodes,
     ),
     kickoffInput: kickoffInput ?? undefined,

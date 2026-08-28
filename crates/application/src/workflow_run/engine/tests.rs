@@ -1,6 +1,6 @@
 use crate::workflow_run::engine::{
-    AgentConfig, AgentExecutor, AgentSkill, GraphError, NodeType, UnknownNodeType, WorkflowGraph,
-    WorkflowGraphNode,
+    AgentConfig, AgentExecutor, AgentSkill, GraphError, NodeType, OutputPolicy, UnknownNodeType,
+    WorkflowGraph, WorkflowGraphNode,
 };
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -108,9 +108,103 @@ fn parses_agent_config_into_the_model() {
                 enabled: true,
             }],
             prompt: "do a".to_string(),
+            // The linear_chain fixture omits `interactive`, so the default must be false.
+            interactive: false,
+            // The linear_chain fixture omits `outputPolicy`, so the default must be `None`.
+            output_policy: OutputPolicy::None,
         }),
     };
     assert_eq!(*graph.node("a").unwrap(), expected);
+}
+
+#[test]
+fn parses_interactive_agent_flag_with_a_default_of_false() {
+    let graph = parse(json!({
+        "nodes": [
+            { "id": "start", "data": { "kind": "start" } },
+            { "id": "a", "data": { "kind": "agent", "agentConfig": {
+                "executor": { "agentCli": "open_code", "modelId": "m" },
+                "roleId": "R", "skills": [], "prompt": "a", "interactive": true
+            } } },
+            { "id": "b", "data": { "kind": "agent", "agentConfig": {
+                "executor": { "agentCli": "open_code", "modelId": "m" },
+                "roleId": "R", "skills": [], "prompt": "b"
+            } } },
+            { "id": "out", "data": { "kind": "output" } }
+        ],
+        "edges": [
+            { "source": "start", "target": "a" },
+            { "source": "a", "target": "b" },
+            { "source": "b", "target": "out" }
+        ]
+    }))
+    .unwrap();
+    assert_eq!(
+        graph
+            .node("a")
+            .unwrap()
+            .agent_config
+            .as_ref()
+            .unwrap()
+            .interactive,
+        true
+    );
+    assert_eq!(
+        graph
+            .node("b")
+            .unwrap()
+            .agent_config
+            .as_ref()
+            .unwrap()
+            .interactive,
+        false
+    );
+}
+
+#[test]
+fn parses_output_policy_with_a_default_of_none() {
+    let graph = parse(json!({
+        "nodes": [
+            { "id": "a", "data": { "kind": "agent", "agentConfig": {
+                "executor": { "agentCli": "open_code", "modelId": "m" },
+                "roleId": "R", "skills": [], "prompt": "a", "outputPolicy": "none"
+            } } },
+            { "id": "b", "data": { "kind": "agent", "agentConfig": {
+                "executor": { "agentCli": "open_code", "modelId": "m" },
+                "roleId": "R", "skills": [], "prompt": "b", "outputPolicy": "final_agent_response"
+            } } },
+            { "id": "c", "data": { "kind": "agent", "agentConfig": {
+                "executor": { "agentCli": "open_code", "modelId": "m" },
+                "roleId": "R", "skills": [], "prompt": "c"
+            } } }
+        ],
+        "edges": []
+    }))
+    .unwrap();
+    let policy = |id: &str| {
+        graph
+            .node(id)
+            .unwrap()
+            .agent_config
+            .as_ref()
+            .unwrap()
+            .output_policy
+    };
+    assert_eq!(policy("a"), OutputPolicy::None);
+    assert_eq!(policy("b"), OutputPolicy::FinalAgentResponse);
+    // Omitting `outputPolicy` defaults to `None`, so nodes withhold output unless opted in.
+    assert_eq!(policy("c"), OutputPolicy::None);
+}
+
+#[test]
+fn output_policy_apply_withholds_or_passes_output() {
+    assert_eq!(OutputPolicy::None.apply(Some("text".to_string())), None);
+    assert_eq!(OutputPolicy::None.apply(None), None);
+    assert_eq!(
+        OutputPolicy::FinalAgentResponse.apply(Some("text".to_string())),
+        Some("text".to_string())
+    );
+    assert_eq!(OutputPolicy::FinalAgentResponse.apply(None), None);
 }
 
 #[test]
@@ -283,6 +377,15 @@ fn transitive_predecessors_follow_upstream_first_order() {
     assert_eq!(
         ids(&graph.transitive_predecessors("output-1")),
         vec!["start", "a", "b"]
+    );
+}
+
+#[test]
+fn all_nodes_follow_topological_execution_order() {
+    let graph = parse(linear_chain()).unwrap();
+    assert_eq!(
+        ids(&graph.nodes_in_topological_order()),
+        vec!["start", "a", "b", "output-1"]
     );
 }
 

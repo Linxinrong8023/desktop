@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Textarea, cn } from "@ora/ui";
+import { Button, cn } from "@ora/ui";
 import {
   IconArrowUp,
   IconCheck,
@@ -15,6 +14,10 @@ import type {
   HitlGateKind,
   HitlRequest,
 } from "@ora/workflow-runtime";
+import {
+  ComposerEditor,
+  type ComposerEditorHandle,
+} from "../editor/composer-editor";
 
 export interface HitlGateOption {
   request: HitlRequest;
@@ -100,7 +103,8 @@ export function RunHitlComposer({
 }: RunHitlComposerProps) {
   const { t, i18n } = useTranslation();
   const locale = i18n.resolvedLanguage === "en-US" ? "en-US" : "zh-CN";
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const primaryEditorRef = useRef<ComposerEditorHandle>(null);
+  const editorByFieldRef = useRef(new Map<string, ComposerEditorHandle>());
   const selected = useMemo(
     () =>
       gates.find((gate) => gate.request.id === selectedRequestId) ??
@@ -182,15 +186,9 @@ export function RunHitlComposer({
     if (!expanded || request === null || primaryTextField === null) {
       return;
     }
-    const el = textAreaRef.current;
-    if (el === null) {
-      return;
-    }
     // preventScroll avoids Theater jump-scrolling the stage onto the composer
     // when a gate opens or the active request changes.
-    el.focus({ preventScroll: true });
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    primaryEditorRef.current?.focus({ preventScroll: true });
   }, [expanded, request, primaryTextField]);
 
   if (request === null) {
@@ -219,6 +217,14 @@ export function RunHitlComposer({
     return null;
   }
 
+  function collectFieldValues(): Record<string, string> {
+    const next = { ...values };
+    for (const [name, handle] of editorByFieldRef.current) {
+      next[name] = handle.getText();
+    }
+    return next;
+  }
+
   async function submitWith(next: Record<string, string>): Promise<void> {
     const missing = missingRequired(next);
     if (missing !== null) {
@@ -229,7 +235,7 @@ export function RunHitlComposer({
   }
 
   async function submit(): Promise<void> {
-    await submitWith(values);
+    await submitWith(collectFieldValues());
   }
 
   function onSelectOption(fieldName: string, optionValue: string): void {
@@ -247,19 +253,6 @@ export function RunHitlComposer({
     });
     if (selectsComplete) {
       void submitWith(next);
-    }
-  }
-
-  function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
-    if (
-      event.key === "Enter" &&
-      !event.shiftKey &&
-      !event.nativeEvent.isComposing
-    ) {
-      event.preventDefault();
-      if (!gateBusy && missingRequired(values) === null) {
-        void submit();
-      }
     }
   }
 
@@ -580,26 +573,33 @@ export function RunHitlComposer({
                     >
                       {field.label}
                     </label>
-                    <Textarea
+                    <ComposerEditor
+                      key={`${request.id}-${field.name}`}
                       id={`hitl-text-${request.id}-${field.name}`}
-                      ref={isPrimary ? textAreaRef : undefined}
-                      value={values[field.name] ?? ""}
+                      ref={(handle) => {
+                        if (handle === null) {
+                          editorByFieldRef.current.delete(field.name);
+                        } else {
+                          editorByFieldRef.current.set(field.name, handle);
+                        }
+                        if (isPrimary) {
+                          primaryEditorRef.current = handle;
+                        }
+                      }}
+                      initialText={values[field.name] ?? ""}
                       placeholder={
                         field.placeholder ??
                         t("workflowRun.hitl.composerPlaceholder")
                       }
                       disabled={gateBusy}
-                      rows={2}
-                      className="min-h-14 max-h-[200px] resize-none rounded-none border-0 bg-transparent px-2 py-1 text-[15px] leading-6 shadow-none focus-visible:ring-0 disabled:bg-transparent"
-                      onChange={(event) => {
-                        setField(field.name, event.target.value);
-                        if (isPrimary) {
-                          const el = event.currentTarget;
-                          el.style.height = "auto";
-                          el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+                      enterKey={isPrimary ? "submit" : "newline"}
+                      ariaLabel={field.label}
+                      onSubmit={() => {
+                        if (!gateBusy) {
+                          void submit();
                         }
                       }}
-                      onKeyDown={isPrimary ? onComposerKeyDown : undefined}
+                      onTextChange={(text) => setField(field.name, text)}
                     />
                     {index === textFields.length - 1 && (
                       <div className="flex min-h-8 items-center justify-end gap-2 pt-0.5">

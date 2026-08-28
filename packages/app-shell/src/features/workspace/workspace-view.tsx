@@ -1,15 +1,13 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@ora/ui";
-import type { AttachSessionResponse, Session, Task } from "@ora/contracts";
+import type { AttachSessionResponse, Session } from "@ora/contracts";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import {
   IconBrandGit,
-  IconChartBar,
   IconFolder,
   IconGitBranch,
-  IconLayoutDashboard,
   IconLayoutSidebarLeftExpand,
   IconPlayerPlay,
 } from "@tabler/icons-react";
@@ -18,6 +16,8 @@ import { useProjects } from "../../state/hooks/use-projects";
 import { useTasks } from "../../state/hooks/use-tasks";
 import { useSessions } from "../../state/hooks/use-sessions";
 import { useSkills } from "../../state/hooks/use-skills";
+import { useWorkspaces } from "../../state/hooks/use-workspaces";
+import { useWorkspaceCwd } from "../../state/hooks/use-workspace-cwd";
 import {
   useWarmSession,
   warmTargetKey,
@@ -37,23 +37,33 @@ import {
 } from "../../state/stores/workflow-store";
 import { conversationKeyFor } from "../../state/stores/conversation-key";
 import { useComposerPluginSelectionStore } from "../../state/stores/composer-plugin-selection-store";
+import { useComposerInputStore } from "../../state/stores/composer-input-store";
+import { useDraftSessionsStore } from "../../state/stores/draft-sessions-store";
+import {
+  recoverFailedDraftSend,
+  DraftSendAbandonedError,
+  noteComposerSendAdoptedSession,
+  reparkDraftComposerContent,
+} from "../../state/session-drafts";
 import { useChatStore } from "../../chat-store-context";
 import { DragRegion } from "../../components/drag-region";
 import { WindowControls } from "../../components/window-controls";
 import { ChatView } from "../chat/chat-view";
 import { ComposerContextBar } from "../chat/composer-context-bar";
+import { SessionAgentBanner } from "../chat/session-agent-banner";
 import { SessionHistoryBanner } from "../chat/session-history-banner";
 import { WorkflowStepper } from "../workflow/workflow-stepper";
 import { useWorkflowDetection } from "../workflow/use-workflow-detection";
 import type { ChatTurn } from "@ora/chat";
 import { LocationActionsButton } from "./location-actions-button";
+import { SurfaceLauncher } from "../surface/surface-launcher";
 import { WorkflowRunWorkspace } from "../workflow-run/workflow-run-workspace";
-import { directChatTitle } from "./workspace-view-utils";
+import { WorkflowEditor } from "../workflow-editor/workflow-editor";
 import {
   WorkspaceReviewLayout,
   type WorkspaceReviewContext,
 } from "./workspace-review-layout";
-import { useTaskDiffLiveSync } from "../../state/hooks/use-task-diff-live-sync";
+import { useWorkspaceDiffLiveSync } from "../../state/hooks/use-workspace-diff-live-sync";
 
 interface WorkspaceViewProps {
   userName: string;
@@ -78,8 +88,8 @@ function errorMessage(error: unknown): string {
 /**
  * Names the chat surface a selection is looking at.
  *
- * Neither half is enough alone: `conversationKeyFor` collapses every project-root
- * chat onto one key, and the warm target does not change when a send adopts its
+ * Neither half is enough alone: `conversationKeyFor` identifies the direct project
+ * Workspace while the warm target does not change when a send adopts its
  * session. Together they move on exactly the two transitions that must retire a
  * pending send — navigating elsewhere, and its own conversation taking over.
  */
@@ -87,6 +97,7 @@ function chatSurfaceKeyFor(selection: {
   projectId: string | null;
   taskId: string | null;
   sessionId: string | null;
+  draftId: string | null;
 }): string {
   return `${conversationKeyFor(selection)}|${warmTargetKey(selection) ?? ""}`;
 }
@@ -141,25 +152,25 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
 
   const { data: projects = [] } = useProjects();
   const { data: tasks = [] } = useTasks();
+  const { data: workspaces = [] } = useWorkspaces();
   const sessionsQuery = useSessions();
   const skillsQuery = useSkills();
   const sessions = sessionsQuery.data ?? [];
   const selection = useWorkspaceSelectionStore((s) => s.selection);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useUiStore((s) => s.setSidebarCollapsed);
+  const workflowEditorOpen = useUiStore((s) => s.workflowEditorOpen);
   // Resolved the same way the picker shows it, so the session warmed here is
   // the one the composer and model picker are actually pointing at — a stale
   // read would warm a different agent than what is on screen.
   const targetAgentCli = useTargetAgentCli(selection);
-  const openDashboardPanel = useUiStore((s) => s.openDashboardPanel);
-
   const chatStore = useChatStore();
-  useTaskDiffLiveSync(chatStore, sessions);
+  useWorkspaceDiffLiveSync(chatStore, sessions);
   const client = useContractsClient();
   const queryClient = useQueryClient();
   // Opens the provider session for this surface before anything is sent, so the
   // model picker has real options and the send path skips the agent handshake.
-  const { sessionId: warmSessionId, ensureSessionId } = useWarmSession(
+  const { sessionId: warmSessionId, ensureSession } = useWarmSession(
     selection,
     targetAgentCli,
   );
@@ -176,18 +187,49 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
 
   const project = projects.find((item) => item.id === selection.projectId);
   const task = tasks.find((item) => item.id === selection.taskId);
+  const overviewProject = projects.find(
+    (item) => item.id === selection.projectId,
+  );
+  const selectedWorkspace =
+    selection.workflowRunId !== null
+      ? undefined
+      : task !== undefined
+        ? workspaces.find((item) => item.id === task.workspaceId)
+        : workspaces.find(
+            (item) =>
+              item.projectId === selection.projectId && item.kind === "main",
+          );
+  const selectedWorkspaceId =
+    selection.workflowRunId !== null
+      ? undefined
+      : (task?.workspaceId ?? selectedWorkspace?.id);
+  const workspaceCwdQuery = useWorkspaceCwd(selectedWorkspaceId);
   const session = sessions.find((item) => item.id === selection.sessionId);
   // Until the first message binds this surface to a persisted session, its
   // conversation lives under the warm one — the same id the composer and the
   // model picker act on. Resolving it the same way here is what lets anything
   // reported before that first send reach the screen.
   const conversationSessionId = selection.sessionId ?? warmSessionId;
-  const reviewContext: WorkspaceReviewContext =
-    task !== undefined && project !== undefined
-      ? { kind: "task", taskId: task.id, projectId: project.id }
-      : project !== undefined
-        ? { kind: "project", projectId: project.id }
-        : { kind: "none" };
+  // Memoized: WorkspaceReviewLayout keys per-scope restore off this object's
+  // identity, and this component re-renders on every streaming chat update.
+  const reviewContext = useMemo<WorkspaceReviewContext>(
+    () =>
+      task !== undefined && project !== undefined
+        ? {
+            kind: "task",
+            taskId: task.id,
+            projectId: project.id,
+            workspaceId: task.workspaceId,
+          }
+        : project !== undefined
+          ? {
+              kind: "project",
+              projectId: project.id,
+              workspaceId: selectedWorkspaceId,
+            }
+          : { kind: "none" },
+    [project, task, selectedWorkspaceId],
+  );
   const conversation = useStore(chatStore, (state) =>
     conversationSessionId === null
       ? undefined
@@ -203,12 +245,12 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
     pendingSend?.surfaceKey === chatSurfaceKeyFor(selection)
       ? pendingSend.turn
       : null;
-  // Absolute path to the OpenSpec skills, so the agent finds them from its worktree
-  // cwd even when `.opencode/skills` lives only at the project root.
+  // Absolute path to the OpenSpec skills, so the agent finds them from its Workspace
+  // cwd even when `.opencode/skills` lives only at the main Workspace.
   const skillsDir =
-    project === undefined
+    workspaceCwdQuery.data === undefined || workspaceCwdQuery.data === ""
       ? ".opencode/skills"
-      : `${project.rootPath.replace(/[\\/]+$/, "")}/.opencode/skills`;
+      : `${workspaceCwdQuery.data.replace(/[\\/]+$/, "")}/.opencode/skills`;
   // The highlighted (blue) stage, if any, so pressing Enter on an empty composer
   // launches it directly.
   const workflowRun = useWorkflowStore((state) => getRun(state, workflowKey));
@@ -255,6 +297,7 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
     agentText: string | undefined,
     images: acp.ImageContent[] = [],
   ) => {
+    if (targetAgentCli === null) return;
     const currentKey = conversationKeyFor(
       useWorkspaceSelectionStore.getState().selection,
     );
@@ -269,21 +312,21 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
       // arriving back where they started, and committing it would be refused.
       const recorded = usePendingAgentStore.getState().switches[session.id];
       const pendingSwitch =
-        recorded === session.agentCli ? undefined : recorded;
+        recorded === session.agentRef ? undefined : recorded;
       const prepare =
         pendingSwitch === undefined
           ? undefined
           : async () => {
               const response = await client.session.switchAgent({
                 sessionId: session.id,
-                agentCli: pendingSwitch,
+                agentRef: pendingSwitch,
               });
               usePendingAgentStore.getState().clearPendingSwitch(session.id);
               // The claim consumed the warm entry, so this surface must warm a
               // fresh one rather than keep an id the backend no longer knows.
               queryClient.removeQueries({
                 queryKey: queryKeys.warmSession(
-                  { type: "task", taskId: session.taskId },
+                  { type: "workspace", workspaceId: session.workspaceId },
                   pendingSwitch,
                 ),
               });
@@ -312,7 +355,7 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
         await Promise.all([
           sessionsQuery.refetch(),
           queryClient.invalidateQueries({
-            queryKey: queryKeys.taskDiffs(session.taskId),
+            queryKey: queryKeys.workspaceDiffs(session.workspaceId),
           }),
         ]);
       }
@@ -326,14 +369,43 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
     const token = (pendingSendToken.current += 1);
     const surfaceKey = chatSurfaceKeyFor(selection);
     setPendingSend({ surfaceKey, turn: draftTurn(displayText, images) });
-    let warmed: string | null;
+    let warmed: Awaited<ReturnType<typeof ensureSession>>;
+    const draftIdAtSend =
+      useWorkspaceSelectionStore.getState().selection.draftId;
+    // Hide × for the whole handshake — bind only happens after warm returns.
+    if (draftIdAtSend !== null) {
+      useDraftSessionsStore.getState().beginSend(draftIdAtSend);
+    }
+    const endDraftSend = () => {
+      if (draftIdAtSend !== null) {
+        useDraftSessionsStore.getState().endSend(draftIdAtSend);
+      }
+    };
+    /** Restores a draft-owned payload when Stop or navigation abandons this handshake. */
+    const abandonDraftSend = (): void => {
+      setPendingSend(null);
+      endDraftSend();
+      if (draftIdAtSend === null) return;
+      reparkDraftComposerContent({
+        draftId: draftIdAtSend,
+        text: displayText,
+        images,
+      });
+      throw new DraftSendAbandonedError();
+    };
     try {
-      warmed = await ensureSessionId();
+      warmed = await ensureSession();
     } catch (error) {
       // The message never reached an agent, so it stays on screen carrying the
       // failure rather than disappearing with the composer's optimistic clear.
       const message = errorMessage(error);
-      if (token !== pendingSendToken.current) return;
+      if (token !== pendingSendToken.current) {
+        // Stop already cleared pendingSend; still drop it if a later path only
+        // bumped the token, so returning to this surface cannot resurrect a
+        // forever-streaming optimistic turn.
+        abandonDraftSend();
+        return;
+      }
       setPendingSend((current) =>
         current === null
           ? null
@@ -342,109 +414,135 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
               turn: { ...current.turn, status: "failed", error: message },
             },
       );
+      // Composer already cleared locally; re-park so a surface that never left
+      // the draft (or the composer's reject handler) can put the text back.
+      if (draftIdAtSend !== null) {
+        reparkDraftComposerContent({
+          draftId: draftIdAtSend,
+          text: displayText,
+          images,
+        });
+      }
+      endDraftSend();
       throw error;
     }
     // Stopped, or the user moved on while the handshake ran. The surface check is
     // not just cosmetic: proceeding would select the session below and drag the
     // user back to a chat they had left.
-    if (token !== pendingSendToken.current) return;
-    if (
-      chatSurfaceKeyFor(useWorkspaceSelectionStore.getState().selection) !==
-      surfaceKey
-    ) {
+    if (token !== pendingSendToken.current) {
+      abandonDraftSend();
       return;
     }
-    if (warmed === null) return;
-    // Rebound as a const so the narrowing survives into `prepare` below.
-    const sessionId = warmed;
-
-    const projectId = project.id;
-    let taskId = task?.id ?? null;
-    // The workflow run and the composer's applied plugins both follow the
-    // conversation onto its session id, which is now known, so this happens once
-    // instead of tracking a moving key.
-    useWorkflowStore.getState().rekey(currentKey, sessionId);
-    useComposerPluginSelectionStore.getState().rekey(currentKey, sessionId);
-    // Point the workspace at this session before anything is awaited, so the
-    // optimistic turn is on screen while its task and record are still forming.
-    const selectionStore = useWorkspaceSelectionStore.getState();
-    if (taskId === null) {
-      selectionStore.selectSessionBeforeTask(sessionId, projectId);
-    } else {
-      selectionStore.selectSession(sessionId, taskId, projectId);
+    const selectionAfterWarm = useWorkspaceSelectionStore.getState().selection;
+    if (
+      chatSurfaceKeyFor(selectionAfterWarm) !== surfaceKey ||
+      selectionAfterWarm.draftId !== draftIdAtSend
+    ) {
+      abandonDraftSend();
+      return;
     }
-    // `sendMessage` materializes its own turn before its first `await`, so the
-    // pending one is released below in the same synchronous stretch. React
-    // commits both together: no duplicated message, and no frame back at the
-    // landing layout between the two.
-    const sent = chatStore.getState().sendMessage({
-      oraSessionId: sessionId,
-      text: displayText,
-      agentText,
-      images,
-      prepare: async () => {
-        if (taskId === null) {
-          const response = await client.task.create({
-            projectId,
-            title: directChatTitle(displayText),
-            workspaceMode: "project_root",
-          });
-          const createdTask = response.task;
-          taskId = createdTask.id;
-          queryClient.setQueryData<Task[]>(queryKeys.tasks, (current) =>
-            upsertById(current, createdTask),
-          );
-          void queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
-          // Record the owning task straight away. If the attach below fails,
-          // the task is retained and the next send reuses it.
-          useWorkspaceSelectionStore
-            .getState()
-            .selectSession(sessionId, taskId, projectId);
-        }
-
-        const attachedTaskId = taskId;
-        let response: AttachSessionResponse;
-        try {
-          response = await client.session.attach({
-            sessionId,
-            taskId: attachedTaskId,
-          });
-        } finally {
-          // The attach attempt consumes the warm entry whether it succeeds or
-          // fails, so this surface must warm a fresh one next time rather than
-          // keep retrying with an id the backend no longer recognizes.
-          queryClient.removeQueries({
-            queryKey: queryKeys.warmSession(
-              { type: "task", taskId: attachedTaskId },
-              targetAgentCli,
-            ),
-          });
-          queryClient.removeQueries({
-            queryKey: queryKeys.warmSession(
-              { type: "projectRoot", projectId },
-              targetAgentCli,
-            ),
-          });
-        }
-        queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
-          upsertById(current, response.session),
-        );
-        useUiStore.getState().expandProject(projectId);
-        useUiStore.getState().expandTask(attachedTaskId);
-        return { availableCommands: response.availableCommands };
-      },
-    });
-    setPendingSend(null);
+    if (warmed === null) {
+      setPendingSend(null);
+      endDraftSend();
+      return;
+    }
+    // Rebound as a const so the narrowing survives into `prepare` below.
+    const sessionId = warmed.sessionId;
+    const workspaceId = warmed.workspaceId;
+    const draftId = draftIdAtSend;
+    const projectId = project.id;
+    const taskId = task?.id ?? null;
+    // True once attach has written a persisted session. Failures after that
+    // belong to the live chat — rolling the draft back would yank the user onto
+    // a row removeCommitted may already have deleted.
+    let sessionAttached = false;
     try {
+      if (draftId !== null) {
+        useDraftSessionsStore.getState().bindToSession(draftId, sessionId);
+      }
+      // Composer hard-fail restore needs the adopted id even after the user
+      // navigates away mid-attach; cleared once that catch settles. Keyed by the
+      // pre-rekey conversation so project/task landings (no draft) work too.
+      noteComposerSendAdoptedSession(currentKey, sessionId);
+      // The workflow run and composer-local stores follow the conversation onto
+      // its final session id before the optimistic turn changes surfaces.
+      useWorkflowStore.getState().rekey(currentKey, sessionId);
+      useComposerPluginSelectionStore.getState().rekey(currentKey, sessionId);
+      useComposerInputStore.getState().rekey(currentKey, sessionId);
+      const selectionStore = useWorkspaceSelectionStore.getState();
+      if (taskId === null) {
+        selectionStore.selectSessionBeforeTask(sessionId, projectId);
+      } else {
+        selectionStore.selectSession(sessionId, taskId, projectId);
+      }
+      // `sendMessage` materializes its own turn before its first `await`, so the
+      // pending one is released in the same synchronous stretch without a blank frame.
+      const sent = chatStore.getState().sendMessage({
+        oraSessionId: sessionId,
+        text: displayText,
+        agentText,
+        images,
+        prepare: async () => {
+          let response: AttachSessionResponse;
+          try {
+            response = await client.session.attach({
+              sessionId,
+              workspaceId,
+            });
+          } finally {
+            // Attach consumes the warm entry on success and failure.
+            queryClient.removeQueries({
+              queryKey: queryKeys.warmSession(
+                { type: "workspace", workspaceId },
+                targetAgentCli,
+              ),
+            });
+          }
+          // Backend persistence is the recovery boundary: after attach succeeds,
+          // rolling back to a client draft could duplicate the real session.
+          sessionAttached = true;
+          try {
+            queryClient.setQueryData<Session[]>(queryKeys.sessions, (current) =>
+              upsertById(current, response.session),
+            );
+          } finally {
+            // Even a cache update failure must not leave a muted row pointing at
+            // a session that the backend already persisted.
+            if (draftId !== null) {
+              useDraftSessionsStore.getState().removeCommitted([sessionId]);
+            }
+          }
+          useUiStore.getState().expandProject(projectId);
+          if (taskId !== null) {
+            useUiStore.getState().expandTask(taskId);
+          }
+          return { availableCommands: response.availableCommands };
+        },
+      });
+      setPendingSend(null);
       await sent;
+    } catch (error) {
+      // This catch includes the synchronous bind/rekey/select/send setup. Every
+      // pre-attach failure returns ownership to the draft instead of stranding
+      // it in sendInFlight.
+      if (draftId !== null && !sessionAttached) {
+        recoverFailedDraftSend({
+          draftId,
+          projectId,
+          taskId,
+          text: displayText,
+          images,
+          boundSessionId: sessionId,
+        });
+      }
+      throw error;
     } finally {
+      endDraftSend();
       await Promise.all([
         sessionsQuery.refetch(),
-        taskId === null
-          ? Promise.resolve()
-          : queryClient.invalidateQueries({
-              queryKey: queryKeys.taskDiffs(taskId),
-            }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.workspaceDiffs(workspaceId),
+        }),
       ]);
     }
   };
@@ -484,19 +582,25 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
     );
   };
 
+  // Graph workflow definition editor owns the main pane while it is open.
+  if (workflowEditorOpen) {
+    return <WorkflowEditor />;
+  }
+
   // Graph workflow runs own a dedicated workspace branch (D2), not the chat layout.
   if (selection.workflowRunId !== null) {
     return <WorkflowRunWorkspace runId={selection.workflowRunId} />;
   }
 
   // Anything short of a persisted selected session is a new or optimistic chat.
-  const chatIsOpen =
-    session === undefined || (task !== undefined && project !== undefined);
+  const chatIsOpen = session === undefined || project !== undefined;
 
   if (chatIsOpen) {
-    const canChat = session
-      ? session.status === "running" || conversation?.isLoaded === true
-      : project !== undefined;
+    const canChat =
+      targetAgentCli !== null &&
+      (session
+        ? session.status === "running" || conversation?.isLoaded === true
+        : project !== undefined);
     // A failed background session-create settles onto the draft conversation, so
     // the conversation error already covers the start-up failure path. A pending
     // send has no conversation to settle onto and carries its own.
@@ -557,30 +661,11 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
               </div>
             )}
           </DragRegion>
-          <LocationActionsButton
-            taskId={task?.id}
-            projectPath={project?.rootPath}
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => openDashboardPanel("trace")}
-            aria-label={t("dashboard.open")}
-            title={t("dashboard.open")}
-          >
-            <IconLayoutDashboard />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => openDashboardPanel("compare")}
-            aria-label={t("dashboard.openCompare")}
-            title={t("dashboard.openCompare")}
-          >
-            <IconChartBar />
-          </Button>
+          <LocationActionsButton workspaceId={selectedWorkspaceId} />
+          <SurfaceLauncher />
           <WindowControls />
         </div>
+        <SessionAgentBanner session={session} />
         <SessionHistoryBanner
           session={session}
           notices={conversation?.historyNotices ?? []}
@@ -588,6 +673,8 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
         <WorkspaceReviewLayout context={reviewContext}>
           <ChatView
             taskId={task?.id}
+            projectId={project?.id}
+            workspaceId={selectedWorkspaceId}
             turns={turns}
             modelChanges={conversation?.modelChanges}
             userName={userName}
@@ -599,7 +686,16 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
             skills={skillsQuery.data ?? []}
             availableCommands={conversation?.availableCommands ?? []}
             disabled={!canChat}
-            disabledHint={canChat ? undefined : t("chat.pickProject")}
+            // An untouched chat cannot send yet, but disabling this picker as
+            // part of the composer would make choosing its first agent impossible.
+            modelSelectorDisabled={targetAgentCli !== null && !canChat}
+            disabledHint={
+              canChat
+                ? undefined
+                : project === undefined
+                  ? t("chat.pickProject")
+                  : t("chat.pickAgent")
+            }
             // A persisted or optimistic session already fixes its project and
             // execution context, so the pickers only belong to a blank composer.
             contextBar={
@@ -613,10 +709,9 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
                 disabled={!canChat}
               />
             }
-            // Failures land in chatError; the rejection itself is expected.
-            onSend={(text, images) =>
-              void sendOrStartSession(text, images).catch(() => undefined)
-            }
+            // Failures land in chatError; the rejection also lets the composer
+            // restore unsent text when the surface never left the draft.
+            onSend={(text, images) => sendOrStartSession(text, images)}
             onEmptySubmit={
               quickLaunchNodeId === null
                 ? undefined
@@ -674,10 +769,8 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
             {t("workspace.overview")}
           </span>
         </DragRegion>
-        <LocationActionsButton
-          taskId={task?.id}
-          projectPath={project?.rootPath}
-        />
+        <LocationActionsButton workspaceId={selectedWorkspaceId} />
+        <SurfaceLauncher />
         <WindowControls />
       </header>
       <WorkspaceReviewLayout context={reviewContext}>
@@ -691,16 +784,18 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
               )}
             </div>
             <h1 className="text-xl font-semibold">
-              {task?.title ?? project?.name ?? t("workspace.defaultTitle")}
+              {task?.title ??
+                overviewProject?.name ??
+                t("workspace.defaultTitle")}
             </h1>
             <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
               {task
                 ? t("workspace.taskHint")
-                : project
+                : overviewProject
                   ? t("workspace.projectHint")
                   : t("workspace.emptyHint")}
             </p>
-            {(project || task) && (
+            {(overviewProject || task) && (
               <div className="mt-6 grid gap-px overflow-hidden rounded-md border border-border bg-border sm:grid-cols-2">
                 <div className="bg-background p-4">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -708,7 +803,7 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
                     {t("workspace.repository")}
                   </div>
                   <p className="mt-2 truncate text-sm font-medium">
-                    {project?.rootPath}
+                    {workspaceCwdQuery.data ?? overviewProject?.name}
                   </p>
                 </div>
                 <div className="bg-background p-4">
@@ -720,12 +815,12 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
                     {task
                       ? t("workspace.sessionCount", {
                           count: sessions.filter(
-                            (item) => item.taskId === task.id,
+                            (item) => item.workspaceId === task.workspaceId,
                           ).length,
                         })
                       : t("workspace.worktreeCount", {
                           count: tasks.filter(
-                            (item) => item.projectId === project?.id,
+                            (item) => item.projectId === overviewProject?.id,
                           ).length,
                         })}
                   </p>

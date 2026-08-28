@@ -11,3 +11,11 @@ export function usePlatform(): PlatformAdapter {
 
   return adapter;
 }
+
+/**
+ * Same lookup as `usePlatform`, but `null` when the tree has no host adapter
+ * (isolated editor tests, Storybook).
+ */
+export function useOptionalPlatform(): PlatformAdapter | null {
+  return useContext(PlatformContext);
+}

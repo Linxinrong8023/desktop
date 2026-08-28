@@ -1,17 +1,22 @@
-use crate::config::DesktopConfigStore;
+use crate::surface::DesktopSurfaceService;
 use crate::workspace_files::WorkspaceFileApi;
-use ora_backend::Backend;
+use ora_backend::{Backend, BackendPreferredLogLevelStore};
+use ora_runtime_settings::RuntimeLogLevelManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 
+pub type DesktopRuntimeLogLevelManager =
+    RuntimeLogLevelManager<ora_logging::LogLevelControl, BackendPreferredLogLevelStore>;
+
 /// Stores every executable shipped with the Desktop application.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BundledBinaryPaths {
     ripgrep: PathBuf,
     deno: PathBuf,
+    reaper: PathBuf,
 }
 
 impl BundledBinaryPaths {
@@ -20,6 +25,7 @@ impl BundledBinaryPaths {
         Ok(Self {
             ripgrep: resolve_binary("rg")?,
             deno: resolve_binary("deno")?,
+            reaper: resolve_reaper_binary()?,
         })
     }
 
@@ -31,6 +37,11 @@ impl BundledBinaryPaths {
     /// Returns the executable reserved for Rust-owned Deno integrations.
     pub fn deno_path(&self) -> &PathBuf {
         &self.deno
+    }
+
+    /// Returns the process-lifetime sidecar used to clean up child process trees.
+    pub fn reaper_path(&self) -> &PathBuf {
+        &self.reaper
     }
 }
 
@@ -53,6 +64,14 @@ fn resolve_binary(executable_name: &'static str) -> Result<PathBuf, BinaryResolu
     Ok(PathBuf::from(executable_name))
 }
 
+/// Resolves the target-qualified sidecar built into the Tauri binaries directory for development.
+#[cfg(debug_assertions)]
+fn resolve_reaper_binary() -> Result<PathBuf, BinaryResolutionError> {
+    Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(target_qualified_binary_name("ora-reaper")))
+}
+
 /// Resolves one external binary beside the Tauri process in release builds.
 #[cfg(not(debug_assertions))]
 fn resolve_binary(executable_name: &'static str) -> Result<PathBuf, BinaryResolutionError> {
@@ -64,6 +83,23 @@ fn resolve_binary(executable_name: &'static str) -> Result<PathBuf, BinaryResolu
             name: executable_name,
             path,
         })
+    }
+}
+
+/// Resolves the sidecar name Tauri installs beside the packaged Desktop executable.
+#[cfg(not(debug_assertions))]
+fn resolve_reaper_binary() -> Result<PathBuf, BinaryResolutionError> {
+    resolve_binary("ora-reaper")
+}
+
+/// Produces the source filename required by Tauri's external binary convention.
+#[cfg(debug_assertions)]
+fn target_qualified_binary_name(name: &str) -> String {
+    let target = env!("ORA_DESKTOP_TARGET_TRIPLE");
+    if cfg!(target_os = "windows") {
+        format!("{name}-{target}.exe")
+    } else {
+        format!("{name}-{target}")
     }
 }
 
@@ -93,12 +129,102 @@ fn platform_binary_name(name: &str) -> String {
 #[derive(Clone)]
 pub struct DesktopState {
     pub backend: Backend,
-    pub config: DesktopConfigStore,
+    pub update: crate::update::UpdateService,
+    pub runtime_log_level: DesktopRuntimeLogLevelManager,
     pub workspace_files: Arc<WorkspaceFileApi>,
     pub binary_paths: BundledBinaryPaths,
-    /// The Tauri application data directory, owner of the dashboard locator files.
-    pub app_data_directory: PathBuf,
     pub stream_cancellations: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    /// Plugin surface host: native webviews, download delivery, plugin process linkage.
+    pub surfaces: Arc<DesktopSurfaceService>,
+}
+
+impl DesktopState {
+    /// Runs one host download action chosen by the trusted main webview for a webview-plugin
+    /// download, then settles the tracked download.
+    ///
+    /// `import_skill` hands the landed archive to the existing two-phase skill import and returns
+    /// its session id so the frontend can open the import preview; `save_as` copies the artifact
+    /// to the destination the host save dialog chose. The staged host path never leaves the host.
+    pub async fn resolve_surface_download(
+        &self,
+        download_id: u64,
+        action: &str,
+        destination: Option<String>,
+    ) -> Result<crate::surface::commands::ResolveDownloadOutcome, crate::error::CommandError> {
+        use crate::error::CommandError;
+        use crate::surface::commands::ResolveDownloadOutcome;
+        use crate::surface::download_actions::DownloadActionHost;
+        use ora_backend::BackendError;
+        use ora_backend::ErrorClassification;
+        use ora_contracts::PublicError;
+        use ora_plugin_manifest::DownloadAction;
+
+        let parsed = action.parse::<DownloadAction>().map_err(|_| {
+            CommandError::from_backend(BackendError::new(
+                ErrorClassification::InvalidRequest,
+                PublicError::InvalidRequest(ora_contracts::EmptyErrorParams {}),
+                "unknown download action",
+            ))
+        })?;
+        let staged = self
+            .surfaces
+            .take_download_for_action(download_id, parsed)
+            .map_err(|_| {
+                CommandError::from_backend(BackendError::new(
+                    ErrorClassification::InvalidRequest,
+                    PublicError::InvalidRequest(ora_contracts::EmptyErrorParams {}),
+                    "download is not awaiting this action",
+                ))
+            })?;
+        let outcome = match parsed {
+            DownloadAction::ImportSkill => {
+                // Same execution path as the automatic disposition (`DownloadActionHost`), so
+                // prompt and auto can never drift apart in how an import is prepared.
+                let response = DownloadActionHost::prepare_skill_import(
+                    &self.backend,
+                    &staged.path,
+                    &staged.file_name,
+                );
+                match response {
+                    Ok(session_id) => ResolveDownloadOutcome {
+                        action: parsed.as_str().to_owned(),
+                        import_session_id: Some(session_id),
+                    },
+                    Err(error) => {
+                        self.surfaces
+                            .settle_download(download_id, Some(error.to_string()));
+                        return Err(CommandError::from_backend(error));
+                    }
+                }
+            }
+            DownloadAction::SaveAs => {
+                let Some(destination) = destination else {
+                    self.surfaces
+                        .settle_download(download_id, Some("missing destination".to_owned()));
+                    return Err(CommandError::from_backend(BackendError::new(
+                        ErrorClassification::InvalidRequest,
+                        PublicError::InvalidRequest(ora_contracts::EmptyErrorParams {}),
+                        "save_as requires a destination path",
+                    )));
+                };
+                if let Err(error) = std::fs::copy(&staged.path, &destination) {
+                    self.surfaces
+                        .settle_download(download_id, Some(error.to_string()));
+                    return Err(CommandError::from_backend(BackendError::new(
+                        ErrorClassification::Internal,
+                        PublicError::InternalError(ora_contracts::EmptyErrorParams {}),
+                        "failed to save the downloaded file",
+                    )));
+                }
+                ResolveDownloadOutcome {
+                    action: parsed.as_str().to_owned(),
+                    import_session_id: None,
+                }
+            }
+        };
+        self.surfaces.settle_download(download_id, None);
+        Ok(outcome)
+    }
 }
 
 /// Retains process-scoped writer guards for the full Tauri application lifetime.
@@ -119,6 +245,9 @@ mod tests {
             BundledBinaryPaths {
                 ripgrep: PathBuf::from("rg"),
                 deno: PathBuf::from("deno"),
+                reaper: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("binaries")
+                    .join(super::target_qualified_binary_name("ora-reaper")),
             }
         );
     }

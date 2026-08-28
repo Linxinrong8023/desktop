@@ -62,6 +62,13 @@ pub(super) const ENDPOINTS: &[FrontendEndpoint] = &[
         response_type: "RespondToPermissionResponse",
     },
     FrontendEndpoint {
+        operation_name: "cancelSessionPrompt",
+        namespace: NAMESPACE,
+        member_name: "cancelPrompt",
+        request_type: "CancelSessionPromptRequest",
+        response_type: "CancelSessionPromptResponse",
+    },
+    FrontendEndpoint {
         operation_name: "stopSession",
         namespace: NAMESPACE,
         member_name: "stop",

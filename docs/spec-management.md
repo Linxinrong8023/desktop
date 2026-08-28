@@ -8,8 +8,8 @@ documents already present on disk.
 ## Targets and automatic discovery
 
 Every operation carries a tagged `SpecTarget`: either a project id or a task id. Task resolution uses
-the same cwd as agent sessions, including linked worktrees and project-root tasks. Source discovery
-is automatic and is never persisted as project configuration.
+the same isolated-worktree cwd as agent sessions. Source discovery is automatic and is never
+persisted as project configuration.
 
 Ora recognizes these built-in source directories:
 
@@ -41,13 +41,14 @@ and stale-catalog authorization. Discovery uses Ora's injected bundled ripgrep w
 `WorkspaceReviewLayout` owns the established 900 px resizable right panel and expanded overlay.
 Project context offers **Files** only; task context offers **Changes** and **Files**. Spec documents
 live inside the Files panel as a dedicated **Specs** sub-view alongside **Explorer** and **Search**.
-Task Files opens on Explorer by default; project Files opens on Specs by default because project-root
-review does not expose a worktree file explorer.
+Task Files and project Files both open on Explorer by default. Specs remains a dedicated
+read-only sub-view in the same panel for either review context.
 
 The Specs sub-view places read-only content on the left and the grouped source tree on the right. It
 starts without an automatic document selection; the viewer stays empty until the user picks a tree
 entry, and clicking Specs again while already on Specs clears the current selection. It supports a
-200 ms filename/path filter, safe GFM preview, the existing line-numbered Shiki source viewer,
+200 ms filename/path filter, safe GFM preview, the existing line-numbered Shiki source viewer
+(with the same gutter `+` quote-to-chat flow as Files),
 manual refresh, and mounted-only watching. Raw HTML and MDX JSX are not executed, local images are
 blocked, and only catalog-member relative Markdown links navigate inside the panel.
 

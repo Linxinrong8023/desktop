@@ -1,5 +1,10 @@
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
+
+use crate::ParseLogLevelError;
 
 /// Describes the process-wide logging behavior installed by `ora-logging`.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -21,13 +26,50 @@ impl LoggingConfig {
 }
 
 /// Enumerates the supported event filtering levels for shared runtime logging.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     Trace,
     Debug,
     Info,
     Warn,
     Error,
+}
+
+impl LogLevel {
+    /// Returns the stable lowercase name shared by environment and serialized configuration.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl std::fmt::Display for LogLevel {
+    /// Formats the stable lowercase representation used at runtime seams.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for LogLevel {
+    type Err = ParseLogLevelError;
+
+    /// Parses a trimmed, ASCII-case-insensitive runtime log-level name.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "trace" => Ok(Self::Trace),
+            "debug" => Ok(Self::Debug),
+            "info" => Ok(Self::Info),
+            "warn" => Ok(Self::Warn),
+            "error" => Ok(Self::Error),
+            _ => Err(ParseLogLevelError::new(value)),
+        }
+    }
 }
 
 /// Names the supported output topologies without relying on booleans at call sites.

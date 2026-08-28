@@ -28,10 +28,12 @@ pub enum DatabaseError {
     ConnectionPool(#[from] r2d2::Error),
     #[error("domain model error: {0}")]
     DomainModel(#[from] ora_domain::DomainModelError),
-    #[error("task diff comment row is corrupt")]
-    CorruptCommentRow,
+    #[error("database row holds a corrupt plugin id: {0}")]
+    CorruptPluginId(#[from] ora_domain::PluginIdError),
     #[error("workflow run state is corrupt: {0}")]
     CorruptWorkflowRunState(#[from] serde_json::Error),
+    #[error("Effect state is corrupt: {0}")]
+    CorruptEffectState(String),
     #[error("workflow run execution context is incomplete")]
     IncompleteWorkflowRunContext,
     #[error("migration versions must be unique, found duplicate version `{0}`")]

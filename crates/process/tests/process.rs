@@ -85,6 +85,38 @@ async fn spawns_process_from_spec_and_reads_stdout_and_stderr() {
     assert!(error_output.contains("process-stderr"));
 }
 
+/// Verifies background processes do not acquire a visible Windows console of their own.
+#[cfg(windows)]
+#[tokio::test]
+async fn spawned_process_has_no_console_window() {
+    let script = "Add-Type -Name NativeMethods -Namespace OraProcessTest -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern IntPtr GetConsoleWindow();'; [OraProcessTest.NativeMethods]::GetConsoleWindow().ToInt64()";
+    let spawner = TokioProcessSpawner::new();
+    let mut process = spawner
+        .spawn(ProcessSpec::new("powershell").args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ]))
+        .unwrap_or_else(|error| panic!("expected process spawn to succeed: {error}"));
+    let mut stdout = process
+        .take_stdout()
+        .unwrap_or_else(|| panic!("expected stdout pipe"));
+
+    let mut output = String::new();
+    stdout
+        .read_to_string(&mut output)
+        .await
+        .unwrap_or_else(|error| panic!("expected stdout read to succeed: {error}"));
+    let exit = process
+        .wait()
+        .await
+        .unwrap_or_else(|error| panic!("expected process wait to succeed: {error}"));
+
+    assert!(exit.success());
+    assert_eq!(output.trim(), "0");
+}
+
 #[tokio::test]
 async fn applies_cwd_and_env_from_process_spec() {
     let worktree = tempfile::tempdir().unwrap_or_else(|error| panic!("expected tempdir: {error}"));
@@ -189,7 +221,9 @@ async fn wait_closes_unowned_stdin_so_stdin_readers_exit() {
     // Child::wait. Without the fix this hangs until the timeout elapses.
     let exit = tokio::time::timeout(Duration::from_secs(5), process.wait())
         .await
-        .expect("expected wait to return after closing stdin, but it hung");
+        .unwrap_or_else(|error| {
+            panic!("expected wait to return after closing stdin, but it hung: {error}")
+        });
     let exit = exit.unwrap_or_else(|error| panic!("expected process wait to succeed: {error}"));
 
     assert!(exit.success());

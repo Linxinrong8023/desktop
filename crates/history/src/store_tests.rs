@@ -2,13 +2,13 @@ use crate::assembler::AssembledRecord;
 use crate::clock::FixedHistoryClock;
 use crate::error::HistoryError;
 use crate::path::history_path;
-use crate::reader::{HistoryIntegrity, read_session_history};
+use crate::reader::{HistoryIntegrity, read_session_history, read_session_history_up_to};
 use crate::record::{HistoryLine, HistoryRecord, SCHEMA_VERSION, SessionMeta};
 use crate::writer::{HistoryWriter, remove_session_history};
 use agent_client_protocol_schema::v1::StopReason;
 use agent_client_protocol_schema::v1::{ContentBlock, TextContent};
 use agent_client_protocol_schema::v1::{ContentChunk, SessionUpdate};
-use ora_domain::AgentCli;
+use ora_domain::AgentRef;
 use pretty_assertions::assert_eq;
 use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
@@ -68,14 +68,37 @@ fn reports_an_empty_history_for_a_session_that_was_never_written() {
 }
 
 #[test]
+fn reads_only_the_durable_prefix_up_to_a_byte_cutoff() {
+    let root = tempfile::tempdir().expect("create history root");
+    let writer = writer(root.path());
+    writer
+        .append_record(0, message("first"))
+        .expect("append first");
+    let cutoff = writer.durable_bytes();
+    writer
+        .append_record(1, message("second"))
+        .expect("append second");
+
+    // Reading up to the cutoff returns only the first record, not the later append.
+    let prefix = read_session_history_up_to(root.path(), SESSION_ID, cutoff).expect("read prefix");
+    assert_eq!(prefix.lines.len(), 1);
+    assert_eq!(prefix.next_seq, 1);
+
+    // Reading the whole file returns both.
+    let full = read_session_history(root.path(), SESSION_ID).expect("read full");
+    assert_eq!(full.lines.len(), 2);
+    assert_eq!(full.next_seq, 2);
+}
+
+#[test]
 fn round_trips_appended_records_in_conversation_order() {
     let root = tempfile::tempdir().expect("create history root");
     let writer = writer(root.path());
     let meta = HistoryRecord::Meta(SessionMeta {
         schema_version: SCHEMA_VERSION,
         session_id: SESSION_ID.to_string(),
-        task_id: "task-1".to_string(),
-        agent_cli: AgentCli::OpenCode,
+        workspace_id: "workspace-1".to_string(),
+        agent_ref: AgentRef::parse("ora-space.nga").expect("agent identity"),
         agent_session_id: "provider-1".to_string(),
         cwd: PathBuf::from("/repo"),
     });

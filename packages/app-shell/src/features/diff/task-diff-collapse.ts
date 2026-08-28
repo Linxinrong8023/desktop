@@ -21,6 +21,52 @@ interface CollapsedRange {
   key: string;
 }
 
+export interface DiffLineTarget {
+  change: ChangeData;
+  collapsedKey: string | null;
+}
+
+/** Returns the old or new source line represented by one parsed change. */
+function lineNumberFor(change: ChangeData, side: "old" | "new"): number | null {
+  if (change.type === "normal") {
+    return side === "old" ? change.oldLineNumber : change.newLineNumber;
+  }
+  if (change.type === "delete") {
+    return side === "old" ? change.lineNumber : null;
+  }
+  return side === "new" ? change.lineNumber : null;
+}
+
+/**
+ * Locates every line on `side` in `[startLine, endLine]` and names any
+ * collapsed block currently hiding each one, so a chat jump can expand then
+ * scroll.
+ */
+export function findDiffLineTargets(
+  hunks: HunkData[],
+  startLine: number,
+  endLine: number,
+  side: "old" | "new" = "new",
+): DiffLineTarget[] {
+  const start = Math.min(startLine, endLine);
+  const end = Math.max(startLine, endLine);
+  const targets: DiffLineTarget[] = [];
+  for (let hunkIndex = 0; hunkIndex < hunks.length; hunkIndex += 1) {
+    const hunk = hunks[hunkIndex]!;
+    const ranges = findCollapsedRanges(hunk, hunkIndex);
+    for (let index = 0; index < hunk.changes.length; index += 1) {
+      const change = hunk.changes[index]!;
+      const line = lineNumberFor(change, side);
+      if (line === null || line < start || line > end) continue;
+      const collapsed = ranges.find(
+        (range) => index >= range.start && index < range.end,
+      );
+      targets.push({ change, collapsedKey: collapsed?.key ?? null });
+    }
+  }
+  return targets;
+}
+
 /**
  * Splits complete-context hunks into visible change neighborhoods and expandable
  * unchanged blocks while preserving the parser's original change objects.
@@ -70,7 +116,7 @@ export function buildCollapsedDiffSegments(
   });
 }
 
-/** Finds the middle of long normal-line runs while retaining nearby review context. */
+/** Finds the middle of long normal-line runs while retaining nearby changed context. */
 function findCollapsedRanges(
   hunk: HunkData,
   hunkIndex: number,

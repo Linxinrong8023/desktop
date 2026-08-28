@@ -11,10 +11,9 @@
 # platform. All three platforms build the same commit in parallel and the
 # release job collects every artifact into a single draft Release.
 #
-# Artifacts are unsigned: macOS Gatekeeper and Windows SmartScreen will warn.
-# Code signing and notarization are tracked separately; when certificates are
-# available, provide TAURI_SIGNING_PRIVATE_KEY / APPLE_CERTIFICATE /
-# WINDOWS_CERTIFICATE secrets and add the corresponding env to the build step.
+# Updater artifacts are generated when TAURI_SIGNING_PRIVATE_KEY is configured.
+# Code signing and notarization are tracked separately; macOS Gatekeeper and
+# Windows SmartScreen may still warn until those certificates are configured.
 name: desktop-build
 
 on:
@@ -63,13 +62,13 @@ jobs:
       # Installs the toolchain pinned by rust-toolchain.toml.
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
-      # Two independent cargo workspaces: the root workspace (compiled by
-      # `cargo xtask export-contracts`) and the standalone src-tauri workspace.
+      # The Tauri crate is a member of the single root cargo workspace, so
+      # `tauri build` compiles the binary and writes every bundle into the
+      # root `target/` directory (there is no separate src-tauri workspace).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             . -> target
-            apps/desktop/src-tauri -> target
       # System libraries required to compile and bundle Tauri 2 on Ubuntu 22.04.
       # Keep in sync with https://v2.tauri.app/start/prerequisites/#linux when
       # upgrading Tauri.
@@ -98,21 +97,55 @@ jobs:
           const fs = require("node:fs");
           const configPath = "apps/desktop/src-tauri/tauri.conf.json";
           const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-          config.bundle.externalBin = ["binaries/rg", "binaries/deno"];
+          config.bundle.externalBin = [
+            "binaries/rg",
+            "binaries/deno",
+            "binaries/ora-reaper",
+          ];
           fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      - name: Configure Tauri updater artifacts
+        shell: node {0}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          const fs = require("node:fs");
+          const configPath = "apps/desktop/src-tauri/tauri.conf.json";
+          const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+          const hasSigningKey = Boolean(process.env.TAURI_SIGNING_PRIVATE_KEY?.trim());
+          config.bundle.createUpdaterArtifacts = hasSigningKey;
+          fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+          if (!hasSigningKey) {
+            console.log("TAURI_SIGNING_PRIVATE_KEY is not configured; skipping updater artifacts.");
+          }
+      - name: Set desktop version from release tag
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+        run: node scripts/set-desktop-version.mjs
+        env:
+          VERSION_TAG: ${{ inputs.tag || github.ref_name }}
       - run: task build:desktop
         env:
           DENO_VERSION: v2.9.5
           RG_VERSION: 15.2.0
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # Each platform produces only the bundle types valid for its OS
+      # (macOS=dmg, Windows=nsis, Linux=appimage+deb). Listing all four
+      # globs is safe: upload-artifact combines them into one search and
+      # only fails when the combined result is empty, so a per-platform
+      # miss on the other types never trips `if-no-files-found: error`.
       - uses: actions/upload-artifact@v6
         with:
           name: ora-desktop-${{ matrix.os }}
           if-no-files-found: error
           path: |
-            apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
-            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
-            apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
-            apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/nsis/*.exe.sig
+            target/release/bundle/macos/*.app.tar.gz
+            target/release/bundle/macos/*.app.tar.gz.sig
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/appimage/*.AppImage.sig
+            target/release/bundle/deb/*.deb
 
   release:
     needs: bundle
@@ -121,6 +154,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      # The manifest generator is checked into the repository and is not part
+      # of the downloaded bundle artifacts, so this job needs its own checkout.
+      - uses: actions/checkout@v6
       # Manual dispatch with release=true must name the tag explicitly; tag
       # pushes carry it in the ref.
       - name: Validate release tag input
@@ -132,7 +168,24 @@ jobs:
         with:
           path: bundles
           merge-multiple: true
-      # Draft on purpose: unsigned artifacts get a manual check before publish.
+      - name: Detect updater signing key
+        id: updater-signing
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY//[[:space:]]/}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Generate static updater manifest
+        if: steps.updater-signing.outputs.enabled == 'true'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: node scripts/create-desktop-update-manifest.mjs bundles
+      # Draft on purpose: releases get a manual check before publish.
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
