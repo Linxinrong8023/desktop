@@ -4,17 +4,17 @@ import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
-/** Reads the workspace version that Cargo.toml owns for the whole Rust workspace. */
+/** Reads the desktop crate version that the release workflow synchronizes before building. */
 function readWorkspaceVersion(): string {
   const cargoToml = readFileSync(
-    path.resolve(__dirname, "../../Cargo.toml"),
+    path.resolve(__dirname, "src-tauri/Cargo.toml"),
     "utf8",
   );
   const match = cargoToml.match(
-    /^\[workspace\.package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
+    /^\[package\][\s\S]*?^version\s*=\s*"([^"]+)"/m,
   );
   if (match === null) {
-    throw new Error("workspace.package version missing in Cargo.toml");
+    throw new Error("desktop package version missing in Cargo.toml");
   }
   return match[1];
 }
