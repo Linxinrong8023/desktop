@@ -1273,6 +1273,8 @@ export const translationResources = {
     "chat.modelSelector.model": "模型",
     "chat.modelSelector.updating": "更新中…",
     "chat.modelSelector.empty": "该 Agent 未提供可选模型",
+    "chat.modelSelector.search": "搜索模型",
+    "chat.modelSelector.noResults": "未找到匹配的模型",
     "chat.agentUnavailable.title": "当前 Agent 不可用",
     "chat.agentUnavailable.uninstalled":
       "提供该 Agent 的插件已被卸载，重新安装后才能继续这段对话。",
@@ -2895,6 +2897,8 @@ export const translationResources = {
     "chat.modelSelector.model": "Model",
     "chat.modelSelector.updating": "Updating…",
     "chat.modelSelector.empty": "This agent offers no model choice",
+    "chat.modelSelector.search": "Search models",
+    "chat.modelSelector.noResults": "No matching models",
     "chat.agentUnavailable.title": "This session's agent is unavailable",
     "chat.agentUnavailable.uninstalled":
       "The plugin that provided this agent was uninstalled. Reinstall it to continue this conversation.",
