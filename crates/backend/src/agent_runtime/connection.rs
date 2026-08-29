@@ -796,7 +796,7 @@ async fn spawn_plugin_connection(
     let LaunchedPluginAgent {
         runtime,
         messages,
-        effect_surfaces,
+        effect_declaration,
     } = match plugin_agent::attach(
         attachment,
         &plugin_id.canonical(),
@@ -812,7 +812,7 @@ async fn spawn_plugin_connection(
         }
     };
     plugin_host
-        .replace_agent_effect_surfaces(plugin_id.clone(), effect_surfaces)
+        .replace_agent_effect_declaration(plugin_id.clone(), effect_declaration)
         .map_err(|error| {
             StartFailure::Terminal(runtime_internal("agent_start_failed", error.to_string()))
         })?;

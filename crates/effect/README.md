@@ -1,27 +1,31 @@
 # ora-effect
 
-`ora-effect` owns Ora's workspace-scoped declarative Skill State and the machinery that safely
-projects it onto consumer-declared filesystem surfaces.
+`ora-effect` owns generic, Workspace-scoped Desired Effect convergence. Skill directory
+materialization is its first Effect kind and filesystem Resources are its first Resource adapter;
+neither concept defines the Core model.
 
 ## Responsibilities
 
-- Strong identities for selections, exact source states, managed ownership, surfaces, operations,
-  and generations.
-- A pure planner that separates desired, managed, observed, and preserved state and never grants
-  ownership from disk contents alone.
-- Consumer descriptor merging, structured conditions, retry policy, and per-consumer readiness.
-- Safe filesystem scanning and journaled staging/swap/delete operations with deterministic crash
-  recovery decisions.
-- Repository, source, consumer-coordination, and clock ports used by a statically dispatched
-  reconciler.
+- Strong identities and immutable revisions for Scopes, Sources, Desired Effects, Consumers,
+  Targets, Resources, projections, ownership, Attempts, Operations, and Artifacts.
+- Pure Target projection and shared-Resource merge planning with structured Conditions.
+- Independent Target readiness and Resource materialization watermarks.
+- Level-triggered requests, fenced Target/Resource claims, retry schedules, and journal-backed
+  recovery states.
+- Static-dispatch repository, Consumer adapter, and Resource adapter seams.
+- Filesystem observation, exact ownership markers, journal-first mutation, verification, and
+  Artifact cleanup.
 
 ## Boundaries and invariants
 
-The crate does not depend on SQLite, Tauri, a concrete Agent runtime, or hard-coded consumer paths.
-Only a matching database ledger and `.ora-managed.json` marker authorize mutation. A matching name,
-digest, source package, or orphan marker is never ownership evidence. Directory fingerprints cover
-all materialized content except the ownership marker.
+`EffectTarget` is the Consumer scheduling/readiness boundary; `EffectResource` is the independent
+observation, locking, mutation, ownership, and recovery boundary. They are many-to-many and must not
+share identity or status.
 
-Reconciliation plans a complete surface before mutation, serializes one physical surface at a
-time through its repository request, and treats watcher payloads only as wakeups. Different
-surfaces may be driven concurrently by the host.
+Desired, Managed, Observed, and Preserved state remain distinct. Only a matching ledger or durable
+Operation/Artifact authorizes mutation. Target claims never authorize shared Resource writes, and
+the reconciler reloads and replans after Resource claims close the race with other Targets.
+
+The crate does not depend on SQLite, Tauri, or a concrete Agent runtime. Consumer- and
+Resource-specific contracts are versioned adapter payloads; generic phases never contain plugin,
+session, filesystem-path, or transport vocabulary.

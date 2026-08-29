@@ -1,18 +1,16 @@
 use crate::{
-    DatabaseBootstrapper, DatabaseLocation, RepositoryPool, SourceMutationOutcome,
-    SourcePublication, SqliteEffectRepository, TimestampSource, default_migration_catalog,
+    DatabaseBootstrapper, DatabaseLocation, PluginSkillProjection, RepositoryPool,
+    SqliteEffectRepository, SqliteSkillRepository, TimestampSource, default_migration_catalog,
 };
-use ora_domain::{Namespace, WorkspaceId};
-use ora_effect::{
-    ConsumerCoordination, ConsumerId, DesiredSkillState, Digest, EffectRepository,
-    FilesystemSkillSurface, Generation, MaterializationFormat, ReplaceEffectOutcome, SkillName,
-    SkillSelectionKey, SkillSource, SkillState, SourceKind, SourceVersion, SurfaceDescriptorSet,
-    SurfaceLifecycle, SurfacePath, WorkspaceEffectSpec,
+use ora_domain::{
+    AuditFields, PluginId, ProjectId, Workspace, WorkspaceId, WorkspaceKind, WorkspaceLifecycle,
+    WorkspaceLocation,
 };
+use ora_effect::*;
 use ora_logging::with_trace_logging;
 use pretty_assertions::assert_eq;
 use rusqlite::params;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use tempfile::TempDir;
 
 #[derive(Clone, Copy, Debug)]
@@ -24,20 +22,94 @@ impl TimestampSource for FixedTimestamp {
     }
 }
 
-/// Creates a file-backed pool with one valid Workspace foreign-key target.
-fn fixture() -> (TempDir, RepositoryPool, WorkspaceId) {
+#[derive(Clone, Copy, Debug)]
+struct ReadyConsumer;
+
+impl ConsumerAdapter for ReadyConsumer {
+    /// Returns a matching barrier receipt if a test declaration opts into coordination.
+    fn coordinate(
+        &self,
+        target: &EffectTarget,
+        plan: &CoordinationPlan,
+    ) -> Result<CoordinationReceipt, ConsumerAdapterError> {
+        coordination_receipt(target, plan, CoordinationReceiptState::SafeToMutate)
+    }
+
+    /// Returns a matching reactivation receipt for the same immutable coordination plan.
+    fn reactivate(
+        &self,
+        target: &EffectTarget,
+        plan: &CoordinationPlan,
+    ) -> Result<CoordinationReceipt, ConsumerAdapterError> {
+        coordination_receipt(target, plan, CoordinationReceiptState::Reactivated)
+    }
+
+    /// Proves readiness only for the exact Target projection supplied by the reconciler.
+    fn verify_ready(
+        &self,
+        target: &EffectTarget,
+        projection: &TargetProjection,
+    ) -> Result<ReadinessReceipt, ConsumerAdapterError> {
+        Ok(ReadinessReceipt {
+            target: target.identity.clone(),
+            generation: projection.generation,
+            consumer_revision: target.consumer_revision.clone(),
+            projection: projection.digest.clone(),
+            proof: AdapterReceipt {
+                version: 1,
+                payload: serde_json::json!({ "ready": true }),
+            },
+        })
+    }
+}
+
+/// Builds an exact coordination receipt or rejects an Uninterrupted Target call as a test bug.
+fn coordination_receipt(
+    target: &EffectTarget,
+    plan: &CoordinationPlan,
+    state: CoordinationReceiptState,
+) -> Result<CoordinationReceipt, ConsumerAdapterError> {
+    let Some(CoordinationRequirement::QuiesceBeforeMutation(contract)) =
+        plan.participants.get(&target.identity)
+    else {
+        return Err(ConsumerAdapterError::new(std::io::Error::other(
+            "Uninterrupted Target should not receive a coordination call",
+        )));
+    };
+    Ok(CoordinationReceipt {
+        target: target.identity.clone(),
+        contract: contract.clone(),
+        state,
+        proof: AdapterReceipt {
+            version: 1,
+            payload: serde_json::json!({ "acknowledged": true }),
+        },
+    })
+}
+
+/// Creates one file-backed database whose Workspace insert also seeds an Effect Scope.
+fn fixture() -> (TempDir, RepositoryPool, Workspace) {
     let directory = TempDir::new().unwrap_or_else(|error| panic!("create database dir: {error}"));
-    let location = DatabaseLocation::path(directory.path().join("ora.sqlite"));
+    let workspace_root = directory.path().join("workspace");
+    std::fs::create_dir_all(&workspace_root)
+        .unwrap_or_else(|error| panic!("create workspace: {error}"));
     let pool = with_trace_logging(|| {
         DatabaseBootstrapper::new(FixedTimestamp)
             .bootstrap_repository_pool(
-                &location,
+                &DatabaseLocation::path(directory.path().join("ora.sqlite")),
                 &default_migration_catalog()
                     .unwrap_or_else(|error| panic!("build catalog: {error}")),
             )
             .unwrap_or_else(|error| panic!("bootstrap pool: {error}"))
     });
-    let workspace_id = WorkspaceId::new("workspace-1");
+    let workspace = Workspace::new(
+        WorkspaceId::new("workspace-1"),
+        ProjectId::new("project-1"),
+        WorkspaceKind::Main,
+        WorkspaceLocation::local_filesystem(workspace_root.to_string_lossy()),
+        WorkspaceLifecycle::Active,
+        AuditFields::new(1, 1, false),
+    );
     pool.with_connection(|connection| {
         connection.execute(
             "INSERT INTO projects (
@@ -48,383 +120,695 @@ fn fixture() -> (TempDir, RepositoryPool, WorkspaceId) {
         connection.execute(
             "INSERT INTO workspace_locations (
                  id, location_kind, locator_version, locator_json, created_at, updated_at
-             ) VALUES ('location-1', 'local_filesystem', 1, '{}', 1, 1)",
-            [],
+             ) VALUES ('location-1', 'local_filesystem', 1, ?1, 1, 1)",
+            params![serde_json::json!({ "path": workspace_root }).to_string()],
         )?;
         connection.execute(
             "INSERT INTO workspaces (
                  id, project_id, workspace_kind, location_id, lifecycle,
                  created_at, updated_at, is_deleted
              ) VALUES (?1, 'project-1', 'main', 'location-1', 'active', 1, 1, 0)",
-            params![workspace_id.as_ref()],
+            params![workspace.id.as_ref()],
         )?;
         Ok(())
     })
     .unwrap_or_else(|error| panic!("insert Workspace fixture: {error}"));
-    (directory, pool, workspace_id)
+    (directory, pool, workspace)
 }
 
-/// Builds one active Local source revision.
-fn local_source(version: &str, manifest: &[u8]) -> (SkillSelectionKey, DesiredSkillState) {
-    let name =
-        SkillName::parse("review").unwrap_or_else(|error| panic!("parse Skill name: {error}"));
-    let key = SkillSelectionKey::new(SourceKind::Local, Namespace::local(), name.clone());
-    let state = DesiredSkillState::try_new(SkillState {
-        name,
-        skill_md_digest: Digest::sha256(manifest),
-        source: SkillSource::Local {
-            namespace: Namespace::local(),
-            version: SourceVersion::parse(version)
-                .unwrap_or_else(|error| panic!("parse source version: {error}")),
+/// Builds one valid Agent Consumer declaration for a shared Skill directory Resource.
+fn declaration(stable_key: &str) -> ConsumerDeclaration {
+    let materialization = MaterializationContract::skill_directory_v1();
+    ConsumerDeclaration {
+        consumer: ConsumerIdentity::new(ConsumerKind::agent_plugin(), stable_key)
+            .unwrap_or_else(|error| panic!("consumer identity: {error}")),
+        adapter: ConsumerAdapterIdentity::parse("ora/agent-plugin")
+            .unwrap_or_else(|error| panic!("consumer adapter: {error}")),
+        capabilities: CapabilitySet {
+            effect_protocols: BTreeMap::from([(EffectKind::skill(), 1)]),
+            materialization_contracts: BTreeSet::from([materialization.capability_key()]),
+            coordination_contracts: BTreeSet::new(),
+            readiness_contracts: BTreeSet::new(),
         },
-    })
-    .unwrap_or_else(|error| panic!("build source: {error}"));
-    (key, state)
-}
-
-/// Registers one consumer-declared physical surface for request-upsert assertions.
-fn register_surface(repository: &SqliteEffectRepository, workspace_id: &WorkspaceId, now: i64) {
-    let descriptors = SurfaceDescriptorSet::merge(
-        workspace_id,
-        [FilesystemSkillSurface {
-            workspace_relative_path: SurfacePath::parse(".agents/skills")
-                .unwrap_or_else(|error| panic!("parse surface path: {error}")),
+        resources: vec![FilesystemResourceTemplate {
+            relative_path: ResourcePath::parse(".agents/skills")
+                .unwrap_or_else(|error| panic!("resource path: {error}")),
             materialization_format: MaterializationFormat::skill_directory_v1(),
-            consumer: ConsumerId::new("codex"),
-            coordination: ConsumerCoordination::WaitForIdleAndRestart,
+            accepts: CapabilityRequirement::default(),
+            coordination: CoordinationRequirement::Uninterrupted,
         }],
-    )
-    .unwrap_or_else(|error| panic!("merge surface: {error}"));
-    repository
-        .replace_surfaces(
-            workspace_id,
-            std::path::Path::new("/workspace"),
-            &descriptors,
-            now,
-        )
-        .unwrap_or_else(|error| panic!("register surface: {error}"));
+    }
 }
 
 #[test]
-fn desired_replace_uses_cas_and_normalized_no_op_semantics() {
-    let (_directory, pool, workspace_id) = fixture();
+fn consumer_targets_share_one_resource_without_sharing_target_state() {
+    let (_directory, pool, workspace) = fixture();
     let repository = SqliteEffectRepository::new(pool.clone());
-    let source = local_source("1", b"manifest-v1");
     repository
-        .publish_source(
-            &source.1,
-            std::path::Path::new("/catalog/review"),
-            SourcePublication::Create,
-            10,
+        .declare_consumer(
+            &declaration("official/codex"),
+            std::slice::from_ref(&workspace),
+            LocalTimestamp::from_millis(10),
         )
-        .unwrap_or_else(|error| panic!("publish source: {error}"));
-    register_surface(&repository, &workspace_id, 10);
-    let spec = WorkspaceEffectSpec {
-        skills: BTreeMap::from([(source.0, source.1)]),
-    };
-
-    assert_eq!(
-        repository
-            .replace_workspace_effect(&workspace_id, Generation::new(1), spec, 30)
-            .unwrap_or_else(|error| panic!("replace no-op: {error}")),
-        ReplaceEffectOutcome::Unchanged(
-            repository
-                .load_workspace_effect(&workspace_id)
-                .unwrap_or_else(|error| panic!("load effect: {error}"))
+        .unwrap_or_else(|error| panic!("declare first Consumer: {error}"));
+    repository
+        .declare_consumer(
+            &declaration("official/opencode"),
+            std::slice::from_ref(&workspace),
+            LocalTimestamp::from_millis(11),
         )
-    );
-    assert_eq!(
-        repository
-            .replace_workspace_effect(
-                &workspace_id,
-                Generation::default(),
-                WorkspaceEffectSpec::default(),
-                40,
-            )
-            .unwrap_or_else(|error| panic!("replace conflict: {error}")),
-        ReplaceEffectOutcome::Conflict {
-            expected_generation: Generation::default(),
-            current_generation: Generation::new(1),
-        }
-    );
+        .unwrap_or_else(|error| panic!("declare second Consumer: {error}"));
 
-    let request_generation = pool
+    let counts = pool
         .with_connection(|connection| {
             connection
                 .query_row(
-                    "SELECT requested_generation FROM effect_reconcile_requests
-                     WHERE surface_id IN (
-                         SELECT id FROM effect_surfaces WHERE workspace_id = ?1
-                     )",
-                    params![workspace_id.as_ref()],
-                    |row| row.get::<_, i64>(0),
+                    "SELECT
+                         (SELECT COUNT(*) FROM effect_targets),
+                         (SELECT COUNT(*) FROM effect_resources),
+                         (SELECT COUNT(*) FROM effect_target_resource_bindings),
+                         (SELECT COUNT(*) FROM effect_reconcile_requests)",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                        ))
+                    },
                 )
                 .map_err(Into::into)
         })
-        .unwrap_or_else(|error| panic!("load request: {error}"));
-    assert_eq!(request_generation, 1);
+        .unwrap_or_else(|error| panic!("load Effect counts: {error}"));
+    assert_eq!(counts, (2, 1, 2, 2));
 }
 
 #[test]
-fn source_updates_coalesce_and_delete_uninstalls_from_every_workspace() {
-    let (_directory, pool, workspace_id) = fixture();
-    let repository = SqliteEffectRepository::new(pool);
-    let version_one = local_source("1", b"manifest-v1");
+fn unchanged_consumer_declaration_does_not_requeue_its_target() {
+    let (_directory, pool, workspace) = fixture();
+    let repository = SqliteEffectRepository::new(pool.clone());
+    let consumer = declaration("official/codex");
     repository
-        .publish_source(
-            &version_one.1,
-            std::path::Path::new("/catalog/review"),
-            SourcePublication::Create,
-            10,
+        .declare_consumer(
+            &consumer,
+            std::slice::from_ref(&workspace),
+            LocalTimestamp::from_millis(10),
         )
-        .unwrap_or_else(|error| panic!("publish v1: {error}"));
-    let version_two = local_source("2", b"manifest-v2");
-    let version_three = local_source("3", b"manifest-v3");
+        .unwrap_or_else(|error| panic!("declare Consumer: {error}"));
+    let before = pool
+        .with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT status.status_version, status.updated_at, request.requested_at,
+                            request.updated_at
+                     FROM effect_target_status status
+                     JOIN effect_reconcile_requests request ON request.target_id = status.target_id",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                        ))
+                    },
+                )
+                .map_err(Into::into)
+        })
+        .unwrap_or_else(|error| panic!("load Target state: {error}"));
+
     repository
-        .publish_source(
-            &version_two.1,
-            std::path::Path::new("/catalog/review"),
-            SourcePublication::Update,
-            30,
-        )
-        .unwrap_or_else(|error| panic!("publish v2: {error}"));
-    repository
-        .publish_source(
-            &version_three.1,
-            std::path::Path::new("/catalog/review"),
-            SourcePublication::Update,
-            40,
-        )
-        .unwrap_or_else(|error| panic!("publish v3: {error}"));
-    assert_eq!(
-        repository
-            .list_propagation_requests()
-            .unwrap_or_else(|error| panic!("list propagation: {error}")),
-        vec![version_one.0.clone()]
-    );
-    assert_eq!(
-        repository
-            .propagate_source(&version_one.0, 50)
-            .unwrap_or_else(|error| panic!("propagate latest: {error}")),
-        vec![(workspace_id.clone(), Generation::new(2))]
-    );
-    let effect = repository
-        .load_workspace_effect(&workspace_id)
-        .unwrap_or_else(|error| panic!("load propagated effect: {error}"));
-    assert_eq!(effect.generation, Generation::new(2));
-    assert_eq!(
-        effect.spec.skills[&version_one.0].state().source.version(),
-        version_three.1.state().source.version()
-    );
-    assert!(
-        repository
-            .list_propagation_requests()
-            .unwrap_or_else(|error| panic!("list completed propagation: {error}"))
-            .is_empty()
-    );
-    assert_eq!(
-        repository
-            .delete_source(&version_one.0)
-            .unwrap_or_else(|error| panic!("delete source: {error}")),
-        SourceMutationOutcome::Deleted
-    );
-    let effect = repository
-        .load_workspace_effect(&workspace_id)
-        .unwrap_or_else(|error| panic!("load uninstalled effect: {error}"));
-    assert_eq!(effect.generation, Generation::new(3));
-    assert_eq!(effect.spec, WorkspaceEffectSpec::default());
+        .declare_consumer(&consumer, &[workspace], LocalTimestamp::from_millis(20))
+        .unwrap_or_else(|error| panic!("redeclare Consumer: {error}"));
+    let after = pool
+        .with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT status.status_version, status.updated_at, request.requested_at,
+                            request.updated_at
+                     FROM effect_target_status status
+                     JOIN effect_reconcile_requests request ON request.target_id = status.target_id",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                        ))
+                    },
+                )
+                .map_err(Into::into)
+        })
+        .unwrap_or_else(|error| panic!("reload Target state: {error}"));
+
+    assert_eq!(after, before);
 }
 
 #[test]
-fn unavailable_source_cannot_enter_desired_state() {
-    let (_directory, pool, workspace_id) = fixture();
-    let repository = SqliteEffectRepository::new(pool);
-    let source = local_source("1", b"manifest-v1");
+fn source_publication_changes_each_complete_scope_generation_once() {
+    let (directory, pool, workspace) = fixture();
+    let package_root = directory.path().join("plugin-skill");
+    std::fs::create_dir_all(&package_root)
+        .unwrap_or_else(|error| panic!("create package: {error}"));
+    std::fs::write(package_root.join("SKILL.md"), b"manifest")
+        .unwrap_or_else(|error| panic!("write package: {error}"));
+    let repository = SqliteSkillRepository::new(pool.clone());
+    let plugin_id =
+        PluginId::new("official", "review").unwrap_or_else(|error| panic!("plugin id: {error}"));
     repository
-        .publish_source(
-            &source.1,
-            std::path::Path::new("/catalog/review"),
-            SourcePublication::Create,
+        .replace_plugin_skills(
+            &plugin_id,
+            "1.0.0",
+            &[PluginSkillProjection {
+                name: "review".to_string(),
+                description: "Reviews changes".to_string(),
+                package_root,
+                skill_md_digest: ora_effect::Digest::sha256(b"manifest").to_string(),
+            }],
             10,
         )
-        .unwrap_or_else(|error| panic!("publish source: {error}"));
-    repository
-        .mark_source_unavailable(&source.0, "external drift", 20)
-        .unwrap_or_else(|error| panic!("mark unavailable: {error}"));
-    repository
-        .replace_workspace_effect(
-            &workspace_id,
-            Generation::new(1),
-            WorkspaceEffectSpec::default(),
-            25,
-        )
-        .unwrap_or_else(|error| panic!("remove unavailable source: {error}"));
+        .unwrap_or_else(|error| panic!("publish plugin Skill: {error}"));
 
-    assert_eq!(
-        repository
-            .replace_workspace_effect(
-                &workspace_id,
-                Generation::new(2),
-                WorkspaceEffectSpec {
-                    skills: BTreeMap::from([(source.0.clone(), source.1)]),
-                },
-                30,
+    let state = SqliteEffectRepository::new(pool)
+        .load_desired_state(&ora_effect::EffectScopeId::Workspace(workspace.id))
+        .unwrap_or_else(|error| panic!("load Desired State: {error}"));
+    assert_eq!(state.generation, ora_effect::Generation::new(1));
+    assert_eq!(state.effects.len(), 1);
+}
+
+#[test]
+fn reconciler_materializes_and_finalizes_one_complete_target_generation() {
+    let (directory, pool, workspace) = fixture();
+    let package_root = directory.path().join("plugin-skill");
+    std::fs::create_dir_all(&package_root)
+        .unwrap_or_else(|error| panic!("create package: {error}"));
+    let manifest = b"---\nname: review\ndescription: Reviews changes\n---\n";
+    std::fs::write(package_root.join("SKILL.md"), manifest)
+        .unwrap_or_else(|error| panic!("write package: {error}"));
+    SqliteSkillRepository::new(pool.clone())
+        .replace_plugin_skills(
+            &PluginId::new("official", "review")
+                .unwrap_or_else(|error| panic!("plugin id: {error}")),
+            "1.0.0",
+            &[PluginSkillProjection {
+                name: "review".to_string(),
+                description: "Reviews changes".to_string(),
+                package_root,
+                skill_md_digest: Digest::sha256(manifest).to_string(),
+            }],
+            10,
+        )
+        .unwrap_or_else(|error| panic!("publish plugin Skill: {error}"));
+    let repository = SqliteEffectRepository::new(pool.clone());
+    repository
+        .declare_consumer(
+            &declaration("official/codex"),
+            std::slice::from_ref(&workspace),
+            LocalTimestamp::from_millis(11),
+        )
+        .unwrap_or_else(|error| panic!("declare Consumer: {error}"));
+    let worker = WorkerIdentity::parse("worker-1")
+        .unwrap_or_else(|error| panic!("worker identity: {error}"));
+    let (target, claim) = repository
+        .claim_due_targets(
+            &worker,
+            LocalTimestamp::from_millis(12),
+            LocalTimestamp::from_millis(100),
+            1,
+        )
+        .unwrap_or_else(|error| panic!("claim Target: {error}"))
+        .remove(0);
+    let planner = SkillPlanner;
+    let filesystem = FilesystemResourceAdapter;
+    let outcome =
+        EffectReconciler::new(&repository, &planner, &planner, &ReadyConsumer, &filesystem)
+            .reconcile(
+                &target,
+                &claim,
+                LocalTimestamp::from_millis(13),
+                LocalTimestamp::from_millis(100),
             )
-            .unwrap_or_else(|error| panic!("replace desired: {error}")),
-        ReplaceEffectOutcome::SourceUnavailable {
-            selection_key: source.0,
+            .unwrap_or_else(|error| panic!("reconcile Target: {error}"));
+    let persisted = pool
+        .with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT status.phase, status.ready_generation,
+                            (SELECT COUNT(*) FROM effect_managed_items),
+                            (SELECT COUNT(*) FROM effect_operations WHERE phase = 'finalized'),
+                            (SELECT COUNT(*) FROM effect_operation_artifacts)
+                     FROM effect_target_status status WHERE status.target_id = ?1",
+                    params![target.as_str()],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    },
+                )
+                .map_err(Into::into)
+        })
+        .unwrap_or_else(|error| panic!("load finalized Effect state: {error}"));
+    let materialized_manifest = directory
+        .path()
+        .join("workspace")
+        .join(".agents")
+        .join("skills")
+        .join("review")
+        .join("SKILL.md");
+
+    assert_eq!(
+        outcome,
+        ReconcileOutcome::Mutated {
+            target: target.clone(),
+            generation: ora_effect::Generation::new(1),
+            operations: 1,
+        }
+    );
+    assert_eq!(persisted, ("current".to_string(), 1, 1, 1, 0));
+    assert_eq!(
+        std::fs::read(materialized_manifest)
+            .unwrap_or_else(|error| panic!("read materialized Skill: {error}")),
+        manifest
+    );
+
+    assert_eq!(
+        repository
+            .request_reconcile(&target, LocalTimestamp::from_millis(14))
+            .unwrap_or_else(|error| panic!("request idempotent reconcile: {error}")),
+        true
+    );
+    let (_, second_claim) = repository
+        .claim_due_targets(
+            &worker,
+            LocalTimestamp::from_millis(14),
+            LocalTimestamp::from_millis(110),
+            1,
+        )
+        .unwrap_or_else(|error| panic!("reclaim Target: {error}"))
+        .remove(0);
+    let replay =
+        EffectReconciler::new(&repository, &planner, &planner, &ReadyConsumer, &filesystem)
+            .reconcile(
+                &target,
+                &second_claim,
+                LocalTimestamp::from_millis(15),
+                LocalTimestamp::from_millis(110),
+            )
+            .unwrap_or_else(|error| panic!("reconcile current Target: {error}"));
+    let operation_count = pool
+        .with_connection(|connection| {
+            connection
+                .query_row("SELECT COUNT(*) FROM effect_operations", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .map_err(Into::into)
+        })
+        .unwrap_or_else(|error| panic!("count replayed Operations: {error}"));
+
+    assert_eq!(
+        (replay, operation_count),
+        (
+            ReconcileOutcome::Current {
+                target,
+                generation: ora_effect::Generation::new(1),
+            },
+            1,
+        )
+    );
+}
+
+#[test]
+fn desired_replacement_uses_generation_cas_and_exact_no_op_semantics() {
+    let (directory, pool, workspace) = fixture();
+    let package_root = directory.path().join("plugin-skill");
+    std::fs::create_dir_all(&package_root)
+        .unwrap_or_else(|error| panic!("create package: {error}"));
+    std::fs::write(package_root.join("SKILL.md"), b"manifest")
+        .unwrap_or_else(|error| panic!("write package: {error}"));
+    SqliteSkillRepository::new(pool.clone())
+        .replace_plugin_skills(
+            &PluginId::new("official", "review")
+                .unwrap_or_else(|error| panic!("plugin id: {error}")),
+            "1.0.0",
+            &[PluginSkillProjection {
+                name: "review".to_string(),
+                description: "Reviews changes".to_string(),
+                package_root,
+                skill_md_digest: ora_effect::Digest::sha256(b"manifest").to_string(),
+            }],
+            10,
+        )
+        .unwrap_or_else(|error| panic!("publish plugin Skill: {error}"));
+    let repository = SqliteEffectRepository::new(pool);
+    let scope = ora_effect::EffectScopeId::Workspace(workspace.id);
+    let current = repository
+        .load_desired_state(&scope)
+        .unwrap_or_else(|error| panic!("load Desired State: {error}"));
+
+    assert_eq!(
+        repository
+            .replace_desired_state(
+                &scope,
+                current.generation,
+                current.effects.values().cloned().collect(),
+                LocalTimestamp::from_millis(20),
+            )
+            .unwrap_or_else(|error| panic!("replace no-op: {error}")),
+        ReplaceDesiredStateOutcome::Unchanged(current.clone())
+    );
+    assert_eq!(
+        repository
+            .replace_desired_state(
+                &scope,
+                ora_effect::Generation::default(),
+                Vec::new(),
+                LocalTimestamp::from_millis(21),
+            )
+            .unwrap_or_else(|error| panic!("replace conflict: {error}")),
+        ReplaceDesiredStateOutcome::Conflict {
+            expected_generation: ora_effect::Generation::default(),
+            current_generation: current.generation,
         }
     );
 }
 
-/// The worker reads a self-contained descriptor, so it never rebuilds one from a live declaration.
-///
-/// A request outlives the process that created it, and the plugin that declared the surface may be
-/// gone by the time it is served, so everything the reconciler needs has to come back out of the
-/// database rather than out of whatever happens to be running.
 #[test]
-fn due_requests_carry_the_locator_and_consumers_the_reconciler_needs() {
-    let (_directory, pool, workspace_id) = fixture();
-    let repository = SqliteEffectRepository::new(pool);
-    register_surface(&repository, &workspace_id, 10);
-
-    let due = repository
-        .claim_due_reconcile_requests("worker-1", 10, 10_000, 8)
-        .unwrap_or_else(|error| panic!("claim due requests: {error}"));
-
-    assert_eq!(due.len(), 1);
-    let entry = &due[0].due;
-    assert_eq!(entry.workspace_id, workspace_id);
-    assert_eq!(entry.workspace_root, std::path::Path::new("/workspace"));
-    assert_eq!(entry.descriptor.path.as_str(), ".agents/skills");
-    assert_eq!(
-        entry.descriptor.format,
-        MaterializationFormat::skill_directory_v1()
-    );
-    assert_eq!(entry.descriptor.lifecycle, SurfaceLifecycle::Active);
-    assert_eq!(
-        entry.descriptor.consumers,
-        BTreeMap::from([(
-            ConsumerId::new("codex"),
-            ConsumerCoordination::WaitForIdleAndRestart
-        )])
-    );
-}
-
-/// Completing at a stale generation must not discard the wakeup a later edit already merged in.
-///
-/// Desired can advance while a reconcile is mid-flight. Nothing re-creates a deleted request, so
-/// clearing one the reconcile never caught up with would strand that surface until the next
-/// unrelated edit.
-#[test]
-fn completing_a_request_respects_a_generation_that_advanced_mid_reconcile() {
-    let (_directory, pool, workspace_id) = fixture();
-    let repository = SqliteEffectRepository::new(pool);
-    register_surface(&repository, &workspace_id, 10);
-    let claim = repository
-        .claim_due_reconcile_requests("worker-1", 10, 10_000, 8)
-        .unwrap_or_else(|error| panic!("claim due requests: {error}"))
-        .remove(0)
-        .claim;
-
-    let source = local_source("1", b"manifest-v1");
-    repository
-        .publish_source(
-            &source.1,
-            std::path::Path::new("/catalog/review"),
-            SourcePublication::Create,
-            20,
-        )
-        .unwrap_or_else(|error| panic!("publish source: {error}"));
-
-    // Publishing installed the source into every Workspace, so the request now asks for
-    // generation 1 while the in-flight reconcile only ever observed the empty generation 0.
-    assert!(
-        !repository
-            .complete_reconcile_request(&claim, Generation::default(), 30)
-            .unwrap_or_else(|error| panic!("complete stale: {error}")),
-    );
-    // Falling back to pending rather than deleting is what keeps the newer generation scheduled.
-    let reclaimed = repository
-        .claim_due_reconcile_requests("worker-1", 30, 10_000, 8)
-        .unwrap_or_else(|error| panic!("reclaim after stale: {error}"));
-    assert_eq!(reclaimed.len(), 1);
-    assert_eq!(
-        reclaimed[0].due.requested_generation,
-        Generation::new(1),
-        "the request must carry the generation that landed mid-reconcile",
-    );
-
-    assert!(
-        repository
-            .complete_reconcile_request(&reclaimed[0].claim, Generation::new(1), 40)
-            .unwrap_or_else(|error| panic!("complete current: {error}")),
-    );
-    assert!(
-        repository
-            .claim_due_reconcile_requests("worker-1", 40, 10_000, 8)
-            .unwrap_or_else(|error| panic!("claim after current: {error}"))
-            .is_empty(),
-    );
-}
-
-/// A retired surface may only be forgotten once nothing on disk is still owned through it.
-#[test]
-fn retired_surface_deletion_waits_for_an_empty_ownership_ledger() {
-    let (_directory, pool, workspace_id) = fixture();
+fn target_fencing_remains_monotonic_after_request_row_recreation() {
+    let (_directory, pool, workspace) = fixture();
     let repository = SqliteEffectRepository::new(pool.clone());
-    register_surface(&repository, &workspace_id, 10);
-    let surface_key = repository
-        .claim_due_reconcile_requests("worker-1", 10, 10_000, 8)
-        .unwrap_or_else(|error| panic!("claim due requests: {error}"))
-        .remove(0)
-        .due
-        .descriptor
-        .surface_key;
-    // Withdrawing every declaration retires the surface without deleting it.
     repository
-        .replace_surfaces(&workspace_id, std::path::Path::new("/workspace"), &[], 20)
-        .unwrap_or_else(|error| panic!("retire surface: {error}"));
-
-    let source = local_source("1", b"manifest-v1");
-    repository
-        .publish_source(
-            &source.1,
-            std::path::Path::new("/catalog/review"),
-            SourcePublication::Create,
-            30,
+        .declare_consumer(
+            &declaration("official/codex"),
+            &[workspace],
+            LocalTimestamp::from_millis(10),
         )
-        .unwrap_or_else(|error| panic!("publish source: {error}"));
+        .unwrap_or_else(|error| panic!("declare Consumer: {error}"));
+    let worker = WorkerIdentity::parse("worker-1")
+        .unwrap_or_else(|error| panic!("worker identity: {error}"));
+    let first = repository
+        .claim_due_targets(
+            &worker,
+            LocalTimestamp::from_millis(10),
+            LocalTimestamp::from_millis(100),
+            1,
+        )
+        .unwrap_or_else(|error| panic!("claim first request: {error}"))
+        .remove(0);
     pool.with_connection(|connection| {
         connection.execute(
-            "INSERT INTO effect_managed_items (
-                 id, surface_id, source_id, applied_revision_id, target_key, target_json,
-                 applied_fingerprint, applied_generation, created_at, updated_at
-             )
-             SELECT 'managed-1', ?1, heads.source_id, heads.revision_id, 'review', '{}',
-                    'sha256:0', 0, 40, 40
-             FROM effect_source_heads heads",
-            params![surface_key.as_str()],
+            "DELETE FROM effect_reconcile_requests WHERE target_id = ?1",
+            params![first.0.as_str()],
+        )?;
+        connection.execute(
+            "INSERT INTO effect_reconcile_requests (
+                 target_id, requested_generation, state, wake_reasons_json,
+                 requested_at, updated_at
+             ) VALUES (?1, 0, 'pending', '[]', 20, 20)",
+            params![first.0.as_str()],
         )?;
         Ok(())
     })
-    .unwrap_or_else(|error| panic!("insert managed item: {error}"));
+    .unwrap_or_else(|error| panic!("recreate request: {error}"));
+    let second = repository
+        .claim_due_targets(
+            &worker,
+            LocalTimestamp::from_millis(20),
+            LocalTimestamp::from_millis(110),
+            1,
+        )
+        .unwrap_or_else(|error| panic!("claim recreated request: {error}"))
+        .remove(0);
 
-    assert!(
-        !repository
-            .delete_retired_surface(&surface_key)
-            .unwrap_or_else(|error| panic!("delete owned surface: {error}")),
+    assert_eq!(first.1.token.value(), 1);
+    assert_eq!(second.1.token.value(), 2);
+}
+
+#[test]
+fn transient_failures_keep_a_counted_durable_retry_schedule() {
+    let (_directory, pool, workspace) = fixture();
+    let repository = SqliteEffectRepository::new(pool.clone());
+    repository
+        .declare_consumer(
+            &declaration("official/codex"),
+            &[workspace],
+            LocalTimestamp::from_millis(10),
+        )
+        .unwrap_or_else(|error| panic!("declare Consumer: {error}"));
+    let worker = WorkerIdentity::parse("worker-1")
+        .unwrap_or_else(|error| panic!("worker identity: {error}"));
+    let (target, first_claim) = repository
+        .claim_due_targets(
+            &worker,
+            LocalTimestamp::from_millis(10),
+            LocalTimestamp::from_millis(100),
+            1,
+        )
+        .unwrap_or_else(|error| panic!("claim first request: {error}"))
+        .remove(0);
+    let first_retry = repository
+        .schedule_retry(
+            &target,
+            &first_claim,
+            LocalTimestamp::from_millis(20),
+            LocalTimestamp::from_millis(11),
+        )
+        .unwrap_or_else(|error| panic!("schedule first retry: {error}"));
+    let (_, second_claim) = repository
+        .claim_due_targets(
+            &worker,
+            LocalTimestamp::from_millis(20),
+            LocalTimestamp::from_millis(110),
+            1,
+        )
+        .unwrap_or_else(|error| panic!("claim second request: {error}"))
+        .remove(0);
+    let second_retry = repository
+        .schedule_retry(
+            &target,
+            &second_claim,
+            LocalTimestamp::from_millis(30),
+            LocalTimestamp::from_millis(21),
+        )
+        .unwrap_or_else(|error| panic!("schedule second retry: {error}"));
+    let stored = pool
+        .with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT state, retry_count, retry_attempt, not_before,
+                            claim_token, claim_worker, lease_until
+                     FROM effect_reconcile_requests WHERE target_id = ?1",
+                    params![target.as_str()],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, Option<i64>>(2)?,
+                            row.get::<_, Option<i64>>(3)?,
+                            row.get::<_, Option<i64>>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<i64>>(6)?,
+                        ))
+                    },
+                )
+                .map_err(Into::into)
+        })
+        .unwrap_or_else(|error| panic!("load retry request: {error}"));
+
+    assert_eq!(first_retry.map(|attempt| attempt.value()), Some(1));
+    assert_eq!(second_retry.map(|attempt| attempt.value()), Some(2));
+    assert_eq!(
+        stored,
+        (
+            "retry_scheduled".to_string(),
+            2,
+            Some(2),
+            Some(30),
+            None,
+            None,
+            None,
+        )
     );
+}
 
+#[test]
+fn unfinished_operation_is_quarantined_with_target_and_resource_conditions() {
+    let (directory, pool, workspace) = fixture();
+    let repository = SqliteEffectRepository::new(pool.clone());
+    repository
+        .declare_consumer(
+            &declaration("official/codex"),
+            &[workspace],
+            LocalTimestamp::from_millis(10),
+        )
+        .unwrap_or_else(|error| panic!("declare Consumer: {error}"));
+    let worker = WorkerIdentity::parse("worker-1")
+        .unwrap_or_else(|error| panic!("worker identity: {error}"));
+    let (target, _claim) = repository
+        .claim_due_targets(
+            &worker,
+            LocalTimestamp::from_millis(10),
+            LocalTimestamp::from_millis(100),
+            1,
+        )
+        .unwrap_or_else(|error| panic!("claim request: {error}"))
+        .remove(0);
+    let (consumer_revision, resource) = pool
+        .with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT target.consumer_revision_id, binding.resource_id
+                     FROM effect_targets target
+                     JOIN effect_target_resource_bindings binding ON binding.target_id = target.id
+                     WHERE target.id = ?1",
+                    params![target.as_str()],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .map_err(Into::into)
+        })
+        .unwrap_or_else(|error| panic!("load Target journal identities: {error}"));
+    let target_projection = Digest::sha256(b"target-projection").to_string();
+    let resource_projection = Digest::sha256(b"resource-projection").to_string();
+    let target_identity = EffectTargetId::new(target.as_str());
+    let resource_identity = EffectResourceId::new(&resource);
+    let coordination = CoordinationPlan::new(
+        BTreeSet::from([resource_identity]),
+        BTreeMap::from([(target_identity, CoordinationRequirement::Uninterrupted)]),
+    )
+    .unwrap_or_else(|error| panic!("build coordination plan: {error}"));
+    let workspace_root = directory.path().join("workspace");
+    let resource_root = workspace_root.join(".agents").join("skills");
+    let payload = VersionedAdapterPlan::FilesystemDirectoryV1(FilesystemOperationPlan {
+        workspace_root: workspace_root.clone(),
+        resource_relative_path: ResourcePath::parse(".agents/skills")
+            .unwrap_or_else(|error| panic!("resource path: {error}")),
+        resource_root,
+        source_root: None,
+        staging_path: workspace_root.join(".agents").join("staging"),
+        backup_path: workspace_root.join(".agents").join("backup"),
+    });
+    let planned = ExactPlannedState::Present {
+        native_identity: NativeResourceIdentity::parse("review")
+            .unwrap_or_else(|error| panic!("native identity: {error}")),
+        fingerprint: Fingerprint::sha256(b"planned"),
+        managed_identity: ManagedIdentity::new("managed-1"),
+    };
     pool.with_connection(|connection| {
-        connection.execute("DELETE FROM effect_managed_items", [])?;
+        connection.execute(
+            "INSERT INTO effect_target_projections (
+                 target_id, generation, consumer_revision_id, digest, created_at
+             ) VALUES (?1, 0, ?2, ?3, 11)",
+            params![target.as_str(), &consumer_revision, &target_projection],
+        )?;
+        connection.execute(
+            "INSERT INTO effect_resource_projections (
+                 resource_id, generation, digest, created_at
+             ) VALUES (?1, 0, ?2, 11)",
+            params![&resource, &resource_projection],
+        )?;
+        connection.execute(
+            "INSERT INTO effect_reconcile_attempts (
+                 id, target_id, generation, consumer_revision_id, target_projection_digest,
+                 coordination_plan_version, coordination_plan_json, phase, prepared_at, updated_at
+             ) VALUES ('attempt-1', ?1, 0, ?2, ?3, 1, ?4, 'prepared', 11, 11)",
+            params![
+                target.as_str(),
+                &consumer_revision,
+                &target_projection,
+                serde_json::to_string(&coordination)
+                    .unwrap_or_else(|error| panic!("serialize coordination: {error}")),
+            ],
+        )?;
+        connection.execute(
+            "INSERT INTO effect_attempt_resource_projections (
+                 attempt_id, resource_projection_digest, sequence
+             ) VALUES ('attempt-1', ?1, 0)",
+            params![&resource_projection],
+        )?;
+        connection.execute(
+            "INSERT INTO effect_operations (
+                 id, attempt_id, resource_id, generation, sequence, mutation,
+                 expected_version, expected_json, planned_version, planned_json,
+                 payload_version, payload_json, phase, prepared_at, updated_at
+             ) VALUES ('operation-1', 'attempt-1', ?1, 0, 0, 'create',
+                       1, ?2, 1, ?3, 1, ?4, 'prepared', 11, 11)",
+            params![
+                &resource,
+                serde_json::to_string(&ExactPreviousState::Missing)
+                    .unwrap_or_else(|error| panic!("serialize expected state: {error}")),
+                serde_json::to_string(&planned)
+                    .unwrap_or_else(|error| panic!("serialize planned state: {error}")),
+                serde_json::to_string(&payload)
+                    .unwrap_or_else(|error| panic!("serialize operation payload: {error}")),
+            ],
+        )?;
         Ok(())
     })
-    .unwrap_or_else(|error| panic!("clear ledger: {error}"));
+    .unwrap_or_else(|error| panic!("insert unfinished journal: {error}"));
 
-    assert!(
-        repository
-            .delete_retired_surface(&surface_key)
-            .unwrap_or_else(|error| panic!("delete cleaned surface: {error}")),
+    let active_lease_quarantined = repository
+        .quarantine_unfinished_operations(LocalTimestamp::from_millis(20))
+        .unwrap_or_else(|error| panic!("check active journal: {error}"));
+    let quarantined = repository
+        .quarantine_unfinished_operations(LocalTimestamp::from_millis(101))
+        .unwrap_or_else(|error| panic!("quarantine journal: {error}"));
+    let recovery_wakeup_recorded = repository
+        .request_reconcile(&target, LocalTimestamp::from_millis(102))
+        .unwrap_or_else(|error| panic!("record recovery wakeup: {error}"));
+    let stored = pool
+        .with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT
+                         (SELECT phase FROM effect_operations WHERE id = 'operation-1'),
+                         (SELECT phase FROM effect_reconcile_attempts WHERE id = 'attempt-1'),
+                         (SELECT phase FROM effect_target_status WHERE target_id = ?1),
+                         (SELECT phase FROM effect_resource_status WHERE resource_id = ?2),
+                         (SELECT state FROM effect_reconcile_requests WHERE target_id = ?1),
+                         (SELECT COUNT(*) FROM effect_conditions
+                          WHERE owner_kind = 'target' AND owner_id = ?1),
+                         (SELECT COUNT(*) FROM effect_conditions
+                          WHERE owner_kind = 'resource' AND owner_id = ?2)",
+                    params![target.as_str(), &resource],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, i64>(6)?,
+                        ))
+                    },
+                )
+                .map_err(Into::into)
+        })
+        .unwrap_or_else(|error| panic!("load recovery state: {error}"));
+
+    assert_eq!(
+        (
+            active_lease_quarantined,
+            quarantined,
+            recovery_wakeup_recorded
+        ),
+        (0, 1, true)
+    );
+    assert_eq!(
+        stored,
+        (
+            "recovery_required".to_string(),
+            "recovery_required".to_string(),
+            "recovery_required".to_string(),
+            "recovery_required".to_string(),
+            "blocked".to_string(),
+            1,
+            1,
+        )
     );
 }

@@ -1,6 +1,8 @@
 use ora_application::{ProjectRepository, RepositoryError};
-use ora_domain::{AuditFields, Project, ProjectId, WorkspaceLocation};
+use ora_domain::{AuditFields, Project, ProjectId, WorkspaceId, WorkspaceLocation};
+use ora_effect::EffectScopeId;
 use rusqlite::{Row, Transaction, TransactionBehavior, params};
+use std::collections::BTreeSet;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -85,6 +87,18 @@ impl ProjectRepository for SqliteProjectRepository {
                         project.audit_fields.created_at,
                         project.audit_fields.updated_at,
                     ],
+                )?;
+                let mut changed_scopes = BTreeSet::new();
+                super::effect::seed_scope_sources(
+                    &transaction,
+                    &EffectScopeId::Workspace(WorkspaceId::new(workspace_id)),
+                    project.audit_fields.updated_at,
+                    &mut changed_scopes,
+                )?;
+                super::effect::advance_changed_scopes(
+                    &transaction,
+                    &changed_scopes,
+                    project.audit_fields.updated_at,
                 )?;
                 transaction.commit()?;
 

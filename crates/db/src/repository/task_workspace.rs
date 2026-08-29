@@ -3,7 +3,9 @@ use ora_domain::{
     Task, Workspace, WorkspaceKind, WorkspaceLifecycle, WorkspaceLocation,
     WorkspaceProvisionerKind, WorkspaceProvisioningState, Worktree, WorktreeProvisioningLeaseId,
 };
+use ora_effect::EffectScopeId;
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
+use std::collections::BTreeSet;
 
 use crate::repository::RepositoryPool;
 use crate::repository::connection::bool_to_sqlite;
@@ -126,7 +128,7 @@ fn insert_worktree(
 fn insert_workspace(
     transaction: &Transaction<'_>,
     workspace: &Workspace,
-) -> Result<(), rusqlite::Error> {
+) -> Result<(), crate::DatabaseError> {
     let location_id = format!("{}-location", workspace.id);
     let locator = match &workspace.location {
         WorkspaceLocation::LocalFilesystem { path } => {
@@ -170,6 +172,18 @@ fn insert_workspace(
             workspace.audit_fields.updated_at,
             bool_to_sqlite(workspace.audit_fields.is_deleted),
         ],
+    )?;
+    let mut changed_scopes = BTreeSet::new();
+    super::effect::seed_scope_sources(
+        transaction,
+        &EffectScopeId::Workspace(workspace.id.clone()),
+        workspace.audit_fields.updated_at,
+        &mut changed_scopes,
+    )?;
+    super::effect::advance_changed_scopes(
+        transaction,
+        &changed_scopes,
+        workspace.audit_fields.updated_at,
     )?;
     Ok(())
 }

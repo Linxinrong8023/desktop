@@ -3,7 +3,7 @@ mod agent_runtime;
 mod app_event;
 mod bootstrap;
 mod clock;
-mod effect_surface_registration;
+mod effect_registration;
 mod effect_worker;
 mod error;
 mod git_cleanup;

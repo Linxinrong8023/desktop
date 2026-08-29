@@ -26,8 +26,9 @@ Contracts are the app-facing protocol, not a projection of the domain. Each enti
 - `Task`: `id`, `projectId`, `workspaceId`, `title`
 - `Session`: `id`, `taskId`, `agentCli`, `status`, `historyState`
 - `Skill`: `id`, `namespace`, `name`, `description`, `availability`
-- `WorkspaceEffect`: `workspaceId`, `generation`, and the complete normalized desired Skill set;
-  surface status exposes desired/observed/applied generations plus structured current conditions.
+- `EffectState`: `workspaceId`, `generation`, and the complete normalized Desired Effect set;
+  generic Target status exposes desired/observed/applied/ready generations, recovery identity, and
+  structured current Conditions.
 - `Agent`: `id`, `namespace`, `name`, `description`
 - `ProjectBranch`: `name`, `refName`, `displayName`
 - Workspace file contracts keep task identity in the request and expose only normalized relative paths: `WorkspaceEntry`, `ReadWorkspaceFileResponse`, `SearchWorkspaceResponse`, and `WorkspaceFileEventBatch`. The server resolves the task's managed workspace; callers never provide a filesystem root.

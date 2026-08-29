@@ -1,15 +1,16 @@
 use crate::{
-    ConsumerId, DesiredSkillState, EffectOperation, Generation, ManagedIdentity, ManagedSkill,
-    SkillSelectionKey, SourceVersion, SurfaceKey, SurfaceStatus, WorkspaceEffect,
-    WorkspaceEffectSpec,
+    AdapterReceipt, ArtifactId, ConditionProposal, ConsumerRevision, CoordinationPlan,
+    CoordinationReceipt, DesiredEffect, DesiredState, EffectOperation, EffectResource,
+    EffectScopeId, EffectTarget, EffectTargetId, Generation, LocalTimestamp, ManagedItem,
+    OperationArtifact, ReadinessReceipt, ReconcileAttempt, ReconcileClaim, ReconcileRequest,
+    ResourceClaim, ResourceObservation, ResourceStatus, TargetDeclaration, TargetProjection,
+    TargetStatus,
 };
-use ora_domain::WorkspaceId;
+use std::collections::BTreeMap;
 use std::error::Error;
-use std::path::PathBuf;
-use std::sync::Arc;
 use thiserror::Error;
 
-/// Preserves concrete persistence failures across the transport-independent Effect boundary.
+/// Preserves concrete persistence failures across the transport-independent Effect seam.
 #[derive(Debug, Error)]
 #[error("Effect repository operation failed")]
 pub struct RepositoryError {
@@ -25,227 +26,219 @@ impl RepositoryError {
     }
 }
 
-/// Result of replacing a complete desired specification using generation CAS.
+/// Result of replacing a complete Desired State using generation compare-and-swap.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ReplaceEffectOutcome {
-    Unchanged(WorkspaceEffect),
-    Replaced(WorkspaceEffect),
+pub enum ReplaceDesiredStateOutcome {
+    Unchanged(DesiredState),
+    Replaced(DesiredState),
     Conflict {
         expected_generation: Generation,
         current_generation: Generation,
     },
-    SourceUnavailable {
-        selection_key: SkillSelectionKey,
-    },
+    RevisionUnavailable(crate::EffectRevisionId),
+    ScopeRetiring,
 }
 
-/// Atomic ledger change committed with operation finalization.
+/// Complete current facts reloaded after a Target request has been claimed.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum LedgerTransition {
-    Upsert(ManagedSkill),
-    Replace {
-        previous_identity: ManagedIdentity,
-        next: ManagedSkill,
-    },
-    Delete {
-        managed_identity: ManagedIdentity,
-    },
+pub struct ReconcileSnapshot {
+    pub request: ReconcileRequest,
+    pub claim: ReconcileClaim,
+    pub desired: DesiredState,
+    pub target: EffectTarget,
+    pub consumer_revision: ConsumerRevision,
+    pub declaration: TargetDeclaration,
+    pub resources: BTreeMap<crate::EffectResourceId, EffectResource>,
+    pub revisions: BTreeMap<crate::EffectRevisionId, crate::EffectRevision>,
+    pub related_targets: BTreeMap<EffectTargetId, RelatedTargetSnapshot>,
+    pub coordination_participants:
+        BTreeMap<crate::EffectResourceId, BTreeMap<EffectTargetId, crate::CoordinationRequirement>>,
+    pub participant_targets: BTreeMap<EffectTargetId, EffectTarget>,
+    pub target_status: TargetStatus,
+    pub resource_statuses: BTreeMap<crate::EffectResourceId, ResourceStatus>,
+    pub managed: BTreeMap<crate::EffectResourceId, Vec<ManagedItem>>,
 }
 
-/// Defines durable state transitions required by desired CRUD and reconciliation.
+/// Complete planning inputs for another Target contributing to a shared Resource.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RelatedTargetSnapshot {
+    pub target: EffectTarget,
+    pub consumer_revision: ConsumerRevision,
+    pub declaration: TargetDeclaration,
+}
+
+/// Atomic final result of a planner pass that produced no external mutation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectionCommit {
+    pub target_projections: Vec<TargetProjection>,
+    pub resource_projections: Vec<crate::ResourceProjection>,
+    pub target_status: TargetStatus,
+    pub resource_statuses: Vec<ResourceStatus>,
+    pub managed: Vec<ManagedItem>,
+    pub removed_managed: Vec<crate::ManagedIdentity>,
+    pub conditions: Vec<ConditionProposal>,
+    pub readiness: Option<ReadinessReceipt>,
+}
+
+/// Atomic business transition committed after every operation in an attempt was verified.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AttemptFinalization {
+    pub attempt: ReconcileAttempt,
+    pub operations: Vec<EffectOperation>,
+    pub managed: Vec<ManagedItem>,
+    pub removed_managed: Vec<crate::ManagedIdentity>,
+    pub target_statuses: Vec<TargetStatus>,
+    pub resource_statuses: Vec<ResourceStatus>,
+    pub readiness: Option<ReadinessReceipt>,
+    pub coordination_receipts: Vec<CoordinationReceipt>,
+    pub conditions: Vec<ConditionProposal>,
+}
+
+/// Deep persistence interface for Desired replacement and durable reconcile state transitions.
 ///
-/// Implementations must make desired replacement and reconcile-request upsert one transaction,
-/// and must never infer managed ownership from filesystem observations.
+/// Implementations must enforce Scope isolation and fencing in every write. Preparing attempts,
+/// finalizing ledger transitions, and completing requests are atomic operations; callers never
+/// write individual status fields or ownership rows directly.
 pub trait EffectRepository {
-    /// Loads the latest complete desired specification or generation zero with an empty spec.
-    fn load_workspace_effect(
-        &self,
-        workspace_id: &WorkspaceId,
-    ) -> Result<WorkspaceEffect, RepositoryError>;
+    /// Loads one complete Desired State snapshot.
+    fn load_desired_state(&self, scope: &EffectScopeId) -> Result<DesiredState, RepositoryError>;
 
-    /// Replaces the full normalized spec and enqueues affected surfaces atomically.
-    fn replace_workspace_effect(
+    /// Replaces the complete normalized set and wakes every active Target atomically.
+    fn replace_desired_state(
         &self,
-        workspace_id: &WorkspaceId,
+        scope: &EffectScopeId,
         expected_generation: Generation,
-        spec: WorkspaceEffectSpec,
-        updated_at: i64,
-    ) -> Result<ReplaceEffectOutcome, RepositoryError>;
+        effects: Vec<DesiredEffect>,
+        updated_at: LocalTimestamp,
+    ) -> Result<ReplaceDesiredStateOutcome, RepositoryError>;
 
-    /// Loads every live ownership ledger for one physical surface.
-    fn load_managed_skills(
+    /// Loads the transaction-consistent Target status and its current Conditions.
+    fn load_target_status(
         &self,
-        workspace_id: &WorkspaceId,
-        surface_key: &SurfaceKey,
-    ) -> Result<Vec<ManagedSkill>, RepositoryError>;
+        target: &EffectTargetId,
+    ) -> Result<Option<(TargetStatus, Vec<crate::EffectCondition>)>, RepositoryError>;
 
-    /// Creates or advances one managed ledger after its exact file operation is applied.
-    fn save_managed_skill(&self, managed: ManagedSkill) -> Result<(), RepositoryError>;
-
-    /// Terminates one ownership lifecycle after safe cleanup or proven absence.
-    fn delete_managed_skill(
+    /// Coalesces an explicit Target wakeup without mutating Desired State.
+    fn request_reconcile(
         &self,
-        managed_identity: &ManagedIdentity,
+        target: &EffectTargetId,
+        requested_at: LocalTimestamp,
+    ) -> Result<bool, RepositoryError>;
+
+    /// Claims due Target requests with fencing and returns only their opaque Target identities.
+    fn claim_due_targets(
+        &self,
+        worker: &crate::WorkerIdentity,
+        now: LocalTimestamp,
+        lease_until: LocalTimestamp,
+        limit: usize,
+    ) -> Result<Vec<(EffectTargetId, ReconcileClaim)>, RepositoryError>;
+
+    /// Reloads all current facts after claiming so wakeup payloads never become correctness input.
+    fn load_reconcile_snapshot(
+        &self,
+        target: &EffectTargetId,
+        claim: &ReconcileClaim,
+    ) -> Result<ReconcileSnapshot, RepositoryError>;
+
+    /// Acquires all required Resource claims in stable identity order or returns no authority.
+    fn claim_resources(
+        &self,
+        target: &EffectTargetId,
+        claim: &ReconcileClaim,
+        resources: &[crate::EffectResourceId],
+        now: LocalTimestamp,
+        lease_until: LocalTimestamp,
+    ) -> Result<Option<Vec<ResourceClaim>>, RepositoryError>;
+
+    /// Persists immutable attempt and operation journals before any external side effect.
+    fn prepare_attempt(
+        &self,
+        claim: &ReconcileClaim,
+        attempt: ReconcileAttempt,
+        target_projections: Vec<TargetProjection>,
+        resource_projections: Vec<crate::ResourceProjection>,
+        operations: Vec<EffectOperation>,
+        artifacts: Vec<OperationArtifact>,
     ) -> Result<(), RepositoryError>;
 
-    /// Loads current status independently from desired generation.
-    fn load_surface_status(
+    /// Persists monotonic attempt, operation, and coordination progress between external calls.
+    fn record_attempt_progress(
         &self,
-        workspace_id: &WorkspaceId,
-        surface_key: &SurfaceKey,
-    ) -> Result<Option<SurfaceStatus>, RepositoryError>;
-
-    /// Replaces current status and conditions without mutating desired generation.
-    fn save_surface_status(&self, status: SurfaceStatus) -> Result<(), RepositoryError>;
-
-    /// Durably records intent before any corresponding filesystem mutation.
-    fn prepare_operation(&self, operation: EffectOperation) -> Result<(), RepositoryError>;
-
-    /// Persists the next phase of an already prepared operation.
-    fn save_operation(&self, operation: EffectOperation) -> Result<(), RepositoryError>;
-
-    /// Commits the ownership-ledger transition and `Finalized` phase in one database transaction.
-    fn finalize_operation(
-        &self,
-        operation: EffectOperation,
-        transition: LedgerTransition,
+        claim: &ReconcileClaim,
+        attempt: &ReconcileAttempt,
+        operations: &[EffectOperation],
+        coordination_receipts: &[CoordinationReceipt],
+        updated_at: LocalTimestamp,
     ) -> Result<(), RepositoryError>;
 
-    /// Releases durable recovery authority after the adapter proves every artifact absent.
-    fn complete_operation_cleanup(
+    /// Commits current blocked Conditions and request state under the Target fencing token.
+    fn block_target(
         &self,
-        operation_id: &crate::EffectOperationId,
+        target: &EffectTargetId,
+        claim: &ReconcileClaim,
+        target_status: TargetStatus,
+        resource_statuses: Vec<ResourceStatus>,
+        conditions: Vec<ConditionProposal>,
+        updated_at: LocalTimestamp,
     ) -> Result<(), RepositoryError>;
 
-    /// Loads unfinished operations in deterministic preparation order for startup recovery.
+    /// Commits a no-mutation projection/readiness transition and completes or preserves the wakeup.
+    fn commit_projection(
+        &self,
+        claim: &ReconcileClaim,
+        commit: ProjectionCommit,
+    ) -> Result<(), RepositoryError>;
+
+    /// Atomically finalizes operations, ownership ledgers, statuses, receipts, and request state.
+    fn finalize_attempt(
+        &self,
+        claim: &ReconcileClaim,
+        finalization: AttemptFinalization,
+    ) -> Result<(), RepositoryError>;
+
+    /// Releases a failed claim into a durable retry schedule while preserving newer wakeups.
+    fn schedule_retry(
+        &self,
+        target: &EffectTargetId,
+        claim: &ReconcileClaim,
+        not_before: LocalTimestamp,
+        updated_at: LocalTimestamp,
+    ) -> Result<Option<crate::RetryAttempt>, RepositoryError>;
+
+    /// Loads immutable unfinished operations in deterministic preparation order for recovery.
     fn load_unfinished_operations(&self) -> Result<Vec<EffectOperation>, RepositoryError>;
 
-    /// Persists per-consumer readiness independently from surface file application.
-    fn save_consumer_status(&self, status: crate::ConsumerStatus) -> Result<(), RepositoryError>;
-
-    /// Coalesces an explicit retry wakeup at the current Desired generation.
-    fn retry_surface(
+    /// Converts every unfinished journal into explicit manual recovery instead of guessing state.
+    fn quarantine_unfinished_operations(
         &self,
-        workspace_id: &WorkspaceId,
-        surface_key: &SurfaceKey,
-        requested_at: i64,
-    ) -> Result<bool, RepositoryError>;
+        detected_at: LocalTimestamp,
+    ) -> Result<usize, RepositoryError>;
+
+    /// Deletes durable artifact authority after the adapter proves the exact artifact absent.
+    fn complete_artifact_cleanup(
+        &self,
+        artifact: &ArtifactId,
+        receipt: CleanupReceipt,
+    ) -> Result<(), RepositoryError>;
+
+    /// Persists cleanup failure without changing already-finalized business state.
+    fn mark_artifact_cleanup_failed(
+        &self,
+        artifact: OperationArtifact,
+        failed_at: LocalTimestamp,
+    ) -> Result<(), RepositoryError>;
 }
 
-/// Generates fresh, random ownership identities for new lifecycles.
-pub trait ManagedIdentityGenerator {
-    fn generate_managed_identity(&self) -> ManagedIdentity;
-}
-
-/// Uses cryptographically random UUIDs for production ownership identities.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct UuidManagedIdentityGenerator;
-
-impl ManagedIdentityGenerator for UuidManagedIdentityGenerator {
-    fn generate_managed_identity(&self) -> ManagedIdentity {
-        ManagedIdentity::random()
-    }
-}
-
-/// A stable read handle for one already validated source revision.
-#[derive(Clone, Debug)]
-pub struct SourceSnapshot {
-    pub state: DesiredSkillState,
-    pub package_root: PathBuf,
-    _lease: Option<Arc<tempfile::TempDir>>,
-}
-
-impl SourceSnapshot {
-    /// Borrows an adapter-coordinated immutable path for the lifetime of the returned value.
-    pub fn borrowed(state: DesiredSkillState, package_root: PathBuf) -> Self {
-        Self {
-            state,
-            package_root,
-            _lease: None,
-        }
-    }
-
-    /// Copies a mutable catalog directory into an owned, link-free snapshot for one operation.
-    pub fn copy_from(
-        state: DesiredSkillState,
-        package_root: &std::path::Path,
-    ) -> Result<Self, SourceError> {
-        let lease = tempfile::Builder::new()
-            .prefix("ora-effect-source-")
-            .tempdir()
-            .map_err(|source| SourceError::Provider {
-                source: Box::new(source),
-            })?;
-        let snapshot_root = lease.path().join("package");
-        ora_utils::directory::copy_directory(
-            package_root,
-            &snapshot_root,
-            &[std::ffi::OsStr::new(crate::MARKER_FILE_NAME)],
-        )
-        .map_err(|source| SourceError::Provider {
-            source: Box::new(source),
-        })?;
-        Ok(Self {
-            state,
-            package_root: snapshot_root,
-            _lease: Some(Arc::new(lease)),
-        })
-    }
-}
-
-/// Reports source disappearance, drift, or adapter failures without exposing package content.
+/// Reports an external Consumer protocol failure without exposing it as a Core state variant.
 #[derive(Debug, Error)]
-pub enum SourceError {
-    #[error("source revision is unavailable")]
-    Unavailable,
-    #[error("source revision no longer matches its published state")]
-    IntegrityMismatch,
-    #[error("source provider failed")]
-    Provider {
-        #[source]
-        source: Box<dyn Error + Send + Sync + 'static>,
-    },
-}
-
-/// Supplies validated, immutable-enough snapshots for one materialization attempt.
-///
-/// Implementations must revalidate manifest name and digest on every open and must not expose a
-/// snapshot that can mix bytes from two source revisions during one copy.
-pub trait SourceProvider {
-    /// Opens the exact desired revision or reports it unavailable without silently substituting a
-    /// newer revision.
-    fn open_snapshot(&self, desired: &DesiredSkillState) -> Result<SourceSnapshot, SourceError>;
-
-    /// Loads the newest active state for propagation by stable selection identity.
-    fn load_active_state(
-        &self,
-        selection_key: &SkillSelectionKey,
-    ) -> Result<DesiredSkillState, SourceError>;
-
-    /// Confirms an immutable plugin version still maps to the expected revision when applicable.
-    fn verify_version(
-        &self,
-        selection_key: &SkillSelectionKey,
-        version: &SourceVersion,
-    ) -> Result<(), SourceError>;
-}
-
-/// Outcome of asking all relevant consumers to reach a safe mutation boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CoordinationOutcome {
-    Ready,
-    WaitingForIdle,
-}
-
-/// Reports a consumer coordination failure separately from filesystem application.
-#[derive(Debug, Error)]
-#[error("consumer coordination failed")]
-pub struct CoordinationError {
+#[error("Consumer adapter operation failed")]
+pub struct ConsumerAdapterError {
     #[source]
     source: Box<dyn Error + Send + Sync + 'static>,
 }
 
-impl CoordinationError {
+impl ConsumerAdapterError {
     pub fn new(source: impl Error + Send + Sync + 'static) -> Self {
         Self {
             source: Box::new(source),
@@ -253,23 +246,115 @@ impl CoordinationError {
     }
 }
 
-/// Coordinates runtime consumers around mutation of one shared physical surface.
+/// Adapter at the seam between Generic Targets and Consumer-specific coordination/readiness.
 ///
-/// Implementations block new turns before returning `Ready`, wait only for consumers whose policy
-/// requires it, and resume each consumer independently after the filesystem reaches a stable state.
-pub trait ConsumerCoordinator {
-    /// Attempts to quiesce the supplied consumer snapshot without interrupting active turns.
-    fn quiesce(
+/// Implementations interpret only their own versioned contracts and return receipts tied to the
+/// exact Target projection. Runtime-specific session or deployment state stays behind this seam.
+pub trait ConsumerAdapter {
+    /// Establishes the safe-to-mutate barrier for one participating Target.
+    fn coordinate(
         &self,
-        surface_key: &SurfaceKey,
-        consumers: &[ConsumerId],
-    ) -> Result<CoordinationOutcome, CoordinationError>;
+        target: &EffectTarget,
+        plan: &CoordinationPlan,
+    ) -> Result<CoordinationReceipt, ConsumerAdapterError>;
 
-    /// Restores one consumer independently so a failure cannot hold healthy siblings offline.
-    fn resume(
+    /// Reactivates one previously coordinated Target after Resource verification.
+    fn reactivate(
         &self,
-        surface_key: &SurfaceKey,
-        consumer: &ConsumerId,
+        target: &EffectTarget,
+        plan: &CoordinationPlan,
+    ) -> Result<CoordinationReceipt, ConsumerAdapterError>;
+
+    /// Confirms that the Consumer can consume the exact complete Target projection.
+    fn verify_ready(
+        &self,
+        target: &EffectTarget,
+        projection: &TargetProjection,
+    ) -> Result<ReadinessReceipt, ConsumerAdapterError>;
+}
+
+/// Reports a Resource adapter observation, mutation, verification, or cleanup failure.
+#[derive(Debug, Error)]
+#[error("Resource adapter operation failed")]
+pub struct ResourceAdapterError {
+    #[source]
+    source: Box<dyn Error + Send + Sync + 'static>,
+}
+
+impl ResourceAdapterError {
+    pub fn new(source: impl Error + Send + Sync + 'static) -> Self {
+        Self {
+            source: Box::new(source),
+        }
+    }
+}
+
+/// Receipt returned after an idempotent Resource apply call.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ApplyReceipt {
+    pub operation: crate::EffectOperationId,
+    pub proof: AdapterReceipt,
+}
+
+/// Receipt proving exact planned state after Resource application or recovery.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerificationReceipt {
+    pub operation: crate::EffectOperationId,
+    pub proof: AdapterReceipt,
+}
+
+/// Receipt proving an exact operation-owned artifact no longer exists.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CleanupReceipt {
+    pub artifact: ArtifactId,
+    pub proof: AdapterReceipt,
+}
+
+/// Immutable operation journal and its exact cleanup artifacts prepared as one unit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedOperation {
+    pub operation: EffectOperation,
+    pub artifacts: Vec<OperationArtifact>,
+}
+
+/// Internal Resource seam that turns a pure mutation proposal into versioned adapter intent.
+///
+/// The production adapter and its tests both use this seam so operation paths and artifact
+/// authority are produced in one place before persistence.
+pub trait ResourceOperationPreparer {
+    /// Builds one immutable operation and all artifact authority without applying side effects.
+    fn prepare_operation(
+        &self,
+        resource: &EffectResource,
+        attempt: crate::ReconcileAttemptId,
         generation: Generation,
-    ) -> Result<(), CoordinationError>;
+        sequence: u32,
+        mutation: crate::PlannedMutation,
+        prepared_at: LocalTimestamp,
+    ) -> Result<PreparedOperation, ResourceAdapterError>;
+}
+
+/// Adapter at the seam between generic operation journals and one Resource protocol.
+///
+/// Implementations must make apply idempotent against exact expected/planned state and refuse to
+/// guess when neither matches. Cleanup uses only durable operation artifact authority.
+pub trait ResourceAdapter {
+    /// Observes a complete normalized snapshot without granting ownership.
+    fn observe(
+        &self,
+        resource: &EffectResource,
+    ) -> Result<ResourceObservation, ResourceAdapterError>;
+
+    /// Applies one previously persisted immutable operation journal.
+    fn apply(&self, operation: &EffectOperation) -> Result<ApplyReceipt, ResourceAdapterError>;
+
+    /// Verifies that external state equals the operation's exact planned state.
+    fn verify(
+        &self,
+        operation: &EffectOperation,
+    ) -> Result<VerificationReceipt, ResourceAdapterError>;
+
+    /// Deletes only the exact artifact authorized by its durable locator and fingerprint.
+    fn cleanup(&self, artifact: &OperationArtifact)
+    -> Result<CleanupReceipt, ResourceAdapterError>;
 }

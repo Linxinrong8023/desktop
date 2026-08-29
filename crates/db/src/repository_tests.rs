@@ -38,6 +38,8 @@ fn plugin_skill_projection_round_trips_and_is_removed_with_its_plugin() {
     let repository = SqliteSkillRepository::new(pool.clone());
     let plugin_id = PluginId::new("official", "review-pack").unwrap();
     let package_root = temp_dir.path().join("plugins/review-pack/review");
+    std::fs::create_dir_all(&package_root).unwrap();
+    std::fs::write(package_root.join("SKILL.md"), b"manifest").unwrap();
     repository
         .replace_plugin_skills(
             &plugin_id,
@@ -80,12 +82,12 @@ fn plugin_skill_projection_round_trips_and_is_removed_with_its_plugin() {
         .with_connection(|connection| {
             connection
                 .query_row(
-                    "SELECT desired.workspace_id, effects.generation,
+                    "SELECT scopes.workspace_id, scopes.generation,
                             sources.namespace, sources.identifier
-                     FROM workspace_effect_desired_items desired
-                     JOIN workspace_effects effects
-                       ON effects.workspace_id = desired.workspace_id
-                     JOIN effect_sources sources ON sources.id = desired.source_id",
+                     FROM effect_desired_effects desired
+                     JOIN effect_scopes scopes ON scopes.id = desired.scope_id
+                     JOIN effect_revisions revisions ON revisions.id = desired.revision_id
+                     JOIN effect_sources sources ON sources.id = revisions.source_id",
                     [],
                     |row| {
                         Ok((
@@ -110,12 +112,12 @@ fn plugin_skill_projection_round_trips_and_is_removed_with_its_plugin() {
         .with_connection(|connection| {
             connection
                 .query_row(
-                    "SELECT effects.generation, COUNT(desired.id)
-                     FROM workspace_effects effects
-                     LEFT JOIN workspace_effect_desired_items desired
-                       ON desired.workspace_id = effects.workspace_id
-                     WHERE effects.workspace_id = ?1
-                     GROUP BY effects.workspace_id",
+                    "SELECT scopes.generation, COUNT(desired.id)
+                     FROM effect_scopes scopes
+                     LEFT JOIN effect_desired_effects desired
+                       ON desired.scope_id = scopes.id
+                     WHERE scopes.workspace_id = ?1
+                     GROUP BY scopes.workspace_id",
                     [workspace_id],
                     |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
                 )

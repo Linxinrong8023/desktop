@@ -18,7 +18,7 @@ pub use agent_definition::{
     CreateAgentDefinitionHandler, DeleteAgentDefinitionHandler, GetAgentDefinitionHandler,
     ListAgentDefinitionsHandler, UpdateAgentDefinitionHandler, UuidAgentDefinitionIdGenerator,
 };
-pub use effect::{EffectApplicationError, WorkspaceEffectService};
+pub use effect::{EffectApplicationError, EffectService};
 pub use error::ApplicationError;
 pub use project::{
     BranchLister, BranchListingError, BranchReference, Clock, CreateProjectHandler,

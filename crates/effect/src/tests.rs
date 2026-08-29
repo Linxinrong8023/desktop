@@ -1,502 +1,316 @@
-use crate::*;
+use super::*;
 use ora_domain::{Namespace, WorkspaceId};
-use pretty_assertions::assert_eq;
-use std::collections::BTreeMap;
-use std::fs;
-use tempfile::TempDir;
+use pretty_assertions::{assert_eq, assert_ne};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
-#[derive(Clone, Copy)]
-struct FixedIdentity;
+/// Builds one Workspace scope used by pure domain fixtures.
+fn scope() -> EffectScopeId {
+    EffectScopeId::Workspace(WorkspaceId::new("workspace-1"))
+}
 
-impl ManagedIdentityGenerator for FixedIdentity {
-    fn generate_managed_identity(&self) -> ManagedIdentity {
-        ManagedIdentity::new("fresh")
+/// Builds the exact capabilities of the first Agent plugin Consumer Revision.
+fn capabilities() -> CapabilitySet {
+    CapabilitySet {
+        effect_protocols: BTreeMap::from([(EffectKind::skill(), 1)]),
+        materialization_contracts: BTreeSet::from([
+            MaterializationContract::skill_directory_v1().capability_key()
+        ]),
+        coordination_contracts: BTreeSet::new(),
+        readiness_contracts: BTreeSet::new(),
     }
 }
 
-/// Builds one exact Local desired state with compact deterministic fixture values.
-fn desired(name: &str, version: &str, manifest: &[u8]) -> (SkillSelectionKey, DesiredSkillState) {
-    let name = SkillName::parse(name).unwrap_or_else(|error| panic!("parse name: {error}"));
-    let source = SkillSource::Local {
+/// Builds one stable Agent Consumer identity without exposing connection identity.
+fn consumer() -> ConsumerIdentity {
+    ConsumerIdentity::new(ConsumerKind::agent_plugin(), "official/codex")
+        .unwrap_or_else(|error| panic!("consumer identity: {error}"))
+}
+
+/// Builds one filesystem Resource and its normalized physical key.
+fn resource() -> EffectResource {
+    EffectResource {
+        identity: EffectResourceId::new("resource-1"),
+        scope: scope(),
+        resource_key: ResourceKey::parse("filesystem-directory:.agents/skills")
+            .unwrap_or_else(|error| panic!("resource key: {error}")),
+        adapter: ResourceAdapterIdentity::parse("ora/filesystem-directory")
+            .unwrap_or_else(|error| panic!("adapter identity: {error}")),
+        descriptor: VersionedResourceDescriptor::FilesystemDirectoryV1(
+            FilesystemDirectoryDescriptor {
+                workspace_root: PathBuf::from("/workspace"),
+                relative_path: ResourcePath::parse(".agents/skills")
+                    .unwrap_or_else(|error| panic!("resource path: {error}")),
+            },
+        ),
+        format: MaterializationFormat::skill_directory_v1(),
+        lifecycle: ResourceLifecycle::Active,
+    }
+}
+
+/// Builds one immutable Skill revision and its selected Desired Effect.
+fn desired_skill() -> (DesiredEffect, EffectRevision) {
+    let source = SkillSourceKey {
+        source_kind: SkillSourceKind::Local,
         namespace: Namespace::local(),
-        version: SourceVersion::parse(version)
-            .unwrap_or_else(|error| panic!("parse version: {error}")),
+        name: SkillName::parse("grilling").unwrap_or_else(|error| panic!("skill name: {error}")),
     };
-    let state = DesiredSkillState::try_new(SkillState {
-        name: name.clone(),
-        skill_md_digest: Digest::sha256(manifest),
-        source,
-    })
-    .unwrap_or_else(|error| panic!("build desired: {error}"));
-    (
-        SkillSelectionKey::new(SourceKind::Local, Namespace::local(), name),
-        state,
-    )
+    let revision_id = EffectRevisionId::new("revision-1");
+    let desired = DesiredEffect {
+        identity: DesiredEffectIdentity::new("desired-1"),
+        revision: revision_id.clone(),
+        parameters: ValidatedEffectParameters::Skill(SkillParameters {}),
+        audience: TargetSelector::default(),
+    };
+    let revision = EffectRevision {
+        identity: revision_id,
+        source: EffectSourceIdentity::new("source-1"),
+        revision_key: SourceRevisionKey::parse("1")
+            .unwrap_or_else(|error| panic!("revision key: {error}")),
+        definition: ValidatedEffectDefinition::Skill(SkillDefinition {
+            source,
+            skill_md_digest: Digest::sha256(b"manifest"),
+            package_fingerprint: Fingerprint::sha256(b"package"),
+            package_root: PathBuf::from("/catalog/grilling"),
+        }),
+        digest: Digest::sha256(b"revision"),
+        availability: RevisionAvailability::Available,
+    };
+    (desired, revision)
 }
 
-/// Builds a ledger whose applied directory is represented by `fingerprint`.
-fn managed(
-    workspace_id: &WorkspaceId,
-    surface_key: &SurfaceKey,
-    identity: &str,
-    desired: &(SkillSelectionKey, DesiredSkillState),
-    fingerprint: &str,
-    generation: u64,
-) -> ManagedSkill {
-    ManagedSkill {
-        managed_identity: ManagedIdentity::new(identity),
-        workspace_id: workspace_id.clone(),
-        surface_key: surface_key.clone(),
-        selection_key: desired.0.clone(),
-        locator: desired.0.name.canonical().to_string(),
-        target_name: desired.0.name.clone(),
-        state: desired.1.clone(),
-        applied_fingerprint: AppliedFingerprint::parse(fingerprint)
-            .unwrap_or_else(|error| panic!("parse fingerprint: {error}")),
-        applied_generation: Generation::new(generation),
-    }
-}
-
-/// Returns a stable valid fingerprint with a repeated hex digit.
-fn fingerprint(digit: char) -> String {
-    format!("sha256:{}", digit.to_string().repeat(64))
+/// Builds one Target and its immutable capability/declaration snapshots.
+fn target_facts(
+    lifecycle: TargetLifecycle,
+) -> (
+    EffectTarget,
+    ConsumerRevision,
+    TargetDeclaration,
+    EffectResource,
+) {
+    let resource = resource();
+    let consumer = consumer();
+    let revision_id = ConsumerRevisionId::new("consumer-revision-1");
+    let target = EffectTarget {
+        identity: EffectTargetId::new("target-1"),
+        scope: scope(),
+        consumer: consumer.clone(),
+        consumer_revision: revision_id.clone(),
+        lifecycle,
+    };
+    let consumer_revision = ConsumerRevision {
+        identity: revision_id.clone(),
+        consumer,
+        capabilities: capabilities(),
+        declaration_digest: Digest::sha256(b"declaration"),
+    };
+    let binding = TargetResourceBinding {
+        target: target.identity.clone(),
+        resource: resource.identity.clone(),
+        accepts: CapabilityRequirement::default(),
+        coordination: CoordinationRequirement::Uninterrupted,
+    };
+    let declaration = TargetDeclaration {
+        target: target.identity.clone(),
+        consumer_revision: revision_id,
+        bindings: BTreeMap::from([(resource.identity.clone(), binding)]),
+        digest: Digest::sha256(b"target-declaration"),
+    };
+    (target, consumer_revision, declaration, resource)
 }
 
 #[test]
-fn planner_creates_missing_desired_with_fresh_ownership() {
-    let workspace_id = WorkspaceId::new("workspace");
-    let surface_key = SurfaceKey::new("surface");
-    let selected = desired("review", "1", b"manifest");
-    let desired = BTreeMap::from([(selected.0.clone(), selected.1.clone())]);
-
-    let plan = Planner::new(&FixedIdentity).plan(PlannerInput {
-        surface_key: &surface_key,
-        lifecycle: SurfaceLifecycle::Active,
-        generation: Generation::new(1),
-        desired: &desired,
-        managed: &[],
-        observed: &BTreeMap::new(),
-        occurred_at: 10,
-    });
-
+fn target_watermarks_reject_unproven_readiness() {
     assert_eq!(
-        plan,
-        ReconcilePlan {
-            generation: Generation::new(1),
-            operations: vec![PlanOperation {
-                locator: "review".to_string(),
-                kind: PlanOperationKind::Create {
-                    desired: selected.1,
-                    managed_identity: ManagedIdentity::new("fresh"),
-                },
-                requires_filesystem_mutation: true,
-            }],
-            conditions: vec![],
-        }
-    );
-    let _ = workspace_id;
-}
-
-#[test]
-fn planner_never_overwrites_preserved_or_unproven_marker() {
-    let selected = desired("review", "1", b"manifest");
-    let desired = BTreeMap::from([(selected.0.clone(), selected.1)]);
-    let surface_key = SurfaceKey::new("surface");
-
-    for observation in [
-        TargetObservation::Preserved,
-        TargetObservation::Managed {
-            marker_identity: ManagedIdentity::new("orphan"),
-            fingerprint: AppliedFingerprint::parse(fingerprint('a'))
-                .unwrap_or_else(|error| panic!("parse fingerprint: {error}")),
-        },
-    ] {
-        let plan = Planner::new(&FixedIdentity).plan(PlannerInput {
-            surface_key: &surface_key,
-            lifecycle: SurfaceLifecycle::Active,
-            generation: Generation::new(1),
-            desired: &desired,
-            managed: &[],
-            observed: &BTreeMap::from([("review".to_string(), observation)]),
-            occurred_at: 10,
-        });
-        assert!(plan.operations.is_empty());
-        assert_eq!(plan.conditions.len(), 1);
-    }
-}
-
-#[test]
-fn planner_distinguishes_ownership_and_content_drift() {
-    let workspace_id = WorkspaceId::new("workspace");
-    let surface_key = SurfaceKey::new("surface");
-    let selected = desired("review", "1", b"manifest");
-    let ledger = managed(
-        &workspace_id,
-        &surface_key,
-        "owned",
-        &selected,
-        &fingerprint('a'),
-        1,
-    );
-    let desired = BTreeMap::from([(selected.0.clone(), selected.1)]);
-    let cases = [
-        (
-            TargetObservation::Managed {
-                marker_identity: ManagedIdentity::new("other"),
-                fingerprint: ledger.applied_fingerprint.clone(),
-            },
-            ConditionReason::OwnershipConflict,
+        TargetProgress::restore(
+            Generation::new(3),
+            Generation::new(2),
+            Generation::new(1),
+            Generation::new(2),
         ),
-        (
-            TargetObservation::Managed {
-                marker_identity: ledger.managed_identity.clone(),
-                fingerprint: AppliedFingerprint::parse(fingerprint('b'))
-                    .unwrap_or_else(|error| panic!("parse fingerprint: {error}")),
-            },
-            ConditionReason::DriftConflict,
-        ),
-    ];
-
-    for (observation, reason) in cases {
-        let plan = Planner::new(&FixedIdentity).plan(PlannerInput {
-            surface_key: &surface_key,
-            lifecycle: SurfaceLifecycle::Active,
-            generation: Generation::new(2),
-            desired: &desired,
-            managed: std::slice::from_ref(&ledger),
-            observed: &BTreeMap::from([("review".to_string(), observation)]),
-            occurred_at: 10,
-        });
-        assert!(plan.operations.is_empty());
-        assert_eq!(plan.conditions[0].reason, reason);
-    }
+        Err(StatusTransitionError::InvalidTargetWatermarks)
+    );
 }
 
 #[test]
-fn planner_preserves_identity_for_update_and_replaces_identity_for_new_source() {
-    let workspace_id = WorkspaceId::new("workspace");
-    let surface_key = SurfaceKey::new("surface");
-    let old = desired("review", "1", b"old");
-    let updated = desired("review", "2", b"new");
-    let ledger = managed(
-        &workspace_id,
-        &surface_key,
-        "owned",
-        &old,
-        &fingerprint('a'),
-        1,
-    );
-    let observation = BTreeMap::from([(
-        "review".to_string(),
-        TargetObservation::Managed {
-            marker_identity: ledger.managed_identity.clone(),
-            fingerprint: ledger.applied_fingerprint.clone(),
+fn operation_intent_rejects_a_mutation_label_that_disagrees_with_exact_states() {
+    let native_identity = NativeResourceIdentity::parse("skill")
+        .unwrap_or_else(|error| panic!("native identity: {error}"));
+    let managed_identity = ManagedIdentity::new("managed-1");
+    let result = EffectOperation::prepare(
+        EffectOperationId::new("operation-1"),
+        EffectOperationIntent {
+            attempt: ReconcileAttemptId::new("attempt-1"),
+            resource: EffectResourceId::new("resource-1"),
+            generation: Generation::new(1),
+            sequence: 0,
+            mutation: EffectMutation::Delete,
+            expected: ExactPreviousState::Present {
+                native_identity: native_identity.clone(),
+                fingerprint: Fingerprint::sha256(b"previous"),
+                managed_identity: managed_identity.clone(),
+            },
+            planned: ExactPlannedState::Present {
+                native_identity,
+                fingerprint: Fingerprint::sha256(b"planned"),
+                managed_identity,
+            },
+            payload: VersionedAdapterPlan::FilesystemDirectoryV1(FilesystemOperationPlan {
+                workspace_root: PathBuf::from("/workspace"),
+                resource_relative_path: ResourcePath::parse(".agents/skills")
+                    .unwrap_or_else(|error| panic!("resource path: {error}")),
+                resource_root: PathBuf::from("/workspace/.agents/skills"),
+                source_root: None,
+                staging_path: PathBuf::from("/workspace/.agents/staging"),
+                backup_path: PathBuf::from("/workspace/.agents/backup"),
+            }),
         },
-    )]);
-    let update_plan = Planner::new(&FixedIdentity).plan(PlannerInput {
-        surface_key: &surface_key,
-        lifecycle: SurfaceLifecycle::Active,
-        generation: Generation::new(2),
-        desired: &BTreeMap::from([(updated.0, updated.1)]),
-        managed: std::slice::from_ref(&ledger),
-        observed: &observation,
-        occurred_at: 10,
-    });
-    assert!(matches!(
-        &update_plan.operations[0].kind,
-        PlanOperationKind::Update { previous, .. }
-            if previous.managed_identity == ManagedIdentity::new("owned")
-    ));
+        LocalTimestamp::from_millis(1),
+    );
 
-    let plugin_name =
-        SkillName::parse("review").unwrap_or_else(|error| panic!("parse plugin name: {error}"));
-    let plugin_key = SkillSelectionKey::new(
-        SourceKind::Plugin,
-        Namespace::new("publisher").unwrap_or_else(|error| panic!("parse namespace: {error}")),
-        plugin_name.clone(),
-    );
-    let plugin_state = DesiredSkillState::try_new(SkillState {
-        name: plugin_name,
-        skill_md_digest: Digest::sha256(b"plugin"),
-        source: SkillSource::Plugin {
-            namespace: Namespace::new("publisher")
-                .unwrap_or_else(|error| panic!("parse namespace: {error}")),
-            version: SourceVersion::parse("1")
-                .unwrap_or_else(|error| panic!("parse version: {error}")),
-        },
-    })
-    .unwrap_or_else(|error| panic!("build plugin state: {error}"));
-    let replace_plan = Planner::new(&FixedIdentity).plan(PlannerInput {
-        surface_key: &surface_key,
-        lifecycle: SurfaceLifecycle::Active,
-        generation: Generation::new(2),
-        desired: &BTreeMap::from([(plugin_key, plugin_state)]),
-        managed: &[ledger],
-        observed: &observation,
-        occurred_at: 10,
-    });
-    assert!(matches!(
-        &replace_plan.operations[0].kind,
-        PlanOperationKind::Replace { managed_identity, .. }
-            if managed_identity == &ManagedIdentity::new("fresh")
-    ));
+    assert_eq!(result, Err(OperationTransitionError::InvalidMutationStates));
 }
 
 #[test]
-fn planner_advances_unchanged_resources_without_filesystem_mutation() {
-    let workspace_id = WorkspaceId::new("workspace");
-    let surface_key = SurfaceKey::new("surface");
-    let selected = desired("review", "1", b"same");
-    let ledger = managed(
-        &workspace_id,
-        &surface_key,
-        "owned",
-        &selected,
-        &fingerprint('a'),
-        1,
-    );
-    let plan = Planner::new(&FixedIdentity).plan(PlannerInput {
-        surface_key: &surface_key,
-        lifecycle: SurfaceLifecycle::Active,
-        generation: Generation::new(2),
-        desired: &BTreeMap::from([(selected.0, selected.1)]),
-        managed: std::slice::from_ref(&ledger),
-        observed: &BTreeMap::from([(
-            "review".to_string(),
-            TargetObservation::Managed {
-                marker_identity: ledger.managed_identity.clone(),
-                fingerprint: ledger.applied_fingerprint.clone(),
-            },
-        )]),
-        occurred_at: 10,
-    });
+fn retiring_target_projects_no_desired_contribution_but_keeps_cleanup_binding() {
+    let (target, consumer_revision, declaration, resource) =
+        target_facts(TargetLifecycle::Retiring);
+    let (desired, revision) = desired_skill();
+    let desired_state = DesiredState::normalized(scope(), Generation::new(4), [desired])
+        .unwrap_or_else(|error| panic!("desired state: {error}"));
+    let result = SkillPlanner
+        .project(TargetPlanningInput {
+            desired: &desired_state,
+            target: &target,
+            consumer_revision: &consumer_revision,
+            declaration: &declaration,
+            resources: &BTreeMap::from([(resource.identity.clone(), resource.clone())]),
+            revisions: &BTreeMap::from([(revision.identity.clone(), revision)]),
+        })
+        .unwrap_or_else(|error| panic!("target projection: {error}"));
+    let PlanningResult::Projected(projection) = result else {
+        panic!("retiring Target should produce a cleanup projection");
+    };
 
-    assert_eq!(plan.operations[0].requires_filesystem_mutation, false);
-    assert!(matches!(
-        plan.operations[0].kind,
-        PlanOperationKind::AdvanceGeneration { .. }
-    ));
-}
-
-#[test]
-fn planner_blocks_locator_collisions_and_retires_only_owned_state() {
-    let workspace_id = WorkspaceId::new("workspace");
-    let surface_key = SurfaceKey::new("surface");
-    let local = desired("review", "1", b"local");
-    let plugin_name =
-        SkillName::parse("REVIEW").unwrap_or_else(|error| panic!("parse plugin name: {error}"));
-    let plugin_key = SkillSelectionKey::new(
-        SourceKind::Plugin,
-        Namespace::new("publisher").unwrap_or_else(|error| panic!("parse namespace: {error}")),
-        plugin_name.clone(),
-    );
-    let plugin = DesiredSkillState::try_new(SkillState {
-        name: plugin_name,
-        skill_md_digest: Digest::sha256(b"plugin"),
-        source: SkillSource::Plugin {
-            namespace: Namespace::new("publisher")
-                .unwrap_or_else(|error| panic!("parse namespace: {error}")),
-            version: SourceVersion::parse("1")
-                .unwrap_or_else(|error| panic!("parse version: {error}")),
-        },
-    })
-    .unwrap_or_else(|error| panic!("build plugin: {error}"));
-    let desired_map = BTreeMap::from([(local.0.clone(), local.1.clone()), (plugin_key, plugin)]);
-    let collision = Planner::new(&FixedIdentity).plan(PlannerInput {
-        surface_key: &surface_key,
-        lifecycle: SurfaceLifecycle::Active,
-        generation: Generation::new(1),
-        desired: &desired_map,
-        managed: &[],
-        observed: &BTreeMap::new(),
-        occurred_at: 10,
-    });
-    assert!(collision.operations.is_empty());
-    assert_eq!(collision.conditions.len(), 2);
-
-    let ledger = managed(
-        &workspace_id,
-        &surface_key,
-        "owned",
-        &local,
-        &fingerprint('a'),
-        1,
-    );
-    let retiring = Planner::new(&FixedIdentity).plan(PlannerInput {
-        surface_key: &surface_key,
-        lifecycle: SurfaceLifecycle::Retiring,
-        generation: Generation::new(2),
-        desired: &desired_map,
-        managed: std::slice::from_ref(&ledger),
-        observed: &BTreeMap::from([(
-            "review".to_string(),
-            TargetObservation::Managed {
-                marker_identity: ledger.managed_identity.clone(),
-                fingerprint: ledger.applied_fingerprint.clone(),
-            },
-        )]),
-        occurred_at: 10,
-    });
-    assert!(matches!(
-        retiring.operations[0].kind,
-        PlanOperationKind::Delete { .. }
-    ));
-}
-
-#[test]
-fn merges_compatible_surface_consumers_and_rejects_format_conflicts() {
-    let workspace_id = WorkspaceId::new("workspace");
-    let path =
-        SurfacePath::parse(".agents/skills").unwrap_or_else(|error| panic!("parse path: {error}"));
-    let descriptors = [
-        FilesystemSkillSurface {
-            workspace_relative_path: path.clone(),
-            materialization_format: MaterializationFormat::skill_directory_v1(),
-            consumer: ConsumerId::new("codex"),
-            coordination: ConsumerCoordination::WaitForIdleAndRestart,
-        },
-        FilesystemSkillSurface {
-            workspace_relative_path: path.clone(),
-            materialization_format: MaterializationFormat::skill_directory_v1(),
-            consumer: ConsumerId::new("opencode"),
-            coordination: ConsumerCoordination::Uninterrupted,
-        },
-    ];
-    let merged = SurfaceDescriptorSet::merge(&workspace_id, descriptors)
-        .unwrap_or_else(|error| panic!("merge descriptors: {error}"));
-    assert_eq!(merged.len(), 1);
-    assert_eq!(merged[0].consumers.len(), 2);
-    assert!(merged[0].requires_coordination());
-
-    let conflict = SurfaceDescriptorSet::merge(
-        &workspace_id,
-        [
-            FilesystemSkillSurface {
-                workspace_relative_path: path.clone(),
-                materialization_format: MaterializationFormat::skill_directory_v1(),
-                consumer: ConsumerId::new("codex"),
-                coordination: ConsumerCoordination::Uninterrupted,
-            },
-            FilesystemSkillSurface {
-                workspace_relative_path: path,
-                materialization_format: MaterializationFormat::named("other")
-                    .unwrap_or_else(|error| panic!("format: {error}")),
-                consumer: ConsumerId::new("other"),
-                coordination: ConsumerCoordination::Uninterrupted,
-            },
-        ],
-    );
-    assert!(matches!(
-        conflict,
-        Err(DescriptorMergeError::IncompatibleSurfaceDeclarations { .. })
-    ));
-}
-
-#[test]
-fn filesystem_materializes_marker_and_detects_content_drift() {
-    let workspace = TempDir::new().unwrap_or_else(|error| panic!("create Workspace: {error}"));
-    let source = TempDir::new().unwrap_or_else(|error| panic!("create source: {error}"));
-    let manifest = b"---\nname: review\ndescription: Reviews code\n---\nbody\n";
-    fs::write(source.path().join("SKILL.md"), manifest)
-        .unwrap_or_else(|error| panic!("write manifest: {error}"));
-    fs::write(source.path().join("binary"), [0, 255, 1])
-        .unwrap_or_else(|error| panic!("write binary: {error}"));
-    let workspace_id = WorkspaceId::new("workspace");
-    let path =
-        SurfacePath::parse(".agents/skills").unwrap_or_else(|error| panic!("parse path: {error}"));
-    let surface_key = SurfaceKey::for_workspace(&workspace_id, path.as_str());
-    let adapter = FilesystemSurfaceAdapter::new(
-        workspace_id,
-        workspace.path().to_path_buf(),
-        surface_key,
-        path,
-    );
-    let selected = desired("review", "1", manifest);
-    let snapshot = SourceSnapshot::borrowed(selected.1, source.path().to_path_buf());
-    let operation_id = EffectOperationId::new("operation");
-    let paths = OperationPaths::for_operation(&adapter.surface_root(), &operation_id);
-    let fingerprint = adapter
-        .stage(&snapshot, &ManagedIdentity::new("owned"), &paths)
-        .unwrap_or_else(|error| panic!("stage package: {error}"));
-    adapter
-        .apply_create(&selected.0.name, &paths)
-        .unwrap_or_else(|error| panic!("apply create: {error}"));
-
-    let scan = adapter
-        .scan()
-        .unwrap_or_else(|error| panic!("scan surface: {error}"));
+    assert_eq!(projection.desired_effects, BTreeSet::new());
     assert_eq!(
-        scan.targets,
-        BTreeMap::from([(
-            "review".to_string(),
-            TargetObservation::Managed {
-                marker_identity: ManagedIdentity::new("owned"),
+        projection
+            .resource_requirements
+            .get(&resource.identity)
+            .map(|requirement| requirement.desired_effects.clone()),
+        Some(BTreeSet::new())
+    );
+}
+
+#[test]
+fn unowned_observed_item_is_preserved_and_never_becomes_a_mutation() {
+    let resource = resource();
+    let native_identity = NativeResourceIdentity::parse("foreign")
+        .unwrap_or_else(|error| panic!("native identity: {error}"));
+    let fingerprint = Fingerprint::sha256(b"foreign bytes");
+    let observed = ResourceObservation {
+        resource: resource.identity.clone(),
+        items: BTreeMap::from([(
+            native_identity.clone(),
+            ObservedItem {
+                native_identity: native_identity.clone(),
                 fingerprint: fingerprint.clone(),
+                ownership_evidence: OwnershipEvidence::NoOwnershipEvidence,
             },
-        )])
-    );
-    fs::write(
-        adapter.surface_root().join("review").join("binary"),
-        b"drift",
-    )
-    .unwrap_or_else(|error| panic!("write drift: {error}"));
-    let drifted = adapter
-        .scan()
-        .unwrap_or_else(|error| panic!("scan drift: {error}"));
-    assert_ne!(
-        drifted.targets["review"],
-        TargetObservation::Managed {
-            marker_identity: ManagedIdentity::new("owned"),
+        )]),
+        fingerprint: fingerprint.clone(),
+    };
+    let result = SkillPlanner
+        .merge(ResourcePlanningInput {
+            resource: &resource,
+            generation: Generation::new(2),
+            requirements: &[],
+            desired_effects: &BTreeMap::new(),
+            revisions: &BTreeMap::new(),
+            managed: &[],
+            observed: &observed,
+        })
+        .unwrap_or_else(|error| panic!("resource projection: {error}"));
+    let PlanningResult::Projected(plan) = result else {
+        panic!("unrelated external state should not block an empty projection");
+    };
+
+    assert_eq!(
+        plan.preserved,
+        vec![PreservedItem {
+            resource: resource.identity,
+            native_identity,
             fingerprint,
-        }
+        }]
     );
+    assert_eq!(plan.changes, Vec::new());
 }
 
 #[test]
-fn recovery_requires_manual_action_for_unknown_disk_state() {
-    let workspace = TempDir::new().unwrap_or_else(|error| panic!("create Workspace: {error}"));
-    let workspace_id = WorkspaceId::new("workspace");
-    let path =
-        SurfacePath::parse(".agents/skills").unwrap_or_else(|error| panic!("parse path: {error}"));
-    let surface_key = SurfaceKey::for_workspace(&workspace_id, path.as_str());
-    let adapter = FilesystemSurfaceAdapter::new(
-        workspace_id.clone(),
-        workspace.path().to_path_buf(),
-        surface_key.clone(),
-        path,
-    );
-    let root = adapter
-        .ensure_surface_root()
-        .unwrap_or_else(|error| panic!("create surface: {error}"));
-    fs::create_dir(root.join("review")).unwrap_or_else(|error| panic!("create target: {error}"));
-    fs::write(root.join("review").join("SKILL.md"), b"unknown")
-        .unwrap_or_else(|error| panic!("write target: {error}"));
-    let selected = desired("review", "1", b"planned");
-    let operation = EffectOperation {
-        operation_id: EffectOperationId::new("operation"),
-        generation: Generation::new(1),
-        workspace_id,
-        surface_key,
-        locator: "review".to_string(),
-        target_name: selected.0.name,
-        kind: EffectOperationKind::Create,
-        phase: EffectOperationPhase::Prepared,
-        previous_state: OperationState::Missing,
-        planned_state: OperationState::Present(
-            AppliedFingerprint::parse(fingerprint('a'))
-                .unwrap_or_else(|error| panic!("parse fingerprint: {error}")),
-        ),
-        previous_identity: None,
-        planned_identity: Some(ManagedIdentity::new("owned")),
-        previous_managed: None,
-        planned_desired: Some(selected.1),
-        staging_path: root.join("staging"),
-        backup_path: root.join("backup"),
+fn shared_resource_merges_target_contributors_before_planning_one_create() {
+    let resource = resource();
+    let (desired, revision) = desired_skill();
+    let desired_ids = BTreeSet::from([desired.identity.clone()]);
+    let requirements = vec![
+        ResourceRequirement {
+            target: EffectTargetId::new("target-a"),
+            resource: resource.identity.clone(),
+            desired_effects: desired_ids.clone(),
+            materialization_contract: MaterializationContract::skill_directory_v1(),
+            digest: Digest::sha256(b"requirement-a"),
+        },
+        ResourceRequirement {
+            target: EffectTargetId::new("target-b"),
+            resource: resource.identity.clone(),
+            desired_effects: desired_ids,
+            materialization_contract: MaterializationContract::skill_directory_v1(),
+            digest: Digest::sha256(b"requirement-b"),
+        },
+    ];
+    let observed = ResourceObservation {
+        resource: resource.identity.clone(),
+        items: BTreeMap::new(),
+        fingerprint: Fingerprint::sha256(&[]),
     };
+    let result = SkillPlanner
+        .merge(ResourcePlanningInput {
+            resource: &resource,
+            generation: Generation::new(1),
+            requirements: &requirements,
+            desired_effects: &BTreeMap::from([(desired.identity.clone(), desired)]),
+            revisions: &BTreeMap::from([(revision.identity.clone(), revision)]),
+            managed: &[],
+            observed: &observed,
+        })
+        .unwrap_or_else(|error| panic!("resource projection: {error}"));
+    let PlanningResult::Projected(plan) = result else {
+        panic!("compatible Target requirements should merge");
+    };
+
     assert_eq!(
-        adapter
-            .recovery_decision(&operation)
-            .unwrap_or_else(|error| panic!("decide recovery: {error}")),
-        RecoveryDecision::RecoveryRequired
+        plan.projection.contributors,
+        BTreeSet::from([
+            EffectTargetId::new("target-a"),
+            EffectTargetId::new("target-b"),
+        ])
+    );
+    assert_eq!(plan.projection.items.len(), 1);
+    assert_eq!(plan.changes.len(), 1);
+}
+
+#[test]
+fn identical_physical_declarations_share_a_resource_key_without_sharing_targets() {
+    let template = FilesystemResourceTemplate {
+        relative_path: ResourcePath::parse(".agents/skills")
+            .unwrap_or_else(|error| panic!("resource path: {error}")),
+        materialization_format: MaterializationFormat::skill_directory_v1(),
+        accepts: CapabilityRequirement::default(),
+        coordination: CoordinationRequirement::Uninterrupted,
+    };
+
+    assert_eq!(template.resource_key(), template.resource_key());
+    assert_ne!(
+        EffectTargetId::new("target-a"),
+        EffectTargetId::new("target-b")
     );
 }

@@ -1,47 +1,78 @@
 # Effect Skill State
 
-Effect stores one complete declarative Skill selection set per Workspace and projects it onto each
-consumer-declared physical surface. The first implementation deliberately has no product worker or
-real Agent runtime integration; tests and later composition code drive reconciliation explicitly.
+Ora models Skill installation as one kind of generic Effect. A Workspace is an `EffectScope` with
+one complete `DesiredState` generation. Every runtime that consumes Effects declares a stable
+`Consumer` revision; pairing that Consumer with a Scope creates an independent `EffectTarget`.
+Targets bind to independently observable and mutable `EffectResource` values, and several Targets
+may contribute to the same physical Resource.
+
+The normative model and invariants are in
+[`00000000-effect-system-foundation.md`](../specs/decisions/desktop/core/effect/00000000-effect-system-foundation.md).
 
 ## State and identity
 
-- Desired is a normalized complete set keyed by source kind, namespace, and case-insensitive Skill
-  name. Replacement uses generation compare-and-swap and an exact normalized no-op does not advance
-  generation.
-- Managed is the database ownership ledger. A random `ManagedIdentity` remains stable across content
-  updates and ends only after safe Desired removal or surface retirement.
-- Observed and Preserved come from each live filesystem scan and are never persisted. An existing
-  directory without matching ledger plus marker proof remains Preserved even when its bytes match a
-  catalog source.
-- Source version locates an upstream package revision; the SHA-256 `SKILL.md` digest verifies the
-  exact declaration bytes. The applied directory fingerprint covers paths, entry types, file bytes,
-  and executable intent while excluding the ownership marker.
+- `EffectSource` is stable across publications. Each publication creates an immutable
+  `EffectRevision`; retiring a source does not invalidate history or unfinished operations.
+- `DesiredState` is a normalized, complete set keyed by `DesiredEffectIdentity`. Replacement uses
+  generation compare-and-swap, and an exact normalized no-op does not advance generation.
+- A `TargetProjection` is the complete deterministic view for one Target and exact Consumer
+  Revision. A `ResourceProjection` merges the requirements of every active or retiring Target
+  bound to that Resource.
+- `ManagedItem` is durable mutation authority. `ObservedItem` is only an adapter claim, and an item
+  without exact ledger and marker evidence remains `PreservedItem` even if its bytes match Desired.
+- Target watermarks satisfy `ready <= applied <= observed <= desired`. Resource status has no
+  readiness watermark because only a Consumer can prove that it can consume a complete Target
+  projection.
+
+## Scheduling and convergence
+
+Each Target owns one coalesced, level-triggered `ReconcileRequest`. A worker claim fences Target
+status changes; every bound Resource additionally uses an independently monotonic Resource claim
+before observation can support status or readiness. Wake reasons are diagnostic only, so a worker
+always reloads current Desired, declarations, statuses, and ledgers after acquiring authority.
+
+The reconciler follows this evidence chain:
+
+1. Reload the current Target declaration and claim every bound Resource in stable identity order.
+2. Reload all mutable facts under those claims, then project the complete Target and every shared
+   Resource contributor.
+3. Observe and plan each Resource under its fence without granting ownership from observation.
+4. Persist the immutable Attempt, projections, Prepared Operations, and Artifact authority before
+   any external side effect.
+5. Persist Consumer coordination receipts and every monotonic Attempt/Operation phase between
+   external calls.
+6. Atomically finalize operation journals, ownership ledgers, statuses, readiness, Conditions, and
+   the Target request after exact adapter verification.
+
+An unchanged Consumer declaration does not touch Target status or requests. New Consumers are
+paired with existing Workspaces immediately, while every worker pass converges existing Consumer
+declarations into Workspaces created later.
 
 ## Filesystem safety and recovery
 
-Consumer descriptors with the same normalized path and materialization format share one surface.
-Path changes retire the old persisted surface rather than changing its ledger identity. Surface
-creation verifies every existing Workspace-relative ancestor and rejects links.
+Filesystem Resources use Workspace roots plus validated portable relative paths. Path construction
+uses typed path APIs, and the adapter refuses links or ancestors that escape the Workspace.
 
-Each managed directory contains `.ora-managed.json`. Mutation requires that marker identity,
-Workspace, and surface to match the database ledger and that the live directory fingerprint match
-the last applied value. Missing managed directories may be rebuilt with the same ownership;
-unowned, marker-mismatched, or drifted directories are never overwritten or deleted.
+Each managed directory contains `.ora-managed.json`. Mutation requires an exact match between the
+database ledger, marker identity, native identity, and last applied fingerprint. Missing managed
+directories may be rebuilt; unowned, marker-mismatched, or drifted directories are never silently
+overwritten or deleted.
 
-Per-resource operations use durable `Prepared → Applied → Finalized` records. Staging and backup
-paths are operation-specific and stored in the journal. Recovery retries when disk matches the
-previous fingerprint, finalizes when it matches the planned fingerprint, and enters manual
-`RecoveryRequired` for every other state. A newer Desired generation cannot bypass unfinished work.
+Every mutation has a durable `Prepared -> Applied -> Finalized` journal and exact expected/planned
+state. A transient failure before journal preparation enters a counted retry schedule. Once a
+journal exists, any interrupted or ambiguous operation, its Attempt, Target, and Resource enter
+`RecoveryRequired` after its worker lease expires, with blocking manual Conditions; a still-valid
+worker is never quarantined. The scheduler excludes the recovering Target instead of guessing or
+planning a second operation. Operation-owned staging and backup Artifacts remain retained until
+exact cleanup authority succeeds.
 
-## Persistence and source propagation
+## Persistence and protocol boundaries
 
-SQLite migration `0005` stores source revisions, Desired rows, surfaces, ledgers, status, consumer
-readiness, operations, and coalesced reconcile/propagation requests. Desired replacement and source
-delete/rename protection use immediate write transactions. Local Skill update commits its catalog
-row, exact digest/source revision, and propagation request together. The explicitly driven
-propagator rereads the latest source and advances only Workspaces that still reference its stable
-selection, so V1→V2→V3 can materialize V3 directly.
+SQLite migration `0006` stores Scopes, Sources/Revisions, complete Desired State, Consumer
+Revisions, Targets, Resources/bindings, digest-addressed projections, ownership ledgers, independent
+statuses, Conditions, requests/claims, Attempts, Operations/Artifacts, readiness/coordination
+receipts, and append-only audit events.
 
-See [the implementation plan](../specs/changes/effect/plan.md) for the first-version acceptance
-matrix and deferred real-Agent integration work.
+Plugin registration exposes `effectResources`. Agent Consumers implement `effect/coordinate`,
+`effect/reactivate`, and `effect/verifyReady`; those versioned payloads remain behind the
+`ConsumerAdapter` boundary and do not add Agent-specific phases to Effect Core.

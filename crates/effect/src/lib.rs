@@ -1,40 +1,75 @@
-//! Workspace-scoped declarative Skill State and safe filesystem reconciliation.
+//! Generic Target Effect convergence with independent Resource ownership and recovery.
 
+mod desired;
 mod filesystem;
 mod identity;
+mod operation;
 mod planner;
 mod ports;
+mod projection;
 mod reconcile;
-mod state;
-mod surface;
+mod status;
+mod target;
 
 #[cfg(test)]
 mod tests;
 
+pub use desired::{
+    CapabilityRequirement, DesiredEffect, DesiredState, DesiredStateError, EffectPublication,
+    EffectRevision, EffectSource, EffectSourceLifecycle, RevisionAvailability, SkillDefinition,
+    SkillParameters, SkillSourceKey, SkillSourceKind, StableReason, TargetInclusion,
+    TargetSelector, ValidatedEffectDefinition, ValidatedEffectParameters,
+};
 pub use filesystem::{
-    FilesystemEffectError, FilesystemSurfaceAdapter, MARKER_FILE_NAME, ManagedSkillMarker,
-    OperationPaths, RecoveryDecision, ScanDiagnostic, SurfaceScan,
+    FilesystemEffectError, FilesystemResourceAdapter, MARKER_FILE_NAME, ManagedItemMarker,
 };
 pub use identity::{
-    AppliedFingerprint, ConsumerId, Digest, EffectOperationId, Generation, ManagedIdentity,
-    SkillName, SkillSelectionKey, SourceKind, SourceVersion, SurfaceKey,
+    ArtifactId, AuditEventId, ConditionId, ConsumerAdapterIdentity, ConsumerIdentity, ConsumerKind,
+    ConsumerRevisionId, DesiredEffectIdentity, Digest, EffectKind, EffectOperationId,
+    EffectResourceId, EffectRevisionId, EffectScopeId, EffectSourceIdentity, EffectTargetId,
+    FencingToken, Fingerprint, Generation, IdentityError, ManagedIdentity, NativeResourceIdentity,
+    ProjectionDigest, ReconcileAttemptId, ResourceAdapterIdentity, ResourceKey, RetryAttempt,
+    SkillName, SourceRevisionKey, StatusVersion, WorkerIdentity,
+};
+pub use operation::{
+    ArtifactRole, ArtifactState, AuditGeneration, AuditInitiator, AuditScope, CoordinationPlan,
+    CoordinationReceipt, CoordinationReceiptState, EffectAuditEvent, EffectMutation,
+    EffectOperation, EffectOperationIntent, ExactPlannedState, ExactPreviousState,
+    FilesystemOperationPlan, OperationArtifact, OperationProgress, OperationTransitionError,
+    ReconcileAttempt, ReconcileAttemptIntent, ReconcileAttemptPhase, VersionedAdapterPlan,
+    VersionedResourceLocator, VersionedSafeAuditPayload,
 };
 pub use planner::{
-    PlanOperation, PlanOperationKind, Planner, PlannerInput, ReconcilePlan, TargetObservation,
+    EffectKindPlanner, PlannedMutation, PlannedResourceChange, PlannerError, PlanningResult,
+    ResourcePlan, ResourcePlanner, ResourcePlanningInput, SkillPlanner, TargetPlanningInput,
 };
 pub use ports::{
-    ConsumerCoordinator, CoordinationError, CoordinationOutcome, EffectRepository,
-    LedgerTransition, ManagedIdentityGenerator, ReplaceEffectOutcome, RepositoryError, SourceError,
-    SourceProvider, SourceSnapshot, UuidManagedIdentityGenerator,
+    ApplyReceipt, AttemptFinalization, CleanupReceipt, ConsumerAdapter, ConsumerAdapterError,
+    EffectRepository, PreparedOperation, ProjectionCommit, ReconcileSnapshot,
+    RelatedTargetSnapshot, ReplaceDesiredStateOutcome, RepositoryError, ResourceAdapter,
+    ResourceAdapterError, ResourceOperationPreparer, VerificationReceipt,
 };
-pub use reconcile::{ReconcileError, ReconcileOutcome, Reconciler};
-pub use state::{
-    Condition, ConditionReason, ConditionSubject, ConsumerStatus, DesiredSkillState,
-    EffectOperation, EffectOperationKind, EffectOperationPhase, ManagedSkill, ObservedSkill,
-    OperationState, RetryPolicy, SkillSource, SkillState, SourceState, SurfacePhase, SurfaceStatus,
-    WorkspaceEffect, WorkspaceEffectSpec,
+pub use projection::{
+    ManagedItem, ObservedItem, OwnershipEvidence, PreservedItem, ResolvedMaterialization,
+    ResourceObservation, ResourceProjection, ResourceRequirement, SkillMaterializationInput,
+    TargetProjection, VersionedMaterializationInput,
 };
-pub use surface::{
-    ConsumerCoordination, DescriptorMergeError, FilesystemSkillSurface, MaterializationFormat,
-    SurfaceDescriptorSet, SurfaceLifecycle, SurfacePath,
+pub use reconcile::{
+    EffectReconciler, ReconcileError, ReconcileOutcome, recovery_condition,
+    resource_recovery_condition,
+};
+pub use status::{
+    AdapterReceipt, AttemptReadinessReceipt, BackoffPolicy, ConditionGeneration, ConditionImpact,
+    ConditionOwner, ConditionProposal, ConditionRetry, ConditionSubject, EffectCondition,
+    LocalTimestamp, ReadinessReceipt, ReconcileClaim, ReconcileRequest, ReconcileRequestState,
+    ReconcileStage, ResourceClaim, ResourcePhase, ResourceStatus, ResumeTrigger,
+    SafeConditionDetails, StableConditionCode, StatusTransitionError, TargetIssueState,
+    TargetPhase, TargetProgress, TargetStatus, WakeReason,
+};
+pub use target::{
+    CapabilitySet, Consumer, ConsumerDeclaration, ConsumerLifecycle, ConsumerRevision,
+    CoordinationContract, CoordinationRequirement, DeclarationError, EffectResource, EffectScope,
+    EffectScopeLifecycle, EffectTarget, FilesystemDirectoryDescriptor, FilesystemResourceTemplate,
+    MaterializationContract, MaterializationFormat, ResourceLifecycle, ResourcePath,
+    TargetDeclaration, TargetLifecycle, TargetResourceBinding, VersionedResourceDescriptor,
 };

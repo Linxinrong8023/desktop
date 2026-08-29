@@ -1,727 +1,780 @@
 use crate::{
-    Condition, ConditionReason, ConditionSubject, ConsumerCoordinator, ConsumerStatus,
-    CoordinationOutcome, DesiredSkillState, EffectOperation, EffectOperationId,
-    EffectOperationKind, EffectOperationPhase, EffectRepository, FilesystemEffectError,
-    FilesystemSurfaceAdapter, Generation, LedgerTransition, ManagedIdentity,
-    ManagedIdentityGenerator, ManagedSkill, OperationPaths, OperationState, PlanOperation,
-    PlanOperationKind, Planner, PlannerInput, RecoveryDecision, RepositoryError, SourceError,
-    SourceProvider, SurfaceDescriptorSet, SurfaceLifecycle, SurfacePhase, SurfaceStatus,
+    ArtifactState, AttemptFinalization, ConditionGeneration, ConditionImpact, ConditionOwner,
+    ConditionProposal, ConditionRetry, ConditionSubject, ConsumerAdapter, ConsumerAdapterError,
+    CoordinationPlan, CoordinationReceipt, CoordinationReceiptState, CoordinationRequirement,
+    EffectKindPlanner, EffectOperationId, EffectRepository, EffectResourceId, EffectTargetId,
+    Generation, LocalTimestamp, ManagedItem, PlanningResult, ProjectionCommit, ReconcileAttempt,
+    ReconcileAttemptId, ReconcileAttemptIntent, ReconcileClaim, RepositoryError, ResourceAdapter,
+    ResourceAdapterError, ResourceOperationPreparer, ResourcePlan, ResourcePlanner,
+    ResourcePlanningInput, SafeConditionDetails, StableConditionCode, StatusTransitionError,
+    TargetIssueState, TargetPlanningInput,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-/// Result of one explicitly driven surface reconcile.
+/// Observable result of one claimed Target reconciliation.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReconcileOutcome {
-    pub status: SurfaceStatus,
-    pub consumer_statuses: Vec<ConsumerStatus>,
+pub enum ReconcileOutcome {
+    Current {
+        target: EffectTargetId,
+        generation: Generation,
+    },
+    Blocked {
+        target: EffectTargetId,
+        generation: Generation,
+        conditions: Vec<ConditionProposal>,
+    },
+    Mutated {
+        target: EffectTargetId,
+        generation: Generation,
+        operations: usize,
+    },
 }
 
-/// Reports failures that prevent a complete scan or durable status transition.
+/// Durable Generic Target reconciler with statically dispatched planners and adapters.
+pub struct EffectReconciler<'a, Repository, KindPlanner, MaterializationPlanner, Consumer, Resource>
+{
+    repository: &'a Repository,
+    kind_planner: &'a KindPlanner,
+    resource_planner: &'a MaterializationPlanner,
+    consumer_adapter: &'a Consumer,
+    resource_adapter: &'a Resource,
+}
+
+/// Complete mutation-path inputs grouped so the transition cannot receive mismatched fragments.
+struct MutationPass {
+    snapshot: crate::ReconcileSnapshot,
+    target_projection: crate::TargetProjection,
+    contributor_projections: BTreeMap<EffectTargetId, crate::TargetProjection>,
+    resource_plans: BTreeMap<EffectResourceId, ResourcePlan>,
+    now: LocalTimestamp,
+}
+
+/// Closed planning result keeps blocking facts separate from a complete mutation candidate.
+enum SnapshotPlan {
+    Ready(MutationPass),
+    Blocked {
+        snapshot: crate::ReconcileSnapshot,
+        conditions: Vec<ConditionProposal>,
+        now: LocalTimestamp,
+    },
+}
+
+impl<'a, Repository, KindPlanner, MaterializationPlanner, Consumer, Resource>
+    EffectReconciler<'a, Repository, KindPlanner, MaterializationPlanner, Consumer, Resource>
+where
+    Repository: EffectRepository,
+    KindPlanner: EffectKindPlanner,
+    MaterializationPlanner: ResourcePlanner,
+    Consumer: ConsumerAdapter,
+    Resource: ResourceAdapter + ResourceOperationPreparer,
+{
+    pub fn new(
+        repository: &'a Repository,
+        kind_planner: &'a KindPlanner,
+        resource_planner: &'a MaterializationPlanner,
+        consumer_adapter: &'a Consumer,
+        resource_adapter: &'a Resource,
+    ) -> Self {
+        Self {
+            repository,
+            kind_planner,
+            resource_planner,
+            consumer_adapter,
+            resource_adapter,
+        }
+    }
+
+    /// Reconciles a claimed Target from freshly reloaded facts through exact readiness proof.
+    pub fn reconcile(
+        &self,
+        target_id: &EffectTargetId,
+        claim: &ReconcileClaim,
+        now: LocalTimestamp,
+        resource_lease_until: LocalTimestamp,
+    ) -> Result<ReconcileOutcome, ReconcileError> {
+        let mut snapshot = self.repository.load_reconcile_snapshot(target_id, claim)?;
+        let resource_ids = snapshot
+            .declaration
+            .bindings
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        if !resource_ids.is_empty() {
+            let resource_claims = self
+                .repository
+                .claim_resources(
+                    &snapshot.target.identity,
+                    claim,
+                    &resource_ids,
+                    now,
+                    resource_lease_until,
+                )?
+                .ok_or(ReconcileError::ResourceClaimUnavailable)?;
+            if resource_claims.len() != resource_ids.len() {
+                return Err(ReconcileError::ResourceClaimUnavailable);
+            }
+
+            // Only observations made after Resource fencing can support ResourceStatus or
+            // readiness. A declaration change during acquisition is retried as a new snapshot.
+            snapshot = self.repository.load_reconcile_snapshot(target_id, claim)?;
+            let refreshed_resource_ids = snapshot
+                .declaration
+                .bindings
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            if refreshed_resource_ids != resource_ids {
+                return Err(ReconcileError::ClaimedResourceSetChanged);
+            }
+        }
+        let pass = match self.plan_snapshot(snapshot, now)? {
+            SnapshotPlan::Ready(pass) => pass,
+            SnapshotPlan::Blocked {
+                snapshot,
+                conditions,
+                now,
+            } => return self.commit_blocked(snapshot, conditions, claim, now),
+        };
+        let mutation_count = pass
+            .resource_plans
+            .values()
+            .flat_map(|plan| &plan.changes)
+            .filter(|change| matches!(change, crate::PlannedResourceChange::Mutate(_)))
+            .count();
+        if mutation_count == 0 {
+            return self.commit_current_without_mutation(
+                pass.snapshot,
+                pass.target_projection,
+                pass.contributor_projections,
+                pass.resource_plans,
+                claim,
+                now,
+            );
+        }
+        self.apply_mutations(pass, claim)
+    }
+
+    /// Plans one complete snapshot, including all contributors to each shared Resource.
+    fn plan_snapshot(
+        &self,
+        mut snapshot: crate::ReconcileSnapshot,
+        now: LocalTimestamp,
+    ) -> Result<SnapshotPlan, ReconcileError> {
+        let generation = snapshot.desired.generation;
+        if snapshot.target_status.progress().desired() < generation {
+            snapshot.target_status.request_generation(generation, now)?;
+        }
+        let target_projection = match self.kind_planner.project(TargetPlanningInput {
+            desired: &snapshot.desired,
+            target: &snapshot.target,
+            consumer_revision: &snapshot.consumer_revision,
+            declaration: &snapshot.declaration,
+            resources: &snapshot.resources,
+            revisions: &snapshot.revisions,
+        })? {
+            PlanningResult::Projected(projection) => projection,
+            PlanningResult::Blocked(conditions) => {
+                return Ok(SnapshotPlan::Blocked {
+                    snapshot,
+                    conditions,
+                    now,
+                });
+            }
+        };
+        snapshot.target_status.record_observed(generation, now)?;
+
+        let mut all_conditions = Vec::new();
+        let mut contributor_projections =
+            BTreeMap::from([(target_projection.target.clone(), target_projection.clone())]);
+        let mut requirements_by_resource = BTreeMap::new();
+        for resource_id in target_projection.resource_requirements.keys() {
+            let mut requirements = Vec::new();
+            for related in snapshot.related_targets.values() {
+                if !related.declaration.bindings.contains_key(resource_id) {
+                    continue;
+                }
+                let related_projection = if related.target.identity == target_projection.target {
+                    target_projection.clone()
+                } else {
+                    match self.kind_planner.project(TargetPlanningInput {
+                        desired: &snapshot.desired,
+                        target: &related.target,
+                        consumer_revision: &related.consumer_revision,
+                        declaration: &related.declaration,
+                        resources: &snapshot.resources,
+                        revisions: &snapshot.revisions,
+                    })? {
+                        PlanningResult::Projected(projection) => projection,
+                        PlanningResult::Blocked(mut conditions) => {
+                            // This reconcile may explain a contributor failure but cannot mutate
+                            // another Target's Condition set without that Target's own claim.
+                            for condition in &mut conditions {
+                                condition.owner =
+                                    ConditionOwner::Target(snapshot.target.identity.clone());
+                            }
+                            all_conditions.extend(conditions);
+                            continue;
+                        }
+                    }
+                };
+                contributor_projections.insert(
+                    related_projection.target.clone(),
+                    related_projection.clone(),
+                );
+                if let Some(requirement) = related_projection.resource_requirements.get(resource_id)
+                {
+                    requirements.push(requirement.clone());
+                }
+            }
+            requirements_by_resource.insert(resource_id.clone(), requirements);
+        }
+
+        let mut resource_plans = BTreeMap::new();
+        for resource_id in target_projection.resource_requirements.keys() {
+            let resource = snapshot
+                .resources
+                .get(resource_id)
+                .ok_or_else(|| ReconcileError::ResourceMissing(resource_id.clone()))?;
+            let observation = self.resource_adapter.observe(resource)?;
+            let status = snapshot
+                .resource_statuses
+                .get_mut(resource_id)
+                .ok_or_else(|| ReconcileError::ResourceStatusMissing(resource_id.clone()))?;
+            if status.desired() < generation {
+                status.request_generation(generation, now)?;
+            }
+            status.record_observed(generation, now)?;
+            let requirements = requirements_by_resource
+                .get(resource_id)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let managed = snapshot
+                .managed
+                .get(resource_id)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            match self.resource_planner.merge(ResourcePlanningInput {
+                resource,
+                generation,
+                requirements,
+                desired_effects: &snapshot.desired.effects,
+                revisions: &snapshot.revisions,
+                managed,
+                observed: &observation,
+            })? {
+                PlanningResult::Projected(plan) => {
+                    resource_plans.insert(resource_id.clone(), plan);
+                }
+                PlanningResult::Blocked(conditions) => all_conditions.extend(conditions),
+            }
+        }
+        if !all_conditions.is_empty() {
+            return Ok(SnapshotPlan::Blocked {
+                snapshot,
+                conditions: all_conditions,
+                now,
+            });
+        }
+        Ok(SnapshotPlan::Ready(MutationPass {
+            snapshot,
+            target_projection,
+            contributor_projections,
+            resource_plans,
+            now,
+        }))
+    }
+
+    /// Persists planner Conditions and releases the claimed request into its blocked state.
+    fn commit_blocked(
+        &self,
+        snapshot: crate::ReconcileSnapshot,
+        conditions: Vec<ConditionProposal>,
+        claim: &ReconcileClaim,
+        now: LocalTimestamp,
+    ) -> Result<ReconcileOutcome, ReconcileError> {
+        let target = snapshot.target.identity.clone();
+        let generation = snapshot.desired.generation;
+        self.repository.block_target(
+            &target,
+            claim,
+            snapshot.target_status,
+            snapshot.resource_statuses.into_values().collect(),
+            conditions.clone(),
+            now,
+        )?;
+        Ok(ReconcileOutcome::Blocked {
+            target,
+            generation,
+            conditions,
+        })
+    }
+
+    /// Commits verified Resource/Target watermarks when projection already matches observation.
+    fn commit_current_without_mutation(
+        &self,
+        mut snapshot: crate::ReconcileSnapshot,
+        target_projection: crate::TargetProjection,
+        contributor_projections: BTreeMap<EffectTargetId, crate::TargetProjection>,
+        resource_plans: BTreeMap<EffectResourceId, ResourcePlan>,
+        claim: &ReconcileClaim,
+        now: LocalTimestamp,
+    ) -> Result<ReconcileOutcome, ReconcileError> {
+        let generation = target_projection.generation;
+        for resource_id in resource_plans.keys() {
+            snapshot
+                .resource_statuses
+                .get_mut(resource_id)
+                .ok_or_else(|| ReconcileError::ResourceStatusMissing(resource_id.clone()))?
+                .record_applied(generation, now)?;
+        }
+        snapshot.target_status.record_applied(generation, now)?;
+        let readiness = self
+            .consumer_adapter
+            .verify_ready(&snapshot.target, &target_projection)?;
+        snapshot.target_status.record_ready(
+            &readiness,
+            &snapshot.consumer_revision.identity,
+            &target_projection.digest,
+            TargetIssueState::Clear,
+            now,
+        )?;
+        let managed = projected_managed(&resource_plans, generation);
+        let projected_identities = managed
+            .iter()
+            .map(|item| item.identity.clone())
+            .collect::<BTreeSet<_>>();
+        let removed_managed = snapshot
+            .managed
+            .into_values()
+            .flatten()
+            .filter(|item| !projected_identities.contains(&item.identity))
+            .map(|item| item.identity)
+            .collect();
+        self.repository.commit_projection(
+            claim,
+            ProjectionCommit {
+                target_projections: contributor_projections.into_values().collect(),
+                resource_projections: resource_plans
+                    .into_values()
+                    .map(|plan| plan.projection)
+                    .collect(),
+                target_status: snapshot.target_status,
+                resource_statuses: snapshot.resource_statuses.into_values().collect(),
+                managed,
+                removed_managed,
+                conditions: Vec::new(),
+                readiness: Some(readiness),
+            },
+        )?;
+        Ok(ReconcileOutcome::Current {
+            target: snapshot.target.identity,
+            generation,
+        })
+    }
+
+    /// Journals and applies a plan that was observed while holding every Resource claim.
+    fn apply_mutations(
+        &self,
+        pass: MutationPass,
+        claim: &ReconcileClaim,
+    ) -> Result<ReconcileOutcome, ReconcileError> {
+        let MutationPass {
+            mut snapshot,
+            target_projection,
+            contributor_projections,
+            resource_plans,
+            now,
+        } = pass;
+        let generation = target_projection.generation;
+
+        let resource_ids = resource_plans
+            .iter()
+            .filter(|(_, plan)| {
+                plan.changes
+                    .iter()
+                    .any(|change| matches!(change, crate::PlannedResourceChange::Mutate(_)))
+            })
+            .map(|(resource, _)| resource.clone())
+            .collect::<Vec<_>>();
+        let coordination = coordination_plan(&snapshot, &resource_ids)?;
+        let attempt_id = ReconcileAttemptId::random();
+        let mut operations = Vec::new();
+        let mut artifacts = Vec::new();
+        let mut removed_managed = Vec::new();
+        let mut sequence = 0_u32;
+        for (resource_id, plan) in &resource_plans {
+            let resource = snapshot
+                .resources
+                .get(resource_id)
+                .ok_or_else(|| ReconcileError::ResourceMissing(resource_id.clone()))?;
+            for change in &plan.changes {
+                match change {
+                    crate::PlannedResourceChange::Mutate(mutation) => {
+                        let prepared = self.resource_adapter.prepare_operation(
+                            resource,
+                            attempt_id.clone(),
+                            generation,
+                            sequence,
+                            mutation.as_ref().clone(),
+                            now,
+                        )?;
+                        sequence = sequence
+                            .checked_add(1)
+                            .ok_or(ReconcileError::OperationSequenceExhausted)?;
+                        operations.push(prepared.operation);
+                        artifacts.extend(prepared.artifacts);
+                    }
+                    crate::PlannedResourceChange::ForgetMissing(identity) => {
+                        removed_managed.push(identity.clone());
+                    }
+                }
+            }
+        }
+        let mut attempt = ReconcileAttempt::prepare(
+            attempt_id,
+            ReconcileAttemptIntent {
+                target: snapshot.target.identity.clone(),
+                generation,
+                consumer_revision: snapshot.consumer_revision.identity.clone(),
+                target_projection: target_projection.digest.clone(),
+                resource_projections: resource_plans
+                    .values()
+                    .map(|plan| plan.projection.digest.clone())
+                    .collect(),
+                coordination: coordination.clone(),
+                operations: operations
+                    .iter()
+                    .map(|operation| operation.identity().clone())
+                    .collect(),
+            },
+        )?;
+        self.repository.prepare_attempt(
+            claim,
+            attempt.clone(),
+            contributor_projections.into_values().collect(),
+            resource_plans
+                .values()
+                .map(|plan| plan.projection.clone())
+                .collect(),
+            operations.clone(),
+            artifacts.clone(),
+        )?;
+
+        let mut receipts = Vec::new();
+        let mut coordinated_targets = BTreeSet::new();
+        for (participant_id, requirement) in &coordination.participants {
+            if matches!(requirement, CoordinationRequirement::Uninterrupted) {
+                continue;
+            }
+            let participant = snapshot
+                .participant_targets
+                .get(participant_id)
+                .ok_or_else(|| ReconcileError::ParticipantMissing(participant_id.clone()))?;
+            let receipt = self
+                .consumer_adapter
+                .coordinate(participant, &coordination)?;
+            validate_coordination_receipt(
+                &receipt,
+                participant_id,
+                requirement,
+                CoordinationReceiptState::SafeToMutate,
+            )?;
+            receipts.push(receipt);
+            coordinated_targets.insert(participant_id.clone());
+            self.repository.record_attempt_progress(
+                claim,
+                &attempt,
+                &operations,
+                &receipts,
+                now,
+            )?;
+        }
+        attempt.mark_coordinated()?;
+        self.repository
+            .record_attempt_progress(claim, &attempt, &operations, &receipts, now)?;
+
+        for operation_index in 0..operations.len() {
+            let apply_receipt = self.resource_adapter.apply(&operations[operation_index])?;
+            if apply_receipt.operation != *operations[operation_index].identity() {
+                return Err(ReconcileError::MismatchedOperationReceipt(
+                    operations[operation_index].identity().clone(),
+                ));
+            }
+            operations[operation_index].mark_applied(now)?;
+            self.repository.record_attempt_progress(
+                claim,
+                &attempt,
+                &operations,
+                &receipts,
+                now,
+            )?;
+            let verification = self.resource_adapter.verify(&operations[operation_index])?;
+            if verification.operation != *operations[operation_index].identity() {
+                return Err(ReconcileError::MismatchedOperationReceipt(
+                    operations[operation_index].identity().clone(),
+                ));
+            }
+        }
+        attempt.mark_applied()?;
+        self.repository
+            .record_attempt_progress(claim, &attempt, &operations, &receipts, now)?;
+        attempt.mark_verified()?;
+        self.repository
+            .record_attempt_progress(claim, &attempt, &operations, &receipts, now)?;
+
+        for participant_id in coordinated_targets {
+            let participant = snapshot
+                .participant_targets
+                .get(&participant_id)
+                .ok_or_else(|| ReconcileError::ParticipantMissing(participant_id.clone()))?;
+            let receipt = self
+                .consumer_adapter
+                .reactivate(participant, &coordination)?;
+            let requirement = coordination
+                .participants
+                .get(&participant_id)
+                .ok_or_else(|| ReconcileError::ParticipantMissing(participant_id.clone()))?;
+            validate_coordination_receipt(
+                &receipt,
+                &participant_id,
+                requirement,
+                CoordinationReceiptState::Reactivated,
+            )?;
+            receipts.push(receipt);
+            self.repository.record_attempt_progress(
+                claim,
+                &attempt,
+                &operations,
+                &receipts,
+                now,
+            )?;
+        }
+        attempt.mark_activated()?;
+        self.repository
+            .record_attempt_progress(claim, &attempt, &operations, &receipts, now)?;
+
+        for resource_id in resource_plans.keys() {
+            snapshot
+                .resource_statuses
+                .get_mut(resource_id)
+                .ok_or_else(|| ReconcileError::ResourceStatusMissing(resource_id.clone()))?
+                .record_applied(generation, now)?;
+        }
+        snapshot.target_status.record_applied(generation, now)?;
+        let readiness = self
+            .consumer_adapter
+            .verify_ready(&snapshot.target, &target_projection)?;
+        snapshot.target_status.record_ready(
+            &readiness,
+            &snapshot.consumer_revision.identity,
+            &target_projection.digest,
+            TargetIssueState::Clear,
+            now,
+        )?;
+        let managed = projected_managed(&resource_plans, generation);
+        let projected_identities = managed
+            .iter()
+            .map(|item| item.identity.clone())
+            .collect::<BTreeSet<_>>();
+        for current in snapshot.managed.into_values().flatten() {
+            if !projected_identities.contains(&current.identity) {
+                removed_managed.push(current.identity);
+            }
+        }
+        removed_managed.sort();
+        removed_managed.dedup();
+        for operation in &mut operations {
+            operation.finalize(now)?;
+        }
+        attempt.finalize()?;
+        self.repository.finalize_attempt(
+            claim,
+            AttemptFinalization {
+                attempt,
+                operations,
+                managed,
+                removed_managed,
+                target_statuses: vec![snapshot.target_status],
+                resource_statuses: snapshot.resource_statuses.into_values().collect(),
+                readiness: Some(readiness),
+                coordination_receipts: receipts,
+                conditions: Vec::new(),
+            },
+        )?;
+        for mut artifact in artifacts {
+            artifact.state = ArtifactState::PendingCleanup;
+            match self.resource_adapter.cleanup(&artifact) {
+                Ok(receipt) => self
+                    .repository
+                    .complete_artifact_cleanup(&artifact.identity, receipt)?,
+                Err(_) => {
+                    artifact.state = ArtifactState::CleanupFailed;
+                    self.repository
+                        .mark_artifact_cleanup_failed(artifact, now)?;
+                }
+            }
+        }
+        Ok(ReconcileOutcome::Mutated {
+            target: snapshot.target.identity,
+            generation,
+            operations: sequence as usize,
+        })
+    }
+}
+
+/// Rejects Consumer acknowledgements that do not prove the exact requested coordination step.
+fn validate_coordination_receipt(
+    receipt: &CoordinationReceipt,
+    target: &EffectTargetId,
+    requirement: &CoordinationRequirement,
+    expected_state: CoordinationReceiptState,
+) -> Result<(), ReconcileError> {
+    let CoordinationRequirement::QuiesceBeforeMutation(contract) = requirement else {
+        return Err(ReconcileError::MismatchedCoordinationReceipt(
+            target.clone(),
+        ));
+    };
+    if receipt.target != *target || receipt.contract != *contract || receipt.state != expected_state
+    {
+        return Err(ReconcileError::MismatchedCoordinationReceipt(
+            target.clone(),
+        ));
+    }
+    Ok(())
+}
+
+/// Builds the union of every affected binding, preserving Uninterrupted participants explicitly.
+fn coordination_plan(
+    snapshot: &crate::ReconcileSnapshot,
+    resources: &[EffectResourceId],
+) -> Result<CoordinationPlan, ReconcileError> {
+    let mut participants = BTreeMap::new();
+    for resource in resources {
+        let resource_participants = snapshot
+            .coordination_participants
+            .get(resource)
+            .ok_or_else(|| ReconcileError::CoordinationParticipantsMissing(resource.clone()))?;
+        for (target, requirement) in resource_participants {
+            match (participants.get(target), requirement) {
+                (
+                    Some(CoordinationRequirement::QuiesceBeforeMutation(existing)),
+                    CoordinationRequirement::QuiesceBeforeMutation(next),
+                ) if existing != next => {
+                    return Err(ReconcileError::CoordinationContractConflict(target.clone()));
+                }
+                (
+                    Some(CoordinationRequirement::QuiesceBeforeMutation(_)),
+                    CoordinationRequirement::Uninterrupted,
+                ) => {}
+                _ => {
+                    participants.insert(target.clone(), requirement.clone());
+                }
+            }
+        }
+    }
+    CoordinationPlan::new(resources.iter().cloned().collect(), participants)
+        .map_err(ReconcileError::Operation)
+}
+
+/// Produces the complete post-verification ledger from every Resource projection.
+fn projected_managed(
+    plans: &BTreeMap<EffectResourceId, ResourcePlan>,
+    generation: Generation,
+) -> Vec<ManagedItem> {
+    plans
+        .iter()
+        .flat_map(|(resource, plan)| {
+            plan.projection.items.values().map(move |materialization| {
+                let crate::VersionedMaterializationInput::SkillDirectoryV1(input) =
+                    &materialization.input;
+                ManagedItem {
+                    identity: materialization.managed_identity.clone(),
+                    resource: resource.clone(),
+                    desired_effect: materialization.desired_effect.clone(),
+                    applied_revision: materialization.revision.clone(),
+                    native_identity: materialization.native_identity.clone(),
+                    fingerprint: input.package_fingerprint.clone(),
+                    applied_generation: generation,
+                }
+            })
+        })
+        .collect()
+}
+
+/// Builds a safe recovery Condition for an operation that cannot be proven automatically.
+pub fn recovery_condition(
+    target: &EffectTargetId,
+    operation: &crate::EffectOperationId,
+    generation: Generation,
+) -> ConditionProposal {
+    ConditionProposal {
+        owner: ConditionOwner::Target(target.clone()),
+        subject: ConditionSubject::Operation(operation.clone()),
+        code: StableConditionCode::built_in("recovery_required"),
+        impact: ConditionImpact::Blocking,
+        retry: ConditionRetry::Manual,
+        generation: ConditionGeneration::At(generation),
+        safe_details: SafeConditionDetails {
+            message: "An Effect operation requires explicit recovery.".to_string(),
+            parameters: BTreeMap::new(),
+        },
+    }
+}
+
+/// Builds the Resource-owned counterpart of a manual operation recovery Condition.
+pub fn resource_recovery_condition(
+    resource: &EffectResourceId,
+    operation: &crate::EffectOperationId,
+    generation: Generation,
+) -> ConditionProposal {
+    ConditionProposal {
+        owner: ConditionOwner::Resource(resource.clone()),
+        subject: ConditionSubject::Operation(operation.clone()),
+        code: StableConditionCode::built_in("recovery_required"),
+        impact: ConditionImpact::Blocking,
+        retry: ConditionRetry::Manual,
+        generation: ConditionGeneration::At(generation),
+        safe_details: SafeConditionDetails {
+            message: "An Effect operation requires explicit recovery.".to_string(),
+            parameters: BTreeMap::new(),
+        },
+    }
+}
+
+/// Reports failure before or during one durable Target reconcile.
 #[derive(Debug, Error)]
 pub enum ReconcileError {
     #[error(transparent)]
     Repository(#[from] RepositoryError),
     #[error(transparent)]
-    Filesystem(#[from] FilesystemEffectError),
-}
-
-/// Statically dispatched orchestrator for one-process Effect reconciliation.
-pub struct Reconciler<'a, Repository, Sources, Coordinator, IdentityGenerator> {
-    repository: &'a Repository,
-    sources: &'a Sources,
-    coordinator: &'a Coordinator,
-    identity_generator: &'a IdentityGenerator,
-}
-
-/// Groups the immutable inputs needed to create one durable filesystem operation.
-struct OperationRequest<'a> {
-    adapter: &'a FilesystemSurfaceAdapter,
-    workspace_id: &'a ora_domain::WorkspaceId,
-    surface_key: &'a crate::SurfaceKey,
-    generation: Generation,
-    plan: &'a PlanOperation,
-    operation_id: EffectOperationId,
-    paths: OperationPaths,
-}
-
-/// Selects whether this status write preserves or advances the surface file generation.
-enum AppliedGenerationUpdate {
-    Preserve,
-    Advance(Generation),
-}
-
-/// Groups one complete status revision update.
-struct StatusUpdate<'a> {
-    descriptor: &'a SurfaceDescriptorSet,
-    workspace_id: &'a ora_domain::WorkspaceId,
-    desired_generation: Generation,
-    phase: SurfacePhase,
-    conditions: Vec<Condition>,
-    occurred_at: i64,
-    applied: AppliedGenerationUpdate,
-}
-
-impl<'a, Repository, Sources, Coordinator, IdentityGenerator>
-    Reconciler<'a, Repository, Sources, Coordinator, IdentityGenerator>
-where
-    Repository: EffectRepository,
-    Sources: SourceProvider,
-    Coordinator: ConsumerCoordinator,
-    IdentityGenerator: ManagedIdentityGenerator,
-{
-    pub fn new(
-        repository: &'a Repository,
-        sources: &'a Sources,
-        coordinator: &'a Coordinator,
-        identity_generator: &'a IdentityGenerator,
-    ) -> Self {
-        Self {
-            repository,
-            sources,
-            coordinator,
-            identity_generator,
-        }
-    }
-
-    /// Recovers older durable transactions, computes a fresh plan, and applies every safe locator.
-    pub fn reconcile_surface(
-        &self,
-        adapter: &FilesystemSurfaceAdapter,
-        descriptor: &SurfaceDescriptorSet,
-        workspace_id: &ora_domain::WorkspaceId,
-        occurred_at: i64,
-    ) -> Result<ReconcileOutcome, ReconcileError> {
-        let effect = self.repository.load_workspace_effect(workspace_id)?;
-        let mut conditions = self.recover_surface_operations(
-            adapter,
-            workspace_id,
-            &descriptor.surface_key,
-            effect.generation,
-            occurred_at,
-        )?;
-        if conditions
-            .iter()
-            .any(|condition| condition.reason == ConditionReason::RecoveryRequired)
-        {
-            let status = self.persist_status(StatusUpdate {
-                descriptor,
-                workspace_id,
-                desired_generation: effect.generation,
-                phase: SurfacePhase::RecoveryRequired,
-                conditions,
-                occurred_at,
-                applied: AppliedGenerationUpdate::Preserve,
-            })?;
-            return Ok(ReconcileOutcome {
-                status,
-                consumer_statuses: Vec::new(),
-            });
-        }
-
-        let managed = self
-            .repository
-            .load_managed_skills(workspace_id, &descriptor.surface_key)?;
-        let scan = adapter.scan()?;
-        let planner = Planner::new(self.identity_generator);
-        let plan = planner.plan(PlannerInput {
-            surface_key: &descriptor.surface_key,
-            lifecycle: descriptor.lifecycle,
-            generation: effect.generation,
-            desired: &effect.spec.skills,
-            managed: &managed,
-            observed: &scan.targets,
-            occurred_at,
-        });
-        conditions.extend(plan.conditions.clone());
-
-        if descriptor.lifecycle == SurfaceLifecycle::Active
-            && descriptor.consumers.is_empty()
-            && !effect.spec.skills.is_empty()
-        {
-            conditions.push(Condition::new(
-                ConditionSubject::Surface {
-                    surface_key: descriptor.surface_key.clone(),
-                },
-                ConditionReason::NoConsumers,
-                "desired Skills have no active surface consumer",
-                occurred_at,
-                effect.generation,
-            ));
-        }
-
-        let coordinated_consumers = descriptor.consumers.keys().cloned().collect::<Vec<_>>();
-        let mut quiesced = false;
-        if plan.has_filesystem_mutations() && descriptor.requires_coordination() {
-            match self
-                .coordinator
-                .quiesce(&descriptor.surface_key, &coordinated_consumers)
-            {
-                Ok(CoordinationOutcome::Ready) => quiesced = true,
-                Ok(CoordinationOutcome::WaitingForIdle) | Err(_) => {
-                    conditions.push(Condition::new(
-                        ConditionSubject::Surface {
-                            surface_key: descriptor.surface_key.clone(),
-                        },
-                        ConditionReason::WaitingForIdle,
-                        "a surface consumer has not reached an idle mutation boundary",
-                        occurred_at,
-                        effect.generation,
-                    ));
-                    let status = self.persist_status(StatusUpdate {
-                        descriptor,
-                        workspace_id,
-                        desired_generation: effect.generation,
-                        phase: SurfacePhase::WaitingForIdle,
-                        conditions,
-                        occurred_at,
-                        applied: AppliedGenerationUpdate::Preserve,
-                    })?;
-                    return Ok(ReconcileOutcome {
-                        status,
-                        consumer_statuses: Vec::new(),
-                    });
-                }
-            }
-        }
-
-        for operation in &plan.operations {
-            if let Err(condition) = self.execute_operation(
-                adapter,
-                workspace_id,
-                &descriptor.surface_key,
-                effect.generation,
-                operation,
-                occurred_at,
-            ) {
-                conditions.push(*condition);
-            }
-        }
-
-        // A second live scan prevents a partial-success generation from being marked Current.
-        let final_managed = self
-            .repository
-            .load_managed_skills(workspace_id, &descriptor.surface_key)?;
-        let final_scan = adapter.scan()?;
-        let final_plan = planner.plan(PlannerInput {
-            surface_key: &descriptor.surface_key,
-            lifecycle: descriptor.lifecycle,
-            generation: effect.generation,
-            desired: &effect.spec.skills,
-            managed: &final_managed,
-            observed: &final_scan.targets,
-            occurred_at,
-        });
-        let files_current = final_plan.is_current();
-        merge_conditions(&mut conditions, final_plan.conditions);
-        let phase = if files_current && conditions.is_empty() {
-            SurfacePhase::Current
-        } else if descriptor.lifecycle == SurfaceLifecycle::Retiring {
-            SurfacePhase::Retiring
-        } else {
-            SurfacePhase::Degraded
-        };
-        let applied = if files_current {
-            AppliedGenerationUpdate::Advance(effect.generation)
-        } else {
-            AppliedGenerationUpdate::Preserve
-        };
-        let status = self.persist_status(StatusUpdate {
-            descriptor,
-            workspace_id,
-            desired_generation: effect.generation,
-            phase,
-            conditions,
-            occurred_at,
-            applied,
-        })?;
-
-        let mut consumer_statuses = Vec::new();
-        if quiesced || (files_current && !coordinated_consumers.is_empty()) {
-            for consumer in coordinated_consumers {
-                let (consumer_phase, ready_generation, consumer_conditions) = match self
-                    .coordinator
-                    .resume(&descriptor.surface_key, &consumer, effect.generation)
-                {
-                    Ok(()) if files_current => {
-                        (SurfacePhase::Current, effect.generation, Vec::new())
-                    }
-                    Ok(()) => (SurfacePhase::Degraded, Generation::default(), Vec::new()),
-                    Err(_) => (
-                        SurfacePhase::Degraded,
-                        Generation::default(),
-                        vec![Condition::new(
-                            ConditionSubject::Consumer {
-                                consumer_id: consumer.clone(),
-                            },
-                            ConditionReason::ConsumerResumeFailed,
-                            "surface consumer failed to resume",
-                            occurred_at,
-                            effect.generation,
-                        )],
-                    ),
-                };
-                let consumer_status = ConsumerStatus {
-                    surface_key: descriptor.surface_key.clone(),
-                    consumer_id: consumer,
-                    ready_generation,
-                    phase: consumer_phase,
-                    revision: 1,
-                    updated_at: occurred_at,
-                    conditions: consumer_conditions,
-                };
-                self.repository
-                    .save_consumer_status(consumer_status.clone())?;
-                consumer_statuses.push(consumer_status);
-            }
-        }
-
-        Ok(ReconcileOutcome {
-            status,
-            consumer_statuses,
-        })
-    }
-
-    /// Applies one safe planned locator through Prepared, Applied, and atomic ledger Finalized.
-    fn execute_operation(
-        &self,
-        adapter: &FilesystemSurfaceAdapter,
-        workspace_id: &ora_domain::WorkspaceId,
-        surface_key: &crate::SurfaceKey,
-        generation: Generation,
-        plan: &PlanOperation,
-        occurred_at: i64,
-    ) -> Result<(), Box<Condition>> {
-        if let PlanOperationKind::AdvanceGeneration { previous } = &plan.kind {
-            let mut advanced = previous.clone();
-            advanced.applied_generation = generation;
-            return self.repository.save_managed_skill(advanced).map_err(|_| {
-                Box::new(Condition::new(
-                    ConditionSubject::ManagedSkill {
-                        managed_identity: previous.managed_identity.clone(),
-                    },
-                    ConditionReason::TransientIo,
-                    "the managed generation could not be persisted",
-                    occurred_at,
-                    generation,
-                ))
-            });
-        }
-        let operation_id = EffectOperationId::random();
-        let paths = OperationPaths::for_operation(&adapter.surface_root(), &operation_id);
-        let result = self.prepare_and_apply(OperationRequest {
-            adapter,
-            workspace_id,
-            surface_key,
-            generation,
-            plan,
-            operation_id,
-            paths,
-        });
-        result.map_err(|reason| {
-            let (condition_reason, message) = match reason {
-                OperationFailure::Source(_) => (
-                    ConditionReason::SourceUnavailable,
-                    "the selected source revision is unavailable",
-                ),
-                OperationFailure::Filesystem(_) => (
-                    ConditionReason::MaterializationFailed,
-                    "the safe filesystem operation failed",
-                ),
-                OperationFailure::Repository(_) => (
-                    ConditionReason::TransientIo,
-                    "the durable Effect operation could not be persisted",
-                ),
-            };
-            Box::new(Condition::new(
-                operation_subject(plan, surface_key),
-                condition_reason,
-                message,
-                occurred_at,
-                generation,
-            ))
-        })
-    }
-
-    /// Builds durable intent from the live previous disk state and then performs its exact swap.
-    fn prepare_and_apply(&self, request: OperationRequest<'_>) -> Result<(), OperationFailure> {
-        let OperationRequest {
-            adapter,
-            workspace_id,
-            surface_key,
-            generation,
-            plan,
-            operation_id,
-            paths,
-        } = request;
-        let (
-            kind,
-            target_name,
-            previous_managed,
-            planned_desired,
-            previous_identity,
-            planned_identity,
-        ) = operation_parts(plan);
-        let previous_state = adapter.operation_state(&target_name)?;
-        let staged_source = if let Some(desired) = &planned_desired {
-            let snapshot = self.sources.open_snapshot(desired)?;
-            let identity = planned_identity
-                .as_ref()
-                .or(previous_identity.as_ref())
-                .ok_or(SourceError::IntegrityMismatch)?;
-            Some((snapshot, identity.clone()))
-        } else {
-            None
-        };
-        let planned_state = if let Some((snapshot, _)) = &staged_source {
-            OperationState::Present(adapter.planned_fingerprint(snapshot)?)
-        } else {
-            OperationState::Missing
-        };
-        let mut operation = EffectOperation {
-            operation_id,
-            generation,
-            workspace_id: workspace_id.clone(),
-            surface_key: surface_key.clone(),
-            locator: plan.locator.clone(),
-            target_name,
-            kind,
-            phase: EffectOperationPhase::Prepared,
-            previous_state,
-            planned_state,
-            previous_identity,
-            planned_identity,
-            previous_managed,
-            planned_desired,
-            staging_path: paths.staging.clone(),
-            backup_path: paths.backup.clone(),
-        };
-        self.repository.prepare_operation(operation.clone())?;
-        if let Some((snapshot, identity)) = &staged_source {
-            let staged_fingerprint = adapter.stage(snapshot, identity, &paths)?;
-            if operation.planned_state != OperationState::Present(staged_fingerprint) {
-                return Err(SourceError::IntegrityMismatch.into());
-            }
-        }
-        apply_prepared(adapter, &operation, &paths)?;
-        operation.phase = EffectOperationPhase::Applied;
-        self.repository.save_operation(operation.clone())?;
-        let transition = ledger_transition(&operation)?;
-        operation.phase = EffectOperationPhase::Finalized;
-        self.repository
-            .finalize_operation(operation.clone(), transition)?;
-        // Business state is already committed; cleanup remains safely retryable maintenance.
-        if adapter.cleanup_operation(&paths).is_ok() {
-            let _ = self
-                .repository
-                .complete_operation_cleanup(&operation.operation_id);
-        }
-        Ok(())
-    }
-
-    /// Resolves unfinished operations before allowing a newer generation to plan more mutations.
-    fn recover_surface_operations(
-        &self,
-        adapter: &FilesystemSurfaceAdapter,
-        workspace_id: &ora_domain::WorkspaceId,
-        surface_key: &crate::SurfaceKey,
-        generation: Generation,
-        occurred_at: i64,
-    ) -> Result<Vec<Condition>, ReconcileError> {
-        let mut conditions = Vec::new();
-        for mut operation in self.repository.load_unfinished_operations()? {
-            if operation.workspace_id != *workspace_id || operation.surface_key != *surface_key {
-                continue;
-            }
-            let paths = OperationPaths {
-                root: operation
-                    .staging_path
-                    .parent()
-                    .map(std::path::Path::to_path_buf)
-                    .unwrap_or_else(|| adapter.surface_root()),
-                staging: operation.staging_path.clone(),
-                backup: operation.backup_path.clone(),
-            };
-            match adapter.recovery_decision(&operation)? {
-                RecoveryDecision::RetryApply => {
-                    stage_recovery_source(adapter, self.sources, &operation, &paths)?;
-                    apply_prepared(adapter, &operation, &paths)?;
-                    operation.phase = EffectOperationPhase::Applied;
-                    self.repository.save_operation(operation.clone())?;
-                    let transition = ledger_transition(&operation)
-                        .map_err(|_| FilesystemEffectError::InvalidSkillManifest)?;
-                    operation.phase = EffectOperationPhase::Finalized;
-                    self.repository
-                        .finalize_operation(operation.clone(), transition)?;
-                    if adapter.cleanup_operation(&paths).is_ok() {
-                        let _ = self
-                            .repository
-                            .complete_operation_cleanup(&operation.operation_id);
-                    }
-                }
-                RecoveryDecision::Finalize => {
-                    let transition = ledger_transition(&operation)
-                        .map_err(|_| FilesystemEffectError::InvalidSkillManifest)?;
-                    operation.phase = EffectOperationPhase::Finalized;
-                    self.repository
-                        .finalize_operation(operation.clone(), transition)?;
-                    if adapter.cleanup_operation(&paths).is_ok() {
-                        let _ = self
-                            .repository
-                            .complete_operation_cleanup(&operation.operation_id);
-                    }
-                }
-                RecoveryDecision::RecoveryRequired => conditions.push(Condition::new(
-                    ConditionSubject::Surface {
-                        surface_key: surface_key.clone(),
-                    },
-                    ConditionReason::RecoveryRequired,
-                    "the target matches neither the previous nor planned operation state",
-                    occurred_at,
-                    generation,
-                )),
-            }
-        }
-        Ok(conditions)
-    }
-
-    /// Writes status with its own revision and preserves the previous applied generation on errors.
-    fn persist_status(&self, update: StatusUpdate<'_>) -> Result<SurfaceStatus, RepositoryError> {
-        let StatusUpdate {
-            descriptor,
-            workspace_id,
-            desired_generation,
-            phase,
-            conditions,
-            occurred_at,
-            applied,
-        } = update;
-        let previous = self
-            .repository
-            .load_surface_status(workspace_id, &descriptor.surface_key)?;
-        let status = SurfaceStatus {
-            workspace_id: workspace_id.clone(),
-            surface_key: descriptor.surface_key.clone(),
-            desired_generation,
-            observed_generation: desired_generation,
-            applied_generation: match applied {
-                AppliedGenerationUpdate::Advance(generation) => generation,
-                AppliedGenerationUpdate::Preserve => previous
-                    .as_ref()
-                    .map_or_else(Generation::default, |status| status.applied_generation),
-            },
-            phase,
-            revision: previous.map_or(1, |status| status.revision.saturating_add(1)),
-            updated_at: occurred_at,
-            conditions,
-        };
-        self.repository.save_surface_status(status.clone())?;
-        Ok(status)
-    }
-}
-
-#[derive(Debug, Error)]
-enum OperationFailure {
+    Planner(#[from] crate::PlannerError),
     #[error(transparent)]
-    Repository(#[from] RepositoryError),
+    Consumer(#[from] ConsumerAdapterError),
     #[error(transparent)]
-    Source(#[from] SourceError),
+    Resource(#[from] ResourceAdapterError),
     #[error(transparent)]
-    Filesystem(#[from] FilesystemEffectError),
-}
-
-/// Extracts operation-specific state while keeping illegal combinations in the plan enum.
-fn operation_parts(
-    plan: &PlanOperation,
-) -> (
-    EffectOperationKind,
-    crate::SkillName,
-    Option<ManagedSkill>,
-    Option<DesiredSkillState>,
-    Option<ManagedIdentity>,
-    Option<ManagedIdentity>,
-) {
-    match &plan.kind {
-        PlanOperationKind::Create {
-            desired,
-            managed_identity,
-        } => (
-            EffectOperationKind::Create,
-            desired.state().name.clone(),
-            None,
-            Some(desired.clone()),
-            None,
-            Some(managed_identity.clone()),
-        ),
-        PlanOperationKind::Update { previous, desired } => (
-            EffectOperationKind::Update,
-            desired.state().name.clone(),
-            Some(previous.clone()),
-            Some(desired.clone()),
-            Some(previous.managed_identity.clone()),
-            Some(previous.managed_identity.clone()),
-        ),
-        PlanOperationKind::AdvanceGeneration { previous } => (
-            EffectOperationKind::Update,
-            previous.target_name.clone(),
-            Some(previous.clone()),
-            Some(previous.state.clone()),
-            Some(previous.managed_identity.clone()),
-            Some(previous.managed_identity.clone()),
-        ),
-        PlanOperationKind::Replace {
-            previous,
-            desired,
-            managed_identity,
-        } => (
-            EffectOperationKind::Replace,
-            desired.state().name.clone(),
-            Some(previous.clone()),
-            Some(desired.clone()),
-            Some(previous.managed_identity.clone()),
-            Some(managed_identity.clone()),
-        ),
-        PlanOperationKind::Delete { previous } => (
-            EffectOperationKind::Delete,
-            previous.target_name.clone(),
-            Some(previous.clone()),
-            None,
-            Some(previous.managed_identity.clone()),
-            None,
-        ),
-    }
-}
-
-/// Rebuilds or validates a reserved staging artifact before replaying Prepared intent.
-fn stage_recovery_source<Sources: SourceProvider>(
-    adapter: &FilesystemSurfaceAdapter,
-    sources: &Sources,
-    operation: &EffectOperation,
-    paths: &OperationPaths,
-) -> Result<(), FilesystemEffectError> {
-    let Some(desired) = &operation.planned_desired else {
-        return Ok(());
-    };
-    let snapshot = sources
-        .open_snapshot(desired)
-        .map_err(|_| FilesystemEffectError::InvalidSkillManifest)?;
-    let identity = operation
-        .planned_identity
-        .as_ref()
-        .or(operation.previous_identity.as_ref())
-        .ok_or(FilesystemEffectError::InvalidSkillManifest)?;
-    let staged_fingerprint = adapter.stage(&snapshot, identity, paths)?;
-    if operation.planned_state != OperationState::Present(staged_fingerprint) {
-        return Err(FilesystemEffectError::InvalidSkillManifest);
-    }
-    Ok(())
-}
-
-/// Applies only the exact mutation described by a durable Prepared operation.
-fn apply_prepared(
-    adapter: &FilesystemSurfaceAdapter,
-    operation: &EffectOperation,
-    paths: &OperationPaths,
-) -> Result<(), FilesystemEffectError> {
-    match operation.kind {
-        EffectOperationKind::Create => adapter.apply_create(&operation.target_name, paths),
-        EffectOperationKind::Update | EffectOperationKind::Replace => {
-            let previous_name = operation
-                .previous_managed
-                .as_ref()
-                .map_or(&operation.target_name, |managed| &managed.target_name);
-            adapter.apply_swap(previous_name, &operation.target_name, paths)
-        }
-        EffectOperationKind::Delete => adapter.apply_delete(&operation.target_name, paths),
-    }
-}
-
-/// Builds the ledger half of finalization from the operation's represented state machine.
-fn ledger_transition(operation: &EffectOperation) -> Result<LedgerTransition, SourceError> {
-    match operation.kind {
-        EffectOperationKind::Create | EffectOperationKind::Update => {
-            Ok(LedgerTransition::Upsert(planned_managed(operation)?))
-        }
-        EffectOperationKind::Replace => Ok(LedgerTransition::Replace {
-            previous_identity: operation
-                .previous_identity
-                .clone()
-                .ok_or(SourceError::IntegrityMismatch)?,
-            next: planned_managed(operation)?,
-        }),
-        EffectOperationKind::Delete => Ok(LedgerTransition::Delete {
-            managed_identity: operation
-                .previous_identity
-                .clone()
-                .ok_or(SourceError::IntegrityMismatch)?,
-        }),
-    }
-}
-
-/// Constructs the exact managed ledger only after the planned fingerprint is visible.
-fn planned_managed(operation: &EffectOperation) -> Result<ManagedSkill, SourceError> {
-    let desired = operation
-        .planned_desired
-        .clone()
-        .ok_or(SourceError::IntegrityMismatch)?;
-    let fingerprint = match &operation.planned_state {
-        OperationState::Present(fingerprint) => fingerprint.clone(),
-        OperationState::Missing => return Err(SourceError::IntegrityMismatch),
-    };
-    let selection_key = desired
-        .state()
-        .source
-        .selection_key(desired.state().name.clone())
-        .ok_or(SourceError::IntegrityMismatch)?;
-    Ok(ManagedSkill {
-        managed_identity: operation
-            .planned_identity
-            .clone()
-            .ok_or(SourceError::IntegrityMismatch)?,
-        workspace_id: operation.workspace_id.clone(),
-        surface_key: operation.surface_key.clone(),
-        selection_key,
-        locator: operation.locator.clone(),
-        target_name: operation.target_name.clone(),
-        state: desired,
-        applied_fingerprint: fingerprint,
-        applied_generation: operation.generation,
-    })
-}
-
-/// Assigns per-resource failures to the most specific stable condition subject available.
-fn operation_subject(plan: &PlanOperation, _surface_key: &crate::SurfaceKey) -> ConditionSubject {
-    match &plan.kind {
-        PlanOperationKind::Create { desired, .. } => ConditionSubject::DesiredSkill {
-            selection_key: desired
-                .state()
-                .source
-                .selection_key(desired.state().name.clone())
-                .unwrap_or_else(|| {
-                    crate::SkillSelectionKey::new(
-                        crate::SourceKind::Local,
-                        ora_domain::Namespace::local(),
-                        desired.state().name.clone(),
-                    )
-                }),
-        },
-        PlanOperationKind::Update { previous, .. }
-        | PlanOperationKind::AdvanceGeneration { previous }
-        | PlanOperationKind::Replace { previous, .. }
-        | PlanOperationKind::Delete { previous } => ConditionSubject::ManagedSkill {
-            managed_identity: previous.managed_identity.clone(),
-        },
-    }
-}
-
-/// Deduplicates current conditions by stable subject and reason while retaining safe messages.
-fn merge_conditions(current: &mut Vec<Condition>, additional: Vec<Condition>) {
-    let mut keys = BTreeMap::new();
-    for condition in current.iter().chain(additional.iter()) {
-        keys.insert(
-            format!("{:?}:{:?}", condition.subject, condition.reason),
-            condition.clone(),
-        );
-    }
-    *current = keys.into_values().collect();
+    Status(#[from] StatusTransitionError),
+    #[error(transparent)]
+    Operation(#[from] crate::OperationTransitionError),
+    #[error("Effect Resource {0} is missing from the claimed snapshot")]
+    ResourceMissing(EffectResourceId),
+    #[error("Effect Resource {0} has no status in the claimed snapshot")]
+    ResourceStatusMissing(EffectResourceId),
+    #[error("Effect Resource claims could not be acquired")]
+    ResourceClaimUnavailable,
+    #[error("the Target Resource set changed while acquiring mutation authority")]
+    ClaimedResourceSetChanged,
+    #[error("coordination participants are missing for Resource {0}")]
+    CoordinationParticipantsMissing(EffectResourceId),
+    #[error("coordination participant Target {0} is missing")]
+    ParticipantMissing(EffectTargetId),
+    #[error("Target {0} declares conflicting coordination contracts")]
+    CoordinationContractConflict(EffectTargetId),
+    #[error("Consumer returned a mismatched coordination receipt for Target {0}")]
+    MismatchedCoordinationReceipt(EffectTargetId),
+    #[error("Resource adapter returned a receipt for a different operation than {0}")]
+    MismatchedOperationReceipt(EffectOperationId),
+    #[error("operation sequence is exhausted")]
+    OperationSequenceExhausted,
 }

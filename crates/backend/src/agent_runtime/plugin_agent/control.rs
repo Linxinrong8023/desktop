@@ -130,13 +130,14 @@ pub(super) fn verify_agent_contract(
         )));
     }
     let requires_restart_coordination = registration
-        .effect_surfaces
+        .effect_resources
         .iter()
-        .any(|surface| surface.coordination == PluginEffectCoordination::WaitForIdleAndRestart);
+        .any(|resource| resource.coordination == PluginEffectCoordination::QuiesceBeforeMutation);
     if requires_restart_coordination {
         let missing_effect_methods = [
-            super::effect::WAIT_FOR_IDLE_METHOD,
-            super::effect::RESTART_METHOD,
+            super::effect::COORDINATE_METHOD,
+            super::effect::REACTIVATE_METHOD,
+            super::effect::VERIFY_READY_METHOD,
         ]
         .into_iter()
         .filter(|method| !registration.methods.contains(*method))

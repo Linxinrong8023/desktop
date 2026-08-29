@@ -21,26 +21,26 @@ pub(crate) const SHUTDOWN_METHOD: &str = "ora/shutdown";
 pub struct PluginRegistration {
     pub methods: HashSet<String>,
     pub emits: HashSet<String>,
-    /// Workspace-relative Effect surfaces this runtime consumes.
-    pub effect_surfaces: Vec<PluginEffectSurface>,
+    /// Workspace-relative Effect Resources this runtime consumes.
+    pub effect_resources: Vec<PluginEffectResource>,
 }
 
-/// Declares one filesystem Skill surface consumed by a plugin runtime.
+/// Declares one filesystem Resource consumed by a plugin runtime.
 ///
 /// The host supplies the Workspace root at materialization time. Plugins only declare a safe,
 /// portable relative locator so a registration can be reused for every Workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginEffectSurface {
+pub struct PluginEffectResource {
     pub workspace_relative_path: String,
     pub materialization_format: String,
     pub coordination: PluginEffectCoordination,
 }
 
-/// Selects the runtime boundary required before Ora mutates one declared surface.
+/// Selects the runtime boundary required before Ora mutates one declared Resource.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginEffectCoordination {
     Uninterrupted,
-    WaitForIdleAndRestart,
+    QuiesceBeforeMutation,
 }
 
 /// Carries one plugin-originated notification that passed the `emits` whitelist.
@@ -152,7 +152,7 @@ async fn handle_plugin_originated<H: HostRequestHandler>(
             methods: parse_method_list(params, "methods")?
                 .ok_or_else(|| "plugin registration is missing a methods array".to_string())?,
             emits: parse_method_list(params, "emits")?.unwrap_or_default(),
-            effect_surfaces: parse_effect_surfaces(params)?,
+            effect_resources: parse_effect_resources(params)?,
         };
         *inner.registration.write().await = registration;
         inner.status_tx.send_replace(RuntimeStatus::Ready);
@@ -176,18 +176,18 @@ async fn handle_plugin_originated<H: HostRequestHandler>(
 }
 
 /// Parses Effect descriptors as a strict registration contract rather than accepting opaque JSON.
-fn parse_effect_surfaces(params: Option<&Value>) -> Result<Vec<PluginEffectSurface>, String> {
-    let Some(value) = params.and_then(|params| params.get("effectSurfaces")) else {
+fn parse_effect_resources(params: Option<&Value>) -> Result<Vec<PluginEffectResource>, String> {
+    let Some(value) = params.and_then(|params| params.get("effectResources")) else {
         return Ok(Vec::new());
     };
     let entries = value
         .as_array()
-        .ok_or_else(|| "plugin registration field effectSurfaces must be an array".to_string())?;
+        .ok_or_else(|| "plugin registration field effectResources must be an array".to_string())?;
     entries
         .iter()
         .map(|entry| {
             let object = entry.as_object().ok_or_else(|| {
-                "plugin registration effectSurfaces entry must be an object".to_string()
+                "plugin registration effectResources entry must be an object".to_string()
             })?;
             let required_string = |field: &str| {
                 object
@@ -196,19 +196,19 @@ fn parse_effect_surfaces(params: Option<&Value>) -> Result<Vec<PluginEffectSurfa
                     .filter(|value| !value.is_empty())
                     .map(str::to_string)
                     .ok_or_else(|| {
-                        format!("plugin registration effectSurfaces entry has invalid {field}")
+                        format!("plugin registration effectResources entry has invalid {field}")
                     })
             };
             let coordination = match required_string("coordination")?.as_str() {
                 "uninterrupted" => PluginEffectCoordination::Uninterrupted,
-                "wait_for_idle_and_restart" => PluginEffectCoordination::WaitForIdleAndRestart,
+                "quiesce_before_mutation" => PluginEffectCoordination::QuiesceBeforeMutation,
                 value => {
                     return Err(format!(
-                        "plugin registration effectSurfaces entry has unknown coordination {value}"
+                        "plugin registration effectResources entry has unknown coordination {value}"
                     ));
                 }
             };
-            Ok(PluginEffectSurface {
+            Ok(PluginEffectResource {
                 workspace_relative_path: required_string("workspaceRelativePath")?,
                 materialization_format: required_string("materializationFormat")?,
                 coordination,

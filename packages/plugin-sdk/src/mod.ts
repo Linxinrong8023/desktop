@@ -2,15 +2,14 @@ export {
   type AcpSender,
   AGENT_NOT_INSTALLED,
   type AgentDefinition,
-  type AgentEffectContext,
+  type AgentEffectCoordinationContext,
   type AgentEffectDefinition,
-  type AgentEffectIdleState,
-  type AgentEffectRestartContext,
+  type AgentEffectReadinessContext,
   type AgentModel,
   type AgentStartContext,
   defineAgent,
 } from "./agent.ts";
-export type { EffectSurfaceDeclaration } from "./plugin.ts";
+export type { EffectResourceDeclaration } from "./plugin.ts";
 export {
   createHostProcesses,
   type HostChildProcess,

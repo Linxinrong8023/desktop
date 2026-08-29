@@ -1,23 +1,26 @@
-//! Maps Agent plugin Effect declarations and coordinates their runtime mutation boundary.
+//! Maps Agent plugin declarations and invokes the generic Consumer adapter protocol.
 
 use ora_domain::PluginId;
 use ora_effect::{
-    ConsumerCoordination, ConsumerId, FilesystemSkillSurface, Generation, MaterializationFormat,
-    SurfaceKey, SurfacePath,
+    AdapterReceipt, CapabilityRequirement, CapabilitySet, ConsumerAdapterIdentity,
+    ConsumerDeclaration, ConsumerIdentity, ConsumerKind, CoordinationContract, CoordinationPlan,
+    CoordinationRequirement, EffectKind, EffectTarget, FilesystemResourceTemplate,
+    MaterializationContract, MaterializationFormat, ResourcePath, TargetProjection,
 };
 use ora_plugin_runtime::{
     PluginEffectCoordination, PluginRegistration, PluginRuntime, PluginRuntimeError,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
-use std::path::Path;
 use thiserror::Error;
 
-pub(super) const WAIT_FOR_IDLE_METHOD: &str = "effect/waitForIdle";
-pub(super) const RESTART_METHOD: &str = "effect/restart";
+pub(super) const COORDINATE_METHOD: &str = "effect/coordinate";
+pub(super) const REACTIVATE_METHOD: &str = "effect/reactivate";
+pub(super) const VERIFY_READY_METHOD: &str = "effect/verifyReady";
 
-/// Reports an invalid registration or a failed Agent Effect coordination call.
+/// Reports an invalid declaration or failed Consumer adapter invocation.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub(crate) enum AgentEffectError {
     #[error("agent plugin Effect declaration is invalid: {0}")]
@@ -26,14 +29,7 @@ pub(crate) enum AgentEffectError {
     Ipc(String),
 }
 
-/// The result of asking an Agent plugin to establish its mutation barrier.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum WaitForIdleOutcome {
-    Ready,
-    WaitingForIdle,
-}
-
-/// Abstracts one IPC generation so the coordination protocol is testable without a real plugin.
+/// Abstracts one IPC generation so the Consumer protocol can be tested in isolation.
 trait AgentEffectRuntime {
     fn invoke(
         &self,
@@ -50,240 +46,142 @@ impl AgentEffectRuntime for PluginRuntime {
     }
 }
 
-/// Converts handshake declarations into host-owned descriptors for one Workspace.
-pub(crate) fn registered_skill_surfaces(
+/// Converts one immutable plugin registration into a host-owned Consumer declaration.
+pub(crate) fn registered_consumer_declaration(
     plugin_id: &PluginId,
     registration: &PluginRegistration,
-) -> Result<Vec<FilesystemSkillSurface>, AgentEffectError> {
-    registration
-        .effect_surfaces
+) -> Result<Option<ConsumerDeclaration>, AgentEffectError> {
+    if registration.effect_resources.is_empty() {
+        return Ok(None);
+    }
+    let consumer = ConsumerIdentity::new(ConsumerKind::agent_plugin(), plugin_id.canonical())
+        .map_err(|error| AgentEffectError::InvalidDeclaration(error.to_string()))?;
+    let materialization = MaterializationContract::skill_directory_v1();
+    let coordination = CoordinationContract::agent_restart_v1();
+    let resources = registration
+        .effect_resources
         .iter()
-        .map(|surface| {
-            let workspace_relative_path = SurfacePath::parse(&surface.workspace_relative_path)
+        .map(|resource| {
+            let relative_path = ResourcePath::parse(&resource.workspace_relative_path)
                 .map_err(|error| AgentEffectError::InvalidDeclaration(error.to_string()))?;
-            let materialization_format =
-                MaterializationFormat::named(surface.materialization_format.clone())
-                    .map_err(|error| AgentEffectError::InvalidDeclaration(error.to_string()))?;
-            if materialization_format != MaterializationFormat::skill_directory_v1() {
+            let format = MaterializationFormat::parse(&resource.materialization_format)
+                .map_err(|error| AgentEffectError::InvalidDeclaration(error.to_string()))?;
+            if format != MaterializationFormat::skill_directory_v1() {
                 return Err(AgentEffectError::InvalidDeclaration(format!(
                     "unsupported Skill materialization format {}",
-                    surface.materialization_format
+                    resource.materialization_format
                 )));
             }
-            let coordination = match surface.coordination {
-                PluginEffectCoordination::Uninterrupted => ConsumerCoordination::Uninterrupted,
-                PluginEffectCoordination::WaitForIdleAndRestart => {
-                    ConsumerCoordination::WaitForIdleAndRestart
+            let coordination = match resource.coordination {
+                PluginEffectCoordination::Uninterrupted => CoordinationRequirement::Uninterrupted,
+                PluginEffectCoordination::QuiesceBeforeMutation => {
+                    CoordinationRequirement::QuiesceBeforeMutation(coordination.clone())
                 }
             };
-            Ok(FilesystemSkillSurface {
-                workspace_relative_path,
-                materialization_format,
-                // The canonical package identity is globally stable; plugins cannot impersonate
-                // another consumer by selecting their own persisted consumer id.
-                consumer: ConsumerId::new(plugin_id.canonical()),
+            Ok(FilesystemResourceTemplate {
+                relative_path,
+                materialization_format: format,
+                accepts: CapabilityRequirement {
+                    effect_protocols: BTreeMap::from([(EffectKind::skill(), 1)]),
+                    materialization_contracts: BTreeSet::from([materialization.capability_key()]),
+                },
                 coordination,
             })
         })
-        .collect()
-}
-
-/// Asks the plugin to wait for all affected Agent instances to become idle and hold a barrier.
-pub(crate) async fn wait_for_idle(
-    runtime: &PluginRuntime,
-    surface_key: &SurfaceKey,
-    workspace_root: &Path,
-    relative_path: &SurfacePath,
-) -> Result<WaitForIdleOutcome, AgentEffectError> {
-    wait_for_idle_with(runtime, surface_key, workspace_root, relative_path).await
-}
-
-/// Restarts every affected Agent instance and releases the barrier for the applied generation.
-pub(crate) async fn restart(
-    runtime: &PluginRuntime,
-    surface_key: &SurfaceKey,
-    workspace_root: &Path,
-    relative_path: &SurfacePath,
-    generation: Generation,
-) -> Result<(), AgentEffectError> {
-    restart_with(
-        runtime,
-        surface_key,
-        workspace_root,
-        relative_path,
-        generation,
-    )
-    .await
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(ConsumerDeclaration {
+        consumer,
+        adapter: ConsumerAdapterIdentity::parse("ora/agent-plugin")
+            .map_err(|error| AgentEffectError::InvalidDeclaration(error.to_string()))?,
+        capabilities: CapabilitySet {
+            effect_protocols: BTreeMap::from([(EffectKind::skill(), 1)]),
+            materialization_contracts: BTreeSet::from([materialization.capability_key()]),
+            coordination_contracts: BTreeSet::from([coordination.capability_key()]),
+            readiness_contracts: BTreeSet::from(["ora/agent-target-ready.v1".to_string()]),
+        },
+        resources,
+    }))
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SurfaceParams<'a> {
-    surface_key: &'a str,
-    workspace_root: &'a Path,
-    relative_path: &'a str,
+struct CoordinationParams<'a> {
+    target_id: &'a str,
+    resource_ids: Vec<&'a str>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RestartParams<'a> {
-    surface_key: &'a str,
-    workspace_root: &'a Path,
-    relative_path: &'a str,
+struct ReadinessParams<'a> {
+    target_id: &'a str,
     generation: u64,
+    consumer_revision_id: &'a str,
+    projection_digest: &'a str,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum WaitState {
-    Ready,
-    WaitingForIdle,
+/// Establishes the plugin-owned safe-to-mutate barrier for the complete Resource set.
+pub(crate) async fn coordinate(
+    runtime: &PluginRuntime,
+    target: &EffectTarget,
+    plan: &CoordinationPlan,
+) -> Result<AdapterReceipt, AgentEffectError> {
+    invoke_coordination(runtime, COORDINATE_METHOD, target, plan).await
 }
 
-#[derive(Deserialize)]
-struct WaitResult {
-    state: WaitState,
+/// Reactivates a plugin Target after every Resource mutation has been verified.
+pub(crate) async fn reactivate(
+    runtime: &PluginRuntime,
+    target: &EffectTarget,
+    plan: &CoordinationPlan,
+) -> Result<AdapterReceipt, AgentEffectError> {
+    invoke_coordination(runtime, REACTIVATE_METHOD, target, plan).await
 }
 
-/// Runs the wait protocol against either the production IPC runtime or a test fake.
-async fn wait_for_idle_with<Runtime: AgentEffectRuntime>(
-    runtime: &Runtime,
-    surface_key: &SurfaceKey,
-    workspace_root: &Path,
-    relative_path: &SurfacePath,
-) -> Result<WaitForIdleOutcome, AgentEffectError> {
-    let params = serde_json::to_value(SurfaceParams {
-        surface_key: surface_key.as_str(),
-        workspace_root,
-        relative_path: relative_path.as_str(),
+/// Obtains exact readiness proof for one immutable Target projection.
+pub(crate) async fn verify_ready(
+    runtime: &PluginRuntime,
+    target: &EffectTarget,
+    projection: &TargetProjection,
+) -> Result<AdapterReceipt, AgentEffectError> {
+    let params = serde_json::to_value(ReadinessParams {
+        target_id: target.identity.as_str(),
+        generation: projection.generation.value(),
+        consumer_revision_id: target.consumer_revision.as_str(),
+        projection_digest: projection.digest.digest().as_str(),
     })
     .map_err(|error| AgentEffectError::Ipc(error.to_string()))?;
-    let value = runtime
-        .invoke(WAIT_FOR_IDLE_METHOD, params)
+    let proof = runtime
+        .invoke(VERIFY_READY_METHOD, params)
         .await
-        .map_err(AgentEffectError::Ipc)?;
-    let result: WaitResult = serde_json::from_value(value)
-        .map_err(|error| AgentEffectError::Ipc(format!("invalid wait result: {error}")))?;
-    Ok(match result.state {
-        WaitState::Ready => WaitForIdleOutcome::Ready,
-        WaitState::WaitingForIdle => WaitForIdleOutcome::WaitingForIdle,
+        .map_err(|error| AgentEffectError::Ipc(error.to_string()))?;
+    Ok(AdapterReceipt {
+        version: 1,
+        payload: proof,
     })
 }
 
-/// Runs the restart protocol against either the production IPC runtime or a test fake.
-async fn restart_with<Runtime: AgentEffectRuntime>(
+/// Invokes either half of the coordination protocol with identical exact Resource identity.
+async fn invoke_coordination<Runtime: AgentEffectRuntime>(
     runtime: &Runtime,
-    surface_key: &SurfaceKey,
-    workspace_root: &Path,
-    relative_path: &SurfacePath,
-    generation: Generation,
-) -> Result<(), AgentEffectError> {
-    let params = serde_json::to_value(RestartParams {
-        surface_key: surface_key.as_str(),
-        workspace_root,
-        relative_path: relative_path.as_str(),
-        generation: generation.value(),
+    method: &str,
+    target: &EffectTarget,
+    plan: &CoordinationPlan,
+) -> Result<AdapterReceipt, AgentEffectError> {
+    let params = serde_json::to_value(CoordinationParams {
+        target_id: target.identity.as_str(),
+        resource_ids: plan
+            .resources
+            .iter()
+            .map(ora_effect::EffectResourceId::as_str)
+            .collect(),
     })
     .map_err(|error| AgentEffectError::Ipc(error.to_string()))?;
-    runtime
-        .invoke(RESTART_METHOD, params)
+    let proof = runtime
+        .invoke(method, params)
         .await
         .map_err(AgentEffectError::Ipc)?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ora_plugin_runtime::PluginEffectSurface;
-    use pretty_assertions::assert_eq;
-    use serde_json::json;
-    use std::sync::{Arc, Mutex, PoisonError};
-
-    #[derive(Clone)]
-    struct FakeRuntime {
-        calls: Arc<Mutex<Vec<(String, Value)>>>,
-        wait_result: Value,
-    }
-
-    impl AgentEffectRuntime for FakeRuntime {
-        async fn invoke(&self, method: &str, params: Value) -> Result<Value, String> {
-            self.calls
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push((method.to_string(), params));
-            if method == WAIT_FOR_IDLE_METHOD {
-                Ok(self.wait_result.clone())
-            } else {
-                Ok(json!({}))
-            }
-        }
-    }
-
-    /// The host derives consumer identity from the package and rejects unsafe locators.
-    #[test]
-    fn maps_registered_locator_to_a_host_owned_surface() {
-        let plugin_id = PluginId::new("official", "codex").expect("plugin id");
-        let registration = PluginRegistration {
-            effect_surfaces: vec![PluginEffectSurface {
-                workspace_relative_path: ".codex/skills".to_string(),
-                materialization_format: "skill_directory.v1".to_string(),
-                coordination: PluginEffectCoordination::WaitForIdleAndRestart,
-            }],
-            ..PluginRegistration::default()
-        };
-
-        assert_eq!(
-            registered_skill_surfaces(&plugin_id, &registration),
-            Ok(vec![FilesystemSkillSurface {
-                workspace_relative_path: SurfacePath::parse(".codex/skills").expect("surface path"),
-                materialization_format: MaterializationFormat::skill_directory_v1(),
-                consumer: ConsumerId::new("official/codex"),
-                coordination: ConsumerCoordination::WaitForIdleAndRestart,
-            }])
-        );
-    }
-
-    /// A fake IPC generation proves waiting is non-destructive and restart carries the generation.
-    #[tokio::test]
-    async fn coordinates_wait_and_restart_without_a_real_agent_plugin() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let runtime = FakeRuntime {
-            calls: calls.clone(),
-            wait_result: json!({ "state": "waiting_for_idle" }),
-        };
-        let key = SurfaceKey::new("surface-1");
-        let path = SurfacePath::parse(".codex/skills").expect("surface path");
-        let root = Path::new("/workspace");
-
-        assert_eq!(
-            wait_for_idle_with(&runtime, &key, root, &path).await,
-            Ok(WaitForIdleOutcome::WaitingForIdle)
-        );
-        restart_with(&runtime, &key, root, &path, Generation::new(7))
-            .await
-            .expect("restart");
-        assert_eq!(
-            calls.lock().unwrap_or_else(PoisonError::into_inner).clone(),
-            vec![
-                (
-                    WAIT_FOR_IDLE_METHOD.to_string(),
-                    json!({
-                        "surfaceKey": "surface-1",
-                        "workspaceRoot": "/workspace",
-                        "relativePath": ".codex/skills"
-                    })
-                ),
-                (
-                    RESTART_METHOD.to_string(),
-                    json!({
-                        "surfaceKey": "surface-1",
-                        "workspaceRoot": "/workspace",
-                        "relativePath": ".codex/skills",
-                        "generation": 7
-                    })
-                )
-            ]
-        );
-    }
+    Ok(AdapterReceipt {
+        version: 1,
+        payload: proof,
+    })
 }

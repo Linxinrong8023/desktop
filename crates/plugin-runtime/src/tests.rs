@@ -90,7 +90,7 @@ async fn accepts_initial_registration() {
         PluginRegistration {
             methods: HashSet::from(["example.echo".to_string()]),
             emits: HashSet::from(["example.tick".to_string()]),
-            effect_surfaces: Vec::new(),
+            effect_resources: Vec::new(),
         }
     );
     assert_eq!(*inner.status_tx.borrow(), RuntimeStatus::Ready);
@@ -117,15 +117,15 @@ async fn defaults_missing_emits_to_an_empty_whitelist() {
         PluginRegistration {
             methods: HashSet::from(["example.echo".to_string()]),
             emits: HashSet::new(),
-            effect_surfaces: Vec::new(),
+            effect_resources: Vec::new(),
         }
     );
 }
 
 /// Effect declarations retain only Workspace-relative locators and typed coordination policy.
 #[tokio::test]
-async fn parses_effect_surface_registration() {
-    use crate::{PluginEffectCoordination, PluginEffectSurface};
+async fn parses_effect_resource_registration() {
+    use crate::{PluginEffectCoordination, PluginEffectResource};
 
     let (inner, _inbound) = test_inner();
     handle_message(
@@ -134,24 +134,24 @@ async fn parses_effect_surface_registration() {
             "jsonrpc": "2.0",
             "method": "ora/register",
             "params": {
-                "methods": ["effect/waitForIdle", "effect/restart"],
-                "effectSurfaces": [{
+                "methods": ["effect/coordinate", "effect/reactivate", "effect/verifyReady"],
+                "effectResources": [{
                     "workspaceRelativePath": ".agents/skills",
                     "materializationFormat": "skill_directory.v1",
-                    "coordination": "wait_for_idle_and_restart"
+                    "coordination": "quiesce_before_mutation"
                 }]
             },
         }),
     )
     .await
-    .expect("register surface");
+    .expect("register Effect Resource");
 
     assert_eq!(
-        inner.registration.read().await.effect_surfaces,
-        vec![PluginEffectSurface {
+        inner.registration.read().await.effect_resources,
+        vec![PluginEffectResource {
             workspace_relative_path: ".agents/skills".to_string(),
             materialization_format: "skill_directory.v1".to_string(),
-            coordination: PluginEffectCoordination::WaitForIdleAndRestart,
+            coordination: PluginEffectCoordination::QuiesceBeforeMutation,
         }]
     );
 }
@@ -401,7 +401,7 @@ async fn ignores_a_late_response_to_an_abandoned_request() {
         registration: RwLock::new(PluginRegistration {
             methods: HashSet::from(["example.echo".to_string()]),
             emits: HashSet::new(),
-            effect_surfaces: Vec::new(),
+            effect_resources: Vec::new(),
         }),
         status_tx,
         exited_tx,

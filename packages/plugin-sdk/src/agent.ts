@@ -1,6 +1,6 @@
 import {
   createPlugin,
-  type EffectSurfaceDeclaration,
+  type EffectResourceDeclaration,
   type Plugin,
   PluginMethodError,
 } from "./plugin.ts";
@@ -10,8 +10,9 @@ const AGENT_START = "agent/start";
 const AGENT_STOP = "agent/stop";
 const AGENT_LIST_MODELS = "agent/listModels";
 const AGENT_ACP = "agent/acp";
-const EFFECT_WAIT_FOR_IDLE = "effect/waitForIdle";
-const EFFECT_RESTART = "effect/restart";
+const EFFECT_COORDINATE = "effect/coordinate";
+const EFFECT_REACTIVATE = "effect/reactivate";
+const EFFECT_VERIFY_READY = "effect/verifyReady";
 
 /**
  * The error code that tells Ora the agent CLI is absent from this machine.
@@ -39,28 +40,32 @@ export interface AgentStartContext {
 /** Sends one ACP frame from the agent back to the host. */
 export type AcpSender = (frame: JsonValue) => Promise<void>;
 
-/** Stable locator Ora sends when coordinating a registered Agent Effect surface. */
-export interface AgentEffectContext {
-  surfaceKey: string;
-  workspaceRoot: string;
-  relativePath: string;
+/** Exact Target and Resource set Ora sends around one mutation attempt. */
+export interface AgentEffectCoordinationContext {
+  targetId: string;
+  resourceIds: string[];
 }
 
-/** Adds the generation whose materialized bytes the restarted instances must observe. */
-export interface AgentEffectRestartContext extends AgentEffectContext {
+/** Exact immutable projection whose readiness the Agent must confirm. */
+export interface AgentEffectReadinessContext {
+  targetId: string;
   generation: number;
+  consumerRevisionId: string;
+  projectionDigest: string;
 }
 
-/** Result of establishing the Agent plugin's idempotent surface mutation barrier. */
-export type AgentEffectIdleState = "ready" | "waiting_for_idle";
-
-/** Defines Agent-owned Skill surfaces and the runtime barrier around their mutation. */
+/** Defines Agent-consumed Resources and its coordination/readiness adapter methods. */
 export interface AgentEffectDefinition {
-  surfaces: readonly EffectSurfaceDeclaration[];
-  waitForIdle(
-    context: AgentEffectContext,
-  ): AgentEffectIdleState | Promise<AgentEffectIdleState>;
-  restart(context: AgentEffectRestartContext): void | Promise<void>;
+  resources: readonly EffectResourceDeclaration[];
+  coordinate(
+    context: AgentEffectCoordinationContext,
+  ): JsonValue | Promise<JsonValue>;
+  reactivate(
+    context: AgentEffectCoordinationContext,
+  ): JsonValue | Promise<JsonValue>;
+  verifyReady(
+    context: AgentEffectReadinessContext,
+  ): JsonValue | Promise<JsonValue>;
 }
 
 /** Implements the agent contract Ora requires of every `kind: "agent"` plugin. */
@@ -77,7 +82,7 @@ export interface AgentDefinition {
   listModels(): AgentModel[] | Promise<AgentModel[]>;
   /** Receives one ACP frame the host is forwarding to the agent. */
   onAcp(frame: JsonValue): void | Promise<void>;
-  /** Declares Skill surfaces this Agent consumes and coordinates their safe replacement. */
+  /** Declares Resources this Agent consumes and the adapter proving safe convergence. */
   effects?: AgentEffectDefinition;
 }
 
@@ -113,55 +118,65 @@ export function defineAgent(definition: AgentDefinition): Plugin {
   plugin.onNotification(AGENT_ACP, (params) => definition.onAcp(params));
   const effects = definition.effects;
   if (effects !== undefined) {
-    for (const surface of effects.surfaces) {
-      plugin.declareEffectSurface(surface);
+    for (const resource of effects.resources) {
+      plugin.declareEffectResource(resource);
     }
-    plugin.registerMethod(EFFECT_WAIT_FOR_IDLE, async (input) => ({
-      state: await effects.waitForIdle(parseEffectContext(input)),
-    }));
-    plugin.registerMethod(EFFECT_RESTART, async (input) => {
-      await effects.restart(parseRestartContext(input));
-      return {};
-    });
+    plugin.registerMethod(EFFECT_COORDINATE, (input) =>
+      effects.coordinate(parseCoordinationContext(input))
+    );
+    plugin.registerMethod(EFFECT_REACTIVATE, (input) =>
+      effects.reactivate(parseCoordinationContext(input))
+    );
+    plugin.registerMethod(EFFECT_VERIFY_READY, (input) =>
+      effects.verifyReady(parseReadinessContext(input))
+    );
   }
 
   return plugin;
 }
 
-/** Validates the stable surface identity and host-resolved filesystem locator. */
-function parseEffectContext(input: JsonValue): AgentEffectContext {
+/** Validates the exact generic identities used by Consumer coordination. */
+function parseCoordinationContext(
+  input: JsonValue,
+): AgentEffectCoordinationContext {
   if (
     typeof input !== "object" || input === null || Array.isArray(input) ||
-    typeof input.surfaceKey !== "string" ||
-    typeof input.workspaceRoot !== "string" ||
-    typeof input.relativePath !== "string"
+    typeof input.targetId !== "string" ||
+    !Array.isArray(input.resourceIds) ||
+    !input.resourceIds.every((resource) => typeof resource === "string")
   ) {
     throw new PluginMethodError(
       -32602,
-      "Effect coordination requires surfaceKey, workspaceRoot, and relativePath",
+      "Effect coordination requires targetId and resourceIds",
     );
   }
   return {
-    surfaceKey: input.surfaceKey,
-    workspaceRoot: input.workspaceRoot,
-    relativePath: input.relativePath,
+    targetId: input.targetId,
+    resourceIds: input.resourceIds as string[],
   };
 }
 
-/** Rejects fractional or negative generations before plugin-owned restart logic runs. */
-function parseRestartContext(input: JsonValue): AgentEffectRestartContext {
-  const context = parseEffectContext(input);
+/** Validates exact Consumer Revision and projection identity before readiness logic runs. */
+function parseReadinessContext(input: JsonValue): AgentEffectReadinessContext {
   if (
     typeof input !== "object" || input === null || Array.isArray(input) ||
+    typeof input.targetId !== "string" ||
     typeof input.generation !== "number" ||
-    !Number.isSafeInteger(input.generation) || input.generation < 0
+    !Number.isSafeInteger(input.generation) || input.generation < 0 ||
+    typeof input.consumerRevisionId !== "string" ||
+    typeof input.projectionDigest !== "string"
   ) {
     throw new PluginMethodError(
       -32602,
-      "effect/restart requires a non-negative integer generation",
+      "effect/verifyReady requires exact Target projection identity",
     );
   }
-  return { ...context, generation: input.generation };
+  return {
+    targetId: input.targetId,
+    generation: input.generation,
+    consumerRevisionId: input.consumerRevisionId,
+    projectionDigest: input.projectionDigest,
+  };
 }
 
 /** Validates the host's start parameters before the agent implementation sees them. */

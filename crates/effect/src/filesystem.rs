@@ -1,14 +1,18 @@
 use crate::{
-    AppliedFingerprint, DesiredSkillState, Digest, EffectOperation, ManagedIdentity,
-    OperationState, SkillName, SkillSource, SkillState, SourceSnapshot, SurfaceKey, SurfacePath,
-    TargetObservation,
+    AdapterReceipt, ApplyReceipt, ArtifactId, ArtifactRole, ArtifactState, CleanupReceipt,
+    EffectMutation, EffectOperation, EffectOperationId, EffectOperationIntent, EffectResource,
+    EffectResourceId, ExactPlannedState, ExactPreviousState, FilesystemOperationPlan, Fingerprint,
+    LocalTimestamp, ManagedIdentity, NativeResourceIdentity, OperationArtifact, PlannedMutation,
+    PreparedOperation, ReconcileAttemptId, ResourceAdapter, ResourceAdapterError,
+    ResourceObservation, ResourceOperationPreparer, VerificationReceipt, VersionedAdapterPlan,
+    VersionedMaterializationInput, VersionedResourceDescriptor, VersionedResourceLocator,
 };
-use ora_domain::{WorkspaceId, validate_skill_name};
 use ora_skill_package::{Limits, parse_manifest};
 use ora_utils::directory::{
     DirectoryFingerprint, DirectoryTreeError, copy_directory, fingerprint_directory,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs;
@@ -20,182 +24,132 @@ pub const MARKER_FILE_NAME: &str = ".ora-managed.json";
 const OPERATIONS_DIR_NAME: &str = ".ora-effect-operations";
 const MARKER_SCHEMA_VERSION: u32 = 1;
 
-/// On-disk half of the dual ownership proof for one managed Skill directory.
+/// On-disk ownership claim that is useful only when matched with the Resource ledger.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ManagedSkillMarker {
+pub struct ManagedItemMarker {
     pub schema_version: u32,
-    pub workspace_id: WorkspaceId,
-    pub surface_key: SurfaceKey,
+    pub resource: EffectResourceId,
     pub managed_identity: ManagedIdentity,
 }
 
-impl ManagedSkillMarker {
-    /// Creates the current marker schema for a newly staged managed directory.
-    pub fn current(
-        workspace_id: WorkspaceId,
-        surface_key: SurfaceKey,
-        managed_identity: ManagedIdentity,
-    ) -> Self {
+impl ManagedItemMarker {
+    /// Creates the current marker schema for a newly staged Managed Item.
+    pub fn current(resource: EffectResourceId, managed_identity: ManagedIdentity) -> Self {
         Self {
             schema_version: MARKER_SCHEMA_VERSION,
-            workspace_id,
-            surface_key,
+            resource,
             managed_identity,
         }
     }
 }
 
-/// A scan issue that is not disguised as a legal preserved Skill.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ScanDiagnostic {
-    pub entry_name: String,
-    pub message: String,
-    pub related_locator: Option<String>,
-}
+/// Local filesystem implementation of the versioned directory Resource contract.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FilesystemResourceAdapter;
 
-/// Complete live observation used for one planner pass.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SurfaceScan {
-    pub targets: BTreeMap<String, TargetObservation>,
-    pub preserved: Vec<SkillState>,
-    pub diagnostics: Vec<ScanDiagnostic>,
-}
+impl FilesystemResourceAdapter {
+    /// Computes the exact content fingerprint used by immutable Skill definitions and observations.
+    pub fn package_fingerprint(path: &Path) -> Result<Fingerprint, FilesystemEffectError> {
+        fingerprint(path)
+    }
 
-/// Exact, journal-recorded staging and backup paths for one operation.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct OperationPaths {
-    pub root: PathBuf,
-    pub staging: PathBuf,
-    pub backup: PathBuf,
-}
-
-impl OperationPaths {
-    /// Derives controlled paths under this surface from an opaque operation identity.
-    pub fn for_operation(surface_root: &Path, operation_id: &crate::EffectOperationId) -> Self {
-        let root = surface_root
+    /// Converts a pure mutation proposal into immutable adapter intent and artifact authority.
+    pub fn prepare_operation(
+        &self,
+        resource: &EffectResource,
+        attempt: ReconcileAttemptId,
+        generation: crate::Generation,
+        sequence: u32,
+        mutation: PlannedMutation,
+        prepared_at: LocalTimestamp,
+    ) -> Result<PreparedOperation, FilesystemEffectError> {
+        let resource_root = resource_root(resource)?;
+        let VersionedResourceDescriptor::FilesystemDirectoryV1(descriptor) = &resource.descriptor;
+        let operation_id = EffectOperationId::random();
+        let operation_root = resource_root
             .join(OPERATIONS_DIR_NAME)
             .join(operation_id.as_str());
-        Self {
-            staging: root.join("staging"),
-            backup: root.join("backup"),
-            root,
-        }
-    }
-}
-
-/// Deterministic action selected by comparing current disk state to a durable operation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RecoveryDecision {
-    RetryApply,
-    Finalize,
-    RecoveryRequired,
-}
-
-/// Filesystem adapter for one local Workspace and consumer-declared surface.
-#[derive(Clone, Debug)]
-pub struct FilesystemSurfaceAdapter {
-    workspace_id: WorkspaceId,
-    workspace_root: PathBuf,
-    surface_key: SurfaceKey,
-    surface_path: SurfacePath,
-}
-
-impl FilesystemSurfaceAdapter {
-    /// Captures a descriptor without creating a missing Workspace root.
-    pub fn new(
-        workspace_id: WorkspaceId,
-        workspace_root: PathBuf,
-        surface_key: SurfaceKey,
-        surface_path: SurfacePath,
-    ) -> Self {
-        Self {
-            workspace_id,
-            workspace_root,
-            surface_key,
-            surface_path,
-        }
-    }
-
-    /// Returns the descriptor-resolved surface root without string path concatenation.
-    pub fn surface_root(&self) -> PathBuf {
-        self.workspace_root.join(self.surface_path.to_path_buf())
-    }
-
-    /// Creates a missing surface path only after proving every existing ancestor is an ordinary
-    /// directory inside the existing Workspace.
-    pub fn ensure_surface_root(&self) -> Result<PathBuf, FilesystemEffectError> {
-        let root_metadata = fs::symlink_metadata(&self.workspace_root).map_err(|source| {
-            FilesystemEffectError::WorkspaceUnavailable {
-                path: self.workspace_root.clone(),
-                source,
-            }
-        })?;
-        if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
-            return Err(FilesystemEffectError::UnsafeSurfacePath {
-                path: self.workspace_root.clone(),
+        let staging_path = operation_root.join("staging");
+        let backup_path = operation_root.join("backup");
+        let source_root = mutation.input.as_ref().map(
+            |VersionedMaterializationInput::SkillDirectoryV1(input)| input.package_root.clone(),
+        );
+        let payload = VersionedAdapterPlan::FilesystemDirectoryV1(FilesystemOperationPlan {
+            workspace_root: descriptor.workspace_root.clone(),
+            resource_relative_path: descriptor.relative_path.clone(),
+            resource_root,
+            source_root,
+            staging_path: staging_path.clone(),
+            backup_path: backup_path.clone(),
+        });
+        let mut artifacts = Vec::new();
+        if let ExactPlannedState::Present { fingerprint, .. } = &mutation.planned {
+            artifacts.push(OperationArtifact {
+                identity: ArtifactId::random(),
+                operation: operation_id.clone(),
+                role: ArtifactRole::Staging,
+                locator: VersionedResourceLocator::FilesystemPathV1(staging_path),
+                expected_fingerprint: fingerprint.clone(),
+                state: ArtifactState::Reserved,
             });
         }
-        let canonical_workspace = self.workspace_root.canonicalize().map_err(|source| {
-            FilesystemEffectError::WorkspaceUnavailable {
-                path: self.workspace_root.clone(),
-                source,
-            }
-        })?;
-        let mut current = canonical_workspace.clone();
-        for component in self.surface_path.to_path_buf().components() {
-            let std::path::Component::Normal(segment) = component else {
-                return Err(FilesystemEffectError::UnsafeSurfacePath { path: current });
-            };
-            current = current.join(segment);
-            match fs::symlink_metadata(&current) {
-                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                    return Err(FilesystemEffectError::UnsafeSurfacePath { path: current });
-                }
-                Ok(_) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    fs::create_dir(&current).map_err(|source| FilesystemEffectError::Io {
-                        path: current.clone(),
-                        source,
-                    })?;
-                }
-                Err(source) => {
-                    return Err(FilesystemEffectError::Io {
-                        path: current,
-                        source,
-                    });
-                }
-            }
-            let canonical = current
-                .canonicalize()
-                .map_err(|source| FilesystemEffectError::Io {
-                    path: current.clone(),
-                    source,
-                })?;
-            if !canonical.starts_with(&canonical_workspace) {
-                return Err(FilesystemEffectError::UnsafeSurfacePath { path: current });
-            }
-            current = canonical;
+        if let ExactPreviousState::Present { fingerprint, .. } = &mutation.expected {
+            artifacts.push(OperationArtifact {
+                identity: ArtifactId::random(),
+                operation: operation_id.clone(),
+                role: ArtifactRole::Backup,
+                locator: VersionedResourceLocator::FilesystemPathV1(backup_path),
+                expected_fingerprint: fingerprint.clone(),
+                state: ArtifactState::Reserved,
+            });
         }
-        Ok(current)
+        Ok(PreparedOperation {
+            operation: EffectOperation::prepare(
+                operation_id,
+                EffectOperationIntent {
+                    attempt,
+                    resource: resource.identity.clone(),
+                    generation,
+                    sequence,
+                    mutation: mutation.mutation,
+                    expected: mutation.expected,
+                    planned: mutation.planned,
+                    payload,
+                },
+                prepared_at,
+            )?,
+            artifacts,
+        })
     }
 
-    /// Scans all legal Skill directories and keeps unrelated diagnostics non-blocking.
-    pub fn scan(&self) -> Result<SurfaceScan, FilesystemEffectError> {
-        let surface_root = self.ensure_surface_root()?;
-        let mut scan = SurfaceScan::default();
-        let entries = fs::read_dir(&surface_root).map_err(|source| FilesystemEffectError::Io {
-            path: surface_root.clone(),
+    /// Observes a filesystem directory without creating a missing Resource as a read side effect.
+    fn observe_resource(
+        self,
+        resource: &EffectResource,
+    ) -> Result<ResourceObservation, FilesystemEffectError> {
+        let root = resolve_resource_root(resource, RootAccess::Observe)?;
+        let Some(root) = root else {
+            return Ok(ResourceObservation {
+                resource: resource.identity.clone(),
+                items: BTreeMap::new(),
+                fingerprint: Fingerprint::sha256(&[]),
+            });
+        };
+        let mut items = BTreeMap::new();
+        for entry in fs::read_dir(&root).map_err(|source| FilesystemEffectError::Io {
+            path: root.clone(),
             source,
-        })?;
-        for entry in entries {
+        })? {
             let entry = entry.map_err(|source| FilesystemEffectError::Io {
-                path: surface_root.clone(),
+                path: root.clone(),
                 source,
             })?;
             let entry_name = entry.file_name().to_string_lossy().into_owned();
             if entry_name == OPERATIONS_DIR_NAME {
                 continue;
             }
+            let native_identity = NativeResourceIdentity::parse(entry_name.clone())
+                .map_err(|_| FilesystemEffectError::InvalidNativeIdentity(entry_name))?;
             let path = entry.path();
             let metadata =
                 fs::symlink_metadata(&path).map_err(|source| FilesystemEffectError::Io {
@@ -203,299 +157,636 @@ impl FilesystemSurfaceAdapter {
                     source,
                 })?;
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                scan.diagnostics.push(ScanDiagnostic {
-                    entry_name,
-                    message: "surface entry is not an ordinary Skill directory".to_string(),
-                    related_locator: None,
+                return Err(FilesystemEffectError::UnsupportedResourceEntry { path });
+            }
+            let fingerprint = fingerprint(&path)?;
+            let ownership_evidence = read_marker(&path)
+                .filter(|marker| {
+                    marker.schema_version == MARKER_SCHEMA_VERSION
+                        && marker.resource == resource.identity
+                })
+                .map_or(crate::OwnershipEvidence::NoOwnershipEvidence, |marker| {
+                    crate::OwnershipEvidence::Claims(marker.managed_identity)
                 });
-                continue;
-            }
-            let skill_name = match SkillName::parse(entry_name.clone()) {
-                Ok(name) => name,
-                Err(_) => {
-                    scan.diagnostics.push(ScanDiagnostic {
-                        entry_name,
-                        message: "surface directory name is not a valid Skill name".to_string(),
-                        related_locator: None,
-                    });
-                    continue;
-                }
-            };
-            let locator = skill_name.canonical().to_string();
-            match self.scan_skill_directory(&path, skill_name) {
-                Ok((_state, Some(marker), fingerprint))
-                    if marker.schema_version == MARKER_SCHEMA_VERSION
-                        && marker.workspace_id == self.workspace_id
-                        && marker.surface_key == self.surface_key =>
-                {
-                    scan.targets.insert(
-                        locator,
-                        TargetObservation::Managed {
-                            marker_identity: marker.managed_identity,
-                            fingerprint,
-                        },
-                    );
-                }
-                Ok((state, _, _)) => {
-                    scan.targets
-                        .insert(locator.clone(), TargetObservation::Preserved);
-                    scan.preserved.push(SkillState {
-                        source: SkillSource::Preserved {
-                            workspace_id: self.workspace_id.clone(),
-                        },
-                        ..state
-                    });
-                }
-                Err(error) => {
-                    scan.targets.insert(
-                        locator.clone(),
-                        TargetObservation::Invalid {
-                            message: error.safe_message(),
-                        },
-                    );
-                    scan.diagnostics.push(ScanDiagnostic {
-                        entry_name,
-                        message: error.safe_message(),
-                        related_locator: Some(locator),
-                    });
-                }
-            }
+            items.insert(
+                native_identity.clone(),
+                crate::ObservedItem {
+                    native_identity,
+                    fingerprint,
+                    ownership_evidence,
+                },
+            );
         }
-        Ok(scan)
-    }
-
-    /// Stages a complete validated source package and writes ownership metadata separately.
-    pub fn stage(
-        &self,
-        snapshot: &SourceSnapshot,
-        managed_identity: &ManagedIdentity,
-        paths: &OperationPaths,
-    ) -> Result<AppliedFingerprint, FilesystemEffectError> {
-        fs::create_dir_all(&paths.root).map_err(|source| FilesystemEffectError::Io {
-            path: paths.root.clone(),
-            source,
-        })?;
-        if paths.staging.exists() {
-            validate_staged_state(&paths.staging, &snapshot.state)?;
-            return fingerprint(&paths.staging);
-        }
-        copy_directory(
-            &snapshot.package_root,
-            &paths.staging,
-            &[OsStr::new(MARKER_FILE_NAME)],
-        )?;
-        validate_staged_state(&paths.staging, &snapshot.state)?;
-        let marker = ManagedSkillMarker::current(
-            self.workspace_id.clone(),
-            self.surface_key.clone(),
-            managed_identity.clone(),
-        );
-        let marker_bytes =
-            serde_json::to_vec(&marker).map_err(FilesystemEffectError::MarkerJson)?;
-        fs::write(paths.staging.join(MARKER_FILE_NAME), marker_bytes).map_err(|source| {
-            FilesystemEffectError::Io {
-                path: paths.staging.join(MARKER_FILE_NAME),
-                source,
-            }
-        })?;
-        fingerprint(&paths.staging)
-    }
-
-    /// Computes the target fingerprint before reserving or creating recovery artifacts.
-    pub fn planned_fingerprint(
-        &self,
-        snapshot: &SourceSnapshot,
-    ) -> Result<AppliedFingerprint, FilesystemEffectError> {
-        validate_staged_state(&snapshot.package_root, &snapshot.state)?;
-        fingerprint(&snapshot.package_root)
-    }
-
-    /// Applies a staged create only when the target locator is still absent.
-    pub fn apply_create(
-        &self,
-        target_name: &SkillName,
-        paths: &OperationPaths,
-    ) -> Result<(), FilesystemEffectError> {
-        let target = self.surface_root().join(target_name.as_str());
-        if target.exists() {
-            return Err(FilesystemEffectError::TargetOccupied { path: target });
-        }
-        fs::rename(&paths.staging, &target).map_err(|source| FilesystemEffectError::Io {
-            path: target,
-            source,
+        let summary = serde_json::to_vec(&items).map_err(FilesystemEffectError::MarkerJson)?;
+        Ok(ResourceObservation {
+            resource: resource.identity.clone(),
+            items,
+            fingerprint: Fingerprint::sha256(&summary),
         })
     }
 
-    /// Atomically swaps a staged directory while retaining the previous tree for recovery.
-    pub fn apply_swap(
-        &self,
-        previous_name: &SkillName,
-        target_name: &SkillName,
-        paths: &OperationPaths,
-    ) -> Result<(), FilesystemEffectError> {
-        let previous = self.surface_root().join(previous_name.as_str());
-        let target = self.surface_root().join(target_name.as_str());
-        if previous.exists() {
-            fs::rename(&previous, &paths.backup).map_err(|source| FilesystemEffectError::Io {
-                path: previous.clone(),
-                source,
-            })?;
+    /// Applies a journal only when disk equals its exact expected state or already-planned state.
+    fn apply_operation(
+        self,
+        operation: &EffectOperation,
+    ) -> Result<ApplyReceipt, FilesystemEffectError> {
+        let VersionedAdapterPlan::FilesystemDirectoryV1(plan) = operation.payload();
+        ensure_operation_paths_are_scoped(plan)?;
+        let resolved_root = resolve_declared_root(
+            &plan.workspace_root,
+            &plan.resource_relative_path,
+            RootAccess::Mutate,
+        )?
+        .ok_or(FilesystemEffectError::UnsafeOperationPath)?;
+        if resolved_root != plan.resource_root {
+            return Err(FilesystemEffectError::UnsafeOperationPath);
         }
-        if target != previous && target.exists() {
-            restore_backup_after_failed_swap(&paths.backup, &previous);
-            return Err(FilesystemEffectError::TargetOccupied { path: target });
+        if state_matches_planned(operation, plan)? {
+            return Ok(apply_receipt(operation));
         }
-        if let Err(source) = fs::rename(&paths.staging, &target) {
-            restore_backup_after_failed_swap(&paths.backup, &previous);
-            return Err(FilesystemEffectError::Io {
-                path: target,
-                source,
+        if !state_matches_expected(operation, plan)? {
+            return Err(FilesystemEffectError::RecoveryRequired {
+                operation: operation.identity().clone(),
             });
         }
-        Ok(())
+
+        match operation.mutation() {
+            EffectMutation::Create => {
+                stage(operation, plan)?;
+                let target = planned_path(operation, plan)?;
+                if target.exists() {
+                    return Err(FilesystemEffectError::TargetOccupied { path: target });
+                }
+                fs::rename(&plan.staging_path, &target).map_err(|source| {
+                    FilesystemEffectError::Io {
+                        path: target,
+                        source,
+                    }
+                })?;
+            }
+            EffectMutation::Update | EffectMutation::Replace => {
+                stage(operation, plan)?;
+                let previous = expected_path(operation, plan)?;
+                let target = planned_path(operation, plan)?;
+                fs::create_dir_all(
+                    plan.backup_path
+                        .parent()
+                        .ok_or(FilesystemEffectError::UnsafeOperationPath)?,
+                )
+                .map_err(|source| FilesystemEffectError::Io {
+                    path: plan.backup_path.clone(),
+                    source,
+                })?;
+                fs::rename(&previous, &plan.backup_path).map_err(|source| {
+                    FilesystemEffectError::Io {
+                        path: previous.clone(),
+                        source,
+                    }
+                })?;
+                if target != previous && target.exists() {
+                    restore_backup(&plan.backup_path, &previous);
+                    return Err(FilesystemEffectError::TargetOccupied { path: target });
+                }
+                if let Err(source) = fs::rename(&plan.staging_path, &target) {
+                    restore_backup(&plan.backup_path, &previous);
+                    return Err(FilesystemEffectError::Io {
+                        path: target,
+                        source,
+                    });
+                }
+            }
+            EffectMutation::Delete => {
+                let previous = expected_path(operation, plan)?;
+                fs::create_dir_all(
+                    plan.backup_path
+                        .parent()
+                        .ok_or(FilesystemEffectError::UnsafeOperationPath)?,
+                )
+                .map_err(|source| FilesystemEffectError::Io {
+                    path: plan.backup_path.clone(),
+                    source,
+                })?;
+                fs::rename(&previous, &plan.backup_path).map_err(|source| {
+                    FilesystemEffectError::Io {
+                        path: previous,
+                        source,
+                    }
+                })?;
+            }
+        }
+        Ok(apply_receipt(operation))
     }
 
-    /// Moves an owned target to its exact journaled backup instead of deleting in place.
-    pub fn apply_delete(
-        &self,
-        target_name: &SkillName,
-        paths: &OperationPaths,
-    ) -> Result<(), FilesystemEffectError> {
-        let target = self.surface_root().join(target_name.as_str());
-        if !target.exists() {
-            return Ok(());
+    /// Verifies exact planned state and never treats a merely similar directory as completion.
+    fn verify_operation(
+        self,
+        operation: &EffectOperation,
+    ) -> Result<VerificationReceipt, FilesystemEffectError> {
+        let VersionedAdapterPlan::FilesystemDirectoryV1(plan) = operation.payload();
+        if !state_matches_planned(operation, plan)? {
+            return Err(FilesystemEffectError::VerificationFailed {
+                operation: operation.identity().clone(),
+            });
         }
-        fs::create_dir_all(&paths.root).map_err(|source| FilesystemEffectError::Io {
-            path: paths.root.clone(),
-            source,
-        })?;
-        fs::rename(&target, &paths.backup).map_err(|source| FilesystemEffectError::Io {
-            path: target,
-            source,
+        Ok(VerificationReceipt {
+            operation: operation.identity().clone(),
+            proof: AdapterReceipt {
+                version: 1,
+                payload: json!({ "state": "planned" }),
+            },
         })
     }
 
-    /// Removes only the operation directory named by its durable journal after finalization.
-    pub fn cleanup_operation(&self, paths: &OperationPaths) -> Result<(), FilesystemEffectError> {
-        if paths.root.exists() {
-            fs::remove_dir_all(&paths.root).map_err(|source| FilesystemEffectError::Io {
-                path: paths.root.clone(),
+    /// Cleans only the exact path/fingerprint pair granted by durable Artifact authority.
+    fn cleanup_artifact(
+        self,
+        artifact: &OperationArtifact,
+    ) -> Result<CleanupReceipt, FilesystemEffectError> {
+        let VersionedResourceLocator::FilesystemPathV1(path) = &artifact.locator;
+        if path.exists() {
+            if fingerprint(path)? != artifact.expected_fingerprint {
+                return Err(FilesystemEffectError::ArtifactFingerprintMismatch {
+                    artifact: artifact.identity.clone(),
+                });
+            }
+            fs::remove_dir_all(path).map_err(|source| FilesystemEffectError::Io {
+                path: path.clone(),
                 source,
             })?;
         }
-        Ok(())
+        Ok(CleanupReceipt {
+            artifact: artifact.identity.clone(),
+            proof: AdapterReceipt {
+                version: 1,
+                payload: json!({ "state": "absent" }),
+            },
+        })
     }
+}
 
-    /// Reads current target identity for recovery without trusting a watcher payload.
-    pub fn operation_state(
+impl ResourceAdapter for FilesystemResourceAdapter {
+    fn observe(
         &self,
-        target_name: &SkillName,
-    ) -> Result<OperationState, FilesystemEffectError> {
-        let target = self.surface_root().join(target_name.as_str());
-        if !target.exists() {
-            return Ok(OperationState::Missing);
-        }
-        Ok(OperationState::Present(fingerprint(&target)?))
+        resource: &EffectResource,
+    ) -> Result<ResourceObservation, ResourceAdapterError> {
+        (*self)
+            .observe_resource(resource)
+            .map_err(ResourceAdapterError::new)
     }
 
-    /// Selects the only safe automatic recovery action for a prepared or applied operation.
-    pub fn recovery_decision(
+    fn apply(&self, operation: &EffectOperation) -> Result<ApplyReceipt, ResourceAdapterError> {
+        (*self)
+            .apply_operation(operation)
+            .map_err(ResourceAdapterError::new)
+    }
+
+    fn verify(
         &self,
         operation: &EffectOperation,
-    ) -> Result<RecoveryDecision, FilesystemEffectError> {
-        let current = self.operation_state(&operation.target_name)?;
-        if current == operation.previous_state {
-            Ok(RecoveryDecision::RetryApply)
-        } else if current == operation.planned_state {
-            Ok(RecoveryDecision::Finalize)
-        } else {
-            Ok(RecoveryDecision::RecoveryRequired)
-        }
+    ) -> Result<VerificationReceipt, ResourceAdapterError> {
+        (*self)
+            .verify_operation(operation)
+            .map_err(ResourceAdapterError::new)
     }
 
-    /// Returns a safe message while keeping absolute paths and source contents out of status.
-    fn scan_skill_directory(
+    fn cleanup(
         &self,
-        path: &Path,
-        directory_name: SkillName,
-    ) -> Result<(SkillState, Option<ManagedSkillMarker>, AppliedFingerprint), FilesystemEffectError>
-    {
-        let manifest_path = path.join("SKILL.md");
-        let manifest_bytes =
-            fs::read(&manifest_path).map_err(|source| FilesystemEffectError::Io {
-                path: manifest_path,
-                source,
-            })?;
-        let parsed = parse_manifest(&manifest_bytes, Limits::default().max_manifest_bytes)
-            .map_err(|_| FilesystemEffectError::InvalidSkillManifest)?;
-        if parsed.name != directory_name.as_str() || validate_skill_name(&parsed.name).is_err() {
-            return Err(FilesystemEffectError::ManifestNameMismatch);
+        artifact: &OperationArtifact,
+    ) -> Result<CleanupReceipt, ResourceAdapterError> {
+        (*self)
+            .cleanup_artifact(artifact)
+            .map_err(ResourceAdapterError::new)
+    }
+}
+
+impl ResourceOperationPreparer for FilesystemResourceAdapter {
+    fn prepare_operation(
+        &self,
+        resource: &EffectResource,
+        attempt: ReconcileAttemptId,
+        generation: crate::Generation,
+        sequence: u32,
+        mutation: PlannedMutation,
+        prepared_at: LocalTimestamp,
+    ) -> Result<PreparedOperation, ResourceAdapterError> {
+        FilesystemResourceAdapter::prepare_operation(
+            self,
+            resource,
+            attempt,
+            generation,
+            sequence,
+            mutation,
+            prepared_at,
+        )
+        .map_err(ResourceAdapterError::new)
+    }
+}
+
+/// Selects whether resolving a Resource path may create missing safe directories.
+#[derive(Clone, Copy)]
+enum RootAccess {
+    Observe,
+    Prepare,
+    Mutate,
+}
+
+/// Resolves the typed filesystem descriptor and checks the root stays inside its Workspace.
+fn resolve_resource_root(
+    resource: &EffectResource,
+    access: RootAccess,
+) -> Result<Option<PathBuf>, FilesystemEffectError> {
+    let VersionedResourceDescriptor::FilesystemDirectoryV1(descriptor) = &resource.descriptor;
+    resolve_declared_root(
+        &descriptor.workspace_root,
+        &descriptor.relative_path,
+        access,
+    )
+}
+
+/// Resolves a filesystem descriptor while refusing links and optionally creating safe segments.
+fn resolve_declared_root(
+    workspace_root: &Path,
+    relative_path: &crate::ResourcePath,
+    access: RootAccess,
+) -> Result<Option<PathBuf>, FilesystemEffectError> {
+    let root_metadata = fs::symlink_metadata(workspace_root).map_err(|source| {
+        FilesystemEffectError::WorkspaceUnavailable {
+            path: workspace_root.to_path_buf(),
+            source,
         }
-        let marker_path = path.join(MARKER_FILE_NAME);
-        let marker = match fs::read(marker_path) {
-            Ok(bytes) => serde_json::from_slice(&bytes).ok(),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+    })?;
+    if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
+        return Err(FilesystemEffectError::UnsafeResourcePath {
+            path: workspace_root.to_path_buf(),
+        });
+    }
+    let canonical_workspace = workspace_root.canonicalize().map_err(|source| {
+        FilesystemEffectError::WorkspaceUnavailable {
+            path: workspace_root.to_path_buf(),
+            source,
+        }
+    })?;
+    let mut current = canonical_workspace.clone();
+    let mut path_is_missing = false;
+    for component in relative_path.to_path_buf().components() {
+        let std::path::Component::Normal(segment) = component else {
+            return Err(FilesystemEffectError::UnsafeResourcePath { path: current });
+        };
+        current = current.join(segment);
+        if path_is_missing {
+            continue;
+        }
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(FilesystemEffectError::UnsafeResourcePath { path: current });
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => match access {
+                RootAccess::Observe => return Ok(None),
+                RootAccess::Prepare => path_is_missing = true,
+                RootAccess::Mutate => {
+                    fs::create_dir(&current).map_err(|source| FilesystemEffectError::Io {
+                        path: current.clone(),
+                        source,
+                    })?;
+                }
+            },
             Err(source) => {
                 return Err(FilesystemEffectError::Io {
-                    path: path.to_path_buf(),
+                    path: current,
                     source,
                 });
             }
-        };
-        let fingerprint = fingerprint(path)?;
-        Ok((
-            SkillState {
-                name: directory_name,
-                skill_md_digest: Digest::sha256(&manifest_bytes),
-                source: SkillSource::Preserved {
-                    workspace_id: self.workspace_id.clone(),
-                },
-            },
-            marker,
-            fingerprint,
-        ))
+        }
+        if path_is_missing {
+            continue;
+        }
+        let canonical = current
+            .canonicalize()
+            .map_err(|source| FilesystemEffectError::Io {
+                path: current.clone(),
+                source,
+            })?;
+        if !canonical.starts_with(&canonical_workspace) {
+            return Err(FilesystemEffectError::UnsafeResourcePath { path: current });
+        }
+        current = canonical;
+    }
+    Ok(Some(current))
+}
+
+/// Resolves the Resource root for intent preparation without creating it yet.
+fn resource_root(resource: &EffectResource) -> Result<PathBuf, FilesystemEffectError> {
+    let VersionedResourceDescriptor::FilesystemDirectoryV1(descriptor) = &resource.descriptor;
+    resolve_declared_root(
+        &descriptor.workspace_root,
+        &descriptor.relative_path,
+        RootAccess::Prepare,
+    )?
+    .ok_or(FilesystemEffectError::UnsafeOperationPath)
+}
+
+/// Prevents a journal payload from redirecting artifacts outside its Resource directory.
+fn ensure_operation_paths_are_scoped(
+    plan: &FilesystemOperationPlan,
+) -> Result<(), FilesystemEffectError> {
+    let Some(staging_parent) = plan.staging_path.parent() else {
+        return Err(FilesystemEffectError::UnsafeOperationPath);
+    };
+    if !staging_parent.starts_with(&plan.resource_root)
+        || !plan.backup_path.starts_with(staging_parent)
+    {
+        return Err(FilesystemEffectError::UnsafeOperationPath);
+    }
+    Ok(())
+}
+
+/// Stages and validates immutable source content before an atomic swap.
+fn stage(
+    operation: &EffectOperation,
+    plan: &FilesystemOperationPlan,
+) -> Result<(), FilesystemEffectError> {
+    let source_root = plan
+        .source_root
+        .as_ref()
+        .ok_or(FilesystemEffectError::MissingMaterializationInput)?;
+    if plan.staging_path.exists() {
+        if !state_matches_path(
+            operation.planned(),
+            &plan.staging_path,
+            operation.resource(),
+        )? {
+            return Err(FilesystemEffectError::StagingMismatch {
+                path: plan.staging_path.clone(),
+            });
+        }
+        return Ok(());
+    }
+    let operation_root = plan
+        .staging_path
+        .parent()
+        .ok_or(FilesystemEffectError::UnsafeOperationPath)?;
+    fs::create_dir_all(operation_root).map_err(|source| FilesystemEffectError::Io {
+        path: operation_root.to_path_buf(),
+        source,
+    })?;
+    copy_directory(
+        source_root,
+        &plan.staging_path,
+        &[OsStr::new(MARKER_FILE_NAME)],
+    )?;
+    validate_staged_skill(operation, &plan.staging_path)?;
+    let managed_identity = match operation.planned() {
+        ExactPlannedState::Present {
+            managed_identity, ..
+        } => managed_identity.clone(),
+        ExactPlannedState::Missing => return Err(FilesystemEffectError::MissingPlannedItem),
+    };
+    let marker = ManagedItemMarker::current(operation.resource().clone(), managed_identity);
+    let marker_bytes = serde_json::to_vec(&marker).map_err(FilesystemEffectError::MarkerJson)?;
+    let marker_path = plan.staging_path.join(MARKER_FILE_NAME);
+    fs::write(&marker_path, marker_bytes).map_err(|source| FilesystemEffectError::Io {
+        path: marker_path,
+        source,
+    })?;
+    if !state_matches_path(
+        operation.planned(),
+        &plan.staging_path,
+        operation.resource(),
+    )? {
+        return Err(FilesystemEffectError::StagingMismatch {
+            path: plan.staging_path.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// Revalidates the staged Skill manifest and exact package fingerprint after copying.
+fn validate_staged_skill(
+    operation: &EffectOperation,
+    staging: &Path,
+) -> Result<(), FilesystemEffectError> {
+    let VersionedAdapterPlan::FilesystemDirectoryV1(plan) = operation.payload();
+    let source_root = plan
+        .source_root
+        .as_ref()
+        .ok_or(FilesystemEffectError::MissingMaterializationInput)?;
+    let source_manifest =
+        fs::read(source_root.join("SKILL.md")).map_err(|source| FilesystemEffectError::Io {
+            path: source_root.join("SKILL.md"),
+            source,
+        })?;
+    let staged_manifest =
+        fs::read(staging.join("SKILL.md")).map_err(|source| FilesystemEffectError::Io {
+            path: staging.join("SKILL.md"),
+            source,
+        })?;
+    let parsed = parse_manifest(&staged_manifest, Limits::default().max_manifest_bytes)
+        .map_err(|_| FilesystemEffectError::InvalidSkillManifest)?;
+    if source_manifest != staged_manifest {
+        return Err(FilesystemEffectError::SourceChanged);
+    }
+    let planned_name = match operation.planned() {
+        ExactPlannedState::Present {
+            native_identity, ..
+        } => native_identity,
+        ExactPlannedState::Missing => return Err(FilesystemEffectError::MissingPlannedItem),
+    };
+    if !parsed.name.eq_ignore_ascii_case(planned_name.as_str()) {
+        return Err(FilesystemEffectError::ManifestNameMismatch);
+    }
+    Ok(())
+}
+
+/// Tests the exact expected state at the locator implied by both operation states.
+fn state_matches_expected(
+    operation: &EffectOperation,
+    plan: &FilesystemOperationPlan,
+) -> Result<bool, FilesystemEffectError> {
+    match operation.expected() {
+        ExactPreviousState::Missing => {
+            let path = planned_path(operation, plan)?;
+            Ok(!path.exists())
+        }
+        ExactPreviousState::Present { .. } => state_matches_path(
+            operation.expected(),
+            &expected_path(operation, plan)?,
+            operation.resource(),
+        ),
     }
 }
 
-impl FilesystemEffectError {
-    /// Redacts paths and adapter details before a diagnostic enters persisted status.
-    fn safe_message(&self) -> String {
+/// Tests the exact planned state at the locator implied by both operation states.
+fn state_matches_planned(
+    operation: &EffectOperation,
+    plan: &FilesystemOperationPlan,
+) -> Result<bool, FilesystemEffectError> {
+    match operation.planned() {
+        ExactPlannedState::Missing => {
+            let path = expected_path(operation, plan)?;
+            Ok(!path.exists())
+        }
+        ExactPlannedState::Present { .. } => state_matches_path(
+            operation.planned(),
+            &planned_path(operation, plan)?,
+            operation.resource(),
+        ),
+    }
+}
+
+/// Compares fingerprint and marker proof for either exact present-state enum.
+fn state_matches_path(
+    state: &impl PresentState,
+    path: &Path,
+    resource: &EffectResourceId,
+) -> Result<bool, FilesystemEffectError> {
+    let Some((fingerprint_expected, managed_identity)) = state.present() else {
+        return Ok(!path.exists());
+    };
+    if !path.exists() || fingerprint(path)? != *fingerprint_expected {
+        return Ok(false);
+    }
+    Ok(read_marker(path).is_some_and(|marker| {
+        marker.schema_version == MARKER_SCHEMA_VERSION
+            && marker.resource == *resource
+            && marker.managed_identity == *managed_identity
+    }))
+}
+
+/// Supplies shared present-state access without collapsing the distinct expected/planned types.
+trait PresentState {
+    fn present(&self) -> Option<(&Fingerprint, &ManagedIdentity)>;
+}
+
+impl PresentState for ExactPreviousState {
+    fn present(&self) -> Option<(&Fingerprint, &ManagedIdentity)> {
         match self {
-            Self::WorkspaceUnavailable { .. } => "Workspace is unavailable".to_string(),
-            Self::UnsafeSurfacePath { .. } => "surface path is unsafe".to_string(),
-            Self::InvalidSkillManifest => "Skill manifest is invalid".to_string(),
-            Self::ManifestNameMismatch => {
-                "Skill manifest name does not match its directory".to_string()
-            }
-            Self::OperationPathOccupied { .. }
-            | Self::TargetOccupied { .. }
-            | Self::Io { .. }
-            | Self::DirectoryTree(_)
-            | Self::MarkerJson(_) => "surface filesystem operation failed".to_string(),
+            Self::Missing => None,
+            Self::Present {
+                fingerprint,
+                managed_identity,
+                ..
+            } => Some((fingerprint, managed_identity)),
         }
     }
 }
 
-/// Reports safe filesystem validation, materialization, and transaction failures.
+impl PresentState for ExactPlannedState {
+    fn present(&self) -> Option<(&Fingerprint, &ManagedIdentity)> {
+        match self {
+            Self::Missing => None,
+            Self::Present {
+                fingerprint,
+                managed_identity,
+                ..
+            } => Some((fingerprint, managed_identity)),
+        }
+    }
+}
+
+/// Resolves the expected native item path using a typed identity and Path::join.
+fn expected_path(
+    operation: &EffectOperation,
+    plan: &FilesystemOperationPlan,
+) -> Result<PathBuf, FilesystemEffectError> {
+    match operation.expected() {
+        ExactPreviousState::Present {
+            native_identity, ..
+        } => Ok(plan.resource_root.join(native_identity.as_str())),
+        ExactPreviousState::Missing => Err(FilesystemEffectError::MissingExpectedItem),
+    }
+}
+
+/// Resolves the planned native item path using a typed identity and Path::join.
+fn planned_path(
+    operation: &EffectOperation,
+    plan: &FilesystemOperationPlan,
+) -> Result<PathBuf, FilesystemEffectError> {
+    match operation.planned() {
+        ExactPlannedState::Present {
+            native_identity, ..
+        } => Ok(plan.resource_root.join(native_identity.as_str())),
+        ExactPlannedState::Missing => Err(FilesystemEffectError::MissingPlannedItem),
+    }
+}
+
+/// Reads a marker as untrusted evidence; malformed or absent markers establish no ownership.
+fn read_marker(path: &Path) -> Option<ManagedItemMarker> {
+    fs::read(path.join(MARKER_FILE_NAME))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+}
+
+/// Produces a versioned idempotence receipt without exposing filesystem paths.
+fn apply_receipt(operation: &EffectOperation) -> ApplyReceipt {
+    ApplyReceipt {
+        operation: operation.identity().clone(),
+        proof: AdapterReceipt {
+            version: 1,
+            payload: json!({ "state": "applied_or_already_planned" }),
+        },
+    }
+}
+
+/// Converts the generic directory fingerprint into Effect's distinct observed-state type.
+fn fingerprint(path: &Path) -> Result<Fingerprint, FilesystemEffectError> {
+    let fingerprint: DirectoryFingerprint =
+        fingerprint_directory(path, &[OsStr::new(MARKER_FILE_NAME)])?;
+    Fingerprint::parse(fingerprint.as_str().to_string())
+        .map_err(|_| FilesystemEffectError::InvalidDirectoryFingerprint)
+}
+
+/// Restores the previous tree when a swap cannot install its staging directory.
+fn restore_backup(backup: &Path, previous: &Path) {
+    if backup.exists() && !previous.exists() {
+        let _ = fs::rename(backup, previous);
+    }
+}
+
+/// Reports filesystem validation, observation, mutation, and recovery failures.
 #[derive(Debug, Error)]
 pub enum FilesystemEffectError {
+    #[error(transparent)]
+    Operation(#[from] crate::OperationTransitionError),
     #[error("Workspace root is unavailable: {path:?}")]
     WorkspaceUnavailable {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("unsafe surface path: {path:?}")]
-    UnsafeSurfacePath { path: PathBuf },
+    #[error("unsafe Effect Resource path: {path:?}")]
+    UnsafeResourcePath { path: PathBuf },
+    #[error("unsupported entry in Skill directory Resource: {path:?}")]
+    UnsupportedResourceEntry { path: PathBuf },
+    #[error("invalid native Resource identity: {0}")]
+    InvalidNativeIdentity(String),
     #[error("invalid Skill manifest")]
     InvalidSkillManifest,
-    #[error("Skill manifest name does not match its directory")]
+    #[error("Skill manifest name does not match its native identity")]
     ManifestNameMismatch,
-    #[error("operation path already exists: {path:?}")]
-    OperationPathOccupied { path: PathBuf },
+    #[error("source content changed while staging")]
+    SourceChanged,
+    #[error("materialization operation is missing source input")]
+    MissingMaterializationInput,
+    #[error("operation expected state does not name an item")]
+    MissingExpectedItem,
+    #[error("operation planned state does not name an item")]
+    MissingPlannedItem,
+    #[error("operation artifact paths are outside the Resource")]
+    UnsafeOperationPath,
+    #[error("operation staging state does not match durable intent: {path:?}")]
+    StagingMismatch { path: PathBuf },
     #[error("target is occupied: {path:?}")]
     TargetOccupied { path: PathBuf },
-    #[error("surface filesystem operation failed: {path:?}")]
+    #[error("operation {operation} requires manual recovery")]
+    RecoveryRequired { operation: EffectOperationId },
+    #[error("operation {operation} did not reach exact planned state")]
+    VerificationFailed { operation: EffectOperationId },
+    #[error("artifact {artifact} no longer matches its cleanup authority")]
+    ArtifactFingerprintMismatch { artifact: ArtifactId },
+    #[error("invalid directory fingerprint")]
+    InvalidDirectoryFingerprint,
+    #[error("Effect Resource filesystem operation failed: {path:?}")]
     Io {
         path: PathBuf,
         #[source]
@@ -505,40 +796,4 @@ pub enum FilesystemEffectError {
     DirectoryTree(#[from] DirectoryTreeError),
     #[error("ownership marker serialization failed")]
     MarkerJson(#[source] serde_json::Error),
-}
-
-/// Revalidates identity and digest after copying so source drift cannot publish mixed state.
-fn validate_staged_state(
-    staging: &Path,
-    desired: &DesiredSkillState,
-) -> Result<(), FilesystemEffectError> {
-    let manifest_path = staging.join("SKILL.md");
-    let bytes = fs::read(&manifest_path).map_err(|source| FilesystemEffectError::Io {
-        path: manifest_path,
-        source,
-    })?;
-    let parsed = parse_manifest(&bytes, Limits::default().max_manifest_bytes)
-        .map_err(|_| FilesystemEffectError::InvalidSkillManifest)?;
-    if parsed.name != desired.state().name.as_str() {
-        return Err(FilesystemEffectError::ManifestNameMismatch);
-    }
-    if Digest::sha256(&bytes) != desired.state().skill_md_digest {
-        return Err(FilesystemEffectError::InvalidSkillManifest);
-    }
-    Ok(())
-}
-
-/// Converts the generic directory fingerprint into Effect's persisted fingerprint type.
-fn fingerprint(path: &Path) -> Result<AppliedFingerprint, FilesystemEffectError> {
-    let fingerprint: DirectoryFingerprint =
-        fingerprint_directory(path, &[OsStr::new(MARKER_FILE_NAME)])?;
-    AppliedFingerprint::parse(fingerprint.as_str().to_string())
-        .map_err(|_| FilesystemEffectError::InvalidSkillManifest)
-}
-
-/// Restores the previous tree when a swap cannot install its staging directory.
-fn restore_backup_after_failed_swap(backup: &Path, previous: &Path) {
-    if backup.exists() && !previous.exists() {
-        let _ = fs::rename(backup, previous);
-    }
 }

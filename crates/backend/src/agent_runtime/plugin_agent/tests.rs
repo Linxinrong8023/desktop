@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use ora_domain::PluginId;
 use ora_plugin_lifecycle::{InboundNotification, PluginGenerationKey};
-use ora_plugin_runtime::{PluginEffectCoordination, PluginEffectSurface, PluginRegistration};
+use ora_plugin_runtime::{PluginEffectCoordination, PluginEffectResource, PluginRegistration};
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -29,7 +29,7 @@ fn complete_registration() -> PluginRegistration {
             "agent/listModels".to_string(),
         ]),
         emits: HashSet::from(["agent/acp".to_string()]),
-        effect_surfaces: Vec::new(),
+        effect_resources: Vec::new(),
     }
 }
 
@@ -79,16 +79,17 @@ fn rejects_a_registration_that_cannot_emit_acp() {
 #[test]
 fn rejects_a_surface_without_effect_control_methods() {
     let mut registration = complete_registration();
-    registration.effect_surfaces = vec![PluginEffectSurface {
+    registration.effect_resources = vec![PluginEffectResource {
         workspace_relative_path: ".codex/skills".to_string(),
         materialization_format: "skill_directory.v1".to_string(),
-        coordination: PluginEffectCoordination::WaitForIdleAndRestart,
+        coordination: PluginEffectCoordination::QuiesceBeforeMutation,
     }];
 
     assert_eq!(
         verify_agent_contract(&registration),
         Err(PluginAgentError::ContractIncomplete(
-            "missing Effect methods effect/waitForIdle, effect/restart".to_string()
+            "missing Effect methods effect/coordinate, effect/reactivate, effect/verifyReady"
+                .to_string()
         ))
     );
 }

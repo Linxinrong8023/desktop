@@ -155,18 +155,27 @@ const plugin = defineAgent({
   listModels: () => [{ id: "opus", displayName: "Opus", default: true }],
   onAcp: (frame) => {/* forward the frame to the CLI */},
   effects: {
-    surfaces: [{
+    resources: [{
       workspaceRelativePath: ".agents/skills",
       materializationFormat: "skill_directory.v1",
-      coordination: "wait_for_idle_and_restart",
+      coordination: "quiesce_before_mutation",
     }],
-    waitForIdle: async ({ surfaceKey, workspaceRoot, relativePath }) => {
-      // Return waiting_for_idle while any affected instance is serving a turn. Once ready is
-      // returned, keep new turns behind the surfaceKey barrier until restart.
-      return "ready";
+    coordinate: async ({ targetId, resourceIds }) => {
+      // Quiesce every instance that could consume this exact Resource set and retain the barrier.
+      return { targetId, resourceIds, state: "safe_to_mutate" };
     },
-    restart: async ({ surfaceKey, generation }) => {
-      // Restart every affected instance, then release the idempotent barrier for this generation.
+    reactivate: async ({ targetId, resourceIds }) => {
+      // Reinitialize affected instances after verification, then release the retained barrier.
+      return { targetId, resourceIds, state: "reactivated" };
+    },
+    verifyReady: async ({
+      targetId,
+      generation,
+      consumerRevisionId,
+      projectionDigest,
+    }) => {
+      // Confirm the Agent can consume this exact immutable Target projection.
+      return { targetId, generation, consumerRevisionId, projectionDigest };
     },
   },
 });

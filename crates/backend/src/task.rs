@@ -72,7 +72,7 @@ impl TaskApi {
 
     /// Resolves the requested project and creates its task in the matching Git repository.
     ///
-    /// The task's Workspace needs the Effect surfaces every running consumer already declared, and
+    /// The task Workspace needs the Effect Targets every running Consumer already declared, and
     /// no declaration will fire again on its own. Waking here is a latency optimization only: the
     /// worker converges the same Workspace within one scan interval regardless, so a wake lost to a
     /// crash costs a scan interval rather than the materialization.

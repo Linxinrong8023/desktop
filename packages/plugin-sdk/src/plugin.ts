@@ -27,11 +27,11 @@ export interface HostRequestOptions {
   timeoutMs?: number;
 }
 
-/** One Workspace-relative Effect surface included in the immutable plugin registration. */
-export interface EffectSurfaceDeclaration {
+/** One Workspace-relative Effect Resource included in the immutable plugin registration. */
+export interface EffectResourceDeclaration {
   workspaceRelativePath: string;
   materializationFormat: string;
-  coordination: "uninterrupted" | "wait_for_idle_and_restart";
+  coordination: "uninterrupted" | "quiesce_before_mutation";
 }
 
 /**
@@ -72,7 +72,7 @@ interface PendingHostRequest {
 export class Plugin {
   readonly #methods = new Map<string, MethodHandler>();
   readonly #emits = new Set<string>();
-  readonly #effectSurfaces: EffectSurfaceDeclaration[] = [];
+  readonly #effectResources: EffectResourceDeclaration[] = [];
   readonly #notificationHandlers = new Map<string, NotificationHandler>();
   readonly #pendingHostRequests = new Map<number, PendingHostRequest>();
   #nextHostRequestId = 1;
@@ -105,16 +105,16 @@ export class Plugin {
     this.#emits.add(name);
   }
 
-  /** Declares one runtime-consumed Effect surface before registration is sent. */
-  declareEffectSurface(surface: EffectSurfaceDeclaration): void {
+  /** Declares one runtime-consumed Effect Resource before registration is sent. */
+  declareEffectResource(resource: EffectResourceDeclaration): void {
     this.#assertRegistering();
     if (
-      surface.workspaceRelativePath.length === 0 ||
-      surface.materializationFormat.length === 0
+      resource.workspaceRelativePath.length === 0 ||
+      resource.materializationFormat.length === 0
     ) {
-      throw new Error("Effect surface locator and format cannot be empty");
+      throw new Error("Effect Resource locator and format cannot be empty");
     }
-    this.#effectSurfaces.push({ ...surface });
+    this.#effectResources.push({ ...resource });
   }
 
   /** Handles one host-sent notification, which never produces a response. */
@@ -214,11 +214,11 @@ export class Plugin {
       methods: [...this.#methods.keys()],
       emits: [...this.#emits],
     };
-    if (this.#effectSurfaces.length > 0) {
-      registration.effectSurfaces = this.#effectSurfaces.map((surface) => ({
-        workspaceRelativePath: surface.workspaceRelativePath,
-        materializationFormat: surface.materializationFormat,
-        coordination: surface.coordination,
+    if (this.#effectResources.length > 0) {
+      registration.effectResources = this.#effectResources.map((resource) => ({
+        workspaceRelativePath: resource.workspaceRelativePath,
+        materializationFormat: resource.materializationFormat,
+        coordination: resource.coordination,
       }));
     }
     await writer.write({

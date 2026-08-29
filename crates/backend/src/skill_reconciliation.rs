@@ -1,10 +1,10 @@
 use ora_application::{
-    BACKUP_DIR_NAME, FilesystemSkillStorage, JournalOp, JournalPhase, STAGING_DIR_NAME,
-    SkillRepository, SkillStorage, TransactionJournal,
+    BACKUP_DIR_NAME, FilesystemSkillStorage, JournalOp, JournalPhase, LocalSkillSourceRevision,
+    STAGING_DIR_NAME, SkillRepository, SkillStorage, TransactionJournal,
 };
-use ora_db::{RepositoryPool, SourcePublication, SqliteEffectRepository, SqliteSkillRepository};
+use ora_db::{RepositoryPool, SqliteSkillRepository};
 use ora_domain::SkillId;
-use ora_effect::{DesiredSkillState, Digest, SkillName, SkillSource, SkillState, SourceVersion};
+use ora_effect::Digest;
 use ora_logging::ora_warn;
 use std::collections::BTreeSet;
 use std::fs;
@@ -32,7 +32,6 @@ pub(crate) fn reconcile_skill_storage(
     skills_root: &Path,
 ) -> Result<(), SkillStorageReconciliationError> {
     let repository = SqliteSkillRepository::new(pool.clone());
-    let effect_repository = SqliteEffectRepository::new(pool.clone());
     let storage = FilesystemSkillStorage::new(skills_root.to_path_buf());
 
     let journals = storage.list_journals().map_err(operation_failed)?;
@@ -68,22 +67,13 @@ pub(crate) fn reconcile_skill_storage(
                 .as_ref()
                 .is_ok_and(|parsed| parsed.name == skill.name)
             {
-                let state = DesiredSkillState::try_new(SkillState {
-                    name: SkillName::parse(skill.name.clone()).map_err(operation_failed)?,
-                    skill_md_digest: Digest::sha256(&manifest),
-                    source: SkillSource::Local {
-                        namespace: skill.namespace.clone(),
-                        version: SourceVersion::parse(skill.audit_fields.updated_at.to_string())
-                            .map_err(operation_failed)?,
-                    },
-                })
-                .map_err(operation_failed)?;
-                effect_repository
-                    .publish_source(
-                        &state,
-                        &skills_root.join(&skill.name),
-                        SourcePublication::Create,
-                        skill.audit_fields.updated_at,
+                repository
+                    .update_skill_with_source(
+                        skill.clone(),
+                        LocalSkillSourceRevision {
+                            skill_md_digest: Digest::sha256(&manifest),
+                            package_root: skills_root.join(&skill.name),
+                        },
                     )
                     .map_err(operation_failed)?;
             } else {

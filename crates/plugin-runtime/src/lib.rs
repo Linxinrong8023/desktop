@@ -13,7 +13,7 @@ pub use host_requests::{
     HostRequestError, HostRequestHandler, METHOD_NOT_FOUND_CODE, NoHostRequests,
 };
 pub use protocol::{
-    PluginEffectCoordination, PluginEffectSurface, PluginNotification, PluginRegistration,
+    PluginEffectCoordination, PluginEffectResource, PluginNotification, PluginRegistration,
 };
 
 use std::path::PathBuf;

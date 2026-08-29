@@ -19,9 +19,8 @@ pub use error::{DatabaseError, MigrationDirection};
 pub use location::DatabaseLocation;
 pub use migration::{AppliedMigration, Migration, MigrationCatalog, default_migration_catalog};
 pub use repository::{
-    CascadeDeleteOutcome, ClaimedReconcile, DueSurfaceReconcile, PluginMarketplaceSourceRecord,
-    PluginSkillProjection, ReconcileClaim, RepositoryPool, SourceMutationOutcome,
-    SourcePublication, SqliteAgentDefinitionRepository, SqliteCascadeRepository,
+    CascadeDeleteOutcome, PluginMarketplaceSourceRecord, PluginSkillProjection, RepositoryPool,
+    SourceMutationOutcome, SqliteAgentDefinitionRepository, SqliteCascadeRepository,
     SqliteEffectRepository, SqliteGitCleanupJobRepository, SqlitePluginMarketplaceSourceRepository,
     SqliteProjectRepository, SqliteSessionRepository, SqliteSkillRepository, SqliteTaskRepository,
     SqliteTaskWorkspaceRepository, SqliteUserConfigRepository, SqliteWorkflowRepository,
