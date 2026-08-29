@@ -37,16 +37,6 @@ Ora is an IDE for AI Agent. In the crates folder where the rust code lives:
 - Use ora-logging wrapper macros instead of `tracing` macros. Use `ora_logging::clock::now_local` instead of `OffsetDateTime::now_local()`.
 - Put logic that is generic — independent of any Ora domain concept, transport, or runtime — in `ora-utils` (`crates/utils`) instead of the calling crate. If you believe a piece of logic is generic, default to placing it in `ora-utils`. `ora-utils` must not depend on any other `ora-*` crate and must not carry domain vocabulary; gate heavier optional dependencies (such as archive formats) behind Cargo features so path-only consumers stay light.
 - Before implementing path validation, normalization, or archive extraction, prefer the shared `ora-utils::path` and `ora-utils::archive` capabilities over crate-local logic. If `ora-utils` does not yet provide the required capability, extend `ora-utils` and then consume it instead of implementing it locally in the caller.
-- When adding a Workspace-scoped consumer kind (Effect surfaces, MCP, anything materialized per Workspace), implement **both** directions of the pairing: new consumer → existing Workspaces, and new Workspace → existing consumers. Derive the second one by convergence in a worker, never from a process start or any other one-shot event — a consumer declaring at startup cannot see a Workspace created later, and the resulting gap is silent because a wakeup that iterates zero surfaces is a successful no-op. Register every consumer kind into the single declaration snapshot the convergence pass reads (`PluginApi::agent_effect_surface_declarations`), rather than adding a second source it must remember to consult.
-
-## Module READMEs
-
-- Every crate under `crates/` must have an English `README.md` in its crate root.
-- Every directory-based production Rust module under a crate's `src/` tree must have an English `README.md` in the module directory. Single-file modules do not need to be converted into directories; their responsibilities should be covered by the nearest parent README.
-- Test, fixture, generated, example, and other non-production directories do not require module READMEs.
-- `crates/contracts`, `crates/domain`, and `crates/pty`, including their descendant modules, are intentional exceptions. Their type definitions and code-level documentation are the primary documentation because they do not own architectural orchestration that benefits from separate README files.
-- When adding a crate or directory-based module, add its README in the same change. When changing a module's responsibilities, boundaries, core flows, or interactions, update the corresponding README in the same change.
-- READMEs document stable facts that should remain true across internal refactors: responsibilities, non-responsibilities, public boundaries, key invariants, lifecycle, important failure semantics, and module interactions. Put local implementation rationale, algorithm details, data-structure choices, specialized branches, performance trade-offs, and temporary implementation constraints in English code comments instead.
 
 ## Tests
 
@@ -63,41 +53,6 @@ authoritative list of available tasks.
 - All lint tasks: `task lint`
 - All lint and test tasks (long-running): `task test`
 
-### Frontend React / TipTap tests and the stderr gate
-
-Frontend package tests run under `scripts/run-with-clean-stderr.mjs`. Any React
-Testing Library warning on stderr — especially `An update to … was not wrapped
-in act(...)` — fails the whole `task test` run even when Vitest reports green.
-
-TipTap / ProseMirror `setContent` can call `flushSync` (React node views). That
-creates two hard constraints:
-
-1. **Do not call programmatic `setContent` / `clear` / `replaceDocument` inside
-   `useLayoutEffect` (or other React commit/layout work).** Nested `flushSync`
-   also fails the stderr gate.
-2. **Do not let those deferred editor transactions call parent `setState`.**
-   Session / draft switches often schedule TipTap updates on a microtask after
-   `act(() => selectSession(…))` returns. If `onUpdate` still drives
-   `onQueryChange` / attachment React state from that microtask, the update
-   lands outside `act` and the suite fails.
-
-Preferred product pattern (chat composer already follows this):
-
-- Treat conversation-keyed **React** state (attachments, slash/@ query, menu
-  dismiss) as derived from the selection key and sync it during render (or
-  another path that stays inside the same `act` as the selection change).
-- Keep TipTap document restore on a deferred path when needed, but suppress
-  parent notify for programmatic `replaceText` / `replaceDocument` / `clear`
-  (still update `dataset.composerText` for tests). User typing continues to
-  emit query/doc/text callbacks normally.
-- Skip no-op attachment `setState` when the parked image id list is unchanged.
-
-Do **not** rely on sprinkling `flushComposerEffects` / extra `act` +
-`Promise.resolve` in every test as the primary fix. Use those flushes only to
-assert after a deferred TipTap document apply, not to hide parent `setState`
-escaping `act`. When a send-failure / abandon test awaits a rejected promise,
-keep that await inside `act` so restore that still updates React stays covered.
-
 ### Test assertions
 
 - Tests should use pretty_assertions::assert_eq for clearer diffs. Import this at the top of the test module if it isn't already.
@@ -107,4 +62,8 @@ keep that await inside `act` so restore that still updates React stays covered.
 
 # TypeScript/packages
 
-- A test that renders anything calling `useTranslation` must import `appI18n` itself: react-i18next keeps its instance in a `node_modules` module that Vitest loads once per worker, so a file relying on an earlier file in the same worker to have initialized it passes locally and fails on CI, where a different worker split leaves it first and the missing-instance warning trips the clean-stderr gate on an otherwise green run.
+## Tests
+
+Frontend package tests run under `scripts/run-with-clean-stderr.mjs`. Any React Testing Library warning on stderr — especially `An update to … was not wrapped in act(...)` — fails the whole `task test` run even when Vitest reports green.
+
+A test that renders anything calling `useTranslation` must import `appI18n` itself: react-i18next keeps its instance in a `node_modules` module that Vitest loads once per worker, so a file relying on an earlier file in the same worker to have initialized it passes locally and fails on CI, where a different worker split leaves it first and the missing-instance warning trips the clean-stderr gate on an otherwise green run.
