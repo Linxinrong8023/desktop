@@ -9,6 +9,8 @@ import {
   type DesktopUpdateStatus,
   type LocationTarget,
   type PlatformAdapter,
+  type PluginInstallProgress,
+  type PluginMarketplaceCapability,
   type SelectPathOptions,
   type SaveTextFileOptions,
   type SelectSavePathOptions,
@@ -26,6 +28,7 @@ import {
 
 const SURFACE_EVENT = "surface://event";
 const DESKTOP_UPDATE_EVENT = "desktop-update-status-changed";
+const PLUGIN_INSTALL_PROGRESS_EVENT = "plugin-install-progress";
 
 /** Reads the host OS from the webview user agent without an async Tauri call. */
 function detectWindowManagerOs(): WindowManagerOs | null {
@@ -103,6 +106,16 @@ function createTauriUpdates(): DesktopUpdateCapability {
   };
 }
 
+/** Wires marketplace package transfer progress into the shared settings UI. */
+function createTauriPluginMarketplace(): PluginMarketplaceCapability {
+  return {
+    onInstallProgress: (listener) =>
+      listen<PluginInstallProgress>(PLUGIN_INSTALL_PROGRESS_EVENT, (event) => {
+        listener(event.payload);
+      }),
+  };
+}
+
 /** Wires the plugin surface commands and lifecycle event stream exposed by the Desktop runtime. */
 function createTauriSurfaces(): SurfaceCapability {
   return {
@@ -157,6 +170,9 @@ export class TauriPlatformAdapter implements PlatformAdapter {
   readonly surfaces: SurfaceCapability = createTauriSurfaces();
 
   readonly updates: DesktopUpdateCapability = createTauriUpdates();
+
+  readonly pluginMarketplace: PluginMarketplaceCapability =
+    createTauriPluginMarketplace();
 
   readonly worktreeStorage = {
     getRoot: async (): Promise<string> => {

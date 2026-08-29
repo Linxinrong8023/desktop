@@ -99,6 +99,20 @@ export interface DesktopUpdateCapability {
   ): Promise<() => void>;
 }
 
+/** Byte-level progress for one marketplace package download. */
+export interface PluginInstallProgress {
+  pluginId: string;
+  downloaded: number;
+  total: number | null;
+}
+
+/** Exposes native marketplace transfer events without coupling shared UI to Tauri. */
+export interface PluginMarketplaceCapability {
+  onInstallProgress(
+    listener: (progress: PluginInstallProgress) => void,
+  ): Promise<() => void>;
+}
+
 /** Where a plugin surface renders: docked into the right panel or in its own native window. */
 export type SurfaceTarget = "embedded" | "windowed";
 
@@ -223,6 +237,7 @@ export interface PlatformAdapter {
   readonly locationActions: LocationActionsCapability;
   readonly surfaces: SurfaceCapability;
   readonly updates?: DesktopUpdateCapability;
+  readonly pluginMarketplace?: PluginMarketplaceCapability;
   selectPath(options: SelectPathOptions): Promise<string | null>;
   /** Opens the native save dialog and returns the chosen path, or null when dismissed. */
   selectSavePath(options: SelectSavePathOptions): Promise<string | null>;

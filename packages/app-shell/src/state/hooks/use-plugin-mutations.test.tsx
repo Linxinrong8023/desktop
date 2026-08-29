@@ -1,6 +1,6 @@
 import { act, waitFor } from "@testing-library/react";
 import { useQuery } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createMockClient,
   createMockClientState,
@@ -10,6 +10,7 @@ import {
   renderHookWithClient,
 } from "../../test/hook-harness";
 import { useAgentModelStore } from "../stores/agent-model-store";
+import { usePluginOperationStore } from "../stores/plugin-operation-store";
 import { queryKeys } from "./query-keys";
 import { usePluginMutations } from "./use-plugin-mutations";
 
@@ -19,6 +20,10 @@ const TARGET = { type: "workspace" as const, workspaceId: "workspace-1" };
 
 beforeEach(() => {
   useAgentModelStore.setState({ known: {} });
+});
+
+afterEach(() => {
+  act(() => usePluginOperationStore.setState({ activities: {} }));
 });
 
 describe("usePluginMutations", () => {
@@ -98,5 +103,50 @@ describe("usePluginMutations", () => {
     );
     expect(useAgentModelStore.getState().known[AGENT_REF]).toBeUndefined();
     expect(loadModels).toHaveBeenCalledOnce();
+  });
+
+  it("keeps uninstall pending across unmount and rejects a duplicate operation", async () => {
+    const client = createMockClient(createMockClientState());
+    let resolveUninstall:
+      | ((
+          response: Awaited<ReturnType<typeof client.plugin.uninstall>>,
+        ) => void)
+      | undefined;
+    const uninstall = vi.spyOn(client.plugin, "uninstall").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUninstall = resolve;
+        }),
+    );
+    const stop = vi.spyOn(client.plugin, "stop");
+    const queryClient = createTestQueryClient();
+    const first = renderHookWithClient(
+      () => usePluginMutations(PLUGIN_ID),
+      client,
+      queryClient,
+    );
+
+    act(() => first.result.current.uninstall.mutate("delete"));
+    await waitFor(() => expect(uninstall).toHaveBeenCalledOnce());
+    expect(first.result.current.uninstall.isPending).toBe(true);
+    first.unmount();
+
+    const second = renderHookWithClient(
+      () => usePluginMutations(PLUGIN_ID),
+      client,
+      queryClient,
+    );
+    expect(second.result.current.uninstall.isPending).toBe(true);
+    act(() => second.result.current.stop.mutate());
+    act(() => second.result.current.uninstall.mutate("delete"));
+    expect(uninstall).toHaveBeenCalledOnce();
+    expect(stop).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveUninstall?.({ pluginId: PLUGIN_ID });
+    });
+    await waitFor(() =>
+      expect(second.result.current.uninstall.isPending).toBe(false),
+    );
   });
 });

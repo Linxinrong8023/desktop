@@ -25,6 +25,7 @@ use ora_db::SqliteWorkflowRunEngineRepository;
 use ora_db::{DatabaseBootstrapper, DatabaseLocation, RepositoryPool, default_migration_catalog};
 use ora_logging::{ora_error, ora_warn};
 use ora_scheduler::Scheduler;
+use ora_utils::http::ProgressCallback;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -428,6 +429,17 @@ impl Backend {
         request: InstallPluginRequest,
     ) -> Result<InstallPluginResponse, BackendError> {
         let response = self.plugin.install(request).await?;
+        self.agent_runtime.sync_plugin_agents();
+        Ok(response)
+    }
+
+    /// Installs a marketplace plugin while forwarding download progress to a host callback.
+    pub async fn install_plugin_with_progress(
+        &self,
+        request: InstallPluginRequest,
+        progress: ProgressCallback,
+    ) -> Result<InstallPluginResponse, BackendError> {
+        let response = self.plugin.install_with_progress(request, progress).await?;
         self.agent_runtime.sync_plugin_agents();
         Ok(response)
     }

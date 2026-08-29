@@ -861,6 +861,7 @@ export const translationResources = {
       "插件进程会先停止，然后移除已安装的代码。",
     "settings.plugins.deleteConfigurationData": "同时删除配置数据（推荐）",
     "settings.plugins.installing": "安装中",
+    "settings.plugins.downloadProgress": "插件下载进度",
     "settings.plugins.cancel": "取消",
     "settings.plugins.installFailed": "安装失败",
     "settings.plugins.installSuccess": "插件已安装。",
@@ -2428,6 +2429,7 @@ export const translationResources = {
     "settings.plugins.deleteConfigurationData":
       "Also delete configuration data (recommended)",
     "settings.plugins.installing": "Installing",
+    "settings.plugins.downloadProgress": "Plugin download progress",
     "settings.plugins.cancel": "Cancel",
     "settings.plugins.installFailed": "Install failed",
     "settings.plugins.installSuccess": "Plugin installed.",
