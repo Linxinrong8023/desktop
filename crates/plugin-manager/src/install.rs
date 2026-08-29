@@ -1,8 +1,9 @@
 //! Installs and updates plugin releases by downloading and safely extracting their package.
 
 use crate::discovery::installed_root;
+use crate::limits::package_extract_limits;
 use ora_plugin_manifest::{HookTarget, PluginKind, PluginManifest, PluginReleaseSource};
-use ora_utils::archive::{ArchiveFormat, ExtractLimits, extract_archive};
+use ora_utils::archive::{ArchiveFormat, extract_archive};
 use ora_utils::hash;
 use ora_utils::http::{Checksum, DownloadOptions, DownloadRequest, DownloadSource, HttpDownload};
 use semver::Version;
@@ -303,7 +304,7 @@ where
             ArchiveFormat::Zip,
             &archive_path,
             staging.path(),
-            &ExtractLimits::default(),
+            &package_extract_limits(),
         )
         .map_err(|source| InstallError::Extract {
             path: staging.path().to_path_buf(),
@@ -432,7 +433,7 @@ where
             ArchiveFormat::Zip,
             archive_path,
             staging.path(),
-            &ExtractLimits::default(),
+            &package_extract_limits(),
         )
         .map_err(|source| InstallError::Extract {
             path: staging.path().to_path_buf(),
@@ -481,10 +482,11 @@ where
         }
         crate::validation::validate(staging.path(), &manifest, /*logo*/ None)
             .map_err(InstallError::invalid_package)?;
-        if matches!(manifest.kind(), PluginKind::Hook) {
-            let Some(artifact) = manifest.artifact() else {
-                return Err(InstallError::MissingArtifactTarget);
-            };
+        // Any package that self-declares a target must match the host it is imported onto, and an
+        // unverifiable host fails closed rather than skipping the match. Requiring the declaration
+        // stays Hook-only: a Hook is its native binary, while an Agent that resolves its CLI from
+        // PATH is a legitimate universal package with no target to check.
+        if let Some(artifact) = manifest.artifact() {
             let HostTarget::Triple(host_target) = host_target else {
                 return Err(InstallError::UnsupportedHost);
             };
@@ -494,6 +496,8 @@ where
                     artifact: artifact.target().to_string(),
                 });
             }
+        } else if matches!(manifest.kind(), PluginKind::Hook) {
+            return Err(InstallError::MissingArtifactTarget);
         }
         if let Some(parent) = destination.parent() {
             std::fs::create_dir_all(parent).map_err(|source| InstallError::Io {
@@ -1029,6 +1033,124 @@ mod tests {
                 .join("0.1.0")
                 .exists()
         );
+    }
+
+    /// Builds one `.orax` whose named entries are stored with the Unix executable mode.
+    fn write_orax_zip_with_executables(path: &Path, files: &[(&str, &[u8])], executables: &[&str]) {
+        let mut writer = ZipWriter::new(File::create(path).unwrap());
+        for (name, data) in files {
+            let options = if executables.contains(name) {
+                SimpleFileOptions::default().unix_permissions(0o100_755)
+            } else {
+                SimpleFileOptions::default()
+            };
+            writer.start_file(*name, options).unwrap();
+            writer.write_all(data).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    /// Builds an installed agent manifest that self-declares the target it was built for.
+    fn bundled_agent_manifest(target: &str) -> String {
+        format!(
+            "resolver = 1\nidentifier = \"ora-space.opencode\"\nnamespace = \"official\"\nkind = \"agent\"\nversion = \"0.2.4\"\ndescription = \"OpenCode agent\"\n\n[artifact]\ntarget = \"{target}\"\n"
+        )
+    }
+
+    /// An agent package may ship the CLI it drives, landing it runnable and target-checked.
+    ///
+    /// This is the whole per-target agent release shape in one place: `[artifact]` naming the host
+    /// it was built for, and an `assets/bin` executable whose execute bit has to survive extraction
+    /// for the plugin to be able to spawn it at all.
+    #[test]
+    fn installs_a_local_agent_package_that_bundles_its_cli() {
+        let temp_dir = TempDir::new().unwrap();
+        let release_path = temp_dir.path().join("opencode.orax");
+        write_orax_zip_with_executables(
+            &release_path,
+            &[
+                (
+                    "orax.toml",
+                    bundled_agent_manifest("x86_64-pc-windows-msvc").as_bytes(),
+                ),
+                ("main.js", b"export {};".as_slice()),
+                ("assets/bin/opencode.exe", b"MZdummy".as_slice()),
+            ],
+            &["assets/bin/opencode.exe"],
+        );
+
+        let installed = Installer::new(LocalFileDownloader)
+            .install_local(
+                &release_path,
+                temp_dir.path(),
+                HostTarget::Triple(&windows_host()),
+            )
+            .unwrap();
+
+        let executable = installed.package_dir.join("assets/bin/opencode.exe");
+        assert!(executable.is_file(), "the bundled CLI must be installed");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&executable).unwrap().permissions().mode() & 0o777,
+                0o755,
+                "a CLI that arrives without its execute bit can never be spawned"
+            );
+        }
+    }
+
+    /// An agent package built for another host is refused, exactly as a Hook package is.
+    #[test]
+    fn rejects_a_local_agent_package_built_for_another_host() {
+        let temp_dir = TempDir::new().unwrap();
+        let release_path = temp_dir.path().join("opencode.orax");
+        write_orax_zip_with_executables(
+            &release_path,
+            &[
+                (
+                    "orax.toml",
+                    bundled_agent_manifest("aarch64-apple-darwin").as_bytes(),
+                ),
+                ("main.js", b"export {};".as_slice()),
+                ("assets/bin/opencode", b"\x7fELFdummy".as_slice()),
+            ],
+            &["assets/bin/opencode"],
+        );
+
+        let error = Installer::new(LocalFileDownloader)
+            .install_local(
+                &release_path,
+                temp_dir.path(),
+                HostTarget::Triple(&windows_host()),
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, InstallError::TargetMismatch { .. }));
+    }
+
+    /// An agent that resolves its CLI from PATH bundles nothing and declares no target, so it
+    /// installs on any host without the artifact check applying at all.
+    #[test]
+    fn installs_a_local_agent_package_without_a_bundled_cli() {
+        let temp_dir = TempDir::new().unwrap();
+        let release_path = temp_dir.path().join("opencode.orax");
+        write_orax_zip(
+            &release_path,
+            &[
+                (
+                    "orax.toml",
+                    b"resolver = 1\nidentifier = \"ora-space.opencode\"\nnamespace = \"official\"\nkind = \"agent\"\nversion = \"0.2.4\"\ndescription = \"OpenCode agent\"\n".as_slice(),
+                ),
+                ("main.js", b"export {};".as_slice()),
+            ],
+        );
+
+        let installed = Installer::new(LocalFileDownloader)
+            .install_local(&release_path, temp_dir.path(), HostTarget::Unsupported)
+            .unwrap();
+
+        assert!(installed.package_dir.join("main.js").is_file());
     }
 
     /// Local import of a Hook archive whose `[artifact]` target does not match the host is

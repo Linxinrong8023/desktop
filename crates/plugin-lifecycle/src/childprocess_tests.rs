@@ -208,7 +208,7 @@ fn exit_status(code: i32) -> ExitStatus {
 #[tokio::test]
 async fn spawn_returns_process_id_and_forwards_command_args_cwd_env() {
     let spawner = FakeChildSpawner::new();
-    let host = PluginProcessHost::new("plugin-a", spawner.clone());
+    let host = PluginProcessHost::new("plugin-a", PathBuf::from("package-root"), spawner.clone());
 
     let result = host
         .handle(
@@ -238,9 +238,168 @@ async fn spawn_returns_process_id_and_forwards_command_args_cwd_env() {
     assert_eq!(result, json!({ "processId": "1", "pid": 100 }));
 }
 
+/// Builds a package root holding one executable file, returning the root and its handler.
+fn package_with_executable(
+    spawner: FakeChildSpawner,
+    relative: &str,
+) -> (tempfile::TempDir, PluginProcessHost<FakeChildSpawner>) {
+    let package = tempfile::TempDir::new().expect("create package root");
+    let executable = package.path().join(relative);
+    std::fs::create_dir_all(executable.parent().expect("executable has a parent"))
+        .expect("create executable directory");
+    std::fs::write(&executable, b"binary").expect("write executable");
+    let host = PluginProcessHost::new("plugin-a", package.path().to_path_buf(), spawner);
+    (package, host)
+}
+
+#[tokio::test]
+async fn spawn_resolves_package_command_against_the_plugin_package_root() {
+    let spawner = FakeChildSpawner::new();
+    let (package, host) = package_with_executable(spawner.clone(), "assets/bin/opencode");
+
+    host.handle(
+        CHILDPROCESS_SPAWN_METHOD,
+        json!({
+            "packageCommand": "assets/bin/opencode",
+            "args": ["acp"],
+            "cwd": "/work",
+        }),
+    )
+    .await
+    .expect("spawn succeeds");
+
+    // The program is the absolute path inside the package, while `cwd` stays the workspace the
+    // child runs in: the two are independent, which is exactly what a relative `command` cannot do.
+    let calls = spawner.calls();
+    let expected = package
+        .path()
+        .join("assets/bin/opencode")
+        .canonicalize()
+        .expect("canonicalize the bundled executable");
+    assert_eq!(
+        (
+            calls.len(),
+            calls[0].program().to_owned(),
+            calls[0].cwd_path().map(Path::to_path_buf),
+        ),
+        (1, expected.into_os_string(), Some(PathBuf::from("/work"))),
+    );
+}
+
+/// A resolved `packageCommand` is spawnable by the real operating system, not just by a fake.
+///
+/// Every other test here injects a spawner, so none of them would notice that resolution produces
+/// a path the OS refuses. That is a live risk rather than a theoretical one: `resolve_existing`
+/// canonicalizes, and on Windows a canonical path is the `\\?\C:\...` verbatim form, which not
+/// every process API accepts. A real binary copied into a real package root is what proves the
+/// path handed to `ProcessSpec` can actually start.
+#[tokio::test]
+async fn a_resolved_package_command_is_spawnable_by_the_operating_system() {
+    let package = tempfile::TempDir::new().expect("create package root");
+    std::fs::create_dir_all(package.path().join("assets/bin")).expect("create bin directory");
+
+    // A binary guaranteed to exist on the host, copied in so it is genuinely package-contained.
+    #[cfg(windows)]
+    let (source, relative, args) = (
+        PathBuf::from(
+            std::env::var("COMSPEC").unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".to_string()),
+        ),
+        "assets/bin/tool.exe",
+        vec!["/c", "exit 0"],
+    );
+    #[cfg(unix)]
+    let (source, relative, args) = (
+        PathBuf::from("/bin/sh"),
+        "assets/bin/tool",
+        vec!["-c", "exit 0"],
+    );
+    std::fs::copy(&source, package.path().join(relative)).expect("copy the host binary");
+
+    let host = PluginProcessHost::new(
+        "plugin-a",
+        package.path().to_path_buf(),
+        ora_process::TokioProcessSpawner::new(),
+    );
+
+    let result = host
+        .handle(
+            CHILDPROCESS_SPAWN_METHOD,
+            json!({ "packageCommand": relative, "args": args }),
+        )
+        .await
+        .expect("the resolved package binary spawns");
+
+    // A real pid is the proof: the OS accepted the canonical path and created a process.
+    assert!(
+        result["pid"].as_u64().is_some_and(|pid| pid > 0),
+        "expected a real process id, got {result}"
+    );
+    host.kill_all().await;
+}
+
+#[tokio::test]
+async fn spawn_rejects_a_package_command_that_escapes_the_package() {
+    let (_package, host) = package_with_executable(FakeChildSpawner::new(), "assets/bin/opencode");
+
+    let error = host
+        .handle(
+            CHILDPROCESS_SPAWN_METHOD,
+            json!({ "packageCommand": "../../../bin/sh" }),
+        )
+        .await
+        .expect_err("a traversing package path is rejected");
+
+    assert_eq!(kind_of(&error), "invalid_package_command");
+}
+
+#[tokio::test]
+async fn spawn_rejects_a_package_command_that_does_not_exist() {
+    let (_package, host) = package_with_executable(FakeChildSpawner::new(), "assets/bin/opencode");
+
+    let error = host
+        .handle(
+            CHILDPROCESS_SPAWN_METHOD,
+            json!({ "packageCommand": "assets/bin/missing" }),
+        )
+        .await
+        .expect_err("an absent package path is rejected");
+
+    assert_eq!(kind_of(&error), "invalid_package_command");
+}
+
+#[tokio::test]
+async fn spawn_rejects_naming_both_program_forms_or_neither() {
+    let host = PluginProcessHost::new(
+        "plugin-a",
+        PathBuf::from("package-root"),
+        FakeChildSpawner::new(),
+    );
+
+    let both = host
+        .handle(
+            CHILDPROCESS_SPAWN_METHOD,
+            json!({ "command": "opencode", "packageCommand": "assets/bin/opencode" }),
+        )
+        .await
+        .expect_err("naming both forms is rejected");
+    let neither = host
+        .handle(CHILDPROCESS_SPAWN_METHOD, json!({ "args": ["acp"] }))
+        .await
+        .expect_err("naming neither form is rejected");
+
+    assert_eq!(
+        (kind_of(&both), kind_of(&neither)),
+        ("invalid_params".to_string(), "invalid_params".to_string()),
+    );
+}
+
 #[tokio::test]
 async fn spawn_rejects_an_empty_command() {
-    let host = PluginProcessHost::new("plugin-a", FakeChildSpawner::new());
+    let host = PluginProcessHost::new(
+        "plugin-a",
+        PathBuf::from("package-root"),
+        FakeChildSpawner::new(),
+    );
 
     let error = host
         .handle(CHILDPROCESS_SPAWN_METHOD, json!({ "command": "   " }))
@@ -254,7 +413,7 @@ async fn spawn_rejects_an_empty_command() {
 async fn spawn_maps_a_missing_executable_to_program_not_found() {
     let spawner = FakeChildSpawner::new();
     spawner.force_next_error(io::ErrorKind::NotFound);
-    let host = PluginProcessHost::new("plugin-a", spawner);
+    let host = PluginProcessHost::new("plugin-a", PathBuf::from("package-root"), spawner);
 
     let error = host
         .handle(CHILDPROCESS_SPAWN_METHOD, json!({ "command": "missing" }))
@@ -268,7 +427,7 @@ async fn spawn_maps_a_missing_executable_to_program_not_found() {
 async fn spawn_maps_any_other_spawn_failure_to_io() {
     let spawner = FakeChildSpawner::new();
     spawner.force_next_error(io::ErrorKind::PermissionDenied);
-    let host = PluginProcessHost::new("plugin-a", spawner);
+    let host = PluginProcessHost::new("plugin-a", PathBuf::from("package-root"), spawner);
 
     let error = host
         .handle(CHILDPROCESS_SPAWN_METHOD, json!({ "command": "opencode" }))
@@ -281,7 +440,7 @@ async fn spawn_maps_any_other_spawn_failure_to_io() {
 #[tokio::test]
 async fn write_forwards_bytes_and_close_stdin_signals_eof() {
     let spawner = FakeChildSpawner::new();
-    let host = PluginProcessHost::new("plugin-a", spawner.clone());
+    let host = PluginProcessHost::new("plugin-a", PathBuf::from("package-root"), spawner.clone());
     let spawned = host
         .handle(CHILDPROCESS_SPAWN_METHOD, json!({ "command": "opencode" }))
         .await
@@ -328,7 +487,11 @@ async fn write_forwards_bytes_and_close_stdin_signals_eof() {
 
 #[tokio::test]
 async fn write_rejects_a_payload_over_the_size_limit_before_decoding_it() {
-    let host = PluginProcessHost::new("plugin-a", FakeChildSpawner::new());
+    let host = PluginProcessHost::new(
+        "plugin-a",
+        PathBuf::from("package-root"),
+        FakeChildSpawner::new(),
+    );
     // Longer than any base64 string that could decode to `MAX_WRITE_BYTES`; the content does not
     // need to be valid base64 because the size check runs before `BASE64.decode`.
     let oversized = "A".repeat(MAX_WRITE_BYTES.div_ceil(3) * 4 + 4);
@@ -346,7 +509,11 @@ async fn write_rejects_a_payload_over_the_size_limit_before_decoding_it() {
 
 #[tokio::test]
 async fn operations_on_an_unknown_process_id_are_not_found() {
-    let host = PluginProcessHost::new("plugin-a", FakeChildSpawner::new());
+    let host = PluginProcessHost::new(
+        "plugin-a",
+        PathBuf::from("package-root"),
+        FakeChildSpawner::new(),
+    );
 
     for (method, params) in [
         (
@@ -367,7 +534,7 @@ async fn operations_on_an_unknown_process_id_are_not_found() {
 #[tokio::test]
 async fn kill_terminates_the_process_which_then_stops_being_tracked() {
     let spawner = FakeChildSpawner::new();
-    let host = PluginProcessHost::new("plugin-a", spawner.clone());
+    let host = PluginProcessHost::new("plugin-a", PathBuf::from("package-root"), spawner.clone());
     let spawned = host
         .handle(CHILDPROCESS_SPAWN_METHOD, json!({ "command": "opencode" }))
         .await
@@ -406,7 +573,7 @@ async fn kill_terminates_the_process_which_then_stops_being_tracked() {
 #[tokio::test]
 async fn kill_all_terminates_every_tracked_process() {
     let spawner = FakeChildSpawner::new();
-    let host = PluginProcessHost::new("plugin-a", spawner.clone());
+    let host = PluginProcessHost::new("plugin-a", PathBuf::from("package-root"), spawner.clone());
     host.handle(CHILDPROCESS_SPAWN_METHOD, json!({ "command": "one" }))
         .await
         .expect("spawn succeeds");
@@ -574,7 +741,11 @@ async fn pushes_stdout_before_exit_even_when_the_process_exits_immediately_after
     .expect("fake plugin runtime launches");
 
     let child_spawner = FakeChildSpawner::new();
-    let processes = PluginProcessHost::new("plugin-a", child_spawner.clone());
+    let processes = PluginProcessHost::new(
+        "plugin-a",
+        PathBuf::from("package-root"),
+        child_spawner.clone(),
+    );
     processes.attach_runtime(runtime);
 
     let spawned = processes

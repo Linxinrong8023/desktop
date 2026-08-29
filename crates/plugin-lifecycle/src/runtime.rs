@@ -111,7 +111,11 @@ impl PluginRuntimeLauncher for DenoPluginRuntimeLauncher {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let processes = request.allow_childprocess.then(|| {
-                PluginProcessHost::new(request.plugin_id.to_string(), TokioProcessSpawner::new())
+                PluginProcessHost::new(
+                    request.plugin_id.to_string(),
+                    request.package_root.clone(),
+                    TokioProcessSpawner::new(),
+                )
             });
             let host_requests = PluginHostRequests {
                 storage: PluginStorage::new(request.data_dir),

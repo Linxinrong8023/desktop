@@ -1,5 +1,5 @@
 use super::error::ArchiveError;
-use super::extracted::ExtractedTree;
+use super::extracted::{ExtractedTree, FileExecutability};
 use super::limits::ExtractLimits;
 use super::tree_writer::{ByteBudgetKind, TreeWriter};
 use crate::path::StrictRelativePath;
@@ -51,7 +51,7 @@ fn copy_children(
             copy_children(&entry.path(), child, writer)?;
         } else if file_type.is_file() {
             let file = fs::File::open(entry.path()).map_err(map_io)?;
-            writer.add_file(child.as_str(), file)?;
+            writer.add_file(child.as_str(), source_executability(&metadata), file)?;
         } else if file_type.is_symlink() {
             // Links are intentionally omitted: following one could copy data outside the
             // submitted folder, while preserving it would require an unsafe tree format.
@@ -61,6 +61,20 @@ fn copy_children(
         }
     }
     Ok(())
+}
+
+/// Reads one local file's executability from the mode the filesystem recorded for it.
+#[cfg(unix)]
+fn source_executability(metadata: &fs::Metadata) -> FileExecutability {
+    use std::os::unix::fs::PermissionsExt;
+
+    FileExecutability::from_unix_mode(metadata.permissions().mode())
+}
+
+/// Windows records no execute bit, so a copied tree can never claim one.
+#[cfg(not(unix))]
+fn source_executability(_metadata: &fs::Metadata) -> FileExecutability {
+    FileExecutability::NotExecutable
 }
 
 /// Converts one source-walk I/O failure into a stable tree error.

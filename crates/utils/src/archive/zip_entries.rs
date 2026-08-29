@@ -1,4 +1,5 @@
 use super::error::ArchiveError;
+use super::extracted::FileExecutability;
 use super::tree_writer::TreeWriter;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -37,7 +38,13 @@ pub(super) fn extract_zip(mut file: File, writer: &mut TreeWriter) -> Result<(),
         if entry.is_dir() {
             writer.add_directory(&name)?;
         } else {
-            writer.add_file(&name, &mut entry)?;
+            // A ZIP written on a system without Unix modes records none, which reads as ordinary
+            // data. Producing an executable entry therefore requires an archiver that stores them.
+            let executability = entry.unix_mode().map_or(
+                FileExecutability::NotExecutable,
+                FileExecutability::from_unix_mode,
+            );
+            writer.add_file(&name, executability, &mut entry)?;
         }
     }
     Ok(())

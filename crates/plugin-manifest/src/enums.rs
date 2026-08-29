@@ -60,6 +60,20 @@ pub enum PluginKind {
 }
 
 impl PluginKind {
+    /// Reports whether a package of this kind may ship a target-specific native executable.
+    ///
+    /// Only these kinds may declare `[[targets]]` on a release or `[artifact]` on an installed
+    /// package, because only they contain a binary whose host compatibility the host must check
+    /// before download. A Hook *is* that binary; an Agent may bundle the CLI it drives instead of
+    /// requiring the user to install one, which is why the section stays optional for an Agent
+    /// while a Hook cannot prove compatibility without it.
+    pub fn may_ship_targeted_artifact(self) -> bool {
+        match self {
+            Self::Hook | Self::Agent => true,
+            Self::Workbench | Self::Webview | Self::Skill | Self::Mcp => false,
+        }
+    }
+
     /// Returns the manifest spelling of this plugin kind.
     pub fn as_str(self) -> &'static str {
         match self {

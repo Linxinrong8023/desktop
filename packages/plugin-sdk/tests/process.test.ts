@@ -89,6 +89,45 @@ Deno.test(
 );
 
 Deno.test(
+  "spawn sends packageCommand alone, never alongside a null command",
+  async () => {
+    const plugin = createPlugin();
+    const processes = createHostProcesses(plugin);
+    const harness = createTransportHarness();
+    const run = plugin.run(harness.transport);
+    await harness.responses.next();
+
+    const spawned = processes.spawn({
+      packageCommand: "assets/bin/opencode",
+      cwd: "/work",
+    });
+
+    // The host reads the two program forms as mutually exclusive, so an explicit `command: null`
+    // would be rejected as naming neither rather than ignored.
+    assertEquals((await harness.responses.next()).value, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "ora/childprocess/spawn",
+      params: {
+        packageCommand: "assets/bin/opencode",
+        args: [],
+        cwd: "/work",
+        env: {},
+      },
+    });
+    await harness.send({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { processId: "1", pid: 4242 },
+    });
+    await spawned;
+
+    await harness.send({ jsonrpc: "2.0", method: "ora/shutdown" });
+    await run;
+  },
+);
+
+Deno.test(
   "spawn omits args/cwd/env with the documented defaults",
   async () => {
     const plugin = createPlugin();

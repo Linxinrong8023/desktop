@@ -112,21 +112,37 @@ workbench, webview, skill, or MCP plugin runs with zero Deno permissions specifi
 start a process (see `permissions::permissions_for`); every `ora/childprocess/*` call from one of
 those kinds gets the same `-32601` a genuinely unknown method would.
 
-| Method                        | Params                           | Result                                   |
-| ----------------------------- | -------------------------------- | ---------------------------------------- |
-| `ora/childprocess/spawn`      | `{ command, args?, cwd?, env? }` | `{ processId, pid }`                     |
-| `ora/childprocess/write`      | `{ processId, bytesBase64 }`     | `{}`                                     |
-| `ora/childprocess/closeStdin` | `{ processId }`                  | `{}` (signals EOF, does not kill)        |
-| `ora/childprocess/kill`       | `{ processId }`                  | `{}` (idempotent, best-effort tree-kill) |
+| Method                        | Params                                             | Result                                   |
+| ----------------------------- | -------------------------------------------------- | ---------------------------------------- |
+| `ora/childprocess/spawn`      | `{ command \| packageCommand, args?, cwd?, env? }` | `{ processId, pid }`                     |
+| `ora/childprocess/write`      | `{ processId, bytesBase64 }`                       | `{}`                                     |
+| `ora/childprocess/closeStdin` | `{ processId }`                                    | `{}` (signals EOF, does not kill)        |
+| `ora/childprocess/kill`       | `{ processId }`                                    | `{}` (idempotent, best-effort tree-kill) |
+
+A spawn request names its executable exactly one of two ways, and the choice decides who resolves
+it. `command` is passed to the operating system unchanged — a PATH lookup, or a path the plugin
+already knows. `packageCommand` is a package-relative path the host joins onto that plugin's own
+install root, canonicalizes, and requires to be a regular file still inside the package; that is
+how a plugin runs an executable it ships. The two are mutually exclusive rather than one falling
+back to the other, because a relative `command` and a `packageCommand` are indistinguishable as
+strings. Resolving package paths here rather than in the plugin is what keeps the "a plugin learns
+nothing about host paths" property intact while still letting one ship a binary: the plugin is told
+no host path and needs none, and `cwd` stays free to be the workspace the child runs in instead of
+doubling as the directory its program is resolved against (which a relative program does
+differently per platform).
 
 The host pushes back three notifications the plugin never declares receiving (mirroring how
 `agent/acp` already flows host→plugin): `ora/childprocess/stdout` and `ora/childprocess/stderr`
 (`{ processId, bytesBase64 }`, raw chunks — the plugin owns any line framing) and
 `ora/childprocess/exit` (`{ processId, code, signal }`, `signal` only ever set on Unix).
 `processId` is scoped to one plugin generation, not globally unique. Failures carry `data.kind`
-`invalid_params` / `invalid_command` (`-32602`), `not_found` (`-32004`), `program_not_found` or
-`io` (`-32000`) — `program_not_found` means the OS could not resolve the executable, distinct from
-any other spawn or I/O failure. `write` rejects a `bytesBase64` payload that would decode to more
+`invalid_params` / `invalid_command` / `invalid_package_command` (`-32602`), `not_found`
+(`-32004`), `program_not_found` or `io` (`-32000`) — `program_not_found` means the OS could not
+resolve the executable, distinct from any other spawn or I/O failure.
+`invalid_package_command` is the separate answer for a `packageCommand` that is not a portable
+relative path, does not exist, escapes the package, or is not a regular file: a broken package
+fails identically on every retry, so it must not be mistaken for a machine that is merely missing
+a CLI. `write` rejects a `bytesBase64` payload that would decode to more
 than `MAX_WRITE_BYTES` (8 MiB, mirroring `MAX_STORAGE_FILE_BYTES`) as `invalid_params` before
 decoding it, so a plugin cannot force unbounded host memory growth through one oversized write.
 

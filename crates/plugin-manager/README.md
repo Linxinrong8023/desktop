@@ -48,6 +48,13 @@ orchestrates checksum-verified installs of new plugin releases.
 - Import one local `.orax` release archive by extracting into a disposable staging directory,
   parsing its in-archive `orax.toml`, verifying a declared `sha256`, and then moving only the
   validated tree into `<data-dir>/plugins/installed/<namespace>/<name>/<version>`.
+- Own the extraction budget plugin packages are held to (`limits::package_extract_limits`) rather
+  than inheriting the generic `ExtractLimits` default, which is sized for text payloads. An Agent
+  Plugin may bundle the CLI it drives, and those are single native binaries in the hundreds of
+  megabytes.
+- Verify a package that self-declares `[artifact]` was built for the host it is landing on, for
+  both online install and local import. The declaration is mandatory only for `hook` packages;
+  every kind that omits it installs as a universal package.
 
 ## Non-responsibilities
 

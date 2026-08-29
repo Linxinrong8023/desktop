@@ -8,6 +8,15 @@
 //! effort, the moment that generation's [`PluginRuntime`](ora_plugin_runtime::PluginRuntime) stops
 //! for any reason; see [`PluginProcessHost::kill_all`] and its wiring in
 //! `runtime::DenoPluginRuntimeLauncher::launch`.
+//!
+//! A spawn request names its executable in one of two ways, and which one it uses decides who
+//! resolves the path. `command` is handed to the operating system unchanged, for a PATH lookup or
+//! a host-absolute path the plugin already knows. `packageCommand` is a package-relative path the
+//! host joins onto this plugin's own install root, which is how a plugin runs an executable it
+//! ships: the plugin is never told a host path (see `crate::runtime`, which injects no environment
+//! and only sets the package root as the working directory), and it cannot reliably compute one —
+//! a relative program combined with a `cwd` resolves against different directories per platform,
+//! and the child's `cwd` must be the workspace rather than the package anyway.
 
 use std::collections::HashMap;
 use std::io;
@@ -23,6 +32,7 @@ use ora_plugin_runtime::{
     HostRequestError, HostRequestHandler, PluginRuntime as ProcessPluginRuntime,
 };
 use ora_process::{ManagedProcess, ProcessSpawner, ProcessSpec, ProcessStdio};
+use ora_utils::path::{CanonicalPathRoot, PortableRelativePath};
 use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
@@ -67,6 +77,8 @@ enum ChildProcessErrorKind {
     InvalidParams,
     /// `command` parsed but was empty.
     InvalidCommand,
+    /// `packageCommand` does not name a usable executable inside the plugin's own package.
+    InvalidPackageCommand,
     /// `processId` does not name a process this handler is tracking.
     NotFound,
     /// Spawn failed because the OS could not resolve the executable.
@@ -80,6 +92,7 @@ impl ChildProcessErrorKind {
         match self {
             Self::InvalidParams => "invalid_params",
             Self::InvalidCommand => "invalid_command",
+            Self::InvalidPackageCommand => "invalid_package_command",
             Self::NotFound => "not_found",
             Self::ProgramNotFound => "program_not_found",
             Self::Io => "io",
@@ -88,7 +101,9 @@ impl ChildProcessErrorKind {
 
     fn code(self) -> i64 {
         match self {
-            Self::InvalidParams | Self::InvalidCommand => INVALID_PARAMS_CODE,
+            Self::InvalidParams | Self::InvalidCommand | Self::InvalidPackageCommand => {
+                INVALID_PARAMS_CODE
+            }
             Self::NotFound => NOT_FOUND_CODE,
             Self::ProgramNotFound | Self::Io => IO_CODE,
         }
@@ -146,6 +161,9 @@ struct Tracked<P> {
 
 struct Inner<S: ProcessSpawner> {
     plugin_id: String,
+    /// Install root of the package this handler serves, and the boundary every `packageCommand`
+    /// must resolve inside. Fixed by the launch, so a request can never widen it.
+    package_root: PathBuf,
     spawner: S,
     next_id: AtomicU64,
     tracked: StdMutex<HashMap<String, Tracked<S::Process>>>,
@@ -176,11 +194,16 @@ where
     S: ProcessSpawner + Send + Sync + 'static,
     S::Process: Send + Sync + 'static,
 {
-    /// Binds the handler to the plugin it serves and the spawner it spawns through.
-    pub fn new(plugin_id: impl Into<String>, spawner: S) -> Self {
+    /// Binds the handler to the plugin it serves, that plugin's package root, and its spawner.
+    ///
+    /// The package root is bound here, at launch, for the same reason the plugin identity is: it
+    /// decides which tree a `packageCommand` may resolve inside, and taking it from a request
+    /// would let a plugin name any directory on the host.
+    pub fn new(plugin_id: impl Into<String>, package_root: PathBuf, spawner: S) -> Self {
         let (runtime, runtime_rx) = watch::channel(None);
         Self(Arc::new(Inner {
             plugin_id: plugin_id.into(),
+            package_root,
             spawner,
             next_id: AtomicU64::new(1),
             tracked: StdMutex::new(HashMap::new()),
@@ -238,9 +261,50 @@ where
         }
     }
 
+    /// Resolves one spawn request's program into the exact path handed to the operating system.
+    ///
+    /// A `packageCommand` is joined onto this plugin's install root and canonicalized, which
+    /// rejects a target that does not exist or that escapes the package through a symlink. The
+    /// resulting absolute path frees the request's `cwd` to be the workspace the child should run
+    /// in, instead of doubling as the directory the program is resolved against.
+    fn resolve_program(&self, program: SpawnProgram) -> Result<PathBuf, ChildProcessError> {
+        let relative = match program {
+            SpawnProgram::Host(command) => return Ok(PathBuf::from(command)),
+            SpawnProgram::Package(relative) => relative,
+        };
+        let root = CanonicalPathRoot::new(&self.0.package_root).map_err(|error| {
+            ChildProcessError::new(
+                ChildProcessErrorKind::InvalidPackageCommand,
+                format!("the plugin package root is unavailable: {error}"),
+            )
+        })?;
+        let resolved = root.resolve_existing(&relative).map_err(|error| {
+            ChildProcessError::new(
+                ChildProcessErrorKind::InvalidPackageCommand,
+                format!(
+                    "packageCommand `{}` must exist inside the plugin package: {error}",
+                    relative.as_str()
+                ),
+            )
+        })?;
+        // Path-based like the containment check above: it cannot prevent a replacement between
+        // this check and the spawn, only a package that is already shaped wrong.
+        if !resolved.is_file() {
+            return Err(ChildProcessError::new(
+                ChildProcessErrorKind::InvalidPackageCommand,
+                format!(
+                    "packageCommand `{}` must name a regular package file",
+                    relative.as_str()
+                ),
+            ));
+        }
+        Ok(resolved)
+    }
+
     async fn handle_spawn(&self, params: Value) -> Result<Value, HostRequestError> {
         let request = parse_spawn_params(&params)?;
-        let mut spec = ProcessSpec::new(request.command)
+        let program = self.resolve_program(request.program)?;
+        let mut spec = ProcessSpec::new(program)
             .args(request.args)
             .stdin(ProcessStdio::Piped)
             .stdout(ProcessStdio::Piped)
@@ -498,16 +562,24 @@ fn exit_fields(status: Result<&ExitStatus, &io::Error>) -> (Option<i32>, Option<
     (code, signal)
 }
 
+/// Names the executable one spawn request wants, and therefore who resolves it.
+enum SpawnProgram {
+    /// Resolved by the operating system: a PATH lookup, or a path the plugin already knows.
+    Host(String),
+    /// Resolved by the host against the calling plugin's own package root.
+    Package(PortableRelativePath),
+}
+
 /// One validated `spawn` request.
 struct SpawnParams {
-    command: String,
+    program: SpawnProgram,
     args: Vec<String>,
     cwd: Option<PathBuf>,
     env: Vec<(String, String)>,
 }
 
 /// Parses and validates the `spawn` params, rejecting anything not shaped like the documented
-/// `{ command, args?, cwd?, env? }`.
+/// `{ command | packageCommand, args?, cwd?, env? }`.
 fn parse_spawn_params(params: &Value) -> Result<SpawnParams, ChildProcessError> {
     let object = params.as_object().ok_or_else(|| {
         ChildProcessError::new(
@@ -515,21 +587,7 @@ fn parse_spawn_params(params: &Value) -> Result<SpawnParams, ChildProcessError> 
             "spawn params must be an object",
         )
     })?;
-    let command = object
-        .get("command")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            ChildProcessError::new(
-                ChildProcessErrorKind::InvalidParams,
-                "missing string command",
-            )
-        })?;
-    if command.trim().is_empty() {
-        return Err(ChildProcessError::new(
-            ChildProcessErrorKind::InvalidCommand,
-            "command must not be empty",
-        ));
-    }
+    let program = parse_spawn_program(object)?;
     let args = match object.get("args") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(items)) => items
@@ -584,11 +642,68 @@ fn parse_spawn_params(params: &Value) -> Result<SpawnParams, ChildProcessError> 
         }
     };
     Ok(SpawnParams {
-        command: command.to_owned(),
+        program,
         args,
         cwd,
         env,
     })
+}
+
+/// Selects the one program field a spawn request carries.
+///
+/// The two forms are mutually exclusive rather than one falling back to the other: a relative
+/// `command` and a `packageCommand` are indistinguishable as strings, so letting one field serve
+/// both meanings would make the callsite decide by accident which directory resolves it.
+fn parse_spawn_program(
+    object: &serde_json::Map<String, Value>,
+) -> Result<SpawnProgram, ChildProcessError> {
+    let command = optional_string(object, "command")?;
+    let package_command = optional_string(object, "packageCommand")?;
+    match (command, package_command) {
+        (Some(_), Some(_)) => Err(ChildProcessError::new(
+            ChildProcessErrorKind::InvalidParams,
+            "command and packageCommand are mutually exclusive",
+        )),
+        (None, None) => Err(ChildProcessError::new(
+            ChildProcessErrorKind::InvalidParams,
+            "missing string command or packageCommand",
+        )),
+        (Some(command), None) => {
+            if command.trim().is_empty() {
+                return Err(ChildProcessError::new(
+                    ChildProcessErrorKind::InvalidCommand,
+                    "command must not be empty",
+                ));
+            }
+            Ok(SpawnProgram::Host(command.to_owned()))
+        }
+        // Portable parsing is what makes the value safe to join: it rejects parent traversal,
+        // rooted paths, drive and UNC prefixes, reserved device names, and NUL on every host, so
+        // the same package behaves identically wherever it is installed.
+        (None, Some(package_command)) => PortableRelativePath::parse(package_command)
+            .map(SpawnProgram::Package)
+            .map_err(|error| {
+                ChildProcessError::new(
+                    ChildProcessErrorKind::InvalidPackageCommand,
+                    format!("packageCommand is not a portable package-relative path: {error}"),
+                )
+            }),
+    }
+}
+
+/// Reads one optional string field, treating an explicit null as absent.
+fn optional_string<'a>(
+    object: &'a serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<Option<&'a str>, ChildProcessError> {
+    match object.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value)),
+        Some(_) => Err(ChildProcessError::new(
+            ChildProcessErrorKind::InvalidParams,
+            format!("{field} must be a string"),
+        )),
+    }
 }
 
 /// Extracts and validates the `processId` param shared by `write`, `closeStdin`, and `kill`.

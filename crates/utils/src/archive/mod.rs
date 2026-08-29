@@ -21,6 +21,6 @@ mod tests;
 pub use copy::copy_tree;
 pub use error::ArchiveError;
 pub use extract::extract_archive;
-pub use extracted::{ExtractedFile, ExtractedTree};
+pub use extracted::{ExtractedFile, ExtractedTree, FileExecutability};
 pub use format::ArchiveFormat;
 pub use limits::ExtractLimits;

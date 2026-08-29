@@ -1145,9 +1145,9 @@ fn rejects_duplicate_target_triples() {
     assert_eq!(field, ManifestField::ReleaseTargetTarget { index: 1 });
 }
 
-/// The targeted form is exclusive to hook kind plugins; other kinds are rejected.
+/// An agent that bundles its CLI declares the targeted form the same way a hook does.
 #[test]
-fn rejects_targeted_release_for_non_hook_kinds() {
+fn parses_targeted_release_for_the_agent_kind() {
     let source = r#"resolver = 1
 identifier = "weather"
 namespace = "official"
@@ -1160,8 +1160,36 @@ target = "x86_64-pc-windows-msvc"
 url = "https://example.com/weather.orax"
 sha256 = "feab001d7e9ff4ce66011ebd70791de93eb1554d34d3ea44c33d102a25c1be0a"
 "#;
+    let manifest = PluginManifest::parse(source).expect("targeted agent release parses");
+    let Some(PluginReleaseSource::Targets(targets)) = manifest.release_source() else {
+        panic!("expected the targeted release form");
+    };
+    assert_eq!(
+        targets
+            .iter()
+            .map(|target| target.target().to_string())
+            .collect::<Vec<_>>(),
+        vec!["x86_64-pc-windows-msvc".to_string()]
+    );
+}
+
+/// The targeted form stays closed to kinds that ship no native binary of their own.
+#[test]
+fn rejects_targeted_release_for_kinds_without_native_binaries() {
+    let source = r#"resolver = 1
+identifier = "weather"
+namespace = "official"
+kind = "workbench"
+version = "1.0.0"
+description = "Weather workbench"
+
+[[targets]]
+target = "x86_64-pc-windows-msvc"
+url = "https://example.com/weather.orax"
+sha256 = "feab001d7e9ff4ce66011ebd70791de93eb1554d34d3ea44c33d102a25c1be0a"
+"#;
     let Err(ManifestError::InvalidField { field, .. }) = PluginManifest::parse(source) else {
-        panic!("expected targeted release rejection for non-hook kind");
+        panic!("expected targeted release rejection for a kind with no native binary");
     };
     assert_eq!(field, ManifestField::Targets);
 }
@@ -1239,9 +1267,9 @@ fn rejects_targets_section_on_installed_manifest() {
     ));
 }
 
-/// `[artifact]` is exclusive to the hook kind on an installed package.
+/// An installed agent package that bundles its CLI self-declares the target it was built for.
 #[test]
-fn rejects_artifact_section_for_non_hook_kinds() {
+fn parses_installed_agent_manifest_with_artifact() {
     let source = r#"resolver = 1
 identifier = "weather"
 namespace = "official"
@@ -1252,16 +1280,52 @@ description = "Weather agent"
 [artifact]
 target = "x86_64-pc-windows-msvc"
 "#;
+    let manifest = PluginManifest::parse_installed(source).expect("installed agent parses");
+    assert_eq!(
+        manifest
+            .artifact()
+            .map(|artifact| artifact.target().to_string()),
+        Some("x86_64-pc-windows-msvc".to_string())
+    );
+}
+
+/// An agent that resolves its CLI from PATH bundles nothing, so it declares no target either.
+#[test]
+fn parses_installed_agent_manifest_without_artifact() {
+    let source = r#"resolver = 1
+identifier = "weather"
+namespace = "official"
+kind = "agent"
+version = "1.0.0"
+description = "Weather agent"
+"#;
+    let manifest = PluginManifest::parse_installed(source).expect("installed agent parses");
+    assert_eq!(manifest.artifact(), None);
+}
+
+/// `[artifact]` stays closed to kinds that ship no native binary of their own.
+#[test]
+fn rejects_artifact_section_for_kinds_without_native_binaries() {
+    let source = r#"resolver = 1
+identifier = "weather"
+namespace = "official"
+kind = "workbench"
+version = "1.0.0"
+description = "Weather workbench"
+
+[artifact]
+target = "x86_64-pc-windows-msvc"
+"#;
     let Err(ManifestError::InvalidField { field, reason }) =
         PluginManifest::parse_installed(source)
     else {
-        panic!("expected artifact rejection for non-hook kind");
+        panic!("expected artifact rejection for a kind with no native binary");
     };
     assert_eq!(field, ManifestField::Artifact);
     assert!(matches!(
         reason,
         InvalidFieldReason::NotAllowedForKind {
-            kind: PluginKind::Agent
+            kind: PluginKind::Workbench
         }
     ));
 }

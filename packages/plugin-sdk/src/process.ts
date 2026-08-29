@@ -10,13 +10,30 @@ const CHILDPROCESS_STDOUT_METHOD = "ora/childprocess/stdout";
 const CHILDPROCESS_STDERR_METHOD = "ora/childprocess/stderr";
 const CHILDPROCESS_EXIT_METHOD = "ora/childprocess/exit";
 
-/** Options for one subprocess the host spawns on this plugin's behalf. */
-export interface HostChildProcessOptions {
-  command: string;
+/** Everything a spawn request carries apart from the program to run. */
+interface HostChildProcessInvocation {
   args?: string[];
+  /** Working directory of the child, independent of how its program was resolved. */
   cwd?: string;
+  /** Added to the environment the child inherits from the host; it is not a replacement. */
   env?: Record<string, string>;
 }
+
+/**
+ * Options for one subprocess the host spawns on this plugin's behalf.
+ *
+ * The program is named exactly one of two ways. `command` is resolved by the operating system: a
+ * PATH lookup, or a path this plugin already knows. `packageCommand` is a package-relative path
+ * the host joins onto this plugin's own install root, which is how a plugin runs an executable it
+ * ships — a plugin is told no host path and cannot reliably compute one, and a relative `command`
+ * would be resolved against a different directory depending on the platform.
+ */
+export type HostChildProcessOptions =
+  & HostChildProcessInvocation
+  & (
+    | { command: string; packageCommand?: never }
+    | { packageCommand: string; command?: never }
+  );
 
 /** How one host-managed child process ended; `signal` is only ever set on Unix. */
 export interface HostChildProcessExit {
@@ -92,8 +109,14 @@ export function createHostProcesses(plugin: Plugin): HostProcesses {
 
   return {
     async spawn(options) {
+      // Only the field actually supplied is sent: the host reads the two program forms as
+      // mutually exclusive, and an explicit null would read as naming neither.
+      const program: Record<string, string> =
+        options.packageCommand === undefined
+          ? { command: options.command }
+          : { packageCommand: options.packageCommand };
       const result = await plugin.request(CHILDPROCESS_SPAWN_METHOD, {
-        command: options.command,
+        ...program,
         args: options.args ?? [],
         cwd: options.cwd ?? null,
         env: options.env ?? {},

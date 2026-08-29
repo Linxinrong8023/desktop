@@ -1,4 +1,5 @@
 use super::error::ArchiveError;
+use super::extracted::FileExecutability;
 use super::tree_writer::TreeWriter;
 use flate2::read::GzDecoder;
 use std::fs::File;
@@ -37,7 +38,10 @@ pub(super) fn extract_tar_gz(mut file: File, writer: &mut TreeWriter) -> Result<
                 if entry_type.is_dir() {
                     writer.add_directory(&name)?;
                 } else {
-                    writer.add_file(&name, &mut entry)?;
+                    // A mode field that is not valid octal is a corrupt header, classified the
+                    // same way as every other unreadable header value in this loop.
+                    let mode = entry.header().mode().map_err(|_| ArchiveError::Corrupt)?;
+                    writer.add_file(&name, FileExecutability::from_unix_mode(mode), &mut entry)?;
                 }
             }
         }

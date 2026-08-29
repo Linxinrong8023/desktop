@@ -151,7 +151,7 @@ impl PluginManifest {
                 InvalidFieldReason::ArtifactNotAllowedOnRelease,
             ));
         }
-        if metadata.artifact.is_some() && !matches!(kind, PluginKind::Hook) {
+        if metadata.artifact.is_some() && !kind.may_ship_targeted_artifact() {
             return Err(invalid_field(
                 ManifestField::Artifact,
                 InvalidFieldReason::NotAllowedForKind { kind },
@@ -159,7 +159,8 @@ impl PluginManifest {
         }
         // A targeted Hook package self-declares its host triple in `[artifact]`; an installed
         // Hook without that section cannot prove host compatibility independently of marketplace
-        // metadata.
+        // metadata. An Agent is not held to this: bundling a CLI is optional, and one that resolves
+        // its agent from PATH is a legitimate universal package with nothing to declare.
         if matches!(form, ManifestForm::Installed)
             && matches!(kind, PluginKind::Hook)
             && metadata.artifact.is_none()
@@ -467,9 +468,9 @@ impl TryFrom<RawArtifact> for PluginArtifact {
 /// The `url`/`sha256` top-level fields describe a universal artifact; the `[[targets]]` array
 /// describes one or more exact-target artifacts. The two forms are mutually exclusive so a
 /// release can never carry ambiguous download precedence. The universal form is available to
-/// every kind that may declare a release; the targeted form is exclusive to `hook` because only
-/// a Hook Plugin ships target-specific native binaries whose host-compatibility the host must
-/// check before download.
+/// every kind that may declare a release; the targeted form is limited to the kinds that ship
+/// target-specific native binaries (see [`PluginKind::may_ship_targeted_artifact`]), whose
+/// host-compatibility the host must check before download.
 fn validate_release_source(
     url: Option<&ReleaseUrl>,
     sha256: Option<&Sha256Digest>,
@@ -525,9 +526,9 @@ fn validate_release_source(
         }));
     }
 
-    // The targeted form is exclusive to Hook Plugins: only a Hook ships native per-target binaries
-    // whose host compatibility the marketplace must advertise before download.
-    if !matches!(kind, PluginKind::Hook) {
+    // The targeted form belongs to the kinds that ship native per-target binaries, whose host
+    // compatibility the marketplace must advertise before download.
+    if !kind.may_ship_targeted_artifact() {
         return Err(invalid_field(
             ManifestField::Targets,
             InvalidFieldReason::NotAllowedForKind { kind },
