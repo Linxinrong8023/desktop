@@ -193,6 +193,7 @@ where
         }
     };
 
+    let had_untracked_package = existing.is_none() && storage.formal_exists(&candidate.name);
     let updated_at = existing.as_ref().map_or(now, |skill| {
         next_updated_at(skill.audit_fields.updated_at, now)
     });
@@ -255,7 +256,13 @@ where
             Err(error) => return promote_failure(storage, &staging, error),
         }
     } else {
-        match commit_unclaimed_package(storage, &skill.id, &skill.name, &staging) {
+        match commit_unclaimed_package(
+            storage,
+            &skill.id,
+            &skill.name,
+            &staging,
+            had_untracked_package,
+        ) {
             Ok(promoted) => promoted,
             Err(error) => return promote_failure(storage, &staging, error),
         }

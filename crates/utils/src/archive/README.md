@@ -25,8 +25,9 @@ feature.
   case-insensitive filesystems.
 - Executability is normalized, never preserved: only an entry's execute bits are read, and
   honoring them writes a fixed `0o755`, so setuid, setgid, and sticky bits can never survive
-  extraction. Windows records no execute bit, so trees materialized there are never executable and
-  a ZIP written without Unix modes yields ordinary data on every host.
+  extraction. Non-executable files are materialized as `0o644` so the process umask cannot change
+  the tree's permissions. Windows records no execute bit, so trees materialized there are never
+  executable and a ZIP written without Unix modes yields ordinary data on every host.
 - Archives are bounded by an expansion budget of `min(max_total_bytes, max(10 MiB, size * 100))`;
   folder copies are bounded by the flat `max_total_bytes`.
 - Any failure aborts the whole tree; callers own cleanup of the destination directory.

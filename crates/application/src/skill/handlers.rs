@@ -84,6 +84,7 @@ where
             });
         }
 
+        let had_untracked_package = self.storage.formal_exists(&name);
         let skill = Skill::new(
             self.id_generator.generate_skill_id(),
             namespace,
@@ -105,7 +106,13 @@ where
         self.storage
             .write_manifest(&staging, manifest.as_bytes())
             .map_err(ApplicationError::from_skill_storage_error)?;
-        let promoted = commit_unclaimed_package(&self.storage, &skill.id, &skill.name, &staging)?;
+        let promoted = commit_unclaimed_package(
+            &self.storage,
+            &skill.id,
+            &skill.name,
+            &staging,
+            had_untracked_package,
+        )?;
         let source_revision = self
             .storage
             .formal_package_path(&skill.name)

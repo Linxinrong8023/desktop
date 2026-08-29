@@ -126,10 +126,7 @@ impl TreeWriter {
         // Released before the mode changes so the permission write cannot race the handle that
         // produced the file.
         drop(file);
-        match executability {
-            FileExecutability::Executable => set_executable(&destination)?,
-            FileExecutability::NotExecutable => {}
-        }
+        set_materialized_permissions(&destination, executability)?;
         self.total_bytes += copied;
         self.files.push(ExtractedFile {
             relative_path: path,
@@ -176,18 +173,26 @@ impl TreeWriter {
     }
 }
 
-/// Marks one materialized file executable, normalizing the mode instead of preserving it.
+/// Applies the stable permissions policy to one materialized file instead of inheriting the
+/// process umask, which keeps extracted trees reproducible across hosts.
 ///
-/// A fixed `0o755` is written rather than the source mode, so an archive asking for setuid,
-/// setgid, or a sticky bit receives none of them.
+/// A fixed `0o644` or `0o755` is written rather than the source mode, so an archive asking for
+/// setuid, setgid, or a sticky bit receives none of them.
 #[cfg(unix)]
-fn set_executable(destination: &Path) -> Result<(), ArchiveError> {
+fn set_materialized_permissions(
+    destination: &Path,
+    executability: FileExecutability,
+) -> Result<(), ArchiveError> {
     use std::os::unix::fs::PermissionsExt;
 
-    fs::set_permissions(destination, fs::Permissions::from_mode(0o755)).map_err(|error| {
+    let mode = match executability {
+        FileExecutability::Executable => 0o755,
+        FileExecutability::NotExecutable => 0o644,
+    };
+    fs::set_permissions(destination, fs::Permissions::from_mode(mode)).map_err(|error| {
         ArchiveError::Io {
             message: format!(
-                "failed to mark tree file {} executable: {error}",
+                "failed to set permissions for tree file {}: {error}",
                 destination.display()
             ),
         }
@@ -196,7 +201,10 @@ fn set_executable(destination: &Path) -> Result<(), ArchiveError> {
 
 /// Windows decides executability by file extension and has no bit to set.
 #[cfg(not(unix))]
-fn set_executable(_destination: &Path) -> Result<(), ArchiveError> {
+fn set_materialized_permissions(
+    _destination: &Path,
+    _executability: FileExecutability,
+) -> Result<(), ArchiveError> {
     Ok(())
 }
 
