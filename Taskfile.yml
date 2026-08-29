@@ -84,6 +84,11 @@ tasks:
       - pnpm store prune
       - cargo clean
 
+  clean:debug:
+    desc: Clean only Rust debug build artifacts
+    cmds:
+      - cargo clean --profile dev
+
   format:
     desc: Format files changed in the working tree or staging area
     cmds:
@@ -132,6 +137,8 @@ tasks:
 
   lint:crates:
     desc: Run linters on all Rust workspace packages
+    env:
+      CARGO_INCREMENTAL: "0"
     silent: true
     cmds:
       - cargo fmt --all -- --check
@@ -159,6 +166,8 @@ tasks:
 
   test:crates:
     desc: Run all Rust workspace package test suites
+    env:
+      CARGO_INCREMENTAL: "0"
     preconditions:
       - sh: command -v rg >/dev/null 2>&1
         msg: "Ripgrep (rg) is not available on PATH. Install it before running Rust tests."

@@ -61,6 +61,10 @@ default-members = [
 ]
 resolver = "2"
 
+# Keep local debugging useful while reducing the size of long-lived MSVC artifacts.
+[profile.dev]
+debug = 1
+
 [workspace.package]
 version = "0.0.0"
 # Track the edition for all workspace crates in one place. Individual
