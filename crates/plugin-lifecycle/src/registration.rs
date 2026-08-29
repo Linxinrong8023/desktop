@@ -24,6 +24,11 @@ pub fn validate_registration(
     match contribution {
         PluginContribution::Agent(_) => Ok(()),
         PluginContribution::Workbench(_) => {
+            if !registration.effect_surfaces.is_empty() {
+                return Err(PluginRuntimeFailure::new(
+                    "workbench contract v1 does not accept Effect surface declarations",
+                ));
+            }
             if let Some(emit) = registration.emits.iter().next() {
                 return Err(PluginRuntimeFailure::new(format!(
                     "workbench contract v1 does not accept emitted notifications (found {emit})"
@@ -45,6 +50,12 @@ pub fn validate_registration(
         )),
         PluginContribution::Skill(_) => Err(PluginRuntimeFailure::new(
             "skill plugins have no process and cannot register",
+        )),
+        PluginContribution::Mcp(_) => Err(PluginRuntimeFailure::new(
+            "mcp plugins have no process and cannot register",
+        )),
+        PluginContribution::Hook(_) => Err(PluginRuntimeFailure::new(
+            "hook plugins have no process and cannot register",
         )),
     }
 }
@@ -81,14 +92,17 @@ mod tests {
         let with_emit = PluginRegistration {
             methods: HashSet::from(["counter/get".to_string()]),
             emits: HashSet::from(["counter/tick".to_string()]),
+            effect_surfaces: Vec::new(),
         };
         let bad_name = PluginRegistration {
             methods: HashSet::from(["Counter.Get".to_string()]),
             emits: HashSet::new(),
+            effect_surfaces: Vec::new(),
         };
         let superset = PluginRegistration {
             methods: HashSet::from(["counter/get".to_string(), "internal/reset".to_string()]),
             emits: HashSet::new(),
+            effect_surfaces: Vec::new(),
         };
         assert_eq!(
             (
@@ -107,6 +121,25 @@ mod tests {
                 Ok(()),
                 Ok(()),
             )
+        );
+    }
+
+    /// Runtime Effect consumers are Agent plugins; a page process cannot own that lifecycle.
+    #[test]
+    fn workbench_registrations_reject_effect_surfaces() {
+        let registration = PluginRegistration {
+            effect_surfaces: vec![ora_plugin_runtime::PluginEffectSurface {
+                workspace_relative_path: ".agents/skills".to_string(),
+                materialization_format: "skill_directory.v1".to_string(),
+                coordination: ora_plugin_runtime::PluginEffectCoordination::Uninterrupted,
+            }],
+            ..PluginRegistration::default()
+        };
+        assert_eq!(
+            validate_registration(&workbench(), &registration),
+            Err(PluginRuntimeFailure::new(
+                "workbench contract v1 does not accept Effect surface declarations",
+            )),
         );
     }
 
@@ -133,6 +166,51 @@ mod tests {
             ),
             Err(PluginRuntimeFailure::new(
                 "skill plugins have no process and cannot register",
+            )),
+        );
+    }
+
+    /// MCP plugins are configuration-only and have no runtime handshake.
+    #[test]
+    fn mcp_plugins_cannot_register() {
+        use ora_plugin_config::{CompiledConfigurationFile, compile_configuration_file};
+        use ora_plugin_manager::InstalledMcpDescriptor;
+
+        let CompiledConfigurationFile::Mcp(configuration) = compile_configuration_file(
+            br#"{ "schemaVersion": 1, "transport": { "type": "http", "url": "https://mcp.example.com/v1" } }"#,
+        )
+        .expect("compile fixture") else {
+            panic!("expected the MCP shape");
+        };
+        let contribution = PluginContribution::Mcp(InstalledMcpDescriptor { configuration });
+        assert_eq!(
+            validate_registration(&contribution, &PluginRegistration::default()),
+            Err(PluginRuntimeFailure::new(
+                "mcp plugins have no process and cannot register",
+            )),
+        );
+    }
+
+    /// Hook plugins are processless and have no runtime handshake.
+    #[test]
+    fn hook_plugins_cannot_register() {
+        use ora_plugin_config::{CompiledConfigurationFile, compile_configuration_file};
+        use ora_plugin_manager::InstalledHookDescriptor;
+
+        let CompiledConfigurationFile::Hook(configuration) = compile_configuration_file(
+            br#"{ "schemaVersion": 1, "hook": { "protocol": "rtk-rewrite-v1", "executable": "assets/rtk.exe", "command": "rtk", "toolVersion": "0.45.0" } }"#,
+        )
+        .expect("compile fixture") else {
+            panic!("expected the Hook shape");
+        };
+        let contribution = PluginContribution::Hook(InstalledHookDescriptor {
+            configuration,
+            artifact_target: None,
+        });
+        assert_eq!(
+            validate_registration(&contribution, &PluginRegistration::default()),
+            Err(PluginRuntimeFailure::new(
+                "hook plugins have no process and cannot register",
             )),
         );
     }

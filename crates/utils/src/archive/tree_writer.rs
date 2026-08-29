@@ -1,11 +1,11 @@
 use super::error::ArchiveError;
-use super::extracted::{ExtractedFile, ExtractedTree};
+use super::extracted::{ExtractedFile, ExtractedTree, FileExecutability};
 use super::limits::ExtractLimits;
 use crate::path::StrictRelativePath;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Selects which stable error a cumulative byte-budget overflow maps to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +87,12 @@ impl TreeWriter {
     }
 
     /// Streams one ordinary file into the tree under its validated relative path.
-    pub(super) fn add_file(&mut self, raw: &str, reader: impl Read) -> Result<(), ArchiveError> {
+    pub(super) fn add_file(
+        &mut self,
+        raw: &str,
+        executability: FileExecutability,
+        reader: impl Read,
+    ) -> Result<(), ArchiveError> {
         self.count_entry()?;
         let path = StrictRelativePath::parse_with_limits(raw, &self.limits.path)
             .map_err(ArchiveError::Path)?;
@@ -118,10 +123,18 @@ impl TreeWriter {
         let mut budgeted = BudgetReader::new(reader, remaining);
         let copied =
             io::copy(&mut budgeted, &mut file).map_err(map_copy_error(self.budget_kind))?;
+        // Released before the mode changes so the permission write cannot race the handle that
+        // produced the file.
+        drop(file);
+        match executability {
+            FileExecutability::Executable => set_executable(&destination)?,
+            FileExecutability::NotExecutable => {}
+        }
         self.total_bytes += copied;
         self.files.push(ExtractedFile {
             relative_path: path,
             size: copied,
+            executability,
         });
         Ok(())
     }
@@ -161,6 +174,30 @@ impl TreeWriter {
         }
         Ok(())
     }
+}
+
+/// Marks one materialized file executable, normalizing the mode instead of preserving it.
+///
+/// A fixed `0o755` is written rather than the source mode, so an archive asking for setuid,
+/// setgid, or a sticky bit receives none of them.
+#[cfg(unix)]
+fn set_executable(destination: &Path) -> Result<(), ArchiveError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(destination, fs::Permissions::from_mode(0o755)).map_err(|error| {
+        ArchiveError::Io {
+            message: format!(
+                "failed to mark tree file {} executable: {error}",
+                destination.display()
+            ),
+        }
+    })
+}
+
+/// Windows decides executability by file extension and has no bit to set.
+#[cfg(not(unix))]
+fn set_executable(_destination: &Path) -> Result<(), ArchiveError> {
+    Ok(())
 }
 
 /// Wraps one entry reader with the remaining tree byte budget.

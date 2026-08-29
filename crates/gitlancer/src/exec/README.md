@@ -7,7 +7,8 @@ This module is the process boundary for prepared Git CLI operations.
 - `GitCommand` carries the working directory, arguments, `GitEnv`, and a `GitIntent` classification.
 - `GitEnv::automation_defaults` disables terminal prompts, fixes language to `C`, and disables paging so agent-driven commands cannot block on interactive UI or localized output.
 - `GitRunner` lets the typed use-case layer execute commands through static dispatch.
-- `CliGitRunner` invokes the system `git` binary, records duration, emits optional command telemetry, and returns normalized `GitOutput`.
+- `CliGitRunner` invokes the system `git` binary without exposing a Windows console window,
+  records duration, emits optional command telemetry, and returns normalized `GitOutput`.
 - `GitRunner::run_bounded` captures stdout and stderr concurrently and terminates the child when either stream exceeds its budget, so a large diff cannot grow process memory without limit.
 - `RecordingGitRunner` provides a non-executing boundary for command-construction tests.
 

@@ -10,6 +10,7 @@
  *   [data-quote-selected]  in-progress drag range (on the row or its <tr>)
  *   [data-quote-anchor]    the row where the drag started (keeps its +)
  *   [data-quote-pinned]    persistent click/shift-click selection
+ *   [data-cited-range]     jump-to-citation wash (same tint as pin; Files only)
  */
 
 [data-quote-root] {
@@ -44,7 +45,8 @@
 
 /* File preview: the keyed element is the row itself. */
 [data-quote-root] [data-quote-selected="true"]:not(tr):not(td),
-[data-quote-root] [data-quote-pinned="true"]:not(tr):not(td) {
+[data-quote-root] [data-quote-pinned="true"]:not(tr):not(td),
+[data-quote-root] [data-cited-range="true"]:not(tr):not(td) {
   background: var(--quote-tint);
 }
 
@@ -60,7 +62,8 @@
 
 /* Gutter of a selected row reads slightly stronger. */
 [data-quote-root] [data-quote-selected="true"] [data-quote-gutter],
-[data-quote-root] [data-quote-pinned="true"] [data-quote-gutter] {
+[data-quote-root] [data-quote-pinned="true"] [data-quote-gutter],
+[data-quote-root] [data-cited-range="true"] [data-quote-gutter] {
   background: var(--quote-tint-strong);
 }
 

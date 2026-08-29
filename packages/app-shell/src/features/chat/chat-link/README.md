@@ -19,6 +19,10 @@ Files viewer, the Diff viewer, or ACP tool collection with line-diff counts.
 
 - Bottom-of-turn “edited N files” summaries (`turn-diff-files.ts` / `TurnDiffSummary`)
 - Specs `MarkdownDocument`, conversation previews, user messages, thoughts, workflow cards
+  (user-authored file reference chips — composer `@` mentions and sent-history
+  quotes — are `../../file-ref-chip.tsx` / `../../file-ref-chip-navigation.ts`;
+  they carry structured `ComposerFileAttrs` already, so they route straight to
+  `TaskChangesNavigation` instead of this module's text classification)
 - Workspace existence probes or a new `openUrl` platform API
 
 ## Invariants
@@ -32,7 +36,7 @@ Files viewer, the Diff viewer, or ACP tool collection with line-diff counts.
 - PowerShell `Mode Name`, `Name Mode`, aligned default tables, and `Name PSIsContainer` (either column order, `True` = directory) provide explicit file/directory evidence. The header rule under any of them (`----   -------------`) is not a row: reading it as one both invents a `----` artifact and suppresses the fallback parse for every real entry below it. Explicit file evidence wins over earlier unknown or directory guesses, including extensionless files such as `install`. Tree markers (`├──`, `└──`) and Markdown list markers are display syntax, not part of the navigation path.
 - ANSI-colored PowerShell headers are normalized before column detection. Recognized directory listings may also use aligned multi-column names separated by two or more spaces; those entries stay `unknown` until Files resolves their real kind. Comma/semicolon-separated prose and multi-column plaintext fences are linked token by token, while non-concrete glob summaries such as `README.*.md` remain text.
 - Tool dumps keep `whitespace-pre-wrap` so indented JSON, trees, and aligned columns do not collapse. Markdown `a` / `p` / `li` overrides are not re-walked by the parent, so `[src/main.rs](src/main.rs)` cannot nest a file button inside another file button.
-- Assistant anchor destinations bypass react-markdown's URL pre-filter so Windows drive paths and `file:` URIs reach this module unchanged; image and other media URLs keep the default filter. Web `http(s)` hrefs keep their original percent-encoding. `javascript:` / `data:` / `vbscript:` / `mailto:` and other non-file schemes (`ssh:`, `ftp:`, …) are inert. File paths decode percent escapes once and accept `:line:column`, `#LlineCcolumn`, query line/column, and `(line N, column N)` suffixes.
+- Assistant anchor destinations bypass react-markdown's URL pre-filter so Windows drive paths and `file:` URIs reach this module unchanged; image and other media URLs keep the default filter. Web `http(s)` hrefs keep their original percent-encoding. `javascript:` / `data:` / `vbscript:` / `mailto:` and other non-file schemes (`ssh:`, `ftp:`, …) are inert. File paths decode percent escapes once and accept `:line:column`, `#LlineCcolumn`, query line/column, and `(line N, column N)` suffixes (plus the `(lines N-M)` range form). Prose tokens keep the whole range phrase attached so `(line 12-20)` passes both `line` and `endLine` to Files/Changes instead of linking the path stem alone.
 - Web links render through `ChatExternalLink` (`../chat-external-link.tsx`), never a bare `<a target="_blank">`. Desktop's main window registers no `on_new_window` hook (only plugin surface webviews do, see `apps/desktop/src-tauri/src/surface/hooks.rs`), so a plain new-window anchor is silently dropped there even though it looks clickable in a browser tab and under jsdom. `ChatExternalLink` routes the click through the platform's `openExternalUrl` command instead, the same one the prompt box uses.
 - Absolute ACP paths are stripped with the active Workspace cwd (`getWorkspace` / `resolveWorkspaceCwd`, plus desktop `resolveTaskCwd` when a task exists) before Diff/Files requests. A hit outside that cwd is not a link: suffix-matching it must not open a different relative path inside the worktree. An absolute Markdown href outside the cwd stays unlinked for the same reason (Files rejects rooted paths). Codex may still open absolute paths in View Code; Ora does not, because `readWorkspaceFile` / `readProjectFile` reject rooted paths.
 - If a requested diff file is not in the active task patch, navigation falls back to Files. A line missing from a file that **is** in the patch still opens that file in Changes, with no toast.
@@ -45,7 +49,12 @@ Files viewer, the Diff viewer, or ACP tool collection with line-diff counts.
 ## Interactions
 
 - `MessageList` provides a per-turn `ChatLinkContext` around each `ResponseTurn` for task or project-only drafts. `ChatView` remounts the list when `taskId` / `projectId` changes so the per-turn artifact cache cannot leak across checkouts.
-- `TaskChangesNavigation.openDiff` / `openWorkspaceFile` / `openWorkspaceDirectory` / `openWorkspaceArtifact` in the review layout
+- `TaskChangesNavigation.openDiff` / `openWorkspaceFile` take an optional
+  `FileNavigationLocation` (`{ line, column }`) rather than positional
+  line/column. `openWorkspaceDirectory` / `openWorkspaceArtifact` stay as
+  they are (`openWorkspaceArtifact` still uses positional line/column
+  because it is a Files fallback that may resolve either a file or a
+  directory). Implemented by the review layout.
 - Desktop `locationActions` for Explorer, VS Code, and copying an OS-absolute path. Links reuse the checkout cwd already resolved by `MessageList`; they do not launch one cwd IPC per mounted link. Explorer / VS Code / Copy path are omitted until an OS-absolute cwd is known. A Diff link also offers Preview in Files.
 - Shared slash matching in `packages/app-shell/src/lib/workspace-path.ts`
 
@@ -53,3 +62,4 @@ Files viewer, the Diff viewer, or ACP tool collection with line-diff counts.
 
 - Clickable file citations use Codex-style path chrome: sky-blue text, no muted code chip, dashed underline on hover. Unlinked inline code keeps the existing chip.
 - Web `http(s)` links keep the existing solid primary underline.
+- Diff (changed-file) citations prepend a small violet `IconFileDiff` badge so a path that opens Changes reads differently from a plain Files link; the badge is `aria-hidden` and does not affect the accessible name. The composer/sent-history chip marks diff-gutter quotes (`origin: "diff"`) the same way via `composer-file-ref-diff`.

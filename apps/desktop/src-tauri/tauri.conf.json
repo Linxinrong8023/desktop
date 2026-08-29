@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "ora",
+  "productName": "Ora",
   "version": "0.1.0",
   "identifier": "space.ora.desktop",
   "build": {
@@ -29,7 +29,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "nsis", "appimage", "deb"],
+    "createUpdaterArtifacts": false,
+    "targets": ["dmg", "app", "nsis", "appimage", "deb"],
     "externalBin": [],
     "icon": [
       "icons/32x32.png",
@@ -38,5 +39,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2NTdCMDc1RTU2NzczMTgKUldRWWMyZmxkYkJYRm1ic0UvdGZPb2I1S0tuQzFaVUd6dzNaNUc2MFRXak9icmQrVmJMR1RiN3AK",
+      "endpoints": [
+        "https://github.com/ora-space/desktop/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

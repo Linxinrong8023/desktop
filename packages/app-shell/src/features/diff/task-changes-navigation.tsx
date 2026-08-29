@@ -1,10 +1,16 @@
 import { type ReactNode } from "react";
-import { TaskChangesNavigationContext } from "./task-changes-navigation-context";
+import {
+  TaskChangesNavigationContext,
+  type FileNavigationLocation,
+} from "./task-changes-navigation-context";
 
 interface TaskChangesNavigationProviderProps {
   children: ReactNode;
-  onOpenDiff: (path: string, line?: number) => void;
-  onOpenWorkspaceFile: (path: string, line?: number, column?: number) => void;
+  onOpenDiff: (path: string, location?: FileNavigationLocation) => void;
+  onOpenWorkspaceFile: (
+    path: string,
+    location?: FileNavigationLocation,
+  ) => void;
   onOpenWorkspaceDirectory?: (path: string) => void;
   onOpenWorkspaceArtifact?: (
     path: string,

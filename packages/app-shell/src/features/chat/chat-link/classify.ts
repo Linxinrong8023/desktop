@@ -15,6 +15,8 @@ export type ChatLinkClassification =
       kind: "diff" | "files" | "directory" | "artifact";
       path: string;
       line: number | undefined;
+      /** Inclusive end of a cited line range; omitted for a single-line jump. */
+      endLine: number | undefined;
       column: number | undefined;
       displayPath: string;
     };
@@ -207,6 +209,7 @@ export function classifyChatCandidate(
     return classifyFileCandidate(
       parsed.path,
       parsed.line,
+      parsed.endLine,
       parsed.column,
       input,
       true,
@@ -228,6 +231,7 @@ export function classifyChatCandidate(
   return classifyFileCandidate(
     parsed.path,
     parsed.line,
+    parsed.endLine,
     parsed.column,
     input,
     false,
@@ -238,6 +242,7 @@ export function classifyChatCandidate(
 function classifyFileCandidate(
   path: string,
   line: number | undefined,
+  endLine: number | undefined,
   column: number | undefined,
   input: ClassifyChatCandidateInput,
   hrefMissOpensFiles: boolean,
@@ -254,7 +259,14 @@ function classifyFileCandidate(
     const kind = pathCollectionLookup(input.index.edited).exact.has(fileKey)
       ? "diff"
       : "files";
-    return navigationClassification(kind, fileHit, line, column, input);
+    return navigationClassification(
+      kind,
+      fileHit,
+      line,
+      endLine,
+      column,
+      input,
+    );
   }
 
   const directoryHit = matchIndexPath(path, input.index.directories ?? []);
@@ -263,6 +275,7 @@ function classifyFileCandidate(
       "directory",
       directoryHit,
       /*line*/ undefined,
+      /*endLine*/ undefined,
       /*column*/ undefined,
       input,
     );
@@ -274,6 +287,7 @@ function classifyFileCandidate(
       "artifact",
       unknownHit,
       line,
+      endLine,
       column,
       input,
     );
@@ -285,6 +299,7 @@ function classifyFileCandidate(
     explicitDirectory ? "directory" : "files",
     path,
     line,
+    endLine,
     column,
     input,
   );
@@ -295,6 +310,7 @@ function navigationClassification(
   kind: "diff" | "files" | "directory" | "artifact",
   storedPath: string,
   line: number | undefined,
+  endLine: number | undefined,
   column: number | undefined,
   input: ClassifyChatCandidateInput,
 ): ChatLinkClassification {
@@ -311,6 +327,7 @@ function navigationClassification(
     kind,
     path: navigationPath,
     line,
+    endLine,
     column,
     displayPath: storedPath,
   };

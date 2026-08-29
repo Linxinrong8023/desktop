@@ -21,7 +21,7 @@ interface CollapsedRange {
   key: string;
 }
 
-export interface NewSideLineTarget {
+export interface DiffLineTarget {
   change: ChangeData;
   collapsedKey: string | null;
 }
@@ -38,26 +38,33 @@ function lineNumberFor(change: ChangeData, side: "old" | "new"): number | null {
 }
 
 /**
- * Locates a new-side line in the original hunks and names the collapsed block
- * that currently hides it, so a chat jump can expand then scroll.
+ * Locates every line on `side` in `[startLine, endLine]` and names any
+ * collapsed block currently hiding each one, so a chat jump can expand then
+ * scroll.
  */
-export function findNewSideLineTarget(
+export function findDiffLineTargets(
   hunks: HunkData[],
-  line: number,
-): NewSideLineTarget | null {
+  startLine: number,
+  endLine: number,
+  side: "old" | "new" = "new",
+): DiffLineTarget[] {
+  const start = Math.min(startLine, endLine);
+  const end = Math.max(startLine, endLine);
+  const targets: DiffLineTarget[] = [];
   for (let hunkIndex = 0; hunkIndex < hunks.length; hunkIndex += 1) {
     const hunk = hunks[hunkIndex]!;
     const ranges = findCollapsedRanges(hunk, hunkIndex);
     for (let index = 0; index < hunk.changes.length; index += 1) {
       const change = hunk.changes[index]!;
-      if (lineNumberFor(change, "new") !== line) continue;
+      const line = lineNumberFor(change, side);
+      if (line === null || line < start || line > end) continue;
       const collapsed = ranges.find(
         (range) => index >= range.start && index < range.end,
       );
-      return { change, collapsedKey: collapsed?.key ?? null };
+      targets.push({ change, collapsedKey: collapsed?.key ?? null });
     }
   }
-  return null;
+  return targets;
 }
 
 /**

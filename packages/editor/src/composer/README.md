@@ -23,17 +23,21 @@ Tiptap preset and plain-text helpers for prompt boxes (chat composer, HITL).
   source extensions, dotfiles) and `$skill` tokens become chips on that text
   path; versions (`v1.0`), globs (`*.ts`), slash-command chips, and directory
   `kind` need TipTap JSON parking (chat composer) for a lossless round-trip.
-  Ranged quotes may carry a `snippet` attr so send expands to a
-  `start:end:path` citation fence; Diff-gutter quotes also set `origin: "diff"`
-  and expand to a mini `diff --git` patch with unified markers. A mixed
-  add/delete range is still one chip; `diffSide` is omitted and the body
-  carries `+/-/ `. The patch's hunk note names the quoted file lines
-  (`lines 2-40`) because the hunk counts describe the body, which is shorter
-  whenever a drag crossed a collapsed hunk. `parseComposerFileQuote` is the
-  inverse of both payloads: read-only surfaces only hold the sent text, so it
-  is what lets them rebuild the chip — including its label — from the fence
-  alone. Any other fence parses to null and stays a code block.
-  Path-only `@` mentions stay backtick paths.
+  File quotes never expand to their body — non-diff quotes serialize to
+  `` `path:range` ``, so what the agent reads and what history replays is a
+  reference, while the chip keeps its range label. A Diff-gutter quote sets
+  `origin: "diff"` and is the one payload that expands to a mini `diff --git`
+  patch with unified `+/-/ ` markers. A mixed add/delete range is still one
+  chip; `diffSide` is omitted and the body carries `+/-/ `. The patch's hunk
+  note names the quoted file lines (`lines 2-40`) because the hunk counts
+  describe the body, which is shorter whenever a drag crossed a collapsed
+  hunk. `parseComposerFileQuote` is the inverse of the `diff` fence (and of
+  legacy `start:end:path` citation fences): read-only surfaces only hold the
+  sent text, so it is what lets them rebuild the chip — including its label —
+  from the fence alone. Any other fence parses to null and stays a code block.
+  Path-only `@` mentions stay backtick paths. Read-only user history also turns
+  path-like backtick spans back into chips so a reference is never shown as
+  raw code.
   Inline code that contains backticks, and fenced blocks that contain a ` ``` `
   line, serialize with a longer CommonMark fence so parse cannot close early.
   `[label](javascript:…)` / `data:` / `vbscript:` / `file:` hrefs stay literal
@@ -73,11 +77,11 @@ Tiptap preset and plain-text helpers for prompt boxes (chat composer, HITL).
 `COMPOSER_CAPABILITIES` is the supported surface. Anything else in the full-page
 kit (images, TOC, video, alignment) is out of scope.
 
-| Layer  | Nodes / marks                                                                                                                                                                                                                                                              |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Blocks | paragraph, heading 1–6, blockquote, fenced code, bullet/ordered/task lists, `---`                                                                                                                                                                                          |
-| Marks  | bold, italic, underline, strike, inline code, highlight, link                                                                                                                                                                                                              |
-| Chips  | `composerFile` (chip), `promptToken` (mention); drag-select snaps onto the chip under the pointer and paints `data-chip-selected` without a React re-render; ArrowLeft/ArrowRight step the caret across a chip instead of node-selecting it (a NodeSelection has no caret) |
+| Layer  | Nodes / marks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Blocks | paragraph, heading 1–6, blockquote, fenced code, bullet/ordered/task lists, `---`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Marks  | bold, italic, underline, strike, inline code, highlight, link                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Chips  | `composerFile` (chip), `promptToken` (mention); drag-select snaps onto the chip under the pointer and paints `data-chip-selected` without a React re-render; ArrowLeft/ArrowRight step the caret across a chip instead of node-selecting it; click-to-select pins a TextSelection over the atom so the caret stays visible and the same wash paints. A plain click on a mention pins that same range (mentions render as bare spans with no host click handler); a plain click on a file chip stays consumed so the host node view decides, and shift-click never re-pins so a drag-built range survives |
 
 Replace a slot with `features: { link: false }` or `features: { link: MyLink }`
 and append extras via `extraExtensions`. Rendering stays CSS in the product shell

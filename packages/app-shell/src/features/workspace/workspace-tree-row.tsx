@@ -310,15 +310,19 @@ function runStatusClass(status: GraphWorkflowRunStatus): string {
   }
 }
 
-/** Per-project run list so each row can call useGraphWorkflowRuns without hook-in-loop. */
+/** Renders workflow runs belonging to one workspace within a project run query. */
 export const ProjectWorkflowRunRows = memo(function ProjectWorkflowRunRows({
   projectId,
+  workspaceId,
+  depth,
   activeRunId,
   onSelectRun,
   onDeleteRun,
   listEnabled = true,
 }: {
   projectId: string;
+  workspaceId: string | null;
+  depth: 1 | 2;
   activeRunId: string | null;
   onSelectRun: (runId: string) => void;
   onDeleteRun: (run: { id: string; name: string }) => void;
@@ -330,7 +334,9 @@ export const ProjectWorkflowRunRows = memo(function ProjectWorkflowRunRows({
     enabled: listEnabled,
   });
   const renameWorkflowRun = useRenameWorkflowRun();
-  const runs = runsQuery.data ?? [];
+  const runs = (runsQuery.data ?? []).filter(
+    (run) => run.workspaceId === workspaceId,
+  );
   return (
     <>
       {runs.map((run) => {
@@ -341,7 +347,7 @@ export const ProjectWorkflowRunRows = memo(function ProjectWorkflowRunRows({
         return (
           <TreeRow
             key={run.id}
-            depth={1}
+            depth={depth}
             active={activeRunId === run.id}
             icon={
               <span className="relative flex size-[18px] items-center justify-center">

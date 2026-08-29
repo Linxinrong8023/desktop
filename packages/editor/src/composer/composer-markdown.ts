@@ -3,6 +3,8 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { isDangerousComposerHref } from "./composer-link";
 import { plainTextToComposerContent } from "./composer-plain-text";
+import { parseComposerFileQuote } from "./composer-file-quote";
+import type { ComposerFileAttrs } from "./composer-file";
 
 type MarkSpec = { type: string; attrs?: Record<string, string | null> };
 
@@ -124,7 +126,16 @@ function parseBlocks(lines: string[], quoteDepth = 0): JSONContent[] {
       ) {
         index += 1;
       }
-      blocks.push(codeBlock(language, body.join("\n")));
+      const bodyText = body.join("\n");
+      // A quote fence (diff patch, or a legacy `start:end:path` citation) must
+      // come back as a chip, never a code block — otherwise a text-only restore
+      // shows the raw body as source. Every other fence stays a code block.
+      const quote = parseComposerFileQuote(language ?? "", bodyText);
+      if (quote !== null) {
+        blocks.push(composerFileBlock(quote));
+        continue;
+      }
+      blocks.push(codeBlock(language, bodyText));
       continue;
     }
 
@@ -218,6 +229,27 @@ function codeBlock(language: string | null, text: string): JSONContent {
     node.content = [{ type: "text", text }];
   }
   return node;
+}
+
+/**
+ * A quote fence restored to a chip. Only diff-origin quotes keep their body
+ * (the agent needs the add/delete markers); a legacy citation fence comes back
+ * as a clean `path:range` reference so no file body is carried or displayed.
+ */
+function composerFileBlock(attrs: ComposerFileAttrs): JSONContent {
+  const diff = attrs.origin === "diff";
+  return {
+    type: "composerFile",
+    attrs: {
+      path: attrs.path,
+      startLine: attrs.startLine ?? null,
+      endLine: attrs.endLine ?? null,
+      snippet: diff ? (attrs.snippet ?? null) : null,
+      kind: attrs.kind ?? "file",
+      origin: diff ? "diff" : null,
+      diffSide: diff ? (attrs.diffSide ?? null) : null,
+    },
+  };
 }
 
 function parseList(
@@ -400,31 +432,48 @@ function takePromptToken(
 const FILE_CHIP_RANGE = /^(.*):(\d+)(?:-(\d+))?$/;
 
 /**
- * Backtick payloads that look like workspace paths become file chips; plain
- * identifiers stay inline code so `` `code` `` does not become a chip.
+ * Chip attrs for an inline backtick payload (`path` or `path:range`), or null
+ * when it is plain inline code. Shared by `markdownToComposerContent` (draft
+ * restore) and the read-only chat-history renderer so both surfaces agree on
+ * exactly which backticks are a file reference.
  */
-function tryParseComposerFileChip(inner: string): JSONContent | null {
+export function composerFileAttrsFromPlainText(
+  inner: string,
+): ComposerFileAttrs | null {
   if (inner.length === 0 || inner.includes("`")) {
     return null;
   }
   let path = inner;
-  let startLine: number | null = null;
-  let endLine: number | null = null;
+  let startLine: number | undefined;
+  let endLine: number | undefined;
   const ranged = FILE_CHIP_RANGE.exec(inner);
   if (ranged !== null) {
     path = ranged[1]!;
-    startLine = Number(ranged[2]);
-    endLine = ranged[3] === undefined ? startLine : Number(ranged[3]);
+    const start = Number(ranged[2]);
+    startLine = start;
+    endLine = ranged[3] === undefined ? start : Number(ranged[3]);
   }
   if (!looksLikeComposerFilePath(path)) {
+    return null;
+  }
+  return { path, startLine, endLine, kind: "file" };
+}
+
+/**
+ * Backtick payloads that look like workspace paths become file chips; plain
+ * identifiers stay inline code so `` `code` `` does not become a chip.
+ */
+function tryParseComposerFileChip(inner: string): JSONContent | null {
+  const attrs = composerFileAttrsFromPlainText(inner);
+  if (attrs === null) {
     return null;
   }
   return {
     type: "composerFile",
     attrs: {
-      path,
-      startLine,
-      endLine,
+      path: attrs.path,
+      startLine: attrs.startLine ?? null,
+      endLine: attrs.endLine ?? null,
       kind: "file",
     },
   };

@@ -33,11 +33,13 @@ App-shell wrapper around `@ora/editor` for prompt boxes.
 - Style kit nodes with Ora CSS variables. Links match the dashboard underline
   and open in the host browser on click. File `@` mentions render as inline
   type-icon + basename refs (Tabler via `WorkspaceFileIcon` / React node view),
-  not bordered pills: soft teal basename ink with type-colored icons. Line
-  quotes append a muted `L12-34` range; when a snippet was captured,
-  `documentPlainText` expands to a citation fence for file-preview quotes, or
-  a mini `diff --git` patch for Diff-gutter quotes, while the
-  chip stays compact in the composer. File chips with a line range expose
+  not bordered pills: soft teal basename ink with type-colored icons. Diff-gutter
+  quotes swap the file-type glyph for a violet `IconFileDiff` so a changed-file
+  chip reads differently from a plain mention instead of stacking two icons.
+  Line quotes append a muted `L12-34` range; file-preview quotes serialize to a
+  backtick `path:range` reference, while Diff-gutter quotes expand to a mini
+  `diff --git` patch — the chip stays compact in the composer and never shows
+  the file body. File chips with a line range expose
   `data-start-line` / `data-end-line` and a matching `title`. Drag-selecting
   across chips snaps the range onto the chip under the pointer (atoms skip
   native `::selection`) and paints `data-chip-selected` without a React
@@ -48,7 +50,21 @@ App-shell wrapper around `@ora/editor` for prompt boxes.
   delimiters hidden). Compact user-message Markdown expands every single
   newline outside fences (including runs of one-character lines). `/` skills
   and `$` commands are mint-wash pills with forest green ink (Cursor-style;
-  no neon glow).
+  no neon glow). A plain click on a mention paints the shared
+  `data-chip-selected` wash — mentions carry no click handler of their own,
+  so without the pin the consumed click would show no feedback at all.
+- A file chip's plain single click jumps to its Files/Changes location
+  (`file-ref-chip-navigation.ts`, routed by `kind`/`origin` to
+  `TaskChangesNavigation.openWorkspaceFile` / `.openDiff` /
+  `.openWorkspaceDirectory`, each with an optional `FileNavigationLocation`)
+  when a `TaskChangesNavigationContext` is in scope, marking the chip
+  `data-navigable` for the hover/focus underline. Outside that context a
+  plain click selects the chip the same way instead of doing nothing.
+  Ctrl/Cmd-click and double-click keep selecting the chip (for delete/drag)
+  instead of navigating; the node view suppresses the click that follows
+  that mousedown so the two behaviours never both fire. The remove control
+  claims its own mousedown so a press on it can never node-select the chip
+  first.
 - Sent user messages stay `documentPlainText` in the store and render read-only
   via chat `MarkdownDocument` (`density="compact"`). Compact mode expands
   TipTap single newlines outside fences, maps `==highlight==` to `<mark>`, and

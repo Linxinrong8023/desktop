@@ -35,6 +35,14 @@ pub struct ProcessSpec {
     stdout: ProcessStdio,
     stderr: ProcessStdio,
     kill_on_drop: bool,
+    reaper_registration: ReaperRegistration,
+}
+
+/// Records whether a spawned process participates in process-global crash cleanup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReaperRegistration {
+    Register,
+    Skip,
 }
 
 impl ProcessSpec {
@@ -48,6 +56,7 @@ impl ProcessSpec {
             stdout: ProcessStdio::Piped,
             stderr: ProcessStdio::Piped,
             kill_on_drop: true,
+            reaper_registration: ReaperRegistration::Register,
         }
     }
 
@@ -109,6 +118,16 @@ impl ProcessSpec {
         self
     }
 
+    /// Skips process-global reaper registration for a bounded, one-shot child process.
+    ///
+    /// The process remains locally managed and can still be waited on or killed tree-wide. Use
+    /// this only when the caller owns the complete short-lived lifecycle and does not need the
+    /// sidecar to clean up the process after an abnormal Ora exit.
+    pub fn skip_reaper_registration(mut self) -> Self {
+        self.reaper_registration = ReaperRegistration::Skip;
+        self
+    }
+
     /// Returns the executable path or name that will be passed to the OS.
     pub fn program(&self) -> &OsStr {
         &self.program
@@ -149,5 +168,31 @@ impl ProcessSpec {
     /// Returns whether the child process should be killed when the handle is dropped.
     pub fn should_kill_on_drop(&self) -> bool {
         self.kill_on_drop
+    }
+
+    /// Returns the typed reaper policy used by the production lifecycle implementation.
+    pub(crate) fn reaper_registration(&self) -> ReaperRegistration {
+        self.reaper_registration
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProcessSpec, ReaperRegistration};
+    use pretty_assertions::assert_eq;
+
+    /// Verifies crash cleanup remains the default and one-shot callers can explicitly opt out.
+    #[test]
+    fn models_reaper_registration_as_an_explicit_policy() {
+        assert_eq!(
+            ProcessSpec::new("agent").reaper_registration(),
+            ReaperRegistration::Register
+        );
+        assert_eq!(
+            ProcessSpec::new("rg")
+                .skip_reaper_registration()
+                .reaper_registration(),
+            ReaperRegistration::Skip
+        );
     }
 }

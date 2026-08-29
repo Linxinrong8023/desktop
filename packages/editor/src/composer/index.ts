@@ -25,6 +25,7 @@ export {
 } from "./composer-link";
 export {
   ComposerMarkdownPaste,
+  composerFileAttrsFromPlainText,
   looksLikeComposerMarkdown,
   markdownToComposerContent,
 } from "./composer-markdown";
@@ -35,6 +36,7 @@ export {
 export {
   ComposerChipSelection,
   chipCaretStep,
+  composerChipSelectionKey,
   pinComposerChipSelection,
   textSelectionForChipDrag,
   chipRangeAt,

@@ -1,5 +1,11 @@
 import { createElement, type ReactNode } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import {
   RemoteContractError,
   type ListWorkspaceDirectoryResponse,
@@ -68,7 +74,7 @@ describe("WorkspaceFilesView missing files", () => {
 });
 
 /** Renders Files with a readable chat-driven path and an optional line target. */
-function renderRequestedFile(path: string, line?: number) {
+function renderRequestedFile(path: string, line?: number, endLine?: number) {
   const client = createMockClient(createMockClientState());
   const readWorkspaceFile = vi.fn(async (request: { path: string }) => ({
     path: request.path,
@@ -103,6 +109,7 @@ function renderRequestedFile(path: string, line?: number) {
         requestId: 1,
         line,
         column: line === undefined ? undefined : 1,
+        endLine,
       }}
     />,
     { wrapper },
@@ -131,6 +138,39 @@ describe("WorkspaceFilesView file requests", () => {
         "location",
       );
     });
+  });
+
+  it("highlights a cited line range and labels the path with start-end", async () => {
+    const { container } = renderRequestedFile("src/main.rs", 1, 3);
+
+    expect(await screen.findByText("src/main.rs:1-3")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        container.querySelectorAll("[data-cited-range='true']"),
+      ).toHaveLength(3);
+    });
+    expect(container.querySelector('[data-line-number="1"]')).toHaveAttribute(
+      "aria-current",
+      "location",
+    );
+  });
+
+  it("clears the path range label when the cited highlight is dismissed", async () => {
+    const { container } = renderRequestedFile("src/main.rs", 1, 3);
+
+    expect(await screen.findByText("src/main.rs:1-3")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(container.querySelector('[data-line-number="4"]')).not.toBeNull();
+    });
+    fireEvent.mouseDown(container.querySelector('[data-line-number="4"]')!, {
+      button: 0,
+    });
+
+    expect(screen.queryByText("src/main.rs:1-3")).toBeNull();
+    expect(screen.getByText("src/main.rs")).toBeInTheDocument();
+    expect(
+      container.querySelectorAll("[data-cited-range='true']"),
+    ).toHaveLength(0);
   });
 
   it("refetches on a new chat request so a deleted file is not shown from cache", async () => {

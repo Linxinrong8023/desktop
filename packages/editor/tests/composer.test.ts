@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { Editor } from "@tiptap/core";
 import { Schema } from "@tiptap/pm/model";
+import type { Plugin } from "@tiptap/pm/state";
+import { composerChipSelectionKey } from "../src/composer/composer-chip-selection.ts";
 import {
   createComposerExtensions,
   COMPOSER_HEADING_LEVELS,
@@ -16,6 +19,10 @@ import {
   composerFilePlainText,
 } from "../src/composer/composer-file.ts";
 import { parseComposerFileQuote } from "../src/composer/composer-file-quote.ts";
+import {
+  composerFileAttrsFromPlainText,
+  markdownToComposerContent,
+} from "../src/composer/composer-markdown.ts";
 import { parseFenceOpener } from "../src/composer/composer-code-fence.ts";
 import { highlightInputMatch } from "../src/composer/composer-highlight.ts";
 import { isComposerOpenableUrl } from "../src/composer/composer-link.ts";
@@ -103,7 +110,7 @@ test("file chips serialize to backtick path:line payloads", () => {
   );
 });
 
-test("composerFileChipTitle keeps one-line path:range and uses path for multiline payloads", () => {
+test("composerFileChipTitle keeps path:range; only a multi-line diff payload drops it", () => {
   assert.equal(
     composerFileChipTitle({
       path: "src/app.ts",
@@ -118,6 +125,16 @@ test("composerFileChipTitle keeps one-line path:range and uses path for multilin
       startLine: 4,
       endLine: 5,
       snippet: "const a = 1;\nconst b = 2;",
+    }),
+    "src/app.ts:4-5",
+  );
+  assert.equal(
+    composerFileChipTitle({
+      path: "src/app.ts",
+      startLine: 4,
+      endLine: 5,
+      snippet: " keep\n+new line",
+      origin: "diff",
     }),
     "src/app.ts",
   );
@@ -145,7 +162,7 @@ test("composerFileAttrsFromUnknown drops non-positive and NaN line numbers", () 
   );
 });
 
-test("file chips with snippets serialize to citation fences", () => {
+test("non-diff file quotes serialize to a path:range reference, not the file body", () => {
   assert.equal(
     composerFilePlainText({
       path: "src/app.ts",
@@ -153,7 +170,7 @@ test("file chips with snippets serialize to citation fences", () => {
       endLine: 5,
       snippet: "const a = 1;\nconst b = 2;",
     }),
-    "\n```4:5:src/app.ts\nconst a = 1;\nconst b = 2;\n```\n",
+    "`src/app.ts:4-5`",
   );
 });
 
@@ -235,17 +252,8 @@ function fencedQuoteParts(payload: string): { info: string; body: string } {
   };
 }
 
-test("parseComposerFileQuote round-trips every payload composerFilePlainText writes", () => {
+test("parseComposerFileQuote round-trips every diff-gutter payload composerFilePlainText writes", () => {
   const quotes = [
-    {
-      path: "src/app.ts",
-      startLine: 4,
-      endLine: 5,
-      snippet: "const a = 1;\nconst b = 2;",
-      kind: "file" as const,
-      origin: undefined,
-      diffSide: undefined,
-    },
     {
       path: "src/example.ts",
       startLine: 1,
@@ -281,6 +289,60 @@ test("parseComposerFileQuote round-trips every payload composerFilePlainText wri
     const { info, body } = fencedQuoteParts(composerFilePlainText(quote));
     assert.deepEqual(parseComposerFileQuote(info, body), quote);
   }
+});
+
+test("composerFileAttrsFromPlainText round-trips path and path:range backtick references", () => {
+  assert.deepEqual(composerFileAttrsFromPlainText("src/app.ts"), {
+    path: "src/app.ts",
+    startLine: undefined,
+    endLine: undefined,
+    kind: "file",
+  });
+  assert.deepEqual(composerFileAttrsFromPlainText("src/app.ts:4-5"), {
+    path: "src/app.ts",
+    startLine: 4,
+    endLine: 5,
+    kind: "file",
+  });
+  assert.deepEqual(composerFileAttrsFromPlainText("src/app.ts:7"), {
+    path: "src/app.ts",
+    startLine: 7,
+    endLine: 7,
+    kind: "file",
+  });
+  // Plain inline code, semver-looking tokens, and globs stay inline code.
+  assert.equal(composerFileAttrsFromPlainText("const x = 1;"), null);
+  assert.equal(composerFileAttrsFromPlainText("v1.0"), null);
+  assert.equal(composerFileAttrsFromPlainText("*.ts"), null);
+});
+
+test("markdownToComposerContent restores quote fences as chips, never as a code block", () => {
+  const diffFence = [
+    "",
+    "```diff",
+    "diff --git a/src/example.ts b/src/example.ts",
+    "--- a/src/example.ts",
+    "+++ b/src/example.ts",
+    "@@ -1,1 +1,2 @@ quoted from git diff, lines 1-2",
+    " keep",
+    "+new line",
+    "```",
+    "",
+  ].join("\n");
+  const diffDoc = markdownToComposerContent(diffFence);
+  assert.equal(diffDoc.content?.[0]?.type, "composerFile");
+
+  // A legacy `start:end:path` citation restores as a chip with the body dropped,
+  // so no file content is carried or displayed by a text-only restore.
+  const legacy = markdownToComposerContent(
+    "```4:5:src/app.ts\nconst a = 1;\n```",
+  );
+  assert.equal(legacy.content?.[0]?.type, "composerFile");
+  assert.equal(legacy.content?.[0]?.attrs?.snippet, null);
+
+  // An ordinary code fence stays a code block.
+  const plainDoc = markdownToComposerContent("```ts\nconst a = 1;\n```");
+  assert.equal(plainDoc.content?.[0]?.type, "codeBlock");
 });
 
 test("parseComposerFileQuote leaves ordinary fenced code alone", () => {
@@ -682,9 +744,9 @@ test("node selection can target a single file chip among adjacent siblings", asy
   editor.destroy();
 });
 
-test("pinComposerChipSelection keeps NodeSelection on one adjacent chip", async () => {
+test("pinComposerChipSelection covers one adjacent chip as a TextSelection", async () => {
   const { Editor } = await import("@tiptap/core");
-  const { NodeSelection } = await import("@tiptap/pm/state");
+  const { TextSelection } = await import("@tiptap/pm/state");
   const { pinComposerChipSelection } =
     await import("../src/composer/composer-chip-selection.ts");
   const editor = new Editor({
@@ -744,16 +806,205 @@ test("pinComposerChipSelection keeps NodeSelection on one adjacent chip", async 
     true,
   );
   assert.equal(prevented, true);
-  assert.ok(state.selection instanceof NodeSelection);
-  assert.equal(
-    (state.selection as InstanceType<typeof NodeSelection>).node.attrs.path,
-    "b.ts",
-  );
+  assert.ok(state.selection instanceof TextSelection);
+  assert.equal(state.selection.empty, false);
   assert.equal(state.selection.from, secondChipPos);
-  assert.equal(
-    state.selection.to,
-    secondChipPos +
-      (state.selection as InstanceType<typeof NodeSelection>).node.nodeSize,
+  const pinned = state.doc.nodeAt(secondChipPos);
+  assert.ok(pinned);
+  assert.equal(pinned.attrs.path, "b.ts");
+  assert.equal(state.selection.to, secondChipPos + pinned.nodeSize);
+  editor.destroy();
+});
+
+/**
+ * Finds the chip-selection plugin in a headless editor. Plugin/PluginKey
+ * expose their key string at runtime only (not in the typings), and headless
+ * editors keep their plugins on the extension manager, not on the state.
+ */
+function chipSelectionPlugin(editor: Editor): Plugin {
+  const wanted = (composerChipSelectionKey as unknown as { key: string }).key;
+  const plugin = editor.extensionManager.plugins.find(
+    (candidate) => (candidate as unknown as { key: string }).key === wanted,
+  );
+  assert.ok(plugin);
+  return plugin;
+}
+
+/** Click-event stub: only preventDefault and the modifier flags are read. */
+function stubClickEvent(
+  preventDefault: () => void,
+  modifiers: { shiftKey?: boolean } = {},
+): MouseEvent {
+  return { preventDefault, ...modifiers } as MouseEvent;
+}
+
+test("plain click on a promptToken mention pins a covering TextSelection", async () => {
+  const { Editor } = await import("@tiptap/core");
+  const { TextSelection } = await import("@tiptap/pm/state");
+  const editor = new Editor({
+    extensions: createComposerExtensions({ placeholder: "Type" }),
+    content: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "promptToken", attrs: { kind: "skill", name: "review" } },
+            { type: "text", text: " tail" },
+          ],
+        },
+      ],
+    },
+  });
+  // Mentions render as bare renderHTML spans with no host click handler, so
+  // the plugin's own plain-click pin is their only selection feedback.
+  const plugin = chipSelectionPlugin(editor);
+  let tokenPos = -1;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "promptToken") {
+      tokenPos = pos;
+      return false;
+    }
+    return true;
+  });
+  const token = editor.state.doc.nodeAt(tokenPos);
+  assert.ok(token);
+  let prevented = 0;
+  const handled = plugin.spec.props?.handleClickOn?.call(
+    plugin,
+    editor.view,
+    tokenPos,
+    token,
+    tokenPos,
+    stubClickEvent(() => {
+      prevented += 1;
+    }),
+    true,
+  );
+  assert.equal(handled, true);
+  assert.equal(prevented, 1);
+  assert.ok(editor.state.selection instanceof TextSelection);
+  assert.deepEqual(
+    { from: editor.state.selection.from, to: editor.state.selection.to },
+    { from: tokenPos, to: tokenPos + token.nodeSize },
+  );
+  editor.destroy();
+});
+
+test("plain click on a composerFile chip stays consumed for the host node view", async () => {
+  const { Editor } = await import("@tiptap/core");
+  const editor = new Editor({
+    extensions: createComposerExtensions({ placeholder: "Type" }),
+    content: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "composerFile", attrs: { path: "a.ts", kind: "file" } },
+            { type: "text", text: " tail" },
+          ],
+        },
+      ],
+    },
+  });
+  const plugin = chipSelectionPlugin(editor);
+  let chipPos = -1;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "composerFile") {
+      chipPos = pos;
+      return false;
+    }
+    return true;
+  });
+  const chip = editor.state.doc.nodeAt(chipPos);
+  assert.ok(chip);
+  const before = {
+    from: editor.state.selection.from,
+    to: editor.state.selection.to,
+    empty: editor.state.selection.empty,
+  };
+  let prevented = 0;
+  const handled = plugin.spec.props?.handleClickOn?.call(
+    plugin,
+    editor.view,
+    chipPos,
+    chip,
+    chipPos,
+    stubClickEvent(() => {
+      prevented += 1;
+    }),
+    true,
+  );
+  // Consumed without pinning: ComposerFileChipView owns the plain click.
+  assert.equal(handled, true);
+  assert.equal(prevented, 0);
+  assert.deepEqual(
+    {
+      from: editor.state.selection.from,
+      to: editor.state.selection.to,
+      empty: editor.state.selection.empty,
+    },
+    before,
+  );
+  editor.destroy();
+});
+
+test("shift-click on a chip keeps the drag-built range instead of re-pinning", async () => {
+  const { Editor } = await import("@tiptap/core");
+  const editor = new Editor({
+    extensions: createComposerExtensions({ placeholder: "Type" }),
+    content: {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "pre" },
+            { type: "promptToken", attrs: { kind: "skill", name: "review" } },
+            { type: "text", text: "post" },
+          ],
+        },
+      ],
+    },
+  });
+  const plugin = chipSelectionPlugin(editor);
+  let tokenPos = -1;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "promptToken") {
+      tokenPos = pos;
+      return false;
+    }
+    return true;
+  });
+  const token = editor.state.doc.nodeAt(tokenPos);
+  assert.ok(token);
+  // Shift-click extends the caret range; re-pinning would clobber that.
+  editor.commands.setTextSelection({ from: 1, to: tokenPos + token.nodeSize });
+  const before = {
+    from: editor.state.selection.from,
+    to: editor.state.selection.to,
+  };
+  let prevented = 0;
+  const handled = plugin.spec.props?.handleClickOn?.call(
+    plugin,
+    editor.view,
+    tokenPos,
+    token,
+    tokenPos,
+    stubClickEvent(
+      () => {
+        prevented += 1;
+      },
+      { shiftKey: true },
+    ),
+    true,
+  );
+  assert.equal(handled, true);
+  assert.equal(prevented, 0);
+  assert.deepEqual(
+    { from: editor.state.selection.from, to: editor.state.selection.to },
+    before,
   );
   editor.destroy();
 });

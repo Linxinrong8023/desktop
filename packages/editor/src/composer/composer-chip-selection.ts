@@ -10,7 +10,14 @@ import {
 import type { EditorView } from "@tiptap/pm/view";
 
 const CHIP_NODE_TYPES = new Set(["composerFile", "promptToken"]);
-const composerChipSelectionKey = new PluginKey("composerChipSelection");
+/**
+ * Chip types whose plain click is owned by a host-shell node view
+ * (`ComposerFileChipView` navigates, or selects when there is nothing to
+ * navigate to). The plugin still swallows ProseMirror's default atom click
+ * for them; it just does not pin, so the host handler decides.
+ */
+const HOST_OWNED_PLAIN_CLICKS = new Set(["composerFile"]);
+export const composerChipSelectionKey = new PluginKey("composerChipSelection");
 const CHIP_SELECTED_ATTR = "data-chip-selected";
 
 /**
@@ -86,14 +93,26 @@ function moveCaretPastChip(editor: Editor, direction: 1 | -1): boolean {
   return true;
 }
 
-/** Selects exactly one chip atom so ctrl/double-clicks cannot span siblings. */
+/**
+ * Selects exactly one chip as a TextSelection over the atom.
+ *
+ * NodeSelection puts `ProseMirror-hideselection` on the editor (caret-color:
+ * transparent) and paints `ProseMirror-selectednode` on the React node-view
+ * wrapper, not the visible chip — so the caret vanishes and the chip does not
+ * highlight. A range over the atom keeps a caret at the head and lets
+ * `data-chip-selected` paint the same wash as a drag.
+ */
 export function pinComposerChipSelection(
   view: Pick<EditorView, "dispatch" | "state">,
   nodePos: number,
   event: Pick<MouseEvent, "preventDefault">,
 ): boolean {
+  const node = view.state.doc.nodeAt(nodePos);
+  const end = nodePos + (node?.nodeSize ?? 1);
   view.dispatch(
-    view.state.tr.setSelection(NodeSelection.create(view.state.doc, nodePos)),
+    view.state.tr.setSelection(
+      TextSelection.create(view.state.doc, nodePos, end),
+    ),
   );
   event.preventDefault();
   return true;
@@ -163,10 +182,21 @@ export const ComposerChipSelection = Extension.create({
           },
           handleClickOn(view, _pos, node, nodePos, event) {
             if (!CHIP_NODE_TYPES.has(node.type.name)) return false;
-            if (event.ctrlKey || event.metaKey) {
+            // Mentions render as bare renderHTML spans nobody listens to, so
+            // their plain click pins the same range as Ctrl-click — otherwise
+            // the consumed click shows nothing at all. File chips keep their
+            // plain click for the host node view. Shift-click extends the
+            // existing caret range and must keep what the drag/anchor logic
+            // already built, so it never re-pins.
+            const pinsOnPlainClick =
+              !HOST_OWNED_PLAIN_CLICKS.has(node.type.name) && !event.shiftKey;
+            if (event.ctrlKey || event.metaKey || pinsOnPlainClick) {
               return pinComposerChipSelection(view, nodePos, event);
             }
-            return false;
+            // Consume the default atom click so ProseMirror cannot NodeSelect
+            // (that hides the caret). Ctrl/double-click still pin a range;
+            // a drag that ends on a chip keeps its TextSelection.
+            return true;
           },
           handleDoubleClickOn(view, _pos, node, nodePos, event) {
             if (!CHIP_NODE_TYPES.has(node.type.name)) return false;
@@ -242,21 +272,29 @@ export const ComposerChipSelection = Extension.create({
 });
 
 /**
- * Paints range-selected chips on the live DOM. Skips NodeSelection so the
- * existing `ProseMirror-selectednode` ring stays the click-to-focus treatment.
+ * Paints selected chips on the live DOM. Covers a TextSelection range and a
+ * leftover NodeSelection so the wash still lands when some other path pins
+ * the atom the old way.
  */
 function paintChipSelection(view: EditorView): void {
   const root = view.dom;
   const { selection, doc } = view.state;
   const keep = new Set<Element>();
-  if (!selection.empty && !(selection instanceof NodeSelection)) {
+  const paintAt = (pos: number) => {
+    const dom = view.nodeDOM(pos);
+    const el = elementForChipDom(dom);
+    if (el === null) return;
+    el.setAttribute(CHIP_SELECTED_ATTR, "true");
+    keep.add(el);
+  };
+  if (selection instanceof NodeSelection) {
+    if (CHIP_NODE_TYPES.has(selection.node.type.name)) {
+      paintAt(selection.from);
+    }
+  } else if (!selection.empty) {
     doc.nodesBetween(selection.from, selection.to, (node, pos) => {
       if (!CHIP_NODE_TYPES.has(node.type.name)) return;
-      const dom = view.nodeDOM(pos);
-      const el = elementForChipDom(dom);
-      if (el === null) return;
-      el.setAttribute(CHIP_SELECTED_ATTR, "true");
-      keep.add(el);
+      paintAt(pos);
     });
   }
   root.querySelectorAll(`[${CHIP_SELECTED_ATTR}]`).forEach((el) => {

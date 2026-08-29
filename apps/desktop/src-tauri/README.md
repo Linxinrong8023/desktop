@@ -31,7 +31,7 @@ and regenerate on every build.
 
 Desktop installs provisional logging from `ORA_LOG_LEVEL` or `info` before Backend migration, then resolves the runtime-ready level from the shared SQLite `user_config.log_level` preference when no environment override exists. It retains the logging writer guard for the process lifetime and shares a cancellation-safe runtime settings manager through Tauri state.
 
-The shared developer preferences are exposed through `get_developer_mode`, `set_developer_mode`, `get_runtime_log_level`, and `set_runtime_log_level`. These commands enter a request-correlated span before reading, persisting, reloading, or compensating; SQLite ownership remains in Backend rather than this crate. Desktop `config.json` does not store either preference.
+The shared developer preferences are exposed through `get_developer_mode`, `set_developer_mode`, `get_runtime_log_level`, and `set_runtime_log_level`. The Desktop-only worktree setting uses `get_worktree_root` and `set_worktree_root`. These commands enter a request-correlated span before reading or persisting; SQLite ownership remains in Backend rather than this crate. A startup-only compatibility step moves a valid legacy `config.json` worktree root into SQLite and removes the file.
 
 ## Plugin surfaces
 
@@ -52,6 +52,16 @@ installs both. The packaging workflow adds the sidecars to Tauri's configuration
 in its checkout immediately before building;
 the checked-in configuration keeps `externalBin` empty so `tauri dev` does not
 depend on that directory.
+
+The Rust-owned `ora-reaper` sidecar is built locally rather than downloaded. `run:desktop` builds
+its debug executable first, while `build:desktop` and the packaging workflow build its release
+executable. The build helper copies it into `binaries/ora-reaper-<target-triple>` so Tauri can
+package it using the same external-binary convention. Debug Desktop starts that target-qualified
+file directly; packaged builds resolve Tauri's installed `ora-reaper` executable beside Ora.
+
+Desktop starts the reaper before constructing Backend state. Normal shutdown first releases
+process owners, then asks the reaper to forcefully clear survivors and waits for acknowledgement;
+an Ora crash closes the private IPC pipe and triggers the same final cleanup automatically.
 
 `BundledBinaryPaths` stores the paths in `DesktopState`. Debug builds, including
 development and tests, pass `rg` and `deno` as command names so the operating

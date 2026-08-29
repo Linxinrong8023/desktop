@@ -5,6 +5,7 @@ import { AppI18nProvider } from "../../i18n/i18n";
 import { composerFilePlainText } from "@ora/editor/composer";
 import { PlatformProvider } from "../../platform";
 import { createStubPlatform } from "../../test/stub-platform";
+import { TaskChangesNavigationProvider } from "../diff/task-changes-navigation";
 import { MarkdownDocument, MarkdownMessage } from "./markdown-message";
 
 /** Renders Markdown with the production translation provider used by code controls. */
@@ -106,6 +107,8 @@ describe("MarkdownDocument", () => {
   });
 
   it("keeps quotes that were adjacent in the composer on one line", () => {
+    // Non-diff quotes serialize as inline backtick references with a space
+    // between neighbours, and both stay chips on a single line.
     const content = [
       composerFilePlainText({
         path: "src/main.py",
@@ -119,7 +122,7 @@ describe("MarkdownDocument", () => {
         endLine: 2,
         snippet: "import sys",
       }),
-    ].join("");
+    ].join(" ");
     render(
       <AppI18nProvider>
         <MarkdownDocument density="compact" content={content} />
@@ -134,15 +137,16 @@ describe("MarkdownDocument", () => {
     expect(chips[0]?.parentElement).toBe(chips[1]?.parentElement);
   });
 
-  it("renders a quote whose snippet contains a fence line", () => {
-    // codeFenceMarker widens the payload's own fence past the snippet's
-    // backticks; the chip has to survive that longer marker.
+  it("keeps a quote's backtick-heavy snippet out of the payload and chip", () => {
+    // A file quote's snippet is never serialized, so even one full of backticks
+    // cannot widen a fence or leak into history — it stays a ranged reference.
     const content = composerFilePlainText({
       path: "docs/guide.md",
       startLine: 3,
       endLine: 5,
       snippet: "```\nconst a = 1;\n```",
     });
+    expect(content).toBe("`docs/guide.md:3-5`");
     render(
       <AppI18nProvider>
         <MarkdownDocument density="compact" content={content} />
@@ -152,6 +156,7 @@ describe("MarkdownDocument", () => {
     const chip = document.querySelector("[data-composer-file='docs/guide.md']");
     expect(chip?.textContent).toBe("guide.mdL3-5");
     expect(document.querySelector("pre")).toBeNull();
+    expect(screen.queryByText(/const a = 1;/)).toBeNull();
   });
 
   it("still renders ordinary fenced code in a user message as a code block", () => {
@@ -754,5 +759,66 @@ describe("MarkdownMessage chat links", () => {
     renderMarkdown("See `src/main.rs`");
     expect(screen.queryByRole("button", { name: /src\/main\.rs/ })).toBeNull();
     expect(screen.getByText("src/main.rs").tagName).toBe("CODE");
+  });
+});
+
+describe("sent file-quote chip navigation", () => {
+  it("opens the quoted file in Files, at its cited range, when clicked", async () => {
+    const user = userEvent.setup();
+    const openWorkspaceFile = vi.fn();
+    const content = composerFilePlainText({
+      path: "src/main.py",
+      startLine: 9,
+      endLine: 14,
+      snippet: "import os",
+    });
+    render(
+      <AppI18nProvider>
+        <TaskChangesNavigationProvider
+          onOpenDiff={vi.fn()}
+          onOpenWorkspaceFile={openWorkspaceFile}
+        >
+          <MarkdownDocument density="compact" content={content} />
+        </TaskChangesNavigationProvider>
+      </AppI18nProvider>,
+    );
+
+    const chip = screen.getByRole("button", { name: /main\.py/ });
+    expect(chip).toHaveClass("composer-file-ref");
+    await user.click(chip);
+    expect(openWorkspaceFile).toHaveBeenCalledWith("src/main.py", {
+      line: 9,
+      endLine: 14,
+    });
+  });
+
+  it("opens a diff-origin quote in Changes at its cited range when clicked", async () => {
+    const user = userEvent.setup();
+    const openDiff = vi.fn();
+    const content = composerFilePlainText({
+      path: "src/example.ts",
+      startLine: 2,
+      endLine: 40,
+      snippet: " keep\n+added",
+      origin: "diff",
+      diffSide: "new",
+    });
+    render(
+      <AppI18nProvider>
+        <TaskChangesNavigationProvider
+          onOpenDiff={openDiff}
+          onOpenWorkspaceFile={vi.fn()}
+        >
+          <MarkdownDocument density="compact" content={content} />
+        </TaskChangesNavigationProvider>
+      </AppI18nProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: /example\.ts/ }));
+    expect(openDiff).toHaveBeenCalledWith("src/example.ts", {
+      line: 2,
+      endLine: 40,
+      side: "new",
+    });
   });
 });

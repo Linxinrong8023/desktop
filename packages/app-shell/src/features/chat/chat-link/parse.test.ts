@@ -91,6 +91,49 @@ describe("parsePathCandidate", () => {
     expect(parsePathCandidate("src/main.rs:0")).toEqual({
       path: "src/main.rs:0",
       line: undefined,
+      endLine: undefined,
+      column: undefined,
+    });
+  });
+
+  it("parses colon, fragment, phrase, and natural-language line ranges", () => {
+    expect(parsePathCandidate("src/main.rs:12-20")).toEqual({
+      path: "src/main.rs",
+      line: 12,
+      endLine: 20,
+      column: undefined,
+    });
+    expect(parsePathCandidate("src/main.rs:12-20:3")).toEqual({
+      path: "src/main.rs",
+      line: 12,
+      endLine: 20,
+      column: 3,
+    });
+    expect(parsePathCandidate("src/main.rs#L12-20")).toEqual({
+      path: "src/main.rs",
+      line: 12,
+      endLine: 20,
+      column: undefined,
+    });
+    expect(parsePathCandidate("src/main.rs (lines 12-20)")).toEqual({
+      path: "src/main.rs",
+      line: 12,
+      endLine: 20,
+      column: undefined,
+    });
+    expect(parsePathCandidate("src/main.rs (line 12-20, column 3)。")).toEqual({
+      path: "src/main.rs",
+      line: 12,
+      endLine: 20,
+      column: 3,
+    });
+  });
+
+  it("normalizes a reversed range so navigation never receives start > end", () => {
+    expect(parsePathCandidate("src/main.rs:20-12")).toEqual({
+      path: "src/main.rs",
+      line: 12,
+      endLine: 20,
       column: undefined,
     });
   });

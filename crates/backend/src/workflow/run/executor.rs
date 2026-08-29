@@ -195,11 +195,12 @@ const MAX_BASELINE_BYTES: u64 = 64 * 1024 * 1024;
 pub(crate) fn capture_worktree_snapshot(
     worktree_root: &Path,
 ) -> Option<BTreeMap<String, Option<String>>> {
-    let Ok(output) = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(["ls-files", "-co", "--exclude-standard", "-z"])
-        .current_dir(worktree_root)
-        .output()
-    else {
+        .current_dir(worktree_root);
+    ora_utils::process::hide_console_window(&mut command);
+    let Ok(output) = command.output() else {
         return None;
     };
     let mut snapshot = BTreeMap::new();

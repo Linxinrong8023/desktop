@@ -53,7 +53,10 @@ fn combine_identity(git: GlobalIdentity, gh: Option<GhUser>) -> GitIdentityRespo
 /// Reads the authenticated GitHub account via the `gh` CLI, or `None` when it is
 /// unavailable, unauthenticated, or offline.
 fn read_gh_user() -> Option<GhUser> {
-    let output = Command::new("gh").args(["api", "user"]).output().ok()?;
+    let mut command = Command::new("gh");
+    command.args(["api", "user"]);
+    ora_utils::process::hide_console_window(&mut command);
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }

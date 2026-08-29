@@ -185,6 +185,8 @@ export const ProjectTreeNode = memo(function ProjectTreeNode({
       <TreeBranch expanded={projectOpen} retainWhenCollapsed={!forceExpanded}>
         <ProjectWorkflowRunRows
           projectId={project.id}
+          workspaceId={mainWorkspaceId}
+          depth={1}
           listEnabled={projectOpen}
           activeRunId={activeRunId}
           onSelectRun={(runId) =>
@@ -269,6 +271,9 @@ const WorktreeTaskNode = memo(function WorktreeTaskNode({
       s.selection.taskId === task.id &&
       (s.selection.sessionId !== null || s.selection.draftId !== null),
   );
+  const activeRunId = useWorkspaceSelectionStore((s) =>
+    s.selection.taskId === task.id ? s.selection.workflowRunId : null,
+  );
   const taskCreateFocused = useWorkspaceSelectionStore((s) => {
     const { createFocus, selection } = s;
     return (
@@ -305,6 +310,7 @@ const WorktreeTaskNode = memo(function WorktreeTaskNode({
           <SidebarCreateMenu
             projectId={projectId}
             workspaceId={task.workspaceId}
+            taskId={task.id}
             scope="task"
             onNewTask={() =>
               startSessionDraft({
@@ -331,6 +337,26 @@ const WorktreeTaskNode = memo(function WorktreeTaskNode({
         ]}
       />
       <TreeBranch expanded={taskOpen} retainWhenCollapsed={!forceExpanded}>
+        <ProjectWorkflowRunRows
+          projectId={projectId}
+          workspaceId={task.workspaceId}
+          depth={2}
+          listEnabled={taskOpen}
+          activeRunId={activeRunId}
+          onSelectRun={(runId) =>
+            useWorkspaceSelectionStore
+              .getState()
+              .selectWorkflowRun(runId, projectId, task.id)
+          }
+          onDeleteRun={(run) =>
+            useUiStore.getState().setDeleteTarget({
+              kind: "workflowRun",
+              id: run.id,
+              name: run.name,
+              projectId,
+            })
+          }
+        />
         {drafts.map((draft) => (
           <DraftSessionTreeRow key={draft.id} draftId={draft.id} depth={2} />
         ))}

@@ -21,7 +21,7 @@ import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selecti
 interface RunWorkflowDialogProps {
   open: boolean;
   workflow: { id: string; name: string } | null;
-  target: { projectId: string; workspaceId: string } | null;
+  target: { projectId: string; workspaceId: string; taskId?: string } | null;
   onOpenChange: (open: boolean) => void;
 }
 
@@ -74,7 +74,7 @@ export function RunWorkflowDialog({
         name: resolvedRunName,
       });
       useUiStore.getState().expandProject(target.projectId);
-      selectWorkflowRun(result.run.id, target.projectId);
+      selectWorkflowRun(result.run.id, target.projectId, target.taskId);
       onOpenChange(false);
       resetLocalState();
     } catch (cause) {

@@ -353,7 +353,7 @@ function linkifyText(
 function artifactTextMatches(text: string): RegExpMatchArray[] {
   return [
     ...text.matchAll(
-      /[^\s,，、;；]+(?:\s+\(line\s+[1-9]\d*(?:\s*,\s*col(?:umn)?\s+[1-9]\d*)?\))?/gi,
+      /[^\s,，、;；]+(?:\s+\(lines?\s+[1-9]\d*(?:\s*-\s*[1-9]\d*)?(?:\s*,\s*col(?:umn)?\s+[1-9]\d*)?\))?/gi,
     ),
   ];
 }

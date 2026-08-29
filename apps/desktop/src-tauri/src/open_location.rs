@@ -117,10 +117,7 @@ fn open_location_error(
 /// Launches the host handler for one location, branching per OS since only desktop hosts call this.
 #[cfg(target_os = "windows")]
 fn open_location_blocking(target: LocationTarget, path: &str) -> Result<(), BackendError> {
-    use std::os::windows::process::CommandExt;
     use std::process::Command;
-    // CREATE_NO_WINDOW: keep the `cmd` shim that resolves `code.cmd` from flashing a console.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     // Git reports worktree paths with forward slashes; explorer.exe only navigates
     // backslash paths and silently falls back to a parent otherwise. Normalize once -
@@ -137,9 +134,10 @@ fn open_location_blocking(target: LocationTarget, path: &str) -> Result<(), Back
         // `code` ships as `code.cmd`, which CreateProcess will not resolve directly; route it
         // through `cmd` and wait so a missing install surfaces as a failure the UI can report.
         LocationTarget::VsCode => {
-            let status = Command::new("cmd")
-                .args(["/C", "code", path])
-                .creation_flags(CREATE_NO_WINDOW)
+            let mut command = Command::new("cmd");
+            command.args(["/C", "code", path]);
+            ora_utils::process::hide_console_window(&mut command);
+            let status = command
                 .status()
                 .map_err(|source| open_location_error(target, source))?;
             if status.success() {

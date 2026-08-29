@@ -23,6 +23,7 @@ import {
 import { TooltipProvider } from "@ora/ui";
 import { PlatformProvider } from "../../platform";
 import { AppI18nProvider } from "../../i18n/i18n";
+import { appI18n } from "../../i18n/i18n-instance";
 import {
   createMockClient,
   createMockClientState,
@@ -40,6 +41,7 @@ import { useDraftSessionsStore } from "../../state/stores/draft-sessions-store";
 import { useUnreadSessionsStore } from "../../state/stores/unread-sessions-store";
 import { dismissSessionDraft } from "../../state/session-drafts";
 import { WorkspaceSidebar } from "./workspace-sidebar";
+import { useWorkflowEditorStore } from "../workflow-editor/workflow-editor-store";
 
 const USER = { name: "Eric", email: "eric@example.com" };
 // Deliberately not "Ora": the sidebar header renders that as the product mark,
@@ -198,6 +200,12 @@ beforeEach(() => {
     treeExpansionBootstrapped: false,
     dialog: null,
     deleteTarget: null,
+    workflowEditorOpen: false,
+  });
+  useWorkflowEditorStore.setState({
+    selectedWorkflowId: null,
+    managerError: null,
+    actions: null,
   });
   useUnreadSessionsStore.setState({ unread: new Set() });
   document.body.removeAttribute("style");
@@ -757,7 +765,7 @@ describe("WorkspaceSidebar", () => {
         snapshotId: "snap1",
         name: "Review bot",
         status: "pending",
-        workspaceId: "workspace-wt1",
+        workspaceId: "workspace-p1",
         createdAt: 0n,
         updatedAt: 0n,
       },
@@ -771,6 +779,43 @@ describe("WorkspaceSidebar", () => {
     expect(
       within(runRow).getByRole("button", { name: /归档|Archive/ }),
     ).not.toBeNull();
+  });
+
+  it("places task workflow runs under the owning task", async () => {
+    const state = workspaceWithOneSession();
+    state.workflowRuns = [
+      {
+        id: "run-task",
+        projectId: PROJECT.id,
+        workflowId: "wf-task",
+        snapshotId: "snap-task",
+        name: "Task workflow",
+        status: "pending",
+        workspaceId: TASK.workspaceId,
+        createdAt: 0n,
+        updatedAt: 0n,
+      },
+      {
+        id: "run-project",
+        projectId: PROJECT.id,
+        workflowId: "wf-project",
+        snapshotId: "snap-project",
+        name: "Project workflow",
+        status: "pending",
+        workspaceId: "workspace-p1",
+        createdAt: 0n,
+        updatedAt: 0n,
+      },
+    ];
+    renderSidebar(state);
+
+    await waitFor(() => {
+      expect(treeRow("Task workflow")).not.toBeNull();
+      expect(treeRow("Project workflow")).not.toBeNull();
+    });
+
+    expect(treeRow("Task workflow")!.style.paddingLeft).toBe("44px");
+    expect(treeRow("Project workflow")!.style.paddingLeft).toBe("26px");
   });
 
   it("opens delete confirmation from the session context menu", async () => {
@@ -857,6 +902,7 @@ describe("WorkspaceSidebar", () => {
       kind: "runWorkflow",
       projectId: PROJECT.id,
       workspaceId: TASK.workspaceId,
+      taskId: TASK.id,
       workflowId: "wf1",
       workflowName: "Task review",
     });
@@ -1605,5 +1651,90 @@ describe("WorkspaceSidebar", () => {
 
     await waitFor(() => expect(workingIndicator()).not.toBeNull());
     expect(unreadMark()).toBeNull();
+  });
+
+  it("opens the workflow editor from the action stack and returns with Back", async () => {
+    const user = userEvent.setup();
+    renderSidebar(workspaceWithOneSession());
+
+    await user.click(
+      await screen.findByRole("button", { name: /^工作流$|^Workflows$/ }),
+    );
+
+    expect(useUiStore.getState().workflowEditorOpen).toBe(true);
+    expect(
+      screen.queryByRole("button", { name: /新建对话|New chat/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText(/搜索工作区|Search workspace/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /返回|Back/ })).toBeDisabled();
+    expect(useUiStore.getState().workflowEditorOpen).toBe(true);
+    // Drain the library query the list starts on mount so it cannot settle
+    // after this test moves on and trip the stderr act() gate.
+    await screen.findByPlaceholderText(/搜索工作流|Search workflows/);
+
+    await act(() => {
+      useWorkflowEditorStore.setState({
+        actions: {
+          select: async () => undefined,
+          create: async () => true,
+          copy: async () => true,
+          rename: async () => true,
+          delete: async () => undefined,
+          importFile: async () => true,
+          leave: async () => {
+            useUiStore.getState().setWorkflowEditorOpen(false);
+          },
+        },
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: /返回|Back/ }));
+
+    expect(useUiStore.getState().workflowEditorOpen).toBe(false);
+    expect(
+      await screen.findByRole("button", { name: /新建对话|New chat/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides project-tree errors while the workflow editor owns the sidebar", async () => {
+    const user = userEvent.setup();
+    await act(() => appI18n.changeLanguage("zh-CN"));
+    const state = workspaceWithOneSession();
+    const client = createMockClient(state);
+    vi.spyOn(client.project, "list").mockRejectedValue(
+      new LocalTransportError("tauri_invoke_failure", "projects unavailable"),
+    );
+    renderSidebar(state, undefined, client);
+
+    expect(await screen.findByText("桌面命令调用失败。")).toBeInTheDocument();
+
+    await user.click(
+      await screen.findByRole("button", { name: /^工作流$|^Workflows$/ }),
+    );
+
+    expect(screen.queryByText("桌面命令调用失败。")).not.toBeInTheDocument();
+  });
+
+  it("does not start a new chat from Ctrl+N while the workflow editor is open", async () => {
+    const user = userEvent.setup();
+    await act(() => appI18n.changeLanguage("zh-CN"));
+    useWorkspaceSelectionStore
+      .getState()
+      .selectSession(SESSION.id, TASK.id, PROJECT.id);
+    renderSidebar(workspaceWithOneSession());
+
+    await user.click(
+      await screen.findByRole("button", { name: /^工作流$|^Workflows$/ }),
+    );
+    expect(useUiStore.getState().workflowEditorOpen).toBe(true);
+    const selection = useWorkspaceSelectionStore.getState().selection;
+
+    fireEvent.keyDown(window, { key: "n", ctrlKey: true });
+
+    expect(useDraftSessionsStore.getState().drafts).toHaveLength(0);
+    expect(useWorkspaceSelectionStore.getState().selection).toEqual(selection);
+    expect(useUiStore.getState().workflowEditorOpen).toBe(true);
   });
 });

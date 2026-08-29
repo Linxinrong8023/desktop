@@ -17,8 +17,9 @@ export interface ParkedComposerInput {
   images: ParkedComposerImage[];
   /**
    * TipTap document JSON so file/skill/command chips restore as chips (with
-   * `kind`) instead of backtick/`$name`/`/name` plain text. Memory only —
-   * localStorage keeps `text` so restart can still approximate via markdown.
+   * `kind`) instead of backtick/`$name`/`/name` plain text. Persisted with the
+   * text so an app restart restores the exact reference chips; image bytes
+   * stay memory only.
    */
   doc?: JSONContent;
   /**
@@ -33,8 +34,8 @@ interface ComposerInputState {
    * Unsent composer text/images keyed by `conversationKeyFor`. The composer
    * component is reused across switches, so parking here is what restores a
    * half-typed message when the user comes back to that session or draft.
-   * Text survives restarts via localStorage; images and TipTap `doc` stay
-   * in-process only (chips need `doc` for kind / slash tokens).
+   * Text and TipTap `doc` survive restarts via localStorage (chips need `doc`
+   * for kind / slash tokens); image bytes stay in-process only.
    */
   byKey: Record<string, ParkedComposerInput>;
   /** Replaces the parked payload for one conversation. */
@@ -63,12 +64,12 @@ export function composerInputHasContent(input: ParkedComposerInput): boolean {
 }
 
 /**
- * Disk shape for one parked conversation: typed text only. Image bytes and
- * TipTap `doc` stay in memory for the current process; restoring an empty
- * retained stub after restart looked like a blank composer with nothing to
- * recover.
+ * Disk shape for one parked conversation: typed text plus a TipTap `doc` so
+ * chips restore exactly. Image bytes stay in memory for the current process.
+ * Restoring an empty retained stub after restart looked like a blank composer
+ * with nothing to recover.
  */
-function textOnlyPark(input: unknown): ParkedComposerInput | null {
+function diskPark(input: unknown): ParkedComposerInput | null {
   if (
     typeof input !== "object" ||
     input === null ||
@@ -79,7 +80,23 @@ function textOnlyPark(input: unknown): ParkedComposerInput | null {
   ) {
     return null;
   }
-  return { text: input.text, images: [] };
+  const parked: ParkedComposerInput = { text: input.text, images: [] };
+  const doc = (input as { doc?: unknown }).doc;
+  if (isParkedDoc(doc)) {
+    parked.doc = doc;
+  }
+  return parked;
+}
+
+/** A plausible TipTap document root; deep validation happens on editor restore. */
+function isParkedDoc(value: unknown): value is JSONContent {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as { type?: unknown }).type === "doc" &&
+    Array.isArray((value as { content?: unknown }).content)
+  );
 }
 
 /** Keeps only runtime-validated entries with typed text. */
@@ -91,7 +108,7 @@ function sanitizeParkedByKey(
   }
   const next: Record<string, ParkedComposerInput> = {};
   for (const [key, input] of Object.entries(byKey)) {
-    const parked = textOnlyPark(input);
+    const parked = diskPark(input);
     if (parked !== null) next[key] = parked;
   }
   return next;
@@ -99,9 +116,9 @@ function sanitizeParkedByKey(
 
 /**
  * Parks unsent composer contents per conversation so switching sessions does
- * not throw away a half-written message. Typed text is mirrored to
- * localStorage (frontend only); attached images and TipTap `doc` remain in
- * memory for the current process.
+ * not throw away a half-written message. Typed text and the TipTap `doc` are
+ * mirrored to localStorage (frontend only) so restart restores the exact
+ * chips; attached image bytes remain in memory for the current process.
  */
 export const useComposerInputStore = create<ComposerInputState>()(
   persist(
@@ -187,7 +204,7 @@ export const useComposerInputStore = create<ComposerInputState>()(
       name: COMPOSER_INPUT_STORAGE_KEY,
       // Keystroke parks coalesce; pagehide / visibility flush for durability.
       storage: createDebouncedJSONStorage(),
-      // Never write image payloads; restart restores text and drops attachments.
+      // Never write image payloads; restart restores text, the TipTap doc, and drops attachments.
       partialize: (state) => ({
         byKey: sanitizeParkedByKey(state.byKey),
       }),

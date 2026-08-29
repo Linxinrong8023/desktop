@@ -70,6 +70,36 @@ await storage.remove("index.json"); // file or directory tree
 Storage errors carry `kind` `invalid_path`, `not_found`, `too_large`, `io`, or
 `invalid_params`.
 
+## Host-managed child processes
+
+`createHostProcesses(plugin)` wraps `ora/childprocess/*`: instead of a plugin
+spawning its own subprocess (which on Deno needs `--allow-run`), it asks Ora to
+spawn, own, and best-effort kill one on its behalf. Ora tears down every process
+a plugin spawned this way the moment that plugin generation stops for any
+reason, on top of whatever a caller's own `kill()` requests.
+
+```ts
+import { createHostProcesses } from "@ora-space/plugin-sdk";
+
+const processes = createHostProcesses(plugin); // before plugin.run()
+const acp = await processes.spawn({
+  command: "opencode",
+  args: ["acp", "--cwd", cwd],
+  cwd,
+});
+acp.stdout; // ReadableStream<Uint8Array> — this plugin owns any line framing
+acp.stderr; // ReadableStream<Uint8Array>
+await acp.write(new TextEncoder().encode(line)); // to the process's stdin
+await acp.closeStdin(); // signals EOF without killing it
+await acp.kill(); // best-effort tree-wide termination
+const { code, signal } = await acp.exited;
+```
+
+`spawn` failures carry `kind` `invalid_command` (empty command),
+`program_not_found` (the OS could not resolve the executable — distinct from any
+other spawn failure, which is `io`), or `invalid_params`; `write`, `closeStdin`,
+and `kill` against an already-exited process's id fail with `not_found`.
+
 ## UI plugins
 
 `defineUiPlugin` builds a plugin that serves Ora's ui contract with the
@@ -124,6 +154,21 @@ const plugin = defineAgent({
   stop: () => {/* terminate the CLI this plugin spawned */},
   listModels: () => [{ id: "opus", displayName: "Opus", default: true }],
   onAcp: (frame) => {/* forward the frame to the CLI */},
+  effects: {
+    surfaces: [{
+      workspaceRelativePath: ".agents/skills",
+      materializationFormat: "skill_directory.v1",
+      coordination: "wait_for_idle_and_restart",
+    }],
+    waitForIdle: async ({ surfaceKey, workspaceRoot, relativePath }) => {
+      // Return waiting_for_idle while any affected instance is serving a turn. Once ready is
+      // returned, keep new turns behind the surfaceKey barrier until restart.
+      return "ready";
+    },
+    restart: async ({ surfaceKey, generation }) => {
+      // Restart every affected instance, then release the idempotent barrier for this generation.
+    },
+  },
 });
 await plugin.run();
 ```
@@ -133,3 +178,10 @@ stdio; it only sees `agent/acp` frames, whose payloads it passes through without
 parsing. Throw `new PluginMethodError(AGENT_NOT_INSTALLED, ...)` from `start`
 when the CLI is absent — Ora treats that as expected local configuration and
 retries quietly instead of reporting a fault.
+
+Effect locators are always Workspace-relative; Ora supplies and validates the
+absolute Workspace root when it coordinates a mutation. The canonical Plugin ID
+becomes the persisted consumer identity, so plugin code cannot claim another
+consumer's state. Both coordination callbacks must be idempotent because Ora may
+retry after either side has completed but before the corresponding durable
+status update is visible.

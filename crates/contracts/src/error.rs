@@ -108,7 +108,7 @@ pub enum PublicError {
     AgentNameConflict(EmptyErrorParams),
     AgentNotFound(EmptyErrorParams),
     PluginNotFound(EmptyErrorParams),
-    PluginDisabled(EmptyErrorParams),
+    PluginHostIncompatible(EmptyErrorParams),
     PluginConfigurationDeclarationInvalid(EmptyErrorParams),
     PluginConfigurationNotDeclared(EmptyErrorParams),
     ConfigurationRevisionConflict(EmptyErrorParams),
@@ -123,11 +123,11 @@ pub enum PublicError {
     TaskBaseBranchRequired(EmptyErrorParams),
     TaskBaseBranchNotFound(TaskBaseBranchNotFoundParams),
     WorktreeNotFound(EmptyErrorParams),
-    TaskDiffBaselineUnavailable(EmptyErrorParams),
-    TaskDiffCommitMessageBlank(EmptyErrorParams),
-    TaskDiffTooLarge(EmptyErrorParams),
+    WorkspaceDiffBaselineUnavailable(EmptyErrorParams),
+    WorkspaceDiffCommitMessageBlank(EmptyErrorParams),
+    WorkspaceDiffTooLarge(EmptyErrorParams),
     SessionNotFound(EmptyErrorParams),
-    AgentCliNotFound(EmptyErrorParams),
+    AgentNotInstalled(EmptyErrorParams),
     AgentRuntimeUnavailable(EmptyErrorParams),
     SessionBusy(EmptyErrorParams),
     SessionStopped(EmptyErrorParams),
@@ -216,7 +216,7 @@ impl PublicError {
             Self::AgentNameConflict(_) => "agent_name_conflict",
             Self::AgentNotFound(_) => "agent_not_found",
             Self::PluginNotFound(_) => "plugin_not_found",
-            Self::PluginDisabled(_) => "plugin_disabled",
+            Self::PluginHostIncompatible(_) => "plugin_host_incompatible",
             Self::PluginConfigurationDeclarationInvalid(_) => {
                 "plugin_configuration_declaration_invalid"
             }
@@ -237,11 +237,11 @@ impl PublicError {
             Self::TaskBaseBranchRequired(_) => "task_base_branch_required",
             Self::TaskBaseBranchNotFound(_) => "task_base_branch_not_found",
             Self::WorktreeNotFound(_) => "worktree_not_found",
-            Self::TaskDiffBaselineUnavailable(_) => "task_diff_baseline_unavailable",
-            Self::TaskDiffCommitMessageBlank(_) => "task_diff_commit_message_blank",
-            Self::TaskDiffTooLarge(_) => "task_diff_too_large",
+            Self::WorkspaceDiffBaselineUnavailable(_) => "workspace_diff_baseline_unavailable",
+            Self::WorkspaceDiffCommitMessageBlank(_) => "workspace_diff_commit_message_blank",
+            Self::WorkspaceDiffTooLarge(_) => "workspace_diff_too_large",
             Self::SessionNotFound(_) => "session_not_found",
-            Self::AgentCliNotFound(_) => "agent_cli_not_found",
+            Self::AgentNotInstalled(_) => "agent_not_installed",
             Self::AgentRuntimeUnavailable(_) => "agent_runtime_unavailable",
             Self::SessionBusy(_) => "session_busy",
             Self::SessionStopped(_) => "session_stopped",
@@ -389,7 +389,7 @@ mod tests {
             PublicError::AgentNameConflict(empty),
             PublicError::AgentNotFound(empty),
             PublicError::PluginNotFound(empty),
-            PublicError::PluginDisabled(empty),
+            PublicError::PluginHostIncompatible(empty),
             PublicError::PluginConfigurationDeclarationInvalid(empty),
             PublicError::PluginConfigurationNotDeclared(empty),
             PublicError::ConfigurationRevisionConflict(empty),
@@ -408,11 +408,11 @@ mod tests {
                 branch_name: "main".to_string(),
             }),
             PublicError::WorktreeNotFound(empty),
-            PublicError::TaskDiffBaselineUnavailable(empty),
-            PublicError::TaskDiffCommitMessageBlank(empty),
-            PublicError::TaskDiffTooLarge(empty),
+            PublicError::WorkspaceDiffBaselineUnavailable(empty),
+            PublicError::WorkspaceDiffCommitMessageBlank(empty),
+            PublicError::WorkspaceDiffTooLarge(empty),
             PublicError::SessionNotFound(empty),
-            PublicError::AgentCliNotFound(empty),
+            PublicError::AgentNotInstalled(empty),
             PublicError::AgentRuntimeUnavailable(empty),
             PublicError::SessionBusy(empty),
             PublicError::SessionStopped(empty),
@@ -496,7 +496,7 @@ mod tests {
                 | PublicError::AgentNameConflict(_)
                 | PublicError::AgentNotFound(_)
                 | PublicError::PluginNotFound(_)
-                | PublicError::PluginDisabled(_)
+                | PublicError::PluginHostIncompatible(_)
                 | PublicError::PluginConfigurationDeclarationInvalid(_)
                 | PublicError::PluginConfigurationNotDeclared(_)
                 | PublicError::ConfigurationRevisionConflict(_)
@@ -511,11 +511,11 @@ mod tests {
                 | PublicError::TaskBaseBranchRequired(_)
                 | PublicError::TaskBaseBranchNotFound(_)
                 | PublicError::WorktreeNotFound(_)
-                | PublicError::TaskDiffBaselineUnavailable(_)
-                | PublicError::TaskDiffCommitMessageBlank(_)
-                | PublicError::TaskDiffTooLarge(_)
+                | PublicError::WorkspaceDiffBaselineUnavailable(_)
+                | PublicError::WorkspaceDiffCommitMessageBlank(_)
+                | PublicError::WorkspaceDiffTooLarge(_)
                 | PublicError::SessionNotFound(_)
-                | PublicError::AgentCliNotFound(_)
+                | PublicError::AgentNotInstalled(_)
                 | PublicError::AgentRuntimeUnavailable(_)
                 | PublicError::SessionBusy(_)
                 | PublicError::SessionStopped(_)

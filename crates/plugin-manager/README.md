@@ -12,15 +12,22 @@ orchestrates checksum-verified installs of new plugin releases.
   schema, and require the manifest version to match the version directory.
 - Resolve the fixed `main.js` entrypoint for agent and workbench packages as an existing regular
   file whose canonical target remains inside its package, then retain its portable relative path.
-  Webview and skill packages have no process entrypoint.
+  Webview, skill, MCP, and hook packages have no process entrypoint.
 - Keep `kind` and its contribution in one value (`PluginContribution::Agent`, `::Workbench`,
-  `::Webview`, or `::Skill`), so a validated plugin always carries exactly what its kind promises.
-  Skill contributions carry no additional contract fields, but the package must contain one or
-  more `assets/skills/<name>/SKILL.md` trees. Each Skill manifest is parsed and its declared name
-  must match the package directory before it can be cataloged.
+  `::Webview`, `::Skill`, `::Mcp`, or `::Hook`), so a validated plugin always carries exactly what
+  its kind promises. Skill contributions carry no additional contract fields, but the package must
+  contain one or more `assets/<name>/SKILL.md` trees. Each Skill manifest is parsed and its declared
+  name must match the package directory before it can be cataloged. MCP contributions carry the
+  immutable Installed MCP Descriptor compiled from `assets/config.json`. Hook contributions
+  carry the immutable Installed Hook Descriptor compiled from a Hook-shaped
+  `assets/config.json` plus the installed artifact target.
 - Compile an optional `assets/config.json` through `ora-plugin-config` without treating the
   package directory as a data root, and record whether the immutable declaration is absent, valid,
-  or invalid so lifecycle can refuse to enable a broken package.
+  or invalid so lifecycle can refuse to start a broken package. Invalid packages remain visible
+  but unusable. A transport-bearing (MCP-shaped) `assets/config.json` is only accepted on
+  `kind = "mcp"` packages, and an MCP package requires one. A Hook-shaped (hook-bearing)
+  `assets/config.json` is only accepted on `kind = "hook"` packages, and a hook package requires
+  one.
 - Apply host-side workbench and webview policy that the manifest crate cannot check: a workbench
   package must ship `assets/index.html` beside `main.js`; a webview package must not ship
   `main.js`, must cover `start_url` with `allowed_origins`, and must not declare shadowed
@@ -34,9 +41,20 @@ orchestrates checksum-verified installs of new plugin releases.
 - Install a plugin release: download the `.orax` package (through an injected `ora-utils::http`
   `HttpDownload`), verify its SHA-256 while downloading, and safely extract it into
   `<data-dir>/plugins/installed/<namespace>/<name>/<version>` with `ora-utils::archive`.
+- Update an installed plugin release by refusing no-op and downgrade attempts (the marketplace
+  manifest must declare a higher version than the highest installed SemVer directory), then
+  downloading, verifying, and extracting the new release into its version directory and retiring
+  every other version directory underneath `<data-dir>/plugins/installed/<namespace>/<name>`.
 - Import one local `.orax` release archive by extracting into a disposable staging directory,
   parsing its in-archive `orax.toml`, verifying a declared `sha256`, and then moving only the
   validated tree into `<data-dir>/plugins/installed/<namespace>/<name>/<version>`.
+- Own the extraction budget plugin packages are held to (`limits::package_extract_limits`) rather
+  than inheriting the generic `ExtractLimits` default, which is sized for text payloads. An Agent
+  Plugin may bundle the CLI it drives, and those are single native binaries in the hundreds of
+  megabytes.
+- Verify a package that self-declares `[artifact]` was built for the host it is landing on, for
+  both online install and local import. The declaration is mandatory only for `hook` packages;
+  every kind that omits it installs as a universal package.
 
 ## Non-responsibilities
 
@@ -51,10 +69,15 @@ Call `PluginManager::discover(data_dir)` once during application bootstrap. Cons
 resulting snapshot through `installed_plugins()` and report any non-fatal problems from
 `discovery_issues()`. `installed_root(data_dir)`, `MANIFEST_FILE_NAME`, and
 `INSTALLED_ENTRYPOINT` expose the layout to callers that write or inspect it. A local `.orax`
-archive is imported with `Installer::install_local(archive_path, data_dir)`, which returns an
-`InstalledPackage` carrying the materialized `package_dir` and the `namespace/name` plugin id
-derived from the in-archive manifest. `Installer::new` accepts any `HttpDownload`; `install`
-returns the package directory it extracted into.
+archive is imported with `Installer::install_local(archive_path, data_dir, host_target)`, which
+returns an `InstalledPackage` carrying the materialized `package_dir` and the `namespace/name`
+plugin id derived from the in-archive manifest. `host_target` is `HostTarget::Triple` for the
+current host's canonical triple and `HostTarget::Unsupported` when the compiled host is not a
+supported plugin target; Hook archives must match that triple, while other kinds ignore it.
+`select_release` takes the same `HostTarget`. `Installer::new` accepts any `HttpDownload`;
+`install` returns the package directory it extracted into, and `update` returns the committed
+`InstalledPackage` after stale versions are retired. Both `install` and `update` take a
+`ResolvedReleaseSource` so targeted Hook releases keep the same host-selection path.
 
 ## Validation split
 
@@ -63,15 +86,26 @@ returns the package directory it extracted into.
 and that `[workbench]` is refused for every other kind. This crate adds what depends on the host
 or on the package on disk:
 
-- Agent and workbench packages must contain `main.js`; webview packages must not. Skill packages
-  have no process entrypoint.
+- Agent and workbench packages must contain `main.js`; webview, MCP, and hook packages must not. Skill
+  packages have no process entrypoint.
 - A workbench package must ship `assets/index.html`; the canonical `assets/` directory is the
   only tree ever served to the page.
 - A webview package is configuration-only: `start_url` must belong to `allowed_origins`, origins
   cannot repeat, and a download rule whose page set is covered by an earlier rule is rejected.
-- A skill package must contain `assets/skills/` with at least one immediate Skill directory, and
-  every such directory must contain a regular root `SKILL.md`. Optional `scripts/`, `references/`,
+- A skill package must contain `assets/` with at least one immediate Skill directory. Every
+  immediate directory is one Skill package rooted by `SKILL.md`; the plugin has no intermediate
+  `skills/` directory. The Skill catalog namespace is the owning plugin's canonical
+  `<namespace>/<identifier>` identity. Every such directory must contain a regular root
+  `SKILL.md`. Optional `scripts/`, `references/`,
   and nested `assets/` contents are preserved but not interpreted in this release.
+- An MCP package is configuration-only: it must not ship `main.js`, must provide an MCP-shaped
+  `assets/config.json` (settings subset plus exactly one transport), and, for a stdio transport,
+  its command must resolve to a regular file inside the package (executable on Unix).
+- A hook package is processless: it must not ship `main.js`, must provide a Hook-shaped
+  `assets/config.json` (schema version, protocol, package-relative executable, bare command alias,
+  embedded tool version), and its executable must resolve to a regular non-symlink file under
+  `assets/` (Windows requires the `.exe` suffix). The installer verifies the installed artifact
+  target against the selected release target without executing the payload.
 - `display_name` is the plugin identifier for every kind. One agent-kind package contributes
   exactly one agent with no identifier of its own: the package's plugin id is that agent's
   identity everywhere in the host.

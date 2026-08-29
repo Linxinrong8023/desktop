@@ -18,6 +18,7 @@
 //! actually exit. Callers that need the final exit status must still reap the direct child via
 //! [`crate::ManagedProcess::wait`].
 
+use std::collections::BTreeSet;
 use std::io;
 
 use tokio::process::{Child, Command};
@@ -35,6 +36,17 @@ use tokio::process::{Child, Command};
 pub(crate) struct ProcessTree {
     #[cfg(unix)]
     pgid: i32,
+    #[cfg(windows)]
+    job: windows_sys::Win32::Foundation::HANDLE,
+}
+
+/// Tracks every process tree registered with the external reaper.
+///
+/// Unix stores independent process-group identifiers, while Windows enrolls direct children in
+/// one aggregate Job Object whose membership follows process lifetime automatically. Dropping
+/// this value is a fail-safe cleanup path for malformed IPC or other sidecar failures.
+pub(crate) struct ReaperTargets {
+    registered: BTreeSet<u32>,
     #[cfg(windows)]
     job: windows_sys::Win32::Foundation::HANDLE,
 }
@@ -73,10 +85,11 @@ impl ProcessTree {
     /// Builds a process-tree handle from a freshly-spawned child.
     ///
     /// On Windows this creates the Job Object with `KILL_ON_JOB_CLOSE` and assigns the running
-    /// child to it. There is a small race window between spawn and assignment where the child
-    /// could fork a subprocess that escapes the job; for Ora's agent runtimes this race is
-    /// acceptable and unavoidable without `CREATE_SUSPENDED` plumbing that the tokio `Command`
-    /// type does not expose.
+    /// child to it after the external reaper has assigned its shared outer Job. There is a small
+    /// race window between spawn and assignment where the child could fork a subprocess that
+    /// escapes the private Job; the shared reaper Job still contains that descendant. Avoiding
+    /// the private-Job race entirely would require `CREATE_SUSPENDED` plumbing that the Tokio
+    /// `Command` type does not expose.
     pub(crate) fn from_spawned(child: &Child) -> io::Result<Self> {
         #[cfg(unix)]
         {
@@ -122,6 +135,95 @@ impl ProcessTree {
     }
 }
 
+impl ReaperTargets {
+    /// Creates the platform containment needed to own all subsequently registered trees.
+    pub(crate) fn new() -> io::Result<Self> {
+        Ok(Self {
+            registered: BTreeSet::new(),
+            #[cfg(windows)]
+            job: create_kill_on_close_job()?,
+        })
+    }
+
+    /// Adds one newly-spawned direct child, treating a process that already exited as registered.
+    pub(crate) fn register(&mut self, process_id: u32) -> io::Result<()> {
+        if self.registered.contains(&process_id) {
+            return Ok(());
+        }
+
+        #[cfg(unix)]
+        if !process_group_exists(process_id)? {
+            return Ok(());
+        }
+
+        #[cfg(windows)]
+        if !assign_child_to_job_if_running(self.job, process_id)? {
+            return Ok(());
+        }
+
+        self.registered.insert(process_id);
+        Ok(())
+    }
+
+    /// Forgets a direct child after its owner observed exit, preventing identifier-reuse hazards.
+    pub(crate) fn unregister(&mut self, process_id: u32) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            // A shell can exit while a background descendant remains in its inherited process
+            // group. Retain that group for final cleanup until the complete tree is gone.
+            if !process_group_exists(process_id)? {
+                self.registered.remove(&process_id);
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            // Windows Job membership, rather than this identifier set, retains descendants.
+            self.registered.remove(&process_id);
+        }
+        Ok(())
+    }
+
+    /// Forcefully terminates every tree that remains registered at parent shutdown.
+    pub(crate) fn kill_all(&mut self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            let mut first_error = None;
+            for process_id in std::mem::take(&mut self.registered) {
+                if let Err(error) = kill_process_group(process_id as i32)
+                    && first_error.is_none()
+                {
+                    first_error = Some(error);
+                }
+            }
+            match first_error {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            self.registered.clear();
+            terminate_job(self.job)
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            self.registered.clear();
+            Ok(())
+        }
+    }
+}
+
+impl Drop for ReaperTargets {
+    fn drop(&mut self) {
+        let _ = self.kill_all();
+        #[cfg(windows)]
+        close_handle(self.job);
+    }
+}
+
 #[cfg(windows)]
 impl Drop for ProcessTree {
     fn drop(&mut self) {
@@ -158,6 +260,25 @@ fn kill_process_group(pgid: i32) -> io::Result<()> {
         Ok(())
     } else {
         Err(error)
+    }
+}
+
+/// Reports whether a process group still contains a direct child or any inherited descendants.
+#[cfg(unix)]
+fn process_group_exists(process_id: u32) -> io::Result<bool> {
+    let Ok(pgid) = i32::try_from(process_id) else {
+        return Ok(false);
+    };
+    let result = unsafe { libc::kill(-pgid, 0) };
+    if result == 0 {
+        return Ok(true);
+    }
+
+    let error = io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::ESRCH) => Ok(false),
+        Some(libc::EPERM) => Ok(true),
+        _ => Err(error),
     }
 }
 
@@ -250,6 +371,43 @@ fn assign_child_to_job(
     }
 
     Ok(())
+}
+
+/// Assigns a child when it is still alive, making registration idempotent for short-lived
+/// processes that exit between spawn and the reaper's synchronous enrollment request.
+#[cfg(windows)]
+fn assign_child_to_job_if_running(
+    job: windows_sys::Win32::Foundation::HANDLE,
+    child_pid: u32,
+) -> io::Result<bool> {
+    use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
+    use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+    };
+
+    let child_handle = unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, child_pid) };
+    if child_handle.is_null() {
+        let error = io::Error::last_os_error();
+        return if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+            Ok(false)
+        } else {
+            Err(error)
+        };
+    }
+
+    let ok = unsafe { AssignProcessToJobObject(job, child_handle) };
+    close_handle(child_handle);
+    if ok != 0 {
+        return Ok(true);
+    }
+
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+        Ok(false)
+    } else {
+        Err(error)
+    }
 }
 
 #[cfg(windows)]

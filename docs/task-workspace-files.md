@@ -21,18 +21,25 @@ The layers remain narrow:
 - `apps/desktop/src-tauri/src/commands.rs` owns Tauri extraction, task-root
   resolution, and the command/channel boundary.
 - `packages/app-shell/src/features/files` owns the file tree, viewer, search UI,
-  cache invalidation, and gutter `+` line quotes into the composer (with eager
-  snippet text). A quote stays a compact chip on both sides of send: the prompt
-  carries the snippet as a fenced payload for the agent, and chat history reads
-  that payload back into the same chip instead of replaying the source. The
-  same
+  cache invalidation, and gutter `+` line quotes into the composer. A quote
+  stays a compact chip on both sides of send: the prompt carries a backtick
+  `path:range` reference (the agent reads the body itself), and chat history
+  reads that back into the same chip instead of replaying source. Diff-gutter
+  quotes are the exception — they expand to a mini `diff --git` patch because
+  the change is not yet on disk. The same
   Files panel hosts the Specs sub-view; see [Specification management](spec-management.md).
   Chat inline artifact links open this panel through `openWorkspaceFile` and a
-  `WorkspaceFileRequest` (`path` + `requestId` + optional line/column) so a
-  second click on the same file still applies. The view strips a task-cwd
-  prefix from absolute ACP paths, expands ancestor directories so the tree
-  shows the file, and selects the optional line so the viewer can highlight
-  and scroll to it. A hit outside the task cwd is not opened as a
+  `WorkspaceFileRequest` (`path` + `requestId` + optional
+  `FileNavigationLocation` fields: line/column/endLine) so a second click on
+  the same file still applies. The view strips a task-cwd prefix from absolute
+  ACP paths, expands ancestor directories so the tree shows the file, and
+  selects the optional line or inclusive start–end range so the viewer can
+  highlight and scroll to it. Citation ranges use the same `--quote-tint` wash
+  as a pinned quote (including the gutter); search matches keep amber plus
+  `<mark>`. A later click outside a citation range dismisses the wash and the
+  header `:start-end` label until the next jump. Search matches stay until the
+  next result. Gutter `+` and other buttons do not dismiss. A hit outside the
+  task cwd is not opened as a
   worktree-relative path (chat leaves those mentions unlinked). Missing files,
   including a path the user deleted after the agent read it, show the
   localized missing-path copy rather than the raw transport error. A new

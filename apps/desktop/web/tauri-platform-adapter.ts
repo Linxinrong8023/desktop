@@ -5,6 +5,8 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   PathSelectionInProgressError,
   type LocationActionsCapability,
+  type DesktopUpdateCapability,
+  type DesktopUpdateStatus,
   type LocationTarget,
   type PlatformAdapter,
   type SelectPathOptions,
@@ -23,6 +25,7 @@ import {
 } from "@ora/app-shell/platform";
 
 const SURFACE_EVENT = "surface://event";
+const DESKTOP_UPDATE_EVENT = "desktop-update-status-changed";
 
 /** Reads the host OS from the webview user agent without an async Tauri call. */
 function detectWindowManagerOs(): WindowManagerOs | null {
@@ -87,6 +90,19 @@ function createTauriLocationActions(): LocationActionsCapability {
   };
 }
 
+/** Wires the native updater status and installation commands into the shared shell. */
+function createTauriUpdates(): DesktopUpdateCapability {
+  return {
+    getStatus: () => invoke<DesktopUpdateStatus>("get_desktop_update_status"),
+    install: () => invoke("install_desktop_update"),
+    check: () => invoke("check_desktop_update"),
+    onStatus: (listener) =>
+      listen<DesktopUpdateStatus>(DESKTOP_UPDATE_EVENT, (event) => {
+        listener(event.payload);
+      }),
+  };
+}
+
 /** Wires the plugin surface commands and lifecycle event stream exposed by the Desktop runtime. */
 function createTauriSurfaces(): SurfaceCapability {
   return {
@@ -140,10 +156,12 @@ export class TauriPlatformAdapter implements PlatformAdapter {
 
   readonly surfaces: SurfaceCapability = createTauriSurfaces();
 
+  readonly updates: DesktopUpdateCapability = createTauriUpdates();
+
   readonly worktreeStorage = {
     getRoot: async (): Promise<string> => {
       const config = await invoke<{ worktreeRoot: string }>(
-        "get_desktop_config",
+        "get_worktree_root",
         {
           request: {},
         },

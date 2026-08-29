@@ -19,7 +19,7 @@ import {
 } from "react-diff-view";
 import "react-diff-view/style/index.css";
 import "./task-diff-view.css";
-import type { TaskDiffScope } from "@ora/contracts";
+import type { WorkspaceDiffScope } from "@ora/contracts";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,10 +51,10 @@ import { useTranslation } from "react-i18next";
 import { useContractsClient } from "../../contracts-client-context";
 import { localizeContractError } from "../../i18n/contract-error";
 import { queryKeys } from "../../state/hooks/query-keys";
-import { useTaskDiff } from "../../state/hooks/use-task-diff";
+import { useWorkspaceDiff } from "../../state/hooks/use-workspace-diff";
 import {
   buildCollapsedDiffSegments,
-  findNewSideLineTarget,
+  findDiffLineTargets,
 } from "./task-diff-collapse";
 import { countChanges, parseTaskDiffPatch } from "./task-diff-data";
 import { diffFilePath } from "./task-diff-file-tree-utils";
@@ -66,7 +66,15 @@ import {
   cancelPanelWidthAnimation,
 } from "../../lib/panel-motion";
 import { pathsMatchForWorkspace } from "../../lib/workspace-path";
-import { diffFileScrollTop, isDiffFileScrollSettled } from "./task-diff-scroll";
+import {
+  fileNavigationLocation,
+  type FileNavigationLocation,
+} from "./task-changes-navigation-context";
+import { diffLineScrollTop, isDiffScrollAtEnd } from "./task-diff-scroll";
+import {
+  runDiffFileScroll,
+  type DiffFileScrollRunHandle,
+} from "./task-diff-scroll-run";
 
 /** Matches the changes-panel slide so the file tree toggle feels consistent. */
 const FILE_TREE_SLIDE_MS = 180;
@@ -76,13 +84,19 @@ const FILE_TREE_MIN_WIDTH = 180;
 const FILE_TREE_COLLAPSE_THRESHOLD = FILE_TREE_MIN_WIDTH / 2;
 
 interface TaskDiffViewProps {
-  taskId: string;
+  workspaceId: string;
+  /**
+   * Whether this workspace has a recorded baseline commit (an isolated task
+   * worktree does; a project's main checkout does not). Gates the `Branch`/
+   * `Committed` scopes, which compare against that baseline.
+   */
+  hasBaseline: boolean;
   viewType: TaskDiffViewType;
   fileTreeOpen: boolean;
   fileRequest?: TaskDiffFileRequest;
   toolbar?: ReactNode;
   onFileTreeOpenChange: (open: boolean) => void;
-  onFileNotFound?: (path: string, line?: number) => void;
+  onFileNotFound?: (path: string, location?: FileNavigationLocation) => void;
   /** Reports the file currently shown so review layout can persist it. */
   onPreviewPathChange?: (path: string) => void;
 }
@@ -93,11 +107,16 @@ export interface TaskDiffFileRequest {
   path: string;
   requestId: number;
   line?: number;
+  /** Inclusive end of a cited range; omitted for a single-line jump. */
+  endLine?: number;
+  /** Patch side the line numbers belong to; omitted for new-side chat links. */
+  side?: "old" | "new";
 }
 
 /** Renders a task worktree patch. */
 export function TaskDiffView({
-  taskId,
+  workspaceId,
+  hasBaseline,
   viewType,
   fileTreeOpen,
   fileRequest,
@@ -109,24 +128,45 @@ export function TaskDiffView({
   const { i18n, t } = useTranslation();
   const client = useContractsClient();
   const queryClient = useQueryClient();
-  const [scope, setScope] = useState<TaskDiffScope>("branch");
+  const [scope, setScope] = useState<WorkspaceDiffScope>(
+    hasBaseline ? "branch" : "unstaged",
+  );
   const [gitActionsOpen, setGitActionsOpen] = useState(false);
   const [commitMessage, setCommitMessage] = useState("");
   const [pushOpen, setPushOpen] = useState(false);
   const [gitNotice, setGitNotice] = useState<string | null>(null);
-  const diffQuery = useTaskDiff(taskId, scope);
+  const diffQuery = useWorkspaceDiff(workspaceId, scope);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [appliedFileRequestId, setAppliedFileRequestId] = useState<
     number | null
   >(null);
+  // Jump wash is a locate-then-read cue. Storing the dismissed requestId
+  // (instead of a boolean reset in an effect) lets the next chat jump paint
+  // again as soon as requestId changes.
+  const [dismissedJumpRequestId, setDismissedJumpRequestId] = useState<
+    number | null
+  >(null);
+  const jumpHighlightDismissed =
+    fileRequest !== undefined &&
+    fileRequest.requestId === dismissedJumpRequestId;
+  // Last tree-click flash. It is never cleared by a timer: the overlay fades
+  // to transparent via `animation-fill-mode`, and re-clicking re-keys it to
+  // replay — so a click on an already-visible file still gets feedback.
+  const [fileFlash, setFileFlash] = useState<{
+    path: string;
+    seq: number;
+  } | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const fileElementsRef = useRef(new Map<string, HTMLDivElement>());
   const fileTreePanelRef = useRef<ResizablePanelHandle | null>(null);
   const fileTreeAnimationRef = useRef<number | null>(null);
   const fileTreeWidthRef = useRef(FILE_TREE_WIDTH);
-  // Programmatic jumps (chat links, tree clicks) must not be overwritten by the
-  // scroll spy: on mount it treats an empty viewport as "scrolled to the end".
-  const suppressScrollSyncRef = useRef(false);
+  // The single scroll run that currently owns the viewport. While it is set
+  // the scroll spy stands down, so the run's own scroll events and the layout
+  // shifts it triggers cannot steal the selection mid-flight.
+  const activeScrollRunRef = useRef<DiffFileScrollRunHandle | null>(null);
+  /** File request whose jump scroll already started, deduplicating effect re-runs. */
+  const jumpScrollRequestIdRef = useRef<number | null>(null);
   const onPreviewPathChangeRef = useRef(onPreviewPathChange);
   /** Last path reported upward, so repeat notifications collapse to one call. */
   const notifiedPreviewPathRef = useRef<string | null>(null);
@@ -200,96 +240,67 @@ export function TaskDiffView({
   ]);
 
   /**
-   * Scrolls the Diff viewport so `path` sits near the top.
-   * Returns false when the panel has not laid out yet so callers can retry
-   * instead of treating a 0-height first paint as a completed jump.
+   * Scrolls `path` to the top of the Changes viewport and keeps re-aligning it
+   * while virtualized placeholders take their real height. The run holds the
+   * scroll spy until it settles — or the user takes over — so neither the
+   * run's own scroll events nor late layout shifts can move the selection
+   * elsewhere. A new run always replaces the previous one.
    */
-  const scrollToPath = useCallback((path: string, behavior: ScrollBehavior) => {
-    const root = scrollContainerRef.current;
-    const element = fileElementsRef.current.get(path);
-    if (
-      root === null ||
-      element === undefined ||
-      typeof root.scrollTo !== "function"
-    ) {
-      return false;
-    }
-    const top = diffFileScrollTop(root, element);
-    if (top === null) return false;
-    root.scrollTo({ top, behavior });
-    return true;
+  const startScrollRun = useCallback((path: string) => {
+    activeScrollRunRef.current?.cancel();
+    const run = runDiffFileScroll({
+      getRoot: () => scrollContainerRef.current,
+      getTarget: () => fileElementsRef.current.get(path),
+      onArrived: () => {
+        if (activeScrollRunRef.current === run) {
+          activeScrollRunRef.current = null;
+        }
+      },
+      onInterrupted: () => {
+        if (activeScrollRunRef.current === run) {
+          activeScrollRunRef.current = null;
+        }
+      },
+    });
+    activeScrollRunRef.current = run;
   }, []);
 
-  /** Selects a changed file and aligns its first line with the top of the Diff viewport. */
+  // A run outliving this panel must not keep scrolling against detached nodes.
+  useEffect(() => () => activeScrollRunRef.current?.cancel(), []);
+
+  /** Selects a changed file and aligns its header with the top of the Diff viewport. */
   const selectFile = useCallback(
-    (path: string, behavior: ScrollBehavior = "smooth") => {
-      suppressScrollSyncRef.current = true;
+    (path: string) => {
       setSelectedFilePath(path);
       notifyPreviewPath(path);
-      if (scrollToPath(path, behavior)) return;
-      requestAnimationFrame(() => {
-        if (!scrollToPath(path, behavior))
-          suppressScrollSyncRef.current = false;
-      });
+      startScrollRun(path);
+      setFileFlash((current) => ({ path, seq: (current?.seq ?? 0) + 1 }));
     },
-    [notifyPreviewPath, scrollToPath],
+    [notifyPreviewPath, startScrollRun],
   );
 
   useLayoutEffect(() => {
     if (fileRequest === undefined || diffQuery.isLoading) return;
     if (fileRequest.requestId !== appliedFileRequestId) return;
+    // One jump per request: the run itself owns retries, so selection changes
+    // and refetch-driven list identity changes must not re-jump the viewport
+    // to an old request's path (they would yank the user away from wherever
+    // they scrolled — visible as a double run when tree-clicking the very
+    // file a restored request points at).
+    if (jumpScrollRequestIdRef.current === fileRequest.requestId) return;
     const matchingPath = filePaths.find((path) =>
       pathsMatchForWorkspace(fileRequest.path, path),
     );
     if (matchingPath === undefined || matchingPath !== selectedFilePath) return;
-    suppressScrollSyncRef.current = true;
-    let cancelled = false;
-    let succeeded = false;
-    let attempts = 0;
-    let observer: ResizeObserver | null = null;
-    const attempt = () => {
-      if (cancelled || succeeded) return;
-      const root = scrollContainerRef.current;
-      const element = fileElementsRef.current.get(matchingPath);
-      scrollToPath(matchingPath, "auto");
-      // Placeholder heights above the file can shrink after the first jump.
-      // Keep retrying until the requested section is actually at the top.
-      if (
-        root !== null &&
-        element !== undefined &&
-        isDiffFileScrollSettled(root, element)
-      ) {
-        succeeded = true;
-        observer?.disconnect();
-        return;
-      }
-      if (++attempts < 90) {
-        requestAnimationFrame(attempt);
-        return;
-      }
-      suppressScrollSyncRef.current = false;
-    };
-    attempt();
-    const root = scrollContainerRef.current;
-    const target = fileElementsRef.current.get(matchingPath);
-    const content = root?.firstElementChild;
-    if (typeof ResizeObserver !== "undefined" && root !== null) {
-      observer = new ResizeObserver(() => attempt());
-      observer.observe(root);
-      if (content instanceof Element) observer.observe(content);
-      if (target !== undefined) observer.observe(target);
-    }
-    return () => {
-      cancelled = true;
-      observer?.disconnect();
-    };
+    jumpScrollRequestIdRef.current = fileRequest.requestId;
+    startScrollRun(matchingPath);
   }, [
     appliedFileRequestId,
     diffQuery.isLoading,
     filePaths,
     fileRequest,
-    scrollToPath,
     selectedFilePath,
+    startScrollRun,
   ]);
 
   useEffect(() => {
@@ -299,7 +310,14 @@ export function TaskDiffView({
       pathsMatchForWorkspace(fileRequest.path, path),
     );
     if (matchingPath === undefined) {
-      onFileNotFound?.(fileRequest.path, fileRequest.line);
+      onFileNotFound?.(
+        fileRequest.path,
+        fileNavigationLocation({
+          line: fileRequest.line,
+          endLine: fileRequest.endLine,
+          side: fileRequest.side,
+        }),
+      );
     }
   }, [
     fileRequest,
@@ -343,15 +361,15 @@ export function TaskDiffView({
     if (root === null || filePaths.length === 0) return;
     let frame: number | null = null;
     const updateActiveFile = () => {
-      if (suppressScrollSyncRef.current) {
-        suppressScrollSyncRef.current = false;
-        return;
-      }
+      // A programmatic jump owns the viewport until it settles; skipping (not
+      // consuming anything) keeps its own scroll events and the layout shifts
+      // they trigger from moving the selection mid-flight.
+      if (activeScrollRunRef.current !== null) return;
       if (frame !== null) return;
       frame = requestAnimationFrame(() => {
         frame = null;
         let activePath = filePaths[0]!;
-        if (root.scrollHeight - root.scrollTop - root.clientHeight <= 2) {
+        if (isDiffScrollAtEnd(root)) {
           activePath = filePaths.at(-1)!;
         } else {
           const rootTop = root.getBoundingClientRect().top;
@@ -383,19 +401,21 @@ export function TaskDiffView({
 
   const commitChanges = useMutation({
     mutationFn: (message: string) =>
-      client.task.commitChanges({ taskId, message }),
+      client.workspace.commitChanges({ workspaceId, message }),
     onSuccess: async (response) => {
       setGitActionsOpen(false);
       setCommitMessage("");
       setGitNotice(t("diff.commitSucceeded", { summary: response.summary }));
-      setScope("committed");
+      // A baseline-less workspace has no fixed "committed" comparison to show;
+      // its remaining uncommitted changes are still the most useful view.
+      setScope(hasBaseline ? "committed" : "unstaged");
       await queryClient.invalidateQueries({
-        queryKey: queryKeys.taskDiffs(taskId),
+        queryKey: queryKeys.workspaceDiffs(workspaceId),
       });
     },
   });
   const pushBranch = useMutation({
-    mutationFn: () => client.task.pushBranch({ taskId }),
+    mutationFn: () => client.workspace.pushBranch({ workspaceId }),
     onSuccess: (response) => {
       setPushOpen(false);
       setGitNotice(
@@ -499,7 +519,7 @@ export function TaskDiffView({
             value={scope}
             onValueChange={(value) => {
               if (value === null) return;
-              setScope(value as TaskDiffScope);
+              setScope(value as WorkspaceDiffScope);
             }}
           >
             <SelectTrigger
@@ -512,14 +532,18 @@ export function TaskDiffView({
               </span>
             </SelectTrigger>
             <SelectContent align="start">
-              <SelectItem value="branch">{t("diff.scopeBranch")}</SelectItem>
+              {hasBaseline && (
+                <SelectItem value="branch">{t("diff.scopeBranch")}</SelectItem>
+              )}
               <SelectItem value="unstaged">
                 {t("diff.scopeUnstaged")}
               </SelectItem>
               <SelectItem value="staged">{t("diff.scopeStaged")}</SelectItem>
-              <SelectItem value="committed">
-                {t("diff.scopeCommitted")}
-              </SelectItem>
+              {hasBaseline && (
+                <SelectItem value="committed">
+                  {t("diff.scopeCommitted")}
+                </SelectItem>
+              )}
             </SelectContent>
           </Select>
           <span className="h-4 w-px bg-border/70" aria-hidden="true" />
@@ -592,6 +616,24 @@ export function TaskDiffView({
               <div
                 ref={scrollContainerRef}
                 className="ora-scroll-region ora-diff-scroll-region h-full min-w-0 overflow-auto bg-background"
+                onMouseDown={(event) => {
+                  if (
+                    event.button !== 0 ||
+                    jumpHighlightDismissed ||
+                    fileRequest?.line === undefined ||
+                    !(event.target instanceof Element)
+                  ) {
+                    return;
+                  }
+                  const onCitedRow =
+                    event.target.closest(
+                      ".diff-code-selected, .diff-selected",
+                    ) !== null;
+                  const onChrome = event.target.closest("button") !== null;
+                  if (!onCitedRow && !onChrome) {
+                    setDismissedJumpRequestId(fileRequest.requestId);
+                  }
+                }}
               >
                 <div className="flex w-full flex-col pb-6 pl-4">
                   {files.map((file, fileIndex) => {
@@ -605,20 +647,42 @@ export function TaskDiffView({
                           else fileElementsRef.current.set(path, element);
                         }}
                         data-diff-path={path}
-                        className="scroll-mt-0"
+                        className="relative scroll-mt-0"
                       >
                         <TaskDiffFileViewport
                           file={file}
                           viewType={viewType}
                           targetLine={
+                            !jumpHighlightDismissed &&
                             fileRequest !== undefined &&
                             pathsMatchForWorkspace(fileRequest.path, path)
                               ? fileRequest.line
                               : undefined
                           }
+                          targetEndLine={
+                            !jumpHighlightDismissed &&
+                            fileRequest !== undefined &&
+                            pathsMatchForWorkspace(fileRequest.path, path)
+                              ? fileRequest.endLine
+                              : undefined
+                          }
+                          targetSide={
+                            !jumpHighlightDismissed &&
+                            fileRequest !== undefined &&
+                            pathsMatchForWorkspace(fileRequest.path, path)
+                              ? fileRequest.side
+                              : undefined
+                          }
                           rootRef={scrollContainerRef}
                           forceRender={activeFilePath === path}
                         />
+                        {fileFlash?.path === path && (
+                          <div
+                            key={fileFlash.seq}
+                            aria-hidden="true"
+                            className="ora-diff-file-flash"
+                          />
+                        )}
                       </div>
                     );
                   })}
@@ -662,7 +726,7 @@ export function TaskDiffView({
                 <TaskDiffFileTree
                   files={files}
                   selectedPath={activeFilePath}
-                  onSelect={(path) => selectFile(path)}
+                  onSelect={selectFile}
                 />
               )}
             </ResizablePanel>
@@ -732,10 +796,18 @@ interface TaskDiffFileProps {
   file: FileData;
   viewType: TaskDiffViewType;
   targetLine?: number;
+  targetEndLine?: number;
+  targetSide?: "old" | "new";
 }
 
 /** Renders one parsed patch file. */
-function TaskDiffFile({ file, viewType, targetLine }: TaskDiffFileProps) {
+function TaskDiffFile({
+  file,
+  viewType,
+  targetLine,
+  targetEndLine,
+  targetSide = "new",
+}: TaskDiffFileProps) {
   const { t } = useTranslation();
   const fileRootRef = useRef<HTMLElement | null>(null);
   const [expanded, setExpanded] = useState(true);
@@ -744,40 +816,62 @@ function TaskDiffFile({ file, viewType, targetLine }: TaskDiffFileProps) {
   );
   const { renderGutter, quoteRootRef } = useTaskDiffQuoteGutter(file, viewType);
   const fileStats = useMemo(() => countChanges([file]), [file]);
-  const jumpTarget =
-    targetLine === undefined
-      ? null
-      : findNewSideLineTarget(file.hunks, targetLine);
-  const jumpChangeKey =
-    jumpTarget === null ? null : getChangeKey(jumpTarget.change);
+  const jumpTargets = useMemo(
+    () =>
+      targetLine === undefined
+        ? []
+        : findDiffLineTargets(
+            file.hunks,
+            targetLine,
+            targetEndLine ?? targetLine,
+            targetSide,
+          ),
+    [file.hunks, targetEndLine, targetLine, targetSide],
+  );
+  const selectedChanges = useMemo(
+    () => jumpTargets.map((target) => getChangeKey(target.change)),
+    [jumpTargets],
+  );
+  const jumpScrollKey = selectedChanges[0] ?? null;
   if (targetLine !== undefined && !expanded) {
     setExpanded(true);
   }
-  if (
-    jumpTarget !== null &&
-    jumpTarget.collapsedKey !== null &&
-    !expandedBlocks.has(jumpTarget.collapsedKey)
-  ) {
+  const collapsedKeysToExpand = jumpTargets
+    .map((target) => target.collapsedKey)
+    .filter((key): key is string => key !== null && !expandedBlocks.has(key));
+  if (collapsedKeysToExpand.length > 0) {
     const next = new Set(expandedBlocks);
-    next.add(jumpTarget.collapsedKey);
+    for (const key of collapsedKeysToExpand) next.add(key);
     setExpandedBlocks(next);
   }
   const renderSegments = useMemo(
     () => buildCollapsedDiffSegments(file.hunks, expandedBlocks),
     [expandedBlocks, file.hunks],
   );
-  const selectedChanges = useMemo(
-    () => (jumpChangeKey === null ? [] : [jumpChangeKey]),
-    [jumpChangeKey],
-  );
 
   useLayoutEffect(() => {
-    if (jumpChangeKey === null) return;
-    const selected = fileRootRef.current?.querySelector(
+    if (jumpScrollKey === null) return;
+    const selected = fileRootRef.current?.querySelector<HTMLElement>(
       ".diff-code-selected, .diff-selected",
     );
-    selected?.scrollIntoView({ block: "center", inline: "nearest" });
-  }, [jumpChangeKey, renderSegments]);
+    if (selected === null || selected === undefined) return;
+    const region = selected.closest<HTMLElement>(".ora-diff-scroll-region");
+    if (region === null) return;
+    if (typeof region.scrollTo !== "function") return;
+    // The effect also re-runs when the user expands or collapses unrelated
+    // blocks (renderSegments changes). Re-centering then would yank them back
+    // to the cited line while they read elsewhere, so only scroll when the
+    // highlighted row is not already fully inside the viewport — which is
+    // exactly the expand-then-reveal case the re-run exists for.
+    const row = selected.getBoundingClientRect();
+    const viewport = region.getBoundingClientRect();
+    if (row.top >= viewport.top && row.bottom <= viewport.bottom) return;
+    const top = diffLineScrollTop(region, selected);
+    if (top === null) return;
+    // Scroll only vertically (block: center) while persisting scrollLeft, so a
+    // jump to a long line never yanks the whole diff sideways.
+    region.scrollTo({ top, left: region.scrollLeft });
+  }, [jumpScrollKey, renderSegments]);
 
   return (
     <article ref={fileRootRef} className="bg-background">
@@ -889,7 +983,9 @@ function areTaskDiffFilePropsEqual(
   return (
     previous.file === next.file &&
     previous.viewType === next.viewType &&
-    previous.targetLine === next.targetLine
+    previous.targetLine === next.targetLine &&
+    previous.targetEndLine === next.targetEndLine &&
+    previous.targetSide === next.targetSide
   );
 }
 

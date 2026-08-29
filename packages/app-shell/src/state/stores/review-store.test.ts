@@ -39,9 +39,19 @@ describe("review-store", () => {
         open: true,
         panel: "changes",
         reviewFilePath: "src/main.ts",
-        fileRequest: { path: "/repo/src/main.ts", line: 12 },
+        fileRequest: {
+          path: "/repo/src/main.ts",
+          line: 12,
+          endLine: 18,
+          side: "old",
+        },
       }),
-    ).toEqual({ path: "src/main.ts", line: 12 });
+    ).toEqual({
+      path: "src/main.ts",
+      line: 12,
+      endLine: 18,
+      side: "old",
+    });
   });
 
   it("omits line metadata when preview and request paths do not match", () => {

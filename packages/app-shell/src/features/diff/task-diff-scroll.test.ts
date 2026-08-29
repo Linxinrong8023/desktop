@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   diffFileScrollTop,
+  diffLineScrollTop,
   isDiffFileAligned,
-  isDiffFileScrollSettled,
+  isDiffScrollAtEnd,
 } from "./task-diff-scroll";
 
 /** Builds a stub element whose geometry tests can set independently of jsdom layout. */
@@ -10,6 +11,7 @@ function geometryElement(values: {
   clientHeight?: number;
   offsetHeight?: number;
   offsetTop?: number;
+  scrollHeight?: number;
   scrollTop?: number;
   top: number;
   height: number;
@@ -26,6 +28,10 @@ function geometryElement(values: {
   Object.defineProperty(element, "offsetTop", {
     configurable: true,
     value: values.offsetTop ?? values.top,
+  });
+  Object.defineProperty(element, "scrollHeight", {
+    configurable: true,
+    value: values.scrollHeight ?? values.height + (values.scrollTop ?? 0),
   });
   Object.defineProperty(element, "scrollTop", {
     configurable: true,
@@ -81,21 +87,23 @@ describe("diffFileScrollTop", () => {
     expect(diffFileScrollTop(root, file)).toBeNull();
   });
 
-  it("returns null when a later file still reports a zero offset into the viewport", () => {
+  it("clamps a jump whose destination is the list start to the container top", () => {
+    // Mirrors the live repro: the first list file sits above the viewport, so
+    // the honest destination is scrollTop ≈ 0, not a rejection.
     const root = geometryElement({
-      clientHeight: 400,
-      height: 400,
-      top: 0,
-      scrollTop: 0,
+      clientHeight: 727,
+      height: 727,
+      top: 104,
+      scrollTop: 1559,
     });
     const file = geometryElement({
-      offsetHeight: 120,
-      offsetTop: 800,
-      height: 120,
-      top: 0,
+      offsetHeight: 329,
+      offsetTop: 1563,
+      height: 329,
+      top: -1454,
     });
 
-    expect(diffFileScrollTop(root, file)).toBeNull();
+    expect(diffFileScrollTop(root, file)).toBe(0);
   });
 
   it("places a later file near the top of the viewport", () => {
@@ -130,6 +138,57 @@ describe("diffFileScrollTop", () => {
     });
 
     expect(diffFileScrollTop(root, file)).toBe(0);
+  });
+});
+
+describe("diffLineScrollTop", () => {
+  it("returns null while the diff viewport has not received a height", () => {
+    const root = geometryElement({
+      clientHeight: 0,
+      height: 0,
+      top: 0,
+      scrollTop: 500,
+    });
+    const line = geometryElement({
+      offsetHeight: 24,
+      height: 24,
+      top: 1000,
+    });
+
+    expect(diffLineScrollTop(root, line)).toBeNull();
+  });
+
+  it("returns null while the target line has not laid out", () => {
+    const root = geometryElement({
+      clientHeight: 400,
+      height: 400,
+      top: 0,
+      scrollTop: 500,
+    });
+    const line = geometryElement({
+      offsetHeight: 0,
+      height: 0,
+      top: 1000,
+    });
+
+    expect(diffLineScrollTop(root, line)).toBeNull();
+  });
+
+  it("vertically centers a scrolled line inside the viewport", () => {
+    const root = geometryElement({
+      clientHeight: 400,
+      height: 400,
+      top: 0,
+      scrollTop: 500,
+    });
+    const line = geometryElement({
+      offsetHeight: 24,
+      height: 24,
+      top: 1000,
+    });
+
+    // content offset 1000 - 0 + 500 = 1500, pulled up by (400 - 24) / 2 = 188.
+    expect(diffLineScrollTop(root, line)).toBe(1312);
   });
 });
 
@@ -183,53 +242,40 @@ describe("isDiffFileAligned", () => {
   });
 });
 
-describe("isDiffFileScrollSettled", () => {
-  it("is false while a preceding file is still a virtualized placeholder", () => {
+describe("isDiffScrollAtEnd", () => {
+  it("is false while the container can still scroll toward the target", () => {
     const root = geometryElement({
       clientHeight: 400,
       height: 400,
+      scrollHeight: 5000,
+      scrollTop: 0,
       top: 0,
     });
-    const previous = geometryElement({
-      offsetHeight: 4488,
-      offsetTop: 0,
-      height: 4488,
-      top: 0,
-    });
-    previous.innerHTML = '<div aria-busy="true"></div>';
-    const file = geometryElement({
-      offsetHeight: 120,
-      offsetTop: 4488,
-      height: 120,
-      top: 16,
-    });
-    root.append(previous, file);
 
-    expect(isDiffFileAligned(root, file)).toBe(true);
-    expect(isDiffFileScrollSettled(root, file)).toBe(false);
+    expect(isDiffScrollAtEnd(root)).toBe(false);
   });
 
-  it("is true once preceding files have rendered and the target is aligned", () => {
+  it("is true when the bottom clamp prevents further scrolling", () => {
     const root = geometryElement({
       clientHeight: 400,
       height: 400,
+      scrollHeight: 5000,
+      scrollTop: 4600,
       top: 0,
     });
-    const previous = geometryElement({
-      offsetHeight: 3525,
-      offsetTop: 0,
-      height: 3525,
-      top: -3510,
-    });
-    previous.innerHTML = '<div aria-busy="false"></div>';
-    const file = geometryElement({
-      offsetHeight: 120,
-      offsetTop: 3525,
-      height: 120,
-      top: 16,
-    });
-    root.append(previous, file);
 
-    expect(isDiffFileScrollSettled(root, file)).toBe(true);
+    expect(isDiffScrollAtEnd(root)).toBe(true);
+  });
+
+  it("is true when all content already fits the viewport", () => {
+    const root = geometryElement({
+      clientHeight: 400,
+      height: 400,
+      scrollHeight: 300,
+      scrollTop: 0,
+      top: 0,
+    });
+
+    expect(isDiffScrollAtEnd(root)).toBe(true);
   });
 });

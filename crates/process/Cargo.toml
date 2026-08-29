@@ -12,7 +12,10 @@ workspace = true
 
 [dependencies]
 libc = { workspace = true }
+ora-logging = { workspace = true }
+ora-utils = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt", "sync"] }
+tracing = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }

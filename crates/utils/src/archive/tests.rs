@@ -1,5 +1,7 @@
 use super::tree_writer::{ByteBudgetKind, TreeWriter};
-use super::{ArchiveError, ArchiveFormat, ExtractLimits, copy_tree, extract_archive};
+use super::{
+    ArchiveError, ArchiveFormat, ExtractLimits, FileExecutability, copy_tree, extract_archive,
+};
 use crate::path::{StrictRelativePath, StrictRelativePathError};
 use pretty_assertions::assert_eq;
 use std::fs;
@@ -34,11 +36,17 @@ fn build_zip(destination: &Path, entries: &[(&str, &[u8], Option<u32>)]) {
 }
 
 /// Builds a `.tar.gz` archive at `destination` from the provided entries.
-fn build_tar_gz(destination: &Path, entries: &[(&str, &[u8], Option<tar::EntryType>)]) {
+///
+/// The fourth element is the Unix mode of a regular file entry, defaulting to `0o644`; special
+/// entry types ignore it.
+fn build_tar_gz(
+    destination: &Path,
+    entries: &[(&str, &[u8], Option<tar::EntryType>, Option<u32>)],
+) {
     let file = fs::File::create(destination).unwrap();
     let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     let mut builder = tar::Builder::new(encoder);
-    for (name, content, entry_type) in entries.iter().copied() {
+    for (name, content, entry_type, mode) in entries.iter().copied() {
         match entry_type {
             Some(tar::EntryType::Symlink) => {
                 let target = content.iter().map(|&byte| byte as char).collect::<String>();
@@ -64,7 +72,7 @@ fn build_tar_gz(destination: &Path, entries: &[(&str, &[u8], Option<tar::EntryTy
                 } else {
                     let mut header = tar::Header::new_gnu();
                     header.set_size(content.len() as u64);
-                    header.set_mode(0o644);
+                    header.set_mode(mode.unwrap_or(0o644));
                     header.set_cksum();
                     builder.append_data(&mut header, name, content).unwrap();
                 }
@@ -130,8 +138,8 @@ fn extracts_tar_gz_archives() {
     build_tar_gz(
         &archive,
         &[
-            ("pkg/README.md", b"docs", None),
-            ("pkg/tool.sh", b"#!/bin/sh", None),
+            ("pkg/README.md", b"docs", None, None),
+            ("pkg/tool.sh", b"#!/bin/sh", None, None),
         ],
     );
 
@@ -147,6 +155,122 @@ fn extracts_tar_gz_archives() {
     let path = StrictRelativePath::parse("pkg/tool.sh").unwrap();
     assert_eq!(tree.read_file(&path).unwrap(), b"#!/bin/sh");
     assert!(tree.find_file(&path).is_some());
+}
+
+/// Collects the extracted listing as `(path, executability)` pairs for whole-object comparison.
+fn executability_listing(tree: &super::ExtractedTree) -> Vec<(String, FileExecutability)> {
+    tree.files()
+        .iter()
+        .map(|file| (file.relative_path.as_str().to_string(), file.executability))
+        .collect()
+}
+
+#[test]
+fn preserves_executability_of_zip_entries() {
+    let temp = TempDir::new().unwrap();
+    let archive = temp.path().join("bundle.zip");
+    build_zip(
+        &archive,
+        &[
+            ("pkg/bin/tool", b"#!/bin/sh", Some(0o100_755)),
+            ("pkg/README.md", b"docs", Some(0o100_644)),
+            // A ZIP produced on a system without Unix modes stores none at all.
+            ("pkg/notes.txt", b"notes", None),
+        ],
+    );
+
+    let tree = extract_archive(
+        ArchiveFormat::Zip,
+        &archive,
+        &temp.path().join("out"),
+        &ExtractLimits::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        executability_listing(&tree),
+        vec![
+            (
+                "pkg/README.md".to_string(),
+                FileExecutability::NotExecutable
+            ),
+            ("pkg/bin/tool".to_string(), FileExecutability::Executable),
+            (
+                "pkg/notes.txt".to_string(),
+                FileExecutability::NotExecutable
+            ),
+        ]
+    );
+}
+
+#[test]
+fn preserves_executability_of_tar_entries() {
+    let temp = TempDir::new().unwrap();
+    let archive = temp.path().join("bundle.tar.gz");
+    build_tar_gz(
+        &archive,
+        &[
+            ("pkg/bin/tool", b"#!/bin/sh", None, Some(0o755)),
+            ("pkg/README.md", b"docs", None, None),
+        ],
+    );
+
+    let tree = extract_archive(
+        ArchiveFormat::TarGz,
+        &archive,
+        &temp.path().join("out"),
+        &ExtractLimits::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        executability_listing(&tree),
+        vec![
+            (
+                "pkg/README.md".to_string(),
+                FileExecutability::NotExecutable
+            ),
+            ("pkg/bin/tool".to_string(), FileExecutability::Executable),
+        ]
+    );
+}
+
+/// An executable entry lands as `0o755` regardless of what the archive asked for, so an archive
+/// cannot use extraction to install a setuid, setgid, or sticky file.
+#[cfg(unix)]
+#[test]
+fn materializes_executable_entries_as_plain_0o755() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = TempDir::new().unwrap();
+    let archive = temp.path().join("bundle.tar.gz");
+    build_tar_gz(
+        &archive,
+        &[
+            ("pkg/bin/tool", b"#!/bin/sh", None, Some(0o4755)),
+            ("pkg/README.md", b"docs", None, None),
+        ],
+    );
+
+    let tree = extract_archive(
+        ArchiveFormat::TarGz,
+        &archive,
+        &temp.path().join("out"),
+        &ExtractLimits::default(),
+    )
+    .unwrap();
+
+    let mode_of = |relative: &str| {
+        fs::metadata(tree.root().join(relative))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777
+    };
+    assert_eq!(
+        (mode_of("pkg/bin/tool"), mode_of("pkg/README.md")),
+        (0o755, 0o644)
+    );
 }
 
 #[test]
@@ -226,19 +350,32 @@ fn rejects_case_conflicting_and_duplicate_paths() {
     let temp = TempDir::new().unwrap();
     let mut writer = flat_writer(&temp.path().join("out"));
     writer
-        .add_file("pkg/README.md", std::io::Cursor::new(b"docs".to_vec()))
+        .add_file(
+            "pkg/README.md",
+            FileExecutability::NotExecutable,
+            std::io::Cursor::new(b"docs".to_vec()),
+        )
         .unwrap();
     let case_conflict = writer.add_file(
         "pkg/readme.md",
+        FileExecutability::NotExecutable,
         std::io::Cursor::new(b"case clash".to_vec()),
     );
     assert_eq!(case_conflict.unwrap_err(), ArchiveError::PathCaseConflict);
 
     let mut duplicate = flat_writer(&temp.path().join("out2"));
     duplicate
-        .add_file("a/file.txt", std::io::Cursor::new(b"one".to_vec()))
+        .add_file(
+            "a/file.txt",
+            FileExecutability::NotExecutable,
+            std::io::Cursor::new(b"one".to_vec()),
+        )
         .unwrap();
-    let duplicate_error = duplicate.add_file("a/file.txt", std::io::Cursor::new(b"two".to_vec()));
+    let duplicate_error = duplicate.add_file(
+        "a/file.txt",
+        FileExecutability::NotExecutable,
+        std::io::Cursor::new(b"two".to_vec()),
+    );
     assert_eq!(duplicate_error.unwrap_err(), ArchiveError::PathCaseConflict);
 }
 
@@ -248,7 +385,7 @@ fn rejects_symlink_and_special_tar_entries() {
     let symlink = temp.path().join("symlink.tar.gz");
     build_tar_gz(
         &symlink,
-        &[("link", b"target", Some(tar::EntryType::Symlink))],
+        &[("link", b"target", Some(tar::EntryType::Symlink), None)],
     );
     let result = extract_archive(
         ArchiveFormat::TarGz,
@@ -259,7 +396,7 @@ fn rejects_symlink_and_special_tar_entries() {
     assert_eq!(result.unwrap_err(), ArchiveError::SpecialEntryUnsupported);
 
     let fifo = temp.path().join("fifo.tar.gz");
-    build_tar_gz(&fifo, &[("pipe", b"", Some(tar::EntryType::Fifo))]);
+    build_tar_gz(&fifo, &[("pipe", b"", Some(tar::EntryType::Fifo), None)]);
     let result = extract_archive(
         ArchiveFormat::TarGz,
         &fifo,
@@ -383,7 +520,11 @@ fn enforces_segment_length_limits_on_writer() {
     let temp = TempDir::new().unwrap();
     let mut writer = flat_writer(&temp.path().join("out"));
     let long_name = "x".repeat(256);
-    let result = writer.add_file(&long_name, std::io::Cursor::new(b"x".to_vec()));
+    let result = writer.add_file(
+        &long_name,
+        FileExecutability::NotExecutable,
+        std::io::Cursor::new(b"x".to_vec()),
+    );
     assert_eq!(
         result.unwrap_err(),
         ArchiveError::Path(StrictRelativePathError::SegmentTooLong)

@@ -7,6 +7,7 @@ use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot, watch};
 
+use crate::spec::ReaperRegistration;
 use crate::tree::ProcessTree;
 use crate::{ManagedProcess, ProcessSpawner, ProcessSpec};
 
@@ -29,8 +30,10 @@ impl ProcessSpawner for TokioProcessSpawner {
                 "TokioProcessSpawner requires an active Tokio runtime: {error}"
             ))
         })?;
+        let reaper_registration = spec.reaper_registration();
         let mut command = Command::new(spec.program());
         command.args(spec.args_iter());
+        ora_utils::process::hide_console_window(command.as_std_mut());
 
         if let Some(cwd) = spec.cwd_path() {
             command.current_dir(cwd);
@@ -46,9 +49,39 @@ impl ProcessSpawner for TokioProcessSpawner {
         ProcessTree::configure_command(&mut command);
 
         let mut child = command.spawn()?;
+        let Some(process_id) = child.id() else {
+            let _ = child.start_kill();
+            handle.spawn(async move {
+                let _ = child.wait().await;
+            });
+            return Err(io::Error::other("spawned child has no platform pid"));
+        };
+        #[cfg(windows)]
+        if reaper_registration == ReaperRegistration::Register
+            && let Err(error) = crate::reaper::register_process(process_id)
+        {
+            // Register before assigning the per-process Job so the reaper's shared Job becomes
+            // the common outer Job. Reversing that order makes the shared Job a child of the
+            // first process's private Job, so Windows rejects a second private Job hierarchy.
+            match ProcessTree::from_spawned(&child) {
+                Ok(tree) => {
+                    let _ = tree.kill();
+                }
+                Err(_) => {
+                    let _ = child.start_kill();
+                }
+            }
+            handle.spawn(async move {
+                let _ = child.wait().await;
+            });
+            return Err(io::Error::new(
+                error.kind(),
+                format!("failed to register spawned process {process_id} with reaper: {error}"),
+            ));
+        }
         // Build the tree handle after spawn so the child can be enrolled in its tree-wide
-        // termination group on Windows. Doing it here (rather than lazily inside the lifecycle
-        // task) propagates any Job Object setup failure as a spawn error.
+        // termination group. On Windows the shared reaper Job must already be the outer Job
+        // before this per-process Job is assigned.
         let tree = match ProcessTree::from_spawned(&child) {
             Ok(tree) => tree,
             Err(error) => {
@@ -60,12 +93,32 @@ impl ProcessSpawner for TokioProcessSpawner {
                 // runtime so it doesn't linger as a zombie either.
                 let _ = child.start_kill();
                 handle.spawn(async move {
+                    #[cfg(windows)]
+                    {
+                        let status = child.wait().await;
+                        unregister_exited_process(process_id, &status, reaper_registration);
+                    }
+                    #[cfg(not(windows))]
                     let _ = child.wait().await;
                 });
                 return Err(error);
             }
         };
-        let id = child.id();
+        #[cfg(not(windows))]
+        if reaper_registration == ReaperRegistration::Register
+            && let Err(error) = crate::reaper::register_process(process_id)
+        {
+            // Do not return a live unmanaged process when synchronous enrollment fails. The
+            // reaper's acknowledgement is the point at which the caller may safely own it.
+            let _ = tree.kill();
+            handle.spawn(async move {
+                let _ = child.wait().await;
+            });
+            return Err(io::Error::new(
+                error.kind(),
+                format!("failed to register spawned process {process_id} with reaper: {error}"),
+            ));
+        }
         let stdin = child.stdin.take();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -78,11 +131,17 @@ impl ProcessSpawner for TokioProcessSpawner {
             (None, None)
         };
         handle.spawn(run_process_lifecycle(
-            child, tree, kill_rx, drop_rx, exit_tx,
+            child,
+            tree,
+            process_id,
+            reaper_registration,
+            kill_rx,
+            drop_rx,
+            exit_tx,
         ));
 
         Ok(TokioManagedProcess {
-            id,
+            id: Some(process_id),
             stdin: Mutex::new(stdin),
             stdout,
             stderr,
@@ -249,6 +308,8 @@ impl WaitFailure {
 async fn run_process_lifecycle(
     mut child: Child,
     tree: ProcessTree,
+    process_id: u32,
+    reaper_registration: ReaperRegistration,
     mut kill_rx: mpsc::UnboundedReceiver<KillRequest>,
     mut drop_rx: Option<oneshot::Receiver<()>>,
     exit_tx: watch::Sender<Option<ExitState>>,
@@ -260,6 +321,7 @@ async fn run_process_lifecycle(
             Some(drop_signal) => {
                 tokio::select! {
                     status = child.wait() => {
+                        unregister_exited_process(process_id, &status, reaper_registration);
                         publish_exit(status, &exit_tx);
                         return;
                     }
@@ -277,6 +339,7 @@ async fn run_process_lifecycle(
             None => {
                 tokio::select! {
                     status = child.wait() => {
+                        unregister_exited_process(process_id, &status, reaper_registration);
                         publish_exit(status, &exit_tx);
                         return;
                     }
@@ -286,6 +349,19 @@ async fn run_process_lifecycle(
                 }
             }
         }
+    }
+}
+
+/// Notifies the reaper only after a successful OS wait proved the direct child has exited.
+fn unregister_exited_process(
+    process_id: u32,
+    status: &io::Result<ExitStatus>,
+    reaper_registration: ReaperRegistration,
+) {
+    if reaper_registration == ReaperRegistration::Register && status.is_ok() {
+        // Failure is deliberately best-effort: exit observation must remain available even if
+        // the safety sidecar failed. The reaper retains the registration in that case.
+        let _ = crate::reaper::unregister_process(process_id);
     }
 }
 

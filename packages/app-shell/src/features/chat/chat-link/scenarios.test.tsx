@@ -20,6 +20,7 @@ import {
 } from "../../../test/mock-client";
 import { createStubPlatform } from "../../../test/stub-platform";
 import { TaskChangesNavigationProvider } from "../../diff/task-changes-navigation";
+import type { FileNavigationLocation } from "../../diff/task-changes-navigation-context";
 import { WorkspaceFilesView } from "../../files/workspace-files-view";
 import { MessageList } from "../message-list";
 import type { SessionArtifactIndex } from "./artifact-index";
@@ -55,8 +56,11 @@ async function renderFileLink(
     index?: SessionArtifactIndex;
     cwd?: string;
     platform?: PlatformAdapter;
-    openDiff?: (path: string, line?: number) => void;
-    openWorkspaceFile?: (path: string, line?: number, column?: number) => void;
+    openDiff?: (path: string, location?: FileNavigationLocation) => void;
+    openWorkspaceFile?: (
+      path: string,
+      location?: FileNavigationLocation,
+    ) => void;
   },
 ) {
   const openDiff = options?.openDiff ?? vi.fn();
@@ -153,8 +157,11 @@ function turn(
 async function renderMessageList(
   turns: ChatTurn[],
   options: {
-    openDiff?: (path: string, line?: number) => void;
-    openWorkspaceFile?: (path: string, line?: number, column?: number) => void;
+    openDiff?: (path: string, location?: FileNavigationLocation) => void;
+    openWorkspaceFile?: (
+      path: string,
+      location?: FileNavigationLocation,
+    ) => void;
     workspaceRoot?: string;
     taskId?: string;
     projectId?: string;
@@ -260,7 +267,6 @@ describe("chat link usage scenarios", () => {
       expect(referenced.openWorkspaceFile).toHaveBeenCalledWith(
         "src/lib.rs",
         undefined,
-        undefined,
       );
       expect(referenced.openDiff).not.toHaveBeenCalled();
     });
@@ -283,11 +289,7 @@ describe("chat link usage scenarios", () => {
       expect(buttons).toHaveLength(2);
 
       await user.click(buttons[0]!);
-      expect(openWorkspaceFile).toHaveBeenCalledWith(
-        "src/main.rs",
-        undefined,
-        undefined,
-      );
+      expect(openWorkspaceFile).toHaveBeenCalledWith("src/main.rs", undefined);
       expect(openDiff).not.toHaveBeenCalled();
 
       await user.click(buttons[1]!);
@@ -312,11 +314,7 @@ describe("chat link usage scenarios", () => {
           name: /打开文件 src\/lib\.rs|Open file src\/lib\.rs/,
         }),
       );
-      expect(openWorkspaceFile).toHaveBeenCalledWith(
-        "src/lib.rs",
-        undefined,
-        undefined,
-      );
+      expect(openWorkspaceFile).toHaveBeenCalledWith("src/lib.rs", undefined);
       expect(openDiff).not.toHaveBeenCalled();
     });
   });
@@ -336,11 +334,7 @@ describe("chat link usage scenarios", () => {
       const { openDiff, openWorkspaceFile } =
         await renderFileLink("src/lib.rs");
       await user.click(screen.getByRole("button", { name: /src\/lib\.rs/ }));
-      expect(openWorkspaceFile).toHaveBeenCalledWith(
-        "src/lib.rs",
-        undefined,
-        undefined,
-      );
+      expect(openWorkspaceFile).toHaveBeenCalledWith("src/lib.rs", undefined);
       expect(openDiff).not.toHaveBeenCalled();
     });
 

@@ -147,7 +147,7 @@ describe("useComposerInputStore", () => {
     expect(useComposerInputStore.getState().byKey.s1?.images).toHaveLength(1);
   });
 
-  it("parks TipTap doc in memory but strips it from localStorage", () => {
+  it("persists the TipTap doc to localStorage so chips return after restart", () => {
     const doc = {
       type: "doc",
       content: [
@@ -183,6 +183,7 @@ describe("useComposerInputStore", () => {
     expect(parsed.state.byKey.s1).toEqual({
       text: "`src/a.ts`",
       images: [],
+      doc,
     });
   });
 
@@ -243,6 +244,7 @@ describe("useComposerInputStore", () => {
             valid: { text: "keep", images: "corrupt" },
             number: 42,
             missingText: { images: [] },
+            badDoc: { text: "keep", images: [], doc: { type: "paragraph" } },
           },
         },
         version: 0,
@@ -254,6 +256,7 @@ describe("useComposerInputStore", () => {
     ).resolves.toBeUndefined();
     expect(useComposerInputStore.getState().byKey).toEqual({
       valid: { text: "keep", images: [] },
+      badDoc: { text: "keep", images: [] },
     });
   });
 

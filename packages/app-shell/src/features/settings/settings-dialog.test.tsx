@@ -145,7 +145,6 @@ describe("SettingsDialog developer options", () => {
       license: null,
       kind: "agent",
       agentDisplayName: "weather",
-      enabled: false,
       logo: null,
       installationValidity: { validity: "valid" },
       configuration: { state: "available", completeness: "incomplete" },
@@ -180,7 +179,12 @@ describe("SettingsDialog developer options", () => {
 
     await user.click(screen.getByRole("button", { name: "Plugins" }));
     await user.click(
-      await screen.findByRole("button", { name: "Manage plugins" }),
+      await screen.findByRole("button", {
+        name: /Plugin management actions/,
+      }),
+    );
+    await user.click(
+      await screen.findByRole("menuitem", { name: /Manage plugins/ }),
     );
     await user.click(await screen.findByRole("button", { name: "Configure" }));
     await user.type(await screen.findByLabelText("Endpoint"), "https://api");

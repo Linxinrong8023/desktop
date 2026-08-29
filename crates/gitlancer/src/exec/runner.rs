@@ -77,6 +77,7 @@ fn run_cli(
     let mut process = Command::new("git");
     process.current_dir(&command.cwd);
     process.args(&command.args);
+    ora_utils::process::hide_console_window(&mut process);
 
     // The execution contract disables prompts and paging so agent-driven flows stay deterministic.
     process.env(

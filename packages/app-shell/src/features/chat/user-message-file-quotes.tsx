@@ -1,4 +1,5 @@
 import {
+  composerFileAttrsFromPlainText,
   composerFileAttrsFromUnknown,
   parseComposerFileQuote,
   type ComposerFileAttrs,
@@ -60,6 +61,30 @@ export const fileQuoteMarkdownComponents = {
     <FileRefChip attrs={composerFileAttrsFromUnknown(props)} />
   ),
 } as unknown as Components;
+
+/**
+ * Turns path-like inline code (`path`, `path:range`) back into file chips on
+ * surfaces that only hold the sent prompt text. File quotes now leave the
+ * composer as a plain backtick reference (they point at the file, never at its
+ * body), so history reads that payload back to keep the chip it showed. Any
+ * other inline code stays inline code.
+ */
+export function remarkComposerFileReference() {
+  return (tree: MdastNode): void => {
+    tree.children = (tree.children ?? []).map(convertInlineCode);
+  };
+}
+
+function convertInlineCode(node: MdastNode): MdastNode {
+  if (node.type === "inlineCode") {
+    const attrs = composerFileAttrsFromPlainText(node.value ?? "");
+    return attrs === null ? node : chipNode(attrs);
+  }
+  if (node.children !== undefined) {
+    node.children = node.children.map(convertInlineCode);
+  }
+  return node;
+}
 
 /** Chip attrs for a fenced quote block, or null for any other node. */
 function fileQuoteAttrs(node: MdastNode): ComposerFileAttrs | null {

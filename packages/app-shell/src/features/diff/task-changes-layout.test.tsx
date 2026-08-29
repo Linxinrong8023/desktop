@@ -5,7 +5,10 @@ import { useState, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppI18nProvider } from "../../i18n/i18n";
 import { createStubPlatform } from "../../test/stub-platform";
-import { useTaskChangesNavigation } from "./task-changes-navigation-context";
+import {
+  useTaskChangesNavigation,
+  type FileNavigationLocation,
+} from "./task-changes-navigation-context";
 import { WorkspaceReviewLayout } from "../workspace/workspace-review-layout";
 import { responsiveReviewWidth } from "../workspace/workspace-review-layout-utils";
 import { flushDebouncedPersistStorage } from "../../state/stores/debounced-json-storage";
@@ -22,8 +25,12 @@ vi.mock("./task-diff-view", () => ({
     onPreviewPathChange,
   }: {
     toolbar?: ReactNode;
-    fileRequest?: { path: string; requestId: number; line?: number };
-    onFileNotFound?: (path: string, line?: number) => void;
+    fileRequest?: {
+      path: string;
+      requestId: number;
+      line?: number;
+    };
+    onFileNotFound?: (path: string, location?: FileNavigationLocation) => void;
     onPreviewPathChange?: (path: string) => void;
   }) => (
     <section aria-label="Task diff">
@@ -36,7 +43,7 @@ vi.mock("./task-diff-view", () => ({
       <button
         type="button"
         data-testid="simulate-not-found"
-        onClick={() => onFileNotFound?.("src/missing.ts", 10)}
+        onClick={() => onFileNotFound?.("src/missing.ts", { line: 10 })}
       >
         Simulate Not Found
       </button>
@@ -57,12 +64,14 @@ vi.mock("../files/workspace-review-files-panel", () => ({
     taskId,
     projectId,
     fileRequest,
+    directoryRequest,
     onPreviewPathChange,
   }: {
     toolbar?: ReactNode;
     taskId?: string;
     projectId: string;
     fileRequest?: { path: string; requestId: number; line?: number };
+    directoryRequest?: { path: string; requestId: number };
     onPreviewPathChange?: (path: string) => void;
   }) => (
     <section aria-label="Files panel" data-testid="files-panel">
@@ -73,6 +82,9 @@ vi.mock("../files/workspace-review-files-panel", () => ({
           : `${fileRequest.path}:${fileRequest.line ?? ""}`}
       </span>
       <span data-testid="files-request-id">{fileRequest?.requestId ?? ""}</span>
+      <span data-testid="directory-request">
+        {directoryRequest?.path ?? ""}
+      </span>
       <button
         type="button"
         data-testid="simulate-files-preview"
@@ -101,9 +113,24 @@ function OpenWorkspaceFileButton() {
   return (
     <button
       type="button"
-      onClick={() => navigation?.openWorkspaceFile("src/lib.ts", 8, 1)}
+      onClick={() =>
+        navigation?.openWorkspaceFile("src/lib.ts", { line: 8, column: 1 })
+      }
     >
       Open workspace file
+    </button>
+  );
+}
+
+/** Requests a workspace folder the way a directory chip navigation does. */
+function OpenWorkspaceFolderButton() {
+  const navigation = useTaskChangesNavigation();
+  return (
+    <button
+      type="button"
+      onClick={() => navigation?.openWorkspaceDirectory?.("src/features")}
+    >
+      Open workspace folder
     </button>
   );
 }
@@ -129,6 +156,7 @@ const taskContext = {
   kind: "task" as const,
   taskId: "task-1",
   projectId: "project-1",
+  workspaceId: "workspace-1",
 };
 
 beforeEach(() => {
@@ -178,7 +206,12 @@ function RerenderHarness() {
         rerender {tick}
       </button>
       <WorkspaceReviewLayout
-        context={{ kind: "task", taskId: "task-1", projectId: "project-1" }}
+        context={{
+          kind: "task",
+          taskId: "task-1",
+          projectId: "project-1",
+          workspaceId: "workspace-1",
+        }}
       >
         <main>Workspace</main>
       </WorkspaceReviewLayout>
@@ -298,6 +331,30 @@ describe("WorkspaceReviewLayout", () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId("files-request")).toHaveTextContent(
       "src/lib.ts:8",
+    );
+  });
+
+  it("opens the Files panel and forwards a workspace folder request", async () => {
+    const user = userEvent.setup();
+    render(
+      <PlatformProvider adapter={createStubPlatform()}>
+        <AppI18nProvider>
+          <WorkspaceReviewLayout context={taskContext}>
+            <OpenWorkspaceFolderButton />
+          </WorkspaceReviewLayout>
+        </AppI18nProvider>
+      </PlatformProvider>,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Open workspace folder" }),
+    );
+
+    expect(
+      screen.getByRole("region", { name: "Files panel" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("directory-request")).toHaveTextContent(
+      "src/features",
     );
   });
 

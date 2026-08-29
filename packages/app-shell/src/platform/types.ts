@@ -67,6 +67,38 @@ export interface LocationActionsCapability {
   open(target: LocationTarget, path: string): Promise<void>;
 }
 
+/**
+ * Explains why a release cannot be installed by the updater itself. Mirrors the Rust
+ * `ManualUpdateReason` in `apps/desktop/src-tauri/src/update/mod.rs`.
+ */
+export type ManualUpdateReason = "system_package" | "unpackaged_binary";
+
+/** Describes the native Desktop updater state shown by the shell's version control. */
+export type DesktopUpdateStatus =
+  | { kind: "current" }
+  | { kind: "checking" }
+  | {
+      kind: "downloading";
+      version: string;
+      downloaded: number;
+      total: number | null;
+    }
+  | { kind: "ready"; version: string }
+  | { kind: "manual_update"; version: string; reason: ManualUpdateReason }
+  | { kind: "installing"; version: string }
+  | { kind: "failed"; message: string };
+
+/** Exposes update status and installation without coupling shared UI to Tauri IPC. */
+export interface DesktopUpdateCapability {
+  getStatus(): Promise<DesktopUpdateStatus>;
+  install(): Promise<void>;
+  /** Runs an update check on demand, outside the scheduled delayed and cron checks. */
+  check(): Promise<void>;
+  onStatus(
+    listener: (status: DesktopUpdateStatus) => void,
+  ): Promise<() => void>;
+}
+
 /** Where a plugin surface renders: docked into the right panel or in its own native window. */
 export type SurfaceTarget = "embedded" | "windowed";
 
@@ -190,6 +222,7 @@ export interface PlatformAdapter {
   readonly windowControls: WindowControlsCapability;
   readonly locationActions: LocationActionsCapability;
   readonly surfaces: SurfaceCapability;
+  readonly updates?: DesktopUpdateCapability;
   selectPath(options: SelectPathOptions): Promise<string | null>;
   /** Opens the native save dialog and returns the chosen path, or null when dismissed. */
   selectSavePath(options: SelectSavePathOptions): Promise<string | null>;

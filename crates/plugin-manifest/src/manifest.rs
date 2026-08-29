@@ -1,8 +1,9 @@
 use crate::webview::RawWebview;
 use crate::workbench::RawWorkbench;
 use crate::{
-    HomepageUrl, InvalidFieldReason, ManifestError, ManifestField, PluginKind, PluginName,
-    PluginNamespace, PluginWebview, PluginWorkbench, ReleaseUrl, RepositoryUrl, Sha256Digest,
+    HomepageUrl, HookTarget, InvalidFieldReason, ManifestError, ManifestField, PluginKind,
+    PluginName, PluginNamespace, PluginWebview, PluginWorkbench, ReleaseUrl, RepositoryUrl,
+    Sha256Digest,
 };
 use ora_utils::GitBranchName;
 use semver::{Version, VersionReq};
@@ -10,6 +11,14 @@ use serde::Deserialize;
 use std::str::FromStr;
 
 const SUPPORTED_RESOLVER: u64 = 1;
+
+/// Distinguishes the marketplace listing form from the in-package installed form so each can
+/// refuse the other form's download/artifact sections.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ManifestForm {
+    Release,
+    Installed,
+}
 
 /// Holds one fully validated plugin release manifest.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -29,6 +38,8 @@ pub struct PluginManifest {
     pub(crate) dependencies: Option<PluginDependencies>,
     pub(crate) workbench: Option<PluginWorkbench>,
     pub(crate) webview: Option<PluginWebview>,
+    pub(crate) release_source: Option<PluginReleaseSource>,
+    pub(crate) artifact: Option<PluginArtifact>,
 }
 
 impl PluginManifest {
@@ -39,7 +50,7 @@ impl PluginManifest {
     pub fn parse(source: &str) -> Result<Self, ManifestError> {
         let raw: RawPluginManifest = deserialize(source)?;
         let (metadata, resolver, url, sha256) = raw.into_parts();
-        Self::from_raw_parts(metadata, resolver, url, sha256)
+        Self::from_raw_parts(metadata, resolver, url, sha256, ManifestForm::Release)
     }
 
     /// Parses and validates an installed plugin's manifest (the `orax.toml` shipped inside a
@@ -49,7 +60,7 @@ impl PluginManifest {
         let raw: RawInstalledManifest = deserialize(source)?;
         let (metadata, resolver, url, sha256) = raw.into_parts();
         let resolver = resolver.unwrap_or(SUPPORTED_RESOLVER);
-        Self::from_raw_parts(metadata, resolver, url, sha256)
+        Self::from_raw_parts(metadata, resolver, url, sha256, ManifestForm::Installed)
     }
 
     /// Applies every semantic validation rule to the values shared by both manifest forms,
@@ -62,6 +73,7 @@ impl PluginManifest {
         resolver: u64,
         url: Option<String>,
         sha256: Option<String>,
+        form: ManifestForm,
     ) -> Result<Self, ManifestError> {
         if resolver != SUPPORTED_RESOLVER {
             return Err(ManifestError::UnsupportedResolver { found: resolver });
@@ -126,6 +138,42 @@ impl PluginManifest {
                     })
             })
             .transpose()?;
+        let release_source = validate_release_source(
+            url.as_ref(),
+            sha256.as_ref(),
+            metadata.targets.as_deref(),
+            kind,
+            form,
+        )?;
+        if metadata.artifact.is_some() && matches!(form, ManifestForm::Release) {
+            return Err(invalid_field(
+                ManifestField::Artifact,
+                InvalidFieldReason::ArtifactNotAllowedOnRelease,
+            ));
+        }
+        if metadata.artifact.is_some() && !kind.may_ship_targeted_artifact() {
+            return Err(invalid_field(
+                ManifestField::Artifact,
+                InvalidFieldReason::NotAllowedForKind { kind },
+            ));
+        }
+        // A targeted Hook package self-declares its host triple in `[artifact]`; an installed
+        // Hook without that section cannot prove host compatibility independently of marketplace
+        // metadata. An Agent is not held to this: bundling a CLI is optional, and one that resolves
+        // its agent from PATH is a legitimate universal package with nothing to declare.
+        if matches!(form, ManifestForm::Installed)
+            && matches!(kind, PluginKind::Hook)
+            && metadata.artifact.is_none()
+        {
+            return Err(invalid_field(
+                ManifestField::Artifact,
+                InvalidFieldReason::MissingForKind { kind },
+            ));
+        }
+        let artifact = metadata
+            .artifact
+            .map(PluginArtifact::try_from)
+            .transpose()?;
         let (workbench, webview) =
             validate_kind_sections(kind, metadata.workbench, metadata.webview)?;
 
@@ -145,6 +193,8 @@ impl PluginManifest {
             dependencies,
             workbench,
             webview,
+            release_source,
+            artifact,
         })
     }
 
@@ -233,6 +283,20 @@ impl PluginManifest {
     pub fn webview(&self) -> Option<&PluginWebview> {
         self.webview.as_ref()
     }
+
+    /// Returns the release source selection: one universal URL/digest pair, or one or more
+    /// unique exact-target artifacts. `None` means a manifest that declares neither form.
+    pub fn release_source(&self) -> Option<&PluginReleaseSource> {
+        self.release_source.as_ref()
+    }
+
+    /// Returns the installed artifact self-declaration carried inside a targeted package.
+    ///
+    /// A universal release carries no artifact target; a targeted archive declares exactly one so
+    /// local import and online install apply the same host-compatibility boundary.
+    pub fn artifact(&self) -> Option<&PluginArtifact> {
+        self.artifact.as_ref()
+    }
 }
 
 /// Deserializes one manifest form, keeping the TOML path of a structural failure.
@@ -274,13 +338,27 @@ fn validate_kind_sections(
     let workbench = match (kind, workbench) {
         (PluginKind::Workbench, Some(workbench)) => Some(PluginWorkbench::try_from(workbench)?),
         (PluginKind::Workbench, None) => None,
-        (PluginKind::Agent | PluginKind::Webview | PluginKind::Skill, Some(_)) => {
+        (
+            PluginKind::Agent
+            | PluginKind::Webview
+            | PluginKind::Skill
+            | PluginKind::Mcp
+            | PluginKind::Hook,
+            Some(_),
+        ) => {
             return Err(invalid_field(
                 ManifestField::Workbench,
                 InvalidFieldReason::NotAllowedForKind { kind },
             ));
         }
-        (PluginKind::Agent | PluginKind::Webview | PluginKind::Skill, None) => None,
+        (
+            PluginKind::Agent
+            | PluginKind::Webview
+            | PluginKind::Skill
+            | PluginKind::Mcp
+            | PluginKind::Hook,
+            None,
+        ) => None,
     };
     let webview = match (kind, webview) {
         (PluginKind::Webview, Some(webview)) => Some(PluginWebview::try_from(webview)?),
@@ -290,16 +368,203 @@ fn validate_kind_sections(
                 InvalidFieldReason::MissingForKind { kind },
             ));
         }
-        (PluginKind::Agent | PluginKind::Workbench | PluginKind::Skill, Some(_)) => {
+        (
+            PluginKind::Agent
+            | PluginKind::Workbench
+            | PluginKind::Skill
+            | PluginKind::Mcp
+            | PluginKind::Hook,
+            Some(_),
+        ) => {
             return Err(invalid_field(
                 ManifestField::Webview,
                 InvalidFieldReason::NotAllowedForKind { kind },
             ));
         }
-        (PluginKind::Agent | PluginKind::Workbench | PluginKind::Skill, None) => None,
+        (
+            PluginKind::Agent
+            | PluginKind::Workbench
+            | PluginKind::Skill
+            | PluginKind::Mcp
+            | PluginKind::Hook,
+            None,
+        ) => None,
     };
 
     Ok((workbench, webview))
+}
+
+/// Models the mutually exclusive resolver-one release source.
+///
+/// A release is either one universal URL/digest pair installable on every host target, or one or
+/// more unique exact-target artifacts. Modeling the two as one enum keeps URL-selection
+/// precedence unambiguous: a manifest can never carry both forms.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PluginReleaseSource {
+    /// One URL/digest pair installable on every host target the plugin's Ora version supports.
+    Universal {
+        url: ReleaseUrl,
+        sha256: Sha256Digest,
+    },
+    /// One or more exact-target artifacts, each carrying its own URL and digest.
+    Targets(Vec<PluginReleaseTarget>),
+}
+
+/// Holds one validated target-specific release artifact.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginReleaseTarget {
+    pub(crate) target: HookTarget,
+    pub(crate) url: ReleaseUrl,
+    pub(crate) sha256: Sha256Digest,
+}
+
+impl PluginReleaseTarget {
+    /// Returns the target triple this artifact is built for.
+    pub fn target(&self) -> &HookTarget {
+        &self.target
+    }
+
+    /// Returns the download URL of this target artifact.
+    pub fn url(&self) -> &ReleaseUrl {
+        &self.url
+    }
+
+    /// Returns the SHA-256 digest of this target artifact.
+    pub fn sha256(&self) -> &Sha256Digest {
+        &self.sha256
+    }
+}
+
+/// Holds the installed artifact self-declaration carried inside a targeted package.
+///
+/// The installed form carries no download URL, digest, or target list; instead it repeats one
+/// target triple so the host can verify the physical artifact matches the host it runs on.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginArtifact {
+    pub(crate) target: HookTarget,
+}
+
+impl PluginArtifact {
+    /// Returns the target triple the installed physical artifact self-declares.
+    pub fn target(&self) -> &HookTarget {
+        &self.target
+    }
+}
+
+impl TryFrom<RawArtifact> for PluginArtifact {
+    type Error = ManifestError;
+
+    /// Converts the raw artifact section after validating its single target field.
+    fn try_from(raw: RawArtifact) -> Result<Self, Self::Error> {
+        let target = HookTarget::parse(&raw.target)
+            .map_err(|reason| invalid_field(ManifestField::ArtifactTarget, reason.into()))?;
+        Ok(Self { target })
+    }
+}
+
+/// Compiles the mutually exclusive release source from the optional universal and targeted
+/// declarations, enforcing that a manifest declares exactly one form.
+///
+/// The `url`/`sha256` top-level fields describe a universal artifact; the `[[targets]]` array
+/// describes one or more exact-target artifacts. The two forms are mutually exclusive so a
+/// release can never carry ambiguous download precedence. The universal form is available to
+/// every kind that may declare a release; the targeted form is limited to the kinds that ship
+/// target-specific native binaries (see [`PluginKind::may_ship_targeted_artifact`]), whose
+/// host-compatibility the host must check before download.
+fn validate_release_source(
+    url: Option<&ReleaseUrl>,
+    sha256: Option<&Sha256Digest>,
+    targets: Option<&[RawReleaseTarget]>,
+    kind: PluginKind,
+    form: ManifestForm,
+) -> Result<Option<PluginReleaseSource>, ManifestError> {
+    let has_universal = url.is_some() || sha256.is_some();
+    let has_targets = targets.is_some_and(|entries| !entries.is_empty());
+
+    // Installed packages may carry a self-declared `sha256` for the archive they came from, but
+    // they never advertise a downloadable release: `[[targets]]` would smuggle download URLs into
+    // the installed form, and `url`/`sha256` are not a marketplace source.
+    if matches!(form, ManifestForm::Installed) {
+        if has_targets {
+            return Err(invalid_field(
+                ManifestField::Targets,
+                InvalidFieldReason::TargetsNotAllowedOnInstalled,
+            ));
+        }
+        return Ok(None);
+    }
+
+    // Neither form means the manifest declares no downloadable release at all; marketplace listings
+    // without a release are still indexed, they simply cannot be installed online.
+    if !has_universal && !has_targets {
+        return Ok(None);
+    }
+    if has_universal && has_targets {
+        return Err(invalid_field(
+            ManifestField::Targets,
+            InvalidFieldReason::DuplicateReleaseSource,
+        ));
+    }
+    if has_universal {
+        // A universal artifact must carry both halves: a URL without a digest cannot be verified
+        // and a digest without a URL cannot be downloaded.
+        let Some(url) = url else {
+            return Err(invalid_field(
+                ManifestField::Url,
+                InvalidFieldReason::MissingUniversalReleaseField,
+            ));
+        };
+        let Some(sha256) = sha256 else {
+            return Err(invalid_field(
+                ManifestField::Sha256,
+                InvalidFieldReason::MissingUniversalReleaseField,
+            ));
+        };
+        return Ok(Some(PluginReleaseSource::Universal {
+            url: url.clone(),
+            sha256: *sha256,
+        }));
+    }
+
+    // The targeted form belongs to the kinds that ship native per-target binaries, whose host
+    // compatibility the marketplace must advertise before download.
+    if !kind.may_ship_targeted_artifact() {
+        return Err(invalid_field(
+            ManifestField::Targets,
+            InvalidFieldReason::NotAllowedForKind { kind },
+        ));
+    }
+    let Some(raw_targets) = targets else {
+        // `has_targets` already guaranteed the array is present and non-empty; reaching here with
+        // `None` is unreachable, but the guard keeps the function total without `expect`.
+        return Ok(None);
+    };
+    let mut compiled: Vec<PluginReleaseTarget> = Vec::with_capacity(raw_targets.len());
+    let mut seen: Vec<HookTarget> = Vec::with_capacity(raw_targets.len());
+    for (index, raw) in raw_targets.iter().enumerate() {
+        let target = HookTarget::parse(&raw.target).map_err(|reason| {
+            invalid_field(ManifestField::ReleaseTargetTarget { index }, reason.into())
+        })?;
+        if seen.iter().any(|seen| seen == &target) {
+            return Err(invalid_field(
+                ManifestField::ReleaseTargetTarget { index },
+                InvalidFieldReason::Duplicate,
+            ));
+        }
+        let url = ReleaseUrl::parse(&raw.url).map_err(|reason| {
+            invalid_field(ManifestField::ReleaseTargetUrl { index }, reason.into())
+        })?;
+        let sha256 = Sha256Digest::parse(&raw.sha256).map_err(|reason| {
+            invalid_field(ManifestField::ReleaseTargetSha256 { index }, reason.into())
+        })?;
+        seen.push(target.clone());
+        compiled.push(PluginReleaseTarget {
+            target,
+            url,
+            sha256,
+        });
+    }
+    Ok(Some(PluginReleaseSource::Targets(compiled)))
 }
 
 /// Holds validated source repository metadata for one plugin release.
@@ -366,6 +631,10 @@ struct RawPluginManifest {
     dependencies: Option<RawDependencies>,
     workbench: Option<RawWorkbench>,
     webview: Option<RawWebview>,
+    #[serde(default)]
+    targets: Option<Vec<RawReleaseTarget>>,
+    #[serde(default)]
+    artifact: Option<RawArtifact>,
 }
 
 #[derive(Deserialize)]
@@ -389,6 +658,10 @@ struct RawInstalledManifest {
     dependencies: Option<RawDependencies>,
     workbench: Option<RawWorkbench>,
     webview: Option<RawWebview>,
+    #[serde(default)]
+    targets: Option<Vec<RawReleaseTarget>>,
+    #[serde(default)]
+    artifact: Option<RawArtifact>,
 }
 
 #[derive(Deserialize)]
@@ -406,6 +679,24 @@ struct RawDependencies {
     ora: Option<String>,
 }
 
+/// Raw form of one `[[targets]]` release entry.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RawReleaseTarget {
+    target: String,
+    url: String,
+    sha256: String,
+}
+
+/// Raw form of the installed `[artifact]` self-declaration.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RawArtifact {
+    target: String,
+}
+
 /// Holds the descriptive metadata shared by both manifest forms.
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RawMetadata {
@@ -421,6 +712,8 @@ struct RawMetadata {
     dependencies: Option<RawDependencies>,
     workbench: Option<RawWorkbench>,
     webview: Option<RawWebview>,
+    targets: Option<Vec<RawReleaseTarget>>,
+    artifact: Option<RawArtifact>,
 }
 
 impl RawPluginManifest {
@@ -442,6 +735,8 @@ impl RawPluginManifest {
             dependencies: self.dependencies,
             workbench: self.workbench,
             webview: self.webview,
+            targets: self.targets,
+            artifact: self.artifact,
         };
         (metadata, self.resolver, self.url, self.sha256)
     }
@@ -465,6 +760,8 @@ impl RawInstalledManifest {
             dependencies: self.dependencies,
             workbench: self.workbench,
             webview: self.webview,
+            targets: self.targets,
+            artifact: self.artifact,
         };
         (metadata, self.resolver, self.url, self.sha256)
     }

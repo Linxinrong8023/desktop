@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AppI18nProvider } from "../../../i18n/i18n";
 import { createStubPlatform } from "../../../test/stub-platform";
 import { TaskChangesNavigationProvider } from "../../diff/task-changes-navigation";
+import type { FileNavigationLocation } from "../../diff/task-changes-navigation-context";
 import type { SessionArtifactIndex } from "./artifact-index";
 import { ChatFileLink } from "./chat-file-link";
 import { ChatLinkContext } from "./context";
@@ -42,8 +43,11 @@ async function renderFileLink(
   raw: string,
   options?: {
     platform?: PlatformAdapter;
-    openDiff?: (path: string, line?: number) => void;
-    openWorkspaceFile?: (path: string, line?: number, column?: number) => void;
+    openDiff?: (path: string, location?: FileNavigationLocation) => void;
+    openWorkspaceFile?: (
+      path: string,
+      location?: FileNavigationLocation,
+    ) => void;
     cwd?: string | null;
   },
 ) {
@@ -91,7 +95,6 @@ describe("ChatFileLink", () => {
     expect(referenced.openWorkspaceFile).toHaveBeenCalledWith(
       "src/lib.rs",
       undefined,
-      undefined,
     );
   });
 
@@ -99,7 +102,17 @@ describe("ChatFileLink", () => {
     const user = userEvent.setup();
     const { openDiff } = await renderFileLink("src/main.rs:12");
     await user.click(screen.getByRole("button", { name: /src\/main\.rs/ }));
-    expect(openDiff).toHaveBeenCalledWith("src/main.rs", 12);
+    expect(openDiff).toHaveBeenCalledWith("src/main.rs", { line: 12 });
+  });
+
+  it("passes a parsed line range to openDiff", async () => {
+    const user = userEvent.setup();
+    const { openDiff } = await renderFileLink("src/main.rs:12-20");
+    await user.click(screen.getByRole("button", { name: /src\/main\.rs/ }));
+    expect(openDiff).toHaveBeenCalledWith("src/main.rs", {
+      line: 12,
+      endLine: 20,
+    });
   });
 
   it("keeps commands as plain code", async () => {
@@ -142,6 +155,21 @@ describe("ChatFileLink", () => {
     expect(button).toHaveClass("text-sky-700");
     expect(button.className).toContain("decoration-dashed");
     expect(button.className).toContain("hover:underline");
+  });
+
+  it("marks an edited file link with a diff badge and leaves a Files link plain", async () => {
+    const edited = await renderFileLink("src/main.rs");
+    const editedButton = screen.getByRole("button", { name: /src\/main\.rs/ });
+    expect(
+      editedButton.querySelector("[data-diff-reference='true']"),
+    ).not.toBeNull();
+
+    edited.unmount();
+    await renderFileLink("src/lib.rs");
+    const filesButton = screen.getByRole("button", { name: /src\/lib\.rs/ });
+    expect(
+      filesButton.querySelector("[data-diff-reference='true']"),
+    ).toBeNull();
   });
 
   it("offers Explorer and VS Code without Terminal on the desktop host", async () => {

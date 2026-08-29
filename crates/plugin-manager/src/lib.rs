@@ -2,9 +2,12 @@
 //! checksum-verified installs of new plugin releases.
 
 mod discovery;
+mod hook;
 mod install;
 mod issue;
+mod limits;
 mod logo;
+mod mcp;
 mod skill;
 mod validation;
 mod webview;
@@ -16,13 +19,19 @@ mod kind_tests;
 mod tests;
 
 pub use discovery::{MANIFEST_FILE_NAME, installed_root};
-pub use install::{InstallError, InstalledPackage, Installer};
+pub use hook::InstalledHookDescriptor;
+pub use install::{
+    HostTarget, InstallError, InstalledPackage, Installer, ResolvedReleaseSource, UpdateError,
+    select_release,
+};
 pub use issue::{PluginDiscoveryIssue, PluginDiscoveryIssueKind};
+pub use mcp::{InstalledMcpDescriptor, MCP_CONFIGURATION_FILE};
+pub use ora_plugin_manifest::HookTarget;
 pub use skill::{
     InstalledSkill, InstalledSkillDescriptor, SKILL_ASSET_DIRECTORY, SKILL_MANIFEST_FILE_NAME,
 };
 pub use validation::{
-    INSTALLED_ENTRYPOINT, InstalledPlugin, InstalledPluginAgent,
+    CONFIGURATION_FILE, INSTALLED_ENTRYPOINT, InstalledPlugin, InstalledPluginAgent,
     PluginConfigurationDeclarationValidity, PluginContribution,
 };
 pub use webview::InstalledWebviewDescriptor;

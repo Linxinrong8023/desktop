@@ -17,6 +17,8 @@ export interface ReviewFilePersist {
   path: string;
   line?: number;
   column?: number;
+  endLine?: number;
+  side?: "old" | "new";
 }
 
 /**
@@ -66,7 +68,11 @@ function reviewFilesEqual(
     const a = left[panel];
     const b = right[panel];
     return (
-      a?.path === b?.path && a?.line === b?.line && a?.column === b?.column
+      a?.path === b?.path &&
+      a?.line === b?.line &&
+      a?.column === b?.column &&
+      a?.endLine === b?.endLine &&
+      a?.side === b?.side
     );
   });
 }
@@ -96,12 +102,18 @@ function sanitizeFile(value: unknown): ReviewFilePersist | undefined {
   }
   const line = record.line;
   const column = record.column;
+  const endLine = record.endLine;
+  const side = record.side;
   return {
     path: record.path,
     ...(typeof line === "number" && Number.isFinite(line) ? { line } : {}),
     ...(typeof column === "number" && Number.isFinite(column)
       ? { column }
       : {}),
+    ...(typeof endLine === "number" && Number.isFinite(endLine)
+      ? { endLine }
+      : {}),
+    ...(side === "old" || side === "new" ? { side } : {}),
   };
 }
 
@@ -175,8 +187,18 @@ export function buildReviewFilePersist(input: {
   open: boolean;
   panel: ReviewPanelKind;
   reviewFilePath?: string;
-  fileRequest?: { path: string; line?: number };
-  workspaceFileRequest?: { path: string; line?: number; column?: number };
+  fileRequest?: {
+    path: string;
+    line?: number;
+    endLine?: number;
+    side?: "old" | "new";
+  };
+  workspaceFileRequest?: {
+    path: string;
+    line?: number;
+    column?: number;
+    endLine?: number;
+  };
 }): ReviewFilePersist | undefined {
   const { open, panel, reviewFilePath, fileRequest, workspaceFileRequest } =
     input;
@@ -186,7 +208,13 @@ export function buildReviewFilePersist(input: {
     ...(panel === "changes" &&
     fileRequest?.line !== undefined &&
     pathsMatchForWorkspace(fileRequest.path, reviewFilePath)
-      ? { line: fileRequest.line }
+      ? {
+          line: fileRequest.line,
+          ...(fileRequest.endLine !== undefined
+            ? { endLine: fileRequest.endLine }
+            : {}),
+          ...(fileRequest.side !== undefined ? { side: fileRequest.side } : {}),
+        }
       : {}),
     ...(panel === "files" &&
     workspaceFileRequest?.line !== undefined &&
@@ -194,6 +222,9 @@ export function buildReviewFilePersist(input: {
       ? {
           line: workspaceFileRequest.line,
           column: workspaceFileRequest.column,
+          ...(workspaceFileRequest.endLine !== undefined
+            ? { endLine: workspaceFileRequest.endLine }
+            : {}),
         }
       : {}),
   };

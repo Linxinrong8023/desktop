@@ -25,6 +25,14 @@ pub struct PluginLaunchRequest {
     /// The plugin's private data directory, already created; the launcher binds the
     /// `ora/storage/*` handler to it so the process can only ever reach its own data.
     pub data_dir: PathBuf,
+    /// Whether the launcher should bind `ora/childprocess/*` for this process.
+    ///
+    /// True only for agent plugins: they are the only kind whose Deno permissions include
+    /// `--allow-run` (see `permissions::agent_permissions`), so they are the only kind a
+    /// host-managed subprocess does not hand a new capability to. A workbench, webview, skill, or
+    /// MCP plugin runs with zero Deno permissions specifically so it cannot start a process; the
+    /// launcher must not let a host request reopen that door.
+    pub allow_childprocess: bool,
 }
 
 /// Preserves the reason a plugin process could not start or stopped unexpectedly.

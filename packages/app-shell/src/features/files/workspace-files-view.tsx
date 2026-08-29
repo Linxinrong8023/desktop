@@ -75,6 +75,8 @@ export interface WorkspaceFileRequest {
   requestId: number;
   line?: number;
   column?: number;
+  /** Inclusive end of a cited range; omitted for a single line or search match. */
+  endLine?: number;
 }
 
 /** External Files-panel directory request that expands and selects a tree node. */
@@ -228,6 +230,7 @@ export function WorkspaceFilesView({
               line: fileRequest.line,
               column: fileRequest.column ?? 1,
               matchedText: "",
+              endLine: fileRequest.endLine,
             },
       );
     }
@@ -466,7 +469,10 @@ export function WorkspaceFilesView({
                   <span className="truncate font-mono text-xs">
                     {selectedTarget === null
                       ? selectedPath
-                      : `${selectedPath}:${selectedTarget.line}:${selectedTarget.column}`}
+                      : selectedTarget.endLine !== undefined &&
+                          selectedTarget.endLine !== selectedTarget.line
+                        ? `${selectedPath}:${selectedTarget.line}-${selectedTarget.endLine}`
+                        : `${selectedPath}:${selectedTarget.line}:${selectedTarget.column}`}
                   </span>
                   {fileQuery.data && (
                     <div className="ml-auto flex shrink-0 items-center gap-2 pl-3">
@@ -492,6 +498,7 @@ export function WorkspaceFilesView({
                       content={fileQuery.data?.content ?? ""}
                       path={selectedPath}
                       target={selectedTarget}
+                      onDismissJump={() => setSelectedTarget(null)}
                     />
                   )}
                 </div>

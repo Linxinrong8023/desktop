@@ -68,6 +68,8 @@ fn validate_main_command_permissions(commands: &[String]) {
 }
 
 fn main() {
+    let target = std::env::var("TARGET").expect("Cargo always sets TARGET for build scripts");
+    println!("cargo:rustc-env=ORA_DESKTOP_TARGET_TRIPLE={target}");
     println!("cargo:rerun-if-changed=permissions/main-commands.toml");
     println!("cargo:rerun-if-changed=src/app_commands.rs");
     let commands = desktop_commands();

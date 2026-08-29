@@ -1,6 +1,7 @@
 use crate::{
-    DownloadActionError, MethodNameError, PathPrefixError, PluginKind, PluginKindError,
-    PluginNameError, PluginNamespaceError, Sha256DigestError, UrlError, WebviewUrlError,
+    DownloadActionError, HookTargetError, MethodNameError, PathPrefixError, PluginKind,
+    PluginKindError, PluginNameError, PluginNamespaceError, Sha256DigestError, UrlError,
+    WebviewUrlError,
 };
 use ora_utils::{GitBranchNameError, SlugError};
 use std::{fmt, ops::Range};
@@ -71,6 +72,24 @@ pub enum ManifestField {
         index: usize,
         field: RuleField,
     },
+    /// The `[[targets]]` array as a whole.
+    Targets,
+    /// The `target` field of the release entry at `index` in `[[targets]]`.
+    ReleaseTargetTarget {
+        index: usize,
+    },
+    /// The `url` field of the release entry at `index` in `[[targets]]`.
+    ReleaseTargetUrl {
+        index: usize,
+    },
+    /// The `sha256` field of the release entry at `index` in `[[targets]]`.
+    ReleaseTargetSha256 {
+        index: usize,
+    },
+    /// The `[artifact]` section carried by an installed targeted package.
+    Artifact,
+    /// The `artifact.target` field.
+    ArtifactTarget,
 }
 
 impl fmt::Display for ManifestField {
@@ -103,6 +122,16 @@ impl fmt::Display for ManifestField {
             Self::WebviewDownloadRule { index, field } => {
                 write!(formatter, "webview.downloads.rules[{index}].{field}")
             }
+            Self::Targets => formatter.write_str("targets"),
+            Self::ReleaseTargetTarget { index } => {
+                write!(formatter, "targets[{index}].target")
+            }
+            Self::ReleaseTargetUrl { index } => write!(formatter, "targets[{index}].url"),
+            Self::ReleaseTargetSha256 { index } => {
+                write!(formatter, "targets[{index}].sha256")
+            }
+            Self::Artifact => formatter.write_str("artifact"),
+            Self::ArtifactTarget => formatter.write_str("artifact.target"),
         }
     }
 }
@@ -162,6 +191,12 @@ pub enum InvalidFieldReason {
     MissingForKind { kind: PluginKind },
     #[error("section is not allowed for plugin kind `{kind}`")]
     NotAllowedForKind { kind: PluginKind },
+    #[error("field is required when declaring a universal release")]
+    MissingUniversalReleaseField,
+    #[error("targeted download list is not allowed on an installed manifest")]
+    TargetsNotAllowedOnInstalled,
+    #[error("installed `[artifact]` is not allowed on a release manifest")]
+    ArtifactNotAllowedOnRelease,
     #[error("invalid slug: {0}")]
     InvalidSlug(#[from] SlugError),
     #[error("value is declared more than once")]
@@ -178,4 +213,8 @@ pub enum InvalidFieldReason {
     InvalidDownloadAction(DownloadActionError),
     #[error("action must declare exactly one of `auto`, `prompt`, or `reject = true`")]
     AmbiguousDownloadAction,
+    #[error("manifest declares both a universal release and targeted artifacts; pick one form")]
+    DuplicateReleaseSource,
+    #[error(transparent)]
+    InvalidHookTarget(#[from] HookTargetError),
 }

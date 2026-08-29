@@ -17,6 +17,14 @@ tasks:
   install:
     desc: Install all dependencies for the project
     cmds:
+      - |
+        {{if eq OS "windows"}}
+        if not exist specs git clone https://github.com/ora-space/specs specs
+        {{else}}
+        if [ ! -d specs ]; then
+          git clone https://github.com/ora-space/specs specs
+        fi
+        {{end}}
       - task: install:frontend
       - task: install:crates
       - task: build
@@ -46,9 +54,20 @@ tasks:
     cmds:
       - cargo build --workspace
 
+  build:reaper:
+    desc: Build the debug process reaper sidecar for the current target
+    cmds:
+      - node scripts/build-reaper.mjs
+
+  build:reaper:release:
+    desc: Build the release process reaper sidecar for the current target
+    cmds:
+      - node scripts/build-reaper.mjs --release
+
   build:desktop:
     desc: Build and bundle the Tauri desktop app installers
     cmds:
+      - task: build:reaper:release
       - task: export-contracts
       - pnpm --filter @ora/desktop tauri build
 
@@ -64,6 +83,11 @@ tasks:
         {{end}}
       - pnpm store prune
       - cargo clean
+
+  clean:debug:
+    desc: Clean only Rust debug build artifacts
+    cmds:
+      - cargo clean --profile dev
 
   format:
     desc: Format files changed in the working tree or staging area
@@ -113,6 +137,8 @@ tasks:
 
   lint:crates:
     desc: Run linters on all Rust workspace packages
+    env:
+      CARGO_INCREMENTAL: "0"
     silent: true
     cmds:
       - cargo fmt --all -- --check
@@ -140,6 +166,8 @@ tasks:
 
   test:crates:
     desc: Run all Rust workspace package test suites
+    env:
+      CARGO_INCREMENTAL: "0"
     preconditions:
       - sh: command -v rg >/dev/null 2>&1
         msg: "Ripgrep (rg) is not available on PATH. Install it before running Rust tests."
@@ -164,6 +192,7 @@ tasks:
       ORA_DATA_DIR: "{{.ROOT_DIR}}/.data"
       VSLANG: "1033"
     cmds:
+      - task: build:reaper
       - pnpm --filter @ora/desktop tauri dev
 
   logdy:

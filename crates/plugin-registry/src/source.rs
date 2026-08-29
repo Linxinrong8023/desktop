@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use gitlancer::git::sync::{CheckoutRequest, CloneRequest, FetchRequest, PullRequest};
-use gitlancer::{BranchName, Git, GitRunner, RepoRoot, Repository};
+use gitlancer::{BranchName, Git, GitEnv, GitRunner, RepoRoot, Repository};
+use ora_plugin_manifest::RepositoryUrl;
+use ora_utils::GitBranchName;
 
 use crate::error::RegistryError;
 
@@ -11,6 +13,7 @@ pub struct RegistrySource {
     url: String,
     branch: BranchName,
     checkout_dir: PathBuf,
+    git_env: GitEnv,
 }
 
 impl RegistrySource {
@@ -24,6 +27,7 @@ impl RegistrySource {
             url: url.into(),
             branch,
             checkout_dir: checkout_dir.into(),
+            git_env: GitEnv::default(),
         }
     }
 
@@ -55,7 +59,26 @@ impl RegistrySource {
             url,
             branch,
             checkout_dir,
+            git_env: GitEnv::default(),
         }
+    }
+
+    /// Validates an HTTPS Git URL and short branch name before creating a source.
+    ///
+    /// Configuration entry points use this checked constructor while the default source keeps
+    /// the infallible [`Self::from_git`] path for the compile-time constant.
+    pub fn try_from_git(
+        url: impl Into<String>,
+        branch: impl AsRef<str>,
+        sources_root: impl AsRef<Path>,
+    ) -> Result<Self, RegistryError> {
+        let url = RepositoryUrl::parse(&url.into())?;
+        let branch = GitBranchName::parse(branch.as_ref())?;
+        Ok(Self::from_git(
+            url.as_str(),
+            BranchName::new(branch.as_str()),
+            sources_root,
+        ))
     }
 
     /// Returns the git URL that hosts this registry source.
@@ -71,6 +94,17 @@ impl RegistrySource {
     /// Returns the local directory where this source is checked out.
     pub fn checkout_dir(&self) -> &Path {
         &self.checkout_dir
+    }
+
+    /// Returns the command environment to apply to this source\u2019s Git network work.
+    pub fn git_env(&self) -> &GitEnv {
+        &self.git_env
+    }
+
+    /// Replaces the command environment used for this source\u2019s Git network work.
+    pub fn with_git_env(mut self, git_env: GitEnv) -> Self {
+        self.git_env = git_env;
+        self
     }
 }
 
@@ -92,6 +126,7 @@ impl RegistrySync {
             git.fetch(FetchRequest {
                 repository: &repository,
                 remote: "origin",
+                env: source.git_env().clone(),
             })?;
             git.checkout(CheckoutRequest {
                 repository: &repository,
@@ -100,6 +135,7 @@ impl RegistrySync {
             git.pull(PullRequest {
                 repository: &repository,
                 branch: source.branch(),
+                env: source.git_env().clone(),
             })?;
         } else {
             let parent = checkout_dir
@@ -112,6 +148,7 @@ impl RegistrySync {
                 destination: checkout_dir.to_path_buf(),
                 working_dir: parent.to_path_buf(),
                 branch: Some(source.branch().clone()),
+                env: source.git_env().clone(),
             })?;
         }
         Ok(checkout_dir.to_path_buf())
@@ -233,6 +270,44 @@ mod tests {
         );
         assert_eq!(source.url(), "https://github.com/ora-space/marketplace");
         assert_eq!(source.branch().as_str(), "main");
+        Ok(())
+    }
+
+    /// Verifies checked source construction normalizes a valid HTTPS URL and branch.
+    #[test]
+    fn validates_checked_git_source() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = TempDir::new()?;
+        let source = RegistrySource::try_from_git(
+            "https://github.com/ora-space/marketplace",
+            "main",
+            temp.path(),
+        )?;
+
+        assert_eq!(source.url(), "https://github.com/ora-space/marketplace");
+        assert_eq!(source.branch().as_str(), "main");
+        assert!(source.checkout_dir().starts_with(temp.path()));
+        Ok(())
+    }
+
+    /// Verifies checked source construction rejects HTTP and malformed Git branch names.
+    #[test]
+    fn rejects_invalid_checked_git_source() -> Result<(), Box<dyn std::error::Error>> {
+        assert!(
+            RegistrySource::try_from_git(
+                "http://github.com/example/marketplace",
+                "main",
+                tempfile::tempdir()?.path(),
+            )
+            .is_err()
+        );
+        assert!(
+            RegistrySource::try_from_git(
+                "https://github.com/example/marketplace",
+                "feature api",
+                tempfile::tempdir()?.path(),
+            )
+            .is_err()
+        );
         Ok(())
     }
 }

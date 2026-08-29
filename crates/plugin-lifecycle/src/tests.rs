@@ -4,18 +4,13 @@ use super::{
     PluginRegistration, PluginRuntime, PluginRuntimeExit, PluginRuntimeFailure,
     PluginRuntimeLauncher, PluginStatusPublisher, ReadScope,
 };
-use ora_application::{Clock, PluginStateRepository};
 use ora_contracts::{
-    ActivatePluginRequest, ActivatePluginResponse, DisablePluginRequest, DisablePluginResponse,
-    EnablePluginRequest, EnablePluginResponse, InstalledPlugin, InstalledPluginContribution,
+    ActivatePluginRequest, ActivatePluginResponse, InstalledPlugin, InstalledPluginContribution,
     ListInstalledPluginsResponse, PluginConfigurationSummary, PluginDataDisposition,
     PluginInstallationValidity, PluginRuntimeStatus, ScanPluginsRequest, ScanPluginsResponse,
     StopPluginRequest, StopPluginResponse, UninstallPluginRequest, UninstallPluginResponse,
 };
-use ora_db::{
-    DatabaseBootstrapper, DatabaseLocation, SqlitePluginStateRepository, default_migration_catalog,
-};
-use ora_domain::{PluginEnabledState, PluginId};
+use ora_domain::PluginId;
 use ora_logging::with_trace_logging;
 use pretty_assertions::assert_eq;
 use std::fs;
@@ -27,17 +22,6 @@ use tokio::sync::{mpsc, oneshot};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::prelude::*;
 
-/// Supplies deterministic lifecycle timestamps without mutating process-global time.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct FixedClock;
-
-impl Clock for FixedClock {
-    /// Returns one stable timestamp for lifecycle repository writes.
-    fn now_timestamp_millis(&self) -> i64 {
-        100
-    }
-}
-
 /// Installs a test-thread TRACE subscriber for the full lifetime of an async test future.
 pub(super) fn trace_logging_guard() -> tracing::subscriber::DefaultGuard {
     let subscriber = tracing_subscriber::registry().with(LevelFilter::TRACE);
@@ -47,21 +31,12 @@ pub(super) fn trace_logging_guard() -> tracing::subscriber::DefaultGuard {
 /// Opens lifecycle state for tests that never cross the external runtime boundary.
 fn open_without_runtime(
     data_directory: &Path,
-    repository: SqlitePluginStateRepository,
-) -> PluginLifecycle<
-    SqlitePluginStateRepository,
-    FixedClock,
-    UnusedRuntimeLauncher,
-    NoopStatusPublisher,
-    NoopNotificationSink,
-> {
+) -> PluginLifecycle<UnusedRuntimeLauncher, NoopStatusPublisher, NoopNotificationSink> {
     PluginLifecycle::open(
         PluginLifecycleConfig {
             data_directory: data_directory.to_path_buf(),
             deno_path: PathBuf::from("deno"),
         },
-        repository,
-        FixedClock,
         UnusedRuntimeLauncher,
         NoopStatusPublisher,
         NoopNotificationSink,
@@ -117,25 +92,18 @@ fn launched_runtime<Runtime>(runtime: Runtime) -> LaunchedRuntime<Runtime> {
     }
 }
 
-/// Verifies startup discovery exposes an unpersisted plugin as disabled and stopped.
+/// Verifies startup discovery exposes an installed plugin as available and stopped.
 #[test]
-fn opens_with_discovered_plugins_disabled_and_stopped() {
+fn opens_with_discovered_plugins_stopped() {
     with_trace_logging(|| {
         let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
         write_plugin_package(temp_dir.path(), "ora.example");
-        let pool = DatabaseBootstrapper::system()
-            .bootstrap_repository_pool(
-                &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-                &default_migration_catalog().expect("build migration catalog"),
-            )
-            .expect("bootstrap plugin lifecycle database");
-        let lifecycle =
-            open_without_runtime(temp_dir.path(), SqlitePluginStateRepository::new(pool));
+        let lifecycle = open_without_runtime(temp_dir.path());
 
         assert_eq!(
             lifecycle.list_installed_plugins(),
             ListInstalledPluginsResponse {
-                plugins: vec![expected_plugin(/*enabled*/ false)],
+                plugins: vec![expected_plugin()],
             },
         );
     });
@@ -147,30 +115,13 @@ async fn manages_static_skill_plugin_without_a_runtime() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
     write_skill_plugin_package(temp_dir.path(), "ora.skill-pack");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
-    let lifecycle = open_without_runtime(temp_dir.path(), SqlitePluginStateRepository::new(pool));
+    let lifecycle = open_without_runtime(temp_dir.path());
     let plugin_id = "official/ora.skill-pack".to_string();
 
     assert_eq!(
         lifecycle.list_installed_plugins(),
         ListInstalledPluginsResponse {
-            plugins: vec![expected_skill_plugin(false)],
-        }
-    );
-    assert_eq!(
-        lifecycle
-            .enable_plugin(EnablePluginRequest {
-                plugin_id: plugin_id.clone(),
-            })
-            .await
-            .expect("enable Skill plugin"),
-        EnablePluginResponse {
-            plugin: expected_skill_plugin(true),
+            plugins: vec![expected_skill_plugin()],
         }
     );
     assert!(matches!(
@@ -181,23 +132,6 @@ async fn manages_static_skill_plugin_without_a_runtime() {
             .await,
         Err(PluginLifecycleError::NoProcess { plugin_id: found }) if found == plugin_id
     ));
-    assert_eq!(
-        lifecycle
-            .disable_plugin(DisablePluginRequest {
-                plugin_id: plugin_id.clone(),
-            })
-            .await
-            .expect("disable Skill plugin"),
-        DisablePluginResponse {
-            plugin: expected_skill_plugin(false),
-        }
-    );
-    lifecycle
-        .enable_plugin(EnablePluginRequest {
-            plugin_id: plugin_id.clone(),
-        })
-        .await
-        .expect("re-enable Skill plugin");
     assert_eq!(
         lifecycle
             .uninstall_plugin(UninstallPluginRequest {
@@ -216,50 +150,55 @@ async fn manages_static_skill_plugin_without_a_runtime() {
     );
     assert!(!package_version_root(temp_dir.path(), "ora.skill-pack").exists());
 }
-/// Verifies startup joins a discovered package with the user's durable enabled intent.
-#[test]
-fn opens_with_persisted_plugin_eligibility() {
-    with_trace_logging(|| {
-        let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
-        write_plugin_package(temp_dir.path(), "ora.example");
-        let pool = DatabaseBootstrapper::system()
-            .bootstrap_repository_pool(
-                &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-                &default_migration_catalog().expect("build migration catalog"),
-            )
-            .expect("bootstrap plugin lifecycle database");
-        let repository = SqlitePluginStateRepository::new(pool);
-        repository
-            .set_plugin_enabled(
-                &PluginId::new("official", "ora.example").expect("plugin id"),
-                PluginEnabledState::Enabled,
-                20,
-            )
-            .expect("persist enabled plugin");
 
-        let lifecycle = open_without_runtime(temp_dir.path(), repository);
+/// Verifies a processless Hook plugin can be listed and uninstalled but never activated.
+#[tokio::test]
+async fn manages_static_hook_plugin_without_a_runtime() {
+    let _logging = trace_logging_guard();
+    let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
+    write_hook_plugin_package(temp_dir.path(), "rtk-ai.rtk");
+    let lifecycle = open_without_runtime(temp_dir.path());
+    let plugin_id = "official/rtk-ai.rtk".to_string();
 
-        assert_eq!(
-            lifecycle.list_installed_plugins(),
-            ListInstalledPluginsResponse {
-                plugins: vec![expected_plugin(/*enabled*/ true)],
-            },
-        );
-    });
+    assert_eq!(
+        lifecycle.list_installed_plugins(),
+        ListInstalledPluginsResponse {
+            plugins: vec![expected_hook_plugin()],
+        }
+    );
+    assert!(matches!(
+        lifecycle
+            .activate_plugin(ActivatePluginRequest {
+                plugin_id: plugin_id.clone(),
+            })
+            .await,
+        Err(PluginLifecycleError::NoProcess { plugin_id: found }) if found == plugin_id
+    ));
+    assert_eq!(
+        lifecycle
+            .uninstall_plugin(UninstallPluginRequest {
+                plugin_id: plugin_id.clone(),
+                data_disposition: PluginDataDisposition::Delete,
+            })
+            .await
+            .expect("uninstall Hook plugin"),
+        UninstallPluginResponse { plugin_id }
+    );
+    assert_eq!(
+        lifecycle.list_installed_plugins(),
+        ListInstalledPluginsResponse {
+            plugins: Vec::new(),
+        }
+    );
+    assert!(!package_version_root(temp_dir.path(), "rtk-ai.rtk").exists());
 }
 
-/// Verifies enabling persists eligibility and starts the runtime it implies.
+/// Verifies an installed process plugin can start directly.
 #[tokio::test]
-async fn enables_plugin_and_starts_its_runtime() {
+async fn activates_plugin_and_starts_its_runtime() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
     write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
     let (runtime, _stop_started, _release_stop) = ControllableStopRuntime::new();
     let (publisher, mut events) = RecordingStatusPublisher::new();
     let lifecycle = PluginLifecycle::open(
@@ -267,8 +206,6 @@ async fn enables_plugin_and_starts_its_runtime() {
             data_directory: temp_dir.path().to_path_buf(),
             deno_path: PathBuf::from("deno"),
         },
-        SqlitePluginStateRepository::new(pool),
-        FixedClock,
         ImmediateRuntimeLauncher { runtime },
         publisher,
         NoopNotificationSink,
@@ -276,18 +213,15 @@ async fn enables_plugin_and_starts_its_runtime() {
     .expect("open plugin lifecycle");
 
     let response = lifecycle
-        .enable_plugin(EnablePluginRequest {
+        .activate_plugin(ActivatePluginRequest {
             plugin_id: "official/ora.example".to_string(),
         })
         .await
-        .expect("enable plugin");
+        .expect("activate plugin");
     assert_eq!(
         response,
-        EnablePluginResponse {
-            plugin: expected_plugin_with_runtime(
-                PluginEnabledState::Enabled,
-                PluginRuntimeStatus::Starting,
-            ),
+        ActivatePluginResponse {
+            plugin: expected_plugin_with_runtime(PluginRuntimeStatus::Starting),
         },
     );
     assert_eq!(
@@ -302,93 +236,8 @@ async fn enables_plugin_and_starts_its_runtime() {
     assert_eq!(
         lifecycle.list_installed_plugins(),
         ListInstalledPluginsResponse {
-            plugins: vec![expected_plugin_with_runtime(
-                PluginEnabledState::Enabled,
-                PluginRuntimeStatus::Running,
-            )],
+            plugins: vec![expected_plugin_with_runtime(PluginRuntimeStatus::Running)],
         },
-    );
-}
-
-/// Verifies disabling a stopped plugin persists ineligibility without changing runtime state.
-#[tokio::test]
-async fn disables_stopped_plugin() {
-    let _logging = trace_logging_guard();
-    let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
-    write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
-    let repository = SqlitePluginStateRepository::new(pool);
-    repository
-        .set_plugin_enabled(
-            &PluginId::new("official", "ora.example").expect("plugin id"),
-            PluginEnabledState::Enabled,
-            20,
-        )
-        .expect("persist enabled plugin");
-    let lifecycle = open_without_runtime(temp_dir.path(), repository);
-
-    let response = lifecycle
-        .disable_plugin(DisablePluginRequest {
-            plugin_id: "official/ora.example".to_string(),
-        })
-        .await
-        .expect("disable plugin");
-    let expected_plugin = expected_plugin(/*enabled*/ false);
-
-    assert_eq!(
-        (response, lifecycle.list_installed_plugins()),
-        (
-            DisablePluginResponse {
-                plugin: expected_plugin.clone(),
-            },
-            ListInstalledPluginsResponse {
-                plugins: vec![expected_plugin],
-            },
-        ),
-    );
-}
-
-/// Verifies disabling a never-enabled plugin preserves missing durable state as the default.
-#[tokio::test]
-async fn disabling_never_enabled_plugin_does_not_create_durable_state() {
-    let _logging = trace_logging_guard();
-    let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
-    write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
-    let repository = SqlitePluginStateRepository::new(pool);
-    let repository_probe = repository.clone();
-    let lifecycle = open_without_runtime(temp_dir.path(), repository);
-
-    let response = lifecycle
-        .disable_plugin(DisablePluginRequest {
-            plugin_id: "official/ora.example".to_string(),
-        })
-        .await
-        .expect("disable never-enabled plugin");
-
-    assert_eq!(
-        (
-            response,
-            repository_probe
-                .find_plugin_state(&PluginId::new("official", "ora.example").expect("plugin id"))
-                .expect("read durable plugin state"),
-        ),
-        (
-            DisablePluginResponse {
-                plugin: expected_plugin(/*enabled*/ false),
-            },
-            None,
-        ),
     );
 }
 
@@ -397,13 +246,7 @@ async fn disabling_never_enabled_plugin_does_not_create_durable_state() {
 async fn scans_new_packages_without_rescanning_cached_queries() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
-    let lifecycle = open_without_runtime(temp_dir.path(), SqlitePluginStateRepository::new(pool));
+    let lifecycle = open_without_runtime(temp_dir.path());
     write_plugin_package(temp_dir.path(), "ora.example");
 
     let before_scan = lifecycle.list_installed_plugins();
@@ -411,7 +254,7 @@ async fn scans_new_packages_without_rescanning_cached_queries() {
         .scan_plugins(ScanPluginsRequest {})
         .await
         .expect("scan plugins");
-    let expected_plugin = expected_plugin(/*enabled*/ false);
+    let expected_plugin = expected_plugin();
 
     assert_eq!(
         (
@@ -433,26 +276,12 @@ async fn scans_new_packages_without_rescanning_cached_queries() {
     );
 }
 
-/// Verifies startup removes durable rows whose package is absent from filesystem discovery.
+/// Verifies a package discovered after startup is immediately available and stopped.
 #[tokio::test]
-async fn startup_reconciliation_deletes_orphaned_plugin_state() {
+async fn package_discovered_after_startup_is_available() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
-    let repository = SqlitePluginStateRepository::new(pool);
-    repository
-        .set_plugin_enabled(
-            &PluginId::new("official", "ora.example").expect("plugin id"),
-            PluginEnabledState::Enabled,
-            20,
-        )
-        .expect("persist orphaned plugin state");
-    let lifecycle = open_without_runtime(temp_dir.path(), repository);
+    let lifecycle = open_without_runtime(temp_dir.path());
 
     write_plugin_package(temp_dir.path(), "ora.example");
     let response = lifecycle
@@ -463,33 +292,18 @@ async fn startup_reconciliation_deletes_orphaned_plugin_state() {
     assert_eq!(
         response,
         ScanPluginsResponse {
-            plugins: vec![expected_plugin(/*enabled*/ false)],
+            plugins: vec![expected_plugin()],
         },
     );
 }
 
-/// Verifies manual reconciliation removes state for packages deleted outside Ora.
+/// Verifies removing and restoring a package makes it available again.
 #[tokio::test]
-async fn scan_reconciliation_deletes_orphaned_plugin_state() {
+async fn scan_restores_removed_packages_as_available() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
     write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
-    let repository = SqlitePluginStateRepository::new(pool);
-    repository
-        .set_plugin_enabled(
-            &PluginId::new("official", "ora.example").expect("plugin id"),
-            PluginEnabledState::Enabled,
-            20,
-        )
-        .expect("persist enabled plugin");
-    let lifecycle = open_without_runtime(temp_dir.path(), repository);
-
+    let lifecycle = open_without_runtime(temp_dir.path());
     fs::remove_dir_all(example_package_root(temp_dir.path())).expect("remove plugin outside Ora");
     lifecycle
         .scan_plugins(ScanPluginsRequest {})
@@ -504,7 +318,7 @@ async fn scan_reconciliation_deletes_orphaned_plugin_state() {
     assert_eq!(
         restored,
         ScanPluginsResponse {
-            plugins: vec![expected_plugin(/*enabled*/ false)],
+            plugins: vec![expected_plugin()],
         },
     );
 }
@@ -515,35 +329,17 @@ async fn scan_stops_runtime_for_package_deleted_outside_ora() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
     write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
-    let repository = SqlitePluginStateRepository::new(pool);
-    let repository_probe = repository.clone();
     let (runtime, mut stop_started, release_stop) = ControllableStopRuntime::new();
     let lifecycle = PluginLifecycle::open(
         PluginLifecycleConfig {
             data_directory: temp_dir.path().to_path_buf(),
             deno_path: PathBuf::from("deno"),
         },
-        repository,
-        FixedClock,
         ImmediateRuntimeLauncher { runtime },
         NoopStatusPublisher,
         NoopNotificationSink,
     )
     .expect("open plugin lifecycle");
-    lifecycle
-        .enable_plugin(EnablePluginRequest {
-            plugin_id: "official/ora.example".to_string(),
-        })
-        .await
-        .expect("enable plugin");
-    // Enabling starts the launch on its own task, and activation shares the plugin's operation
-    // queue, so awaiting it is what makes the settled running runtime observable to the scan.
     let activation = lifecycle
         .activate_plugin(ActivatePluginRequest {
             plugin_id: "official/ora.example".to_string(),
@@ -553,10 +349,7 @@ async fn scan_stops_runtime_for_package_deleted_outside_ora() {
     assert_eq!(
         activation,
         ActivatePluginResponse {
-            plugin: expected_plugin_with_runtime(
-                PluginEnabledState::Enabled,
-                PluginRuntimeStatus::Running,
-            ),
+            plugin: expected_plugin_with_runtime(PluginRuntimeStatus::Starting),
         },
     );
     tokio::task::yield_now().await;
@@ -574,156 +367,44 @@ async fn scan_stops_runtime_for_package_deleted_outside_ora() {
         .expect("scan plugins");
 
     assert_eq!(
-        (
-            response,
-            repository_probe
-                .find_plugin_state(&PluginId::new("official", "ora.example").expect("plugin id"))
-                .expect("read reconciled plugin state"),
-        ),
-        (
-            ScanPluginsResponse {
-                plugins: Vec::new(),
-            },
-            None,
-        ),
+        response,
+        ScanPluginsResponse {
+            plugins: Vec::new()
+        }
     );
 }
 
-/// Verifies an explicit scan reapplies durable eligibility to an existing cached package.
+/// Verifies an explicit scan retains an existing installed package.
 #[tokio::test]
-async fn scan_reloads_durable_eligibility_for_existing_plugin() {
+async fn scan_retains_existing_plugin() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
-    write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
-    let repository = SqlitePluginStateRepository::new(pool);
-    let repository_probe = repository.clone();
-    let lifecycle = open_without_runtime(temp_dir.path(), repository);
-    repository_probe
-        .set_plugin_enabled(
-            &PluginId::new("official", "ora.example").expect("plugin id"),
-            PluginEnabledState::Enabled,
-            20,
-        )
-        .expect("persist external eligibility change");
-
+    write_skill_plugin_package(temp_dir.path(), "ora.skill-pack");
+    let lifecycle = open_without_runtime(temp_dir.path());
     let response = lifecycle
         .scan_plugins(ScanPluginsRequest {})
         .await
-        .expect("reconcile durable eligibility");
-
-    assert_eq!(
-        (response, lifecycle.list_installed_plugins()),
-        (
-            ScanPluginsResponse {
-                plugins: vec![expected_plugin(/*enabled*/ true)],
-            },
-            ListInstalledPluginsResponse {
-                plugins: vec![expected_plugin(/*enabled*/ true)],
-            },
-        ),
-    );
-}
-
-/// Verifies reconciliation stops a runtime when its durable eligibility row disappears.
-#[tokio::test]
-async fn scan_stops_runtime_invalidated_by_missing_durable_state() {
-    let _logging = trace_logging_guard();
-    let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
-    write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
-    let repository = SqlitePluginStateRepository::new(pool);
-    let repository_probe = repository.clone();
-    let (runtime, mut stop_started, release_stop) = ControllableStopRuntime::new();
-    let (publisher, mut events) = RecordingStatusPublisher::new();
-    let lifecycle = PluginLifecycle::open(
-        PluginLifecycleConfig {
-            data_directory: temp_dir.path().to_path_buf(),
-            deno_path: PathBuf::from("deno"),
-        },
-        repository,
-        FixedClock,
-        ImmediateRuntimeLauncher { runtime },
-        publisher,
-        NoopNotificationSink,
-    )
-    .expect("open plugin lifecycle");
-    lifecycle
-        .enable_plugin(EnablePluginRequest {
-            plugin_id: "official/ora.example".to_string(),
-        })
-        .await
-        .expect("enable plugin");
-    assert_eq!(
-        events.recv().await,
-        Some(PluginId::new("official", "ora.example").expect("plugin id"))
-    );
-    // Enabling starts the launch on its own task, and activation shares the plugin's operation
-    // queue, so awaiting it is what makes the settled running runtime observable below.
-    lifecycle
-        .activate_plugin(ActivatePluginRequest {
-            plugin_id: "official/ora.example".to_string(),
-        })
-        .await
-        .expect("activate plugin");
-    assert_eq!(
-        events.recv().await,
-        Some(PluginId::new("official", "ora.example").expect("plugin id"))
-    );
-    repository_probe
-        .delete_plugin_state(&PluginId::new("official", "ora.example").expect("plugin id"))
-        .expect("delete durable state outside lifecycle");
-
-    let scan_lifecycle = lifecycle.clone();
-    let scan_task =
-        tokio::spawn(async move { scan_lifecycle.scan_plugins(ScanPluginsRequest {}).await });
-    assert_eq!(stop_started.recv().await, Some(()));
-    assert_eq!(scan_task.is_finished(), false);
-    release_stop.send(()).expect("release runtime stop");
-    let response = scan_task
-        .await
-        .expect("join scan task")
         .expect("scan plugins");
-    assert_eq!(
-        events.recv().await,
-        Some(PluginId::new("official", "ora.example").expect("plugin id"))
-    );
 
     assert_eq!(
         (response, lifecycle.list_installed_plugins()),
         (
             ScanPluginsResponse {
-                plugins: vec![expected_plugin(/*enabled*/ false)],
+                plugins: vec![expected_skill_plugin()],
             },
             ListInstalledPluginsResponse {
-                plugins: vec![expected_plugin(/*enabled*/ false)],
+                plugins: vec![expected_skill_plugin()],
             },
         ),
     );
 }
 
-/// Verifies enabling returns starting, launches with agent permissions, then reports running.
+/// Verifies activation returns starting, launches with agent permissions, then reports running.
 #[tokio::test]
-async fn enabling_launches_the_plugin_and_publishes_each_transition() {
+async fn activation_launches_the_plugin_and_publishes_each_transition() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
     write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
     let (launcher, mut launched, release_launch) = ControllableRuntimeLauncher::new();
     let (publisher, mut events) = RecordingStatusPublisher::new();
     let lifecycle = PluginLifecycle::open(
@@ -731,26 +412,21 @@ async fn enabling_launches_the_plugin_and_publishes_each_transition() {
             data_directory: temp_dir.path().to_path_buf(),
             deno_path: PathBuf::from("deno"),
         },
-        SqlitePluginStateRepository::new(pool),
-        FixedClock,
         launcher,
         publisher,
         NoopNotificationSink,
     )
     .expect("open plugin lifecycle");
     let response = lifecycle
-        .enable_plugin(EnablePluginRequest {
+        .activate_plugin(ActivatePluginRequest {
             plugin_id: "official/ora.example".to_string(),
         })
         .await
-        .expect("enable plugin");
+        .expect("activate plugin");
     assert_eq!(
         response,
-        EnablePluginResponse {
-            plugin: expected_plugin_with_runtime(
-                PluginEnabledState::Enabled,
-                PluginRuntimeStatus::Starting,
-            ),
+        ActivatePluginResponse {
+            plugin: expected_plugin_with_runtime(PluginRuntimeStatus::Starting),
         },
     );
     assert_eq!(
@@ -770,6 +446,7 @@ async fn enabling_launches_the_plugin_and_publishes_each_transition() {
                 DenoPermission::AllowEnv,
                 DenoPermission::AllowNet,
             ],
+            allow_childprocess: true,
             data_dir: temp_dir
                 .path()
                 .join("plugins")
@@ -796,33 +473,21 @@ async fn enabling_launches_the_plugin_and_publishes_each_transition() {
         (activation, lifecycle.list_installed_plugins()),
         (
             ActivatePluginResponse {
-                plugin: expected_plugin_with_runtime(
-                    PluginEnabledState::Enabled,
-                    PluginRuntimeStatus::Running,
-                ),
+                plugin: expected_plugin_with_runtime(PluginRuntimeStatus::Running),
             },
             ListInstalledPluginsResponse {
-                plugins: vec![expected_plugin_with_runtime(
-                    PluginEnabledState::Enabled,
-                    PluginRuntimeStatus::Running,
-                )],
+                plugins: vec![expected_plugin_with_runtime(PluginRuntimeStatus::Running)],
             },
         ),
     );
 }
 
-/// Verifies explicit stop waits for process exit and preserves durable eligibility.
+/// Verifies explicit stop waits for process exit and leaves the plugin available.
 #[tokio::test]
-async fn stops_running_plugin_without_disabling_it() {
+async fn stops_running_plugin() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
     write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
     let (runtime, mut stop_started, release_stop) = ControllableStopRuntime::new();
     let launcher = ImmediateRuntimeLauncher { runtime };
     let (publisher, mut events) = RecordingStatusPublisher::new();
@@ -831,31 +496,21 @@ async fn stops_running_plugin_without_disabling_it() {
             data_directory: temp_dir.path().to_path_buf(),
             deno_path: PathBuf::from("deno"),
         },
-        SqlitePluginStateRepository::new(pool),
-        FixedClock,
         launcher,
         publisher,
         NoopNotificationSink,
     )
     .expect("open plugin lifecycle");
     lifecycle
-        .enable_plugin(EnablePluginRequest {
-            plugin_id: "official/ora.example".to_string(),
-        })
-        .await
-        .expect("enable plugin");
-    assert_eq!(
-        events.recv().await,
-        Some(PluginId::new("official", "ora.example").expect("plugin id"))
-    );
-    // Enabling starts the launch on its own task, and activation shares the plugin's operation
-    // queue, so awaiting it is what makes the settled running runtime observable below.
-    lifecycle
         .activate_plugin(ActivatePluginRequest {
             plugin_id: "official/ora.example".to_string(),
         })
         .await
         .expect("activate plugin");
+    assert_eq!(
+        events.recv().await,
+        Some(PluginId::new("official", "ora.example").expect("plugin id"))
+    );
     assert_eq!(
         events.recv().await,
         Some(PluginId::new("official", "ora.example").expect("plugin id"))
@@ -880,7 +535,7 @@ async fn stops_running_plugin_without_disabling_it() {
         events.recv().await,
         Some(PluginId::new("official", "ora.example").expect("plugin id"))
     );
-    let expected_plugin = expected_plugin(/*enabled*/ true);
+    let expected_plugin = expected_plugin();
     assert_eq!(
         (response, lifecycle.list_installed_plugins()),
         (
@@ -894,101 +549,12 @@ async fn stops_running_plugin_without_disabling_it() {
     );
 }
 
-/// Verifies disabling a running plugin waits for shutdown before clearing eligibility.
+/// Verifies stop queues behind an in-flight launch and waits for the resulting runtime stop.
 #[tokio::test]
-async fn disabling_running_plugin_stops_it_first() {
+async fn queues_stop_behind_an_in_flight_launch() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
     write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
-    let (runtime, mut stop_started, release_stop) = ControllableStopRuntime::new();
-    let launcher = ImmediateRuntimeLauncher { runtime };
-    let (publisher, mut events) = RecordingStatusPublisher::new();
-    let lifecycle = PluginLifecycle::open(
-        PluginLifecycleConfig {
-            data_directory: temp_dir.path().to_path_buf(),
-            deno_path: PathBuf::from("deno"),
-        },
-        SqlitePluginStateRepository::new(pool),
-        FixedClock,
-        launcher,
-        publisher,
-        NoopNotificationSink,
-    )
-    .expect("open plugin lifecycle");
-    lifecycle
-        .enable_plugin(EnablePluginRequest {
-            plugin_id: "official/ora.example".to_string(),
-        })
-        .await
-        .expect("enable plugin");
-    assert_eq!(
-        events.recv().await,
-        Some(PluginId::new("official", "ora.example").expect("plugin id"))
-    );
-    // Enabling starts the launch on its own task, and activation shares the plugin's operation
-    // queue, so awaiting it is what makes the settled running runtime observable below.
-    lifecycle
-        .activate_plugin(ActivatePluginRequest {
-            plugin_id: "official/ora.example".to_string(),
-        })
-        .await
-        .expect("activate plugin");
-    assert_eq!(
-        events.recv().await,
-        Some(PluginId::new("official", "ora.example").expect("plugin id"))
-    );
-
-    let disable_lifecycle = lifecycle.clone();
-    let disable_task = tokio::spawn(async move {
-        disable_lifecycle
-            .disable_plugin(DisablePluginRequest {
-                plugin_id: "official/ora.example".to_string(),
-            })
-            .await
-    });
-    assert_eq!(stop_started.recv().await, Some(()));
-    release_stop.send(()).expect("release runtime stop");
-    let response = disable_task
-        .await
-        .expect("join disable task")
-        .expect("disable running plugin");
-
-    assert_eq!(
-        events.recv().await,
-        Some(PluginId::new("official", "ora.example").expect("plugin id"))
-    );
-    let expected_plugin = expected_plugin(/*enabled*/ false);
-    assert_eq!(
-        (response, lifecycle.list_installed_plugins()),
-        (
-            DisablePluginResponse {
-                plugin: expected_plugin.clone(),
-            },
-            ListInstalledPluginsResponse {
-                plugins: vec![expected_plugin],
-            },
-        ),
-    );
-}
-
-/// Verifies disable queues behind an in-flight launch and waits for the resulting runtime stop.
-#[tokio::test]
-async fn queues_disable_behind_the_launch_enabling_started() {
-    let _logging = trace_logging_guard();
-    let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
-    write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
     let (runtime, mut stop_started, release_stop) = ControllableStopRuntime::new();
     let (launcher, release_launch) = QueuedRuntimeLauncher::new(runtime);
     let (publisher, _events) = RecordingStatusPublisher::new();
@@ -997,44 +563,41 @@ async fn queues_disable_behind_the_launch_enabling_started() {
             data_directory: temp_dir.path().to_path_buf(),
             deno_path: PathBuf::from("deno"),
         },
-        SqlitePluginStateRepository::new(pool),
-        FixedClock,
         launcher,
         publisher,
         NoopNotificationSink,
     )
     .expect("open plugin lifecycle");
     lifecycle
-        .enable_plugin(EnablePluginRequest {
+        .activate_plugin(ActivatePluginRequest {
             plugin_id: "official/ora.example".to_string(),
         })
         .await
-        .expect("enable plugin");
+        .expect("activate plugin");
 
-    // Enabling starts the launch, which owns the plugin's operation queue until it settles.
-    let disable_lifecycle = lifecycle.clone();
-    let disable_task = tokio::spawn(async move {
-        disable_lifecycle
-            .disable_plugin(DisablePluginRequest {
+    let stop_lifecycle = lifecycle.clone();
+    let stop_task = tokio::spawn(async move {
+        stop_lifecycle
+            .stop_plugin(StopPluginRequest {
                 plugin_id: "official/ora.example".to_string(),
             })
             .await
     });
     tokio::task::yield_now().await;
-    assert_eq!(disable_task.is_finished(), false);
+    assert_eq!(stop_task.is_finished(), false);
 
     release_launch.send(()).expect("release runtime launch");
     assert_eq!(stop_started.recv().await, Some(()));
     release_stop.send(()).expect("release runtime stop");
-    let response = disable_task
+    let response = stop_task
         .await
-        .expect("join disable task")
-        .expect("disable plugin after launch");
+        .expect("join stop task")
+        .expect("stop plugin after launch");
 
     assert_eq!(
         response,
-        DisablePluginResponse {
-            plugin: expected_plugin(/*enabled*/ false),
+        StopPluginResponse {
+            plugin: expected_plugin(),
         },
     );
 }
@@ -1051,12 +614,6 @@ async fn uninstalls_running_plugin_after_stopping_it() {
         .join("plugins")
         .join("installed")
         .join("official");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
     let (runtime, mut stop_started, release_stop) = ControllableStopRuntime::new();
     let launcher = ImmediateRuntimeLauncher { runtime };
     let (publisher, mut events) = RecordingStatusPublisher::new();
@@ -1065,31 +622,21 @@ async fn uninstalls_running_plugin_after_stopping_it() {
             data_directory: temp_dir.path().to_path_buf(),
             deno_path: PathBuf::from("deno"),
         },
-        SqlitePluginStateRepository::new(pool),
-        FixedClock,
         launcher,
         publisher,
         NoopNotificationSink,
     )
     .expect("open plugin lifecycle");
     lifecycle
-        .enable_plugin(EnablePluginRequest {
-            plugin_id: "official/ora.example".to_string(),
-        })
-        .await
-        .expect("enable plugin");
-    assert_eq!(
-        events.recv().await,
-        Some(PluginId::new("official", "ora.example").expect("plugin id"))
-    );
-    // Enabling starts the launch on its own task, and activation shares the plugin's operation
-    // queue, so awaiting it is what makes the settled running runtime observable below.
-    lifecycle
         .activate_plugin(ActivatePluginRequest {
             plugin_id: "official/ora.example".to_string(),
         })
         .await
         .expect("activate plugin");
+    assert_eq!(
+        events.recv().await,
+        Some(PluginId::new("official", "ora.example").expect("plugin id"))
+    );
     assert_eq!(
         events.recv().await,
         Some(PluginId::new("official", "ora.example").expect("plugin id"))
@@ -1143,14 +690,6 @@ async fn uninstall_records_stopped_state_before_package_removal() {
         .parent()
         .expect("version directory has a package name parent")
         .to_path_buf();
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
-    let repository = SqlitePluginStateRepository::new(pool);
-    let repository_probe = repository.clone();
     let (runtime, mut stop_started, release_stop) = ControllableStopRuntime::new();
     let (publisher, mut events) = RecordingStatusPublisher::new();
     let lifecycle = PluginLifecycle::open(
@@ -1158,31 +697,21 @@ async fn uninstall_records_stopped_state_before_package_removal() {
             data_directory: temp_dir.path().to_path_buf(),
             deno_path: PathBuf::from("deno"),
         },
-        repository,
-        FixedClock,
         ImmediateRuntimeLauncher { runtime },
         publisher,
         NoopNotificationSink,
     )
     .expect("open plugin lifecycle");
     lifecycle
-        .enable_plugin(EnablePluginRequest {
-            plugin_id: "official/ora.example".to_string(),
-        })
-        .await
-        .expect("enable plugin");
-    assert_eq!(
-        events.recv().await,
-        Some(PluginId::new("official", "ora.example").expect("plugin id"))
-    );
-    // Enabling starts the launch on its own task, and activation shares the plugin's operation
-    // queue, so awaiting it is what makes the settled running runtime observable below.
-    lifecycle
         .activate_plugin(ActivatePluginRequest {
             plugin_id: "official/ora.example".to_string(),
         })
         .await
         .expect("activate plugin");
+    assert_eq!(
+        events.recv().await,
+        Some(PluginId::new("official", "ora.example").expect("plugin id"))
+    );
     assert_eq!(
         events.recv().await,
         Some(PluginId::new("official", "ora.example").expect("plugin id"))
@@ -1215,36 +744,22 @@ async fn uninstall_records_stopped_state_before_package_removal() {
     ));
 
     assert_eq!(
-        (
-            lifecycle.list_installed_plugins(),
-            repository_probe
-                .find_plugin_state(&PluginId::new("official", "ora.example").expect("plugin id"))
-                .expect("read durable state")
-                .map(|state| state.enabled),
-            package_root.is_file(),
-        ),
+        (lifecycle.list_installed_plugins(), package_root.is_file()),
         (
             ListInstalledPluginsResponse {
-                plugins: vec![expected_plugin(/*enabled*/ true)],
+                plugins: vec![expected_plugin()],
             },
-            Some(PluginEnabledState::Enabled),
             true,
         ),
     );
 }
 
-/// Verifies an unexpected process exit records failure without clearing durable eligibility.
+/// Verifies an unexpected process exit records failure while leaving the plugin available.
 #[tokio::test]
-async fn records_runtime_failure_without_disabling_plugin() {
+async fn records_runtime_failure() {
     let _logging = trace_logging_guard();
     let temp_dir = TempDir::new().expect("create plugin lifecycle directory");
     write_plugin_package(temp_dir.path(), "ora.example");
-    let pool = DatabaseBootstrapper::system()
-        .bootstrap_repository_pool(
-            &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
-            &default_migration_catalog().expect("build migration catalog"),
-        )
-        .expect("bootstrap plugin lifecycle database");
     let (runtime, fail_runtime) = ControllableFailureRuntime::new();
     let (publisher, mut events) = RecordingStatusPublisher::new();
     let lifecycle = PluginLifecycle::open(
@@ -1252,31 +767,21 @@ async fn records_runtime_failure_without_disabling_plugin() {
             data_directory: temp_dir.path().to_path_buf(),
             deno_path: PathBuf::from("deno"),
         },
-        SqlitePluginStateRepository::new(pool),
-        FixedClock,
         FailureRuntimeLauncher { runtime },
         publisher,
         NoopNotificationSink,
     )
     .expect("open plugin lifecycle");
     lifecycle
-        .enable_plugin(EnablePluginRequest {
-            plugin_id: "official/ora.example".to_string(),
-        })
-        .await
-        .expect("enable plugin");
-    assert_eq!(
-        events.recv().await,
-        Some(PluginId::new("official", "ora.example").expect("plugin id"))
-    );
-    // Enabling starts the launch on its own task, and activation shares the plugin's operation
-    // queue, so awaiting it is what makes the settled running runtime observable below.
-    lifecycle
         .activate_plugin(ActivatePluginRequest {
             plugin_id: "official/ora.example".to_string(),
         })
         .await
         .expect("activate plugin");
+    assert_eq!(
+        events.recv().await,
+        Some(PluginId::new("official", "ora.example").expect("plugin id"))
+    );
     assert_eq!(
         events.recv().await,
         Some(PluginId::new("official", "ora.example").expect("plugin id"))
@@ -1295,30 +800,20 @@ async fn records_runtime_failure_without_disabling_plugin() {
     assert_eq!(
         lifecycle.list_installed_plugins(),
         ListInstalledPluginsResponse {
-            plugins: vec![expected_plugin_with_runtime(
-                PluginEnabledState::Enabled,
-                PluginRuntimeStatus::Failed {
-                    failure_reason: "process crashed".to_string(),
-                },
-            )],
+            plugins: vec![expected_plugin_with_runtime(PluginRuntimeStatus::Failed {
+                failure_reason: "process crashed".to_string(),
+            })],
         },
     );
 }
 
 /// Builds the complete expected wire contract for the shared package fixture.
-fn expected_plugin(enabled: bool) -> InstalledPlugin {
-    expected_plugin_with_runtime(
-        if enabled {
-            PluginEnabledState::Enabled
-        } else {
-            PluginEnabledState::Disabled
-        },
-        PluginRuntimeStatus::Stopped,
-    )
+fn expected_plugin() -> InstalledPlugin {
+    expected_plugin_with_runtime(PluginRuntimeStatus::Stopped)
 }
 
 /// Builds the expected wire contract for the static Skill package fixture.
-fn expected_skill_plugin(enabled: bool) -> InstalledPlugin {
+fn expected_skill_plugin() -> InstalledPlugin {
     InstalledPlugin {
         id: "official/ora.skill-pack".to_string(),
         namespace: "official".to_string(),
@@ -1329,18 +824,39 @@ fn expected_skill_plugin(enabled: bool) -> InstalledPlugin {
         homepage: None,
         license: None,
         contribution: InstalledPluginContribution::Skill,
-        enabled,
         logo: Some(PACKAGE_LOGO.to_string()),
         installation_validity: PluginInstallationValidity::Valid,
         configuration: PluginConfigurationSummary::NotDeclared,
         runtime: PluginRuntimeStatus::Stopped,
     }
 }
+
+/// Builds the expected wire contract for the static Hook package fixture.
+fn expected_hook_plugin() -> InstalledPlugin {
+    InstalledPlugin {
+        id: "official/rtk-ai.rtk".to_string(),
+        namespace: "official".to_string(),
+        name: "rtk-ai.rtk".to_string(),
+        display_name: "rtk-ai.rtk".to_string(),
+        version: "1.0.0".to_string(),
+        description: "Example Hook plugin".to_string(),
+        homepage: None,
+        license: None,
+        contribution: InstalledPluginContribution::Hook {
+            protocol: "rtk-rewrite-v1".to_string(),
+            command: "rtk".to_string(),
+            target: Some("x86_64-pc-windows-msvc".to_string()),
+            tool_version: "0.45.0".to_string(),
+        },
+        logo: Some(PACKAGE_LOGO.to_string()),
+        installation_validity: PluginInstallationValidity::Valid,
+        configuration: PluginConfigurationSummary::NotDeclared,
+        runtime: PluginRuntimeStatus::Stopped,
+    }
+}
+
 /// Builds the expected package contract with an explicit lifecycle state.
-fn expected_plugin_with_runtime(
-    enabled: PluginEnabledState,
-    runtime: PluginRuntimeStatus,
-) -> InstalledPlugin {
+fn expected_plugin_with_runtime(runtime: PluginRuntimeStatus) -> InstalledPlugin {
     InstalledPlugin {
         id: "official/ora.example".to_string(),
         namespace: "official".to_string(),
@@ -1353,7 +869,6 @@ fn expected_plugin_with_runtime(
         contribution: InstalledPluginContribution::Agent {
             agent_display_name: "ora.example".to_string(),
         },
-        enabled: enabled.is_enabled(),
         logo: Some(PACKAGE_LOGO.to_string()),
         installation_validity: PluginInstallationValidity::Valid,
         configuration: PluginConfigurationSummary::NotDeclared,
@@ -1689,10 +1204,9 @@ pub(super) fn package_version_root(data_dir: &std::path::Path, name: &str) -> st
 /// Writes one static Skill package without a process entrypoint.
 fn write_skill_plugin_package(data_dir: &std::path::Path, name: &str) {
     let package_root = package_version_root(data_dir, name);
-    fs::create_dir_all(package_root.join("assets/skills/review"))
-        .expect("create Skill plugin assets");
+    fs::create_dir_all(package_root.join("assets/review")).expect("create Skill plugin assets");
     fs::write(
-        package_root.join("assets/skills/review/SKILL.md"),
+        package_root.join("assets/review/SKILL.md"),
         "---\nname: review\ndescription: Reviews code\n---\n",
     )
     .expect("write bundled Skill manifest");
@@ -1710,6 +1224,44 @@ description = "Example Skill plugin"
     )
     .expect("write Skill plugin manifest");
 }
+
+/// Writes one processless Hook package with a contained executable and no `main.js`.
+fn write_hook_plugin_package(data_dir: &std::path::Path, name: &str) {
+    let package_root = package_version_root(data_dir, name);
+    fs::create_dir_all(package_root.join("assets")).expect("create Hook plugin assets");
+    fs::write(package_root.join("logo.svg"), PACKAGE_LOGO).expect("write plugin logo");
+    fs::write(
+        package_root.join("assets").join("config.json"),
+        r#"{
+            "schemaVersion": 1,
+            "hook": {
+                "protocol": "rtk-rewrite-v1",
+                "executable": "assets/rtk.exe",
+                "command": "rtk",
+                "toolVersion": "0.45.0"
+            }
+        }"#,
+    )
+    .expect("write Hook configuration");
+    fs::write(package_root.join("assets").join("rtk.exe"), b"MZdummy")
+        .expect("write Hook executable");
+    fs::write(
+        package_root.join("orax.toml"),
+        format!(
+            r#"identifier = "{name}"
+namespace = "official"
+kind = "hook"
+version = "1.0.0"
+description = "Example Hook plugin"
+
+[artifact]
+target = "x86_64-pc-windows-msvc"
+"#
+        ),
+    )
+    .expect("write Hook plugin manifest");
+}
+
 /// Writes one complete agent package into the versioned installed layout.
 pub(super) fn write_plugin_package(data_dir: &std::path::Path, name: &str) {
     let package_root = package_version_root(data_dir, name);

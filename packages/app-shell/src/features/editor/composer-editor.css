@@ -339,8 +339,12 @@
   background: color-mix(in oklch, var(--primary) 10%, var(--muted));
 }
 
-.composer-chip.ProseMirror-selectednode {
-  box-shadow: 0 0 0 2px var(--ring);
+.composer-chip.ProseMirror-selectednode,
+.composer-chip[data-chip-selected] {
+  border-radius: 0.12rem;
+  background: Highlight;
+  color: HighlightText;
+  box-shadow: none;
 }
 
 /*
@@ -392,26 +396,31 @@
   stroke-width: 2.5;
 }
 
+/* A chip with an active TaskChangesNavigationContext jumps to its source on
+ * plain click; the shared default above stays for the (rare) case where the
+ * composer renders outside that context. */
+.composer-editor-shell .composer-file-ref[data-navigable="true"] {
+  cursor: pointer;
+}
+
 .composer-editor-shell .composer-file-ref::selection,
 .composer-editor-shell .composer-file-ref *::selection {
   background: transparent;
   color: inherit;
 }
 
-.composer-editor-shell .composer-file-ref.ProseMirror-selectednode {
-  border-radius: 0.25rem;
-  background: color-mix(in oklch, var(--composer-file-ink) 14%, transparent);
-  box-shadow: 0 0 0 1px
-    color-mix(in oklch, var(--composer-file-ink) 35%, var(--ring));
-}
-
-/* Atom chips skip native ::selection. Range-select paints data-chip-selected
- * imperatively so the highlight tracks the pointer without a React re-render.
- * Match the platform Highlight wash — no outline, radius, or transition. */
+/* Atom chips skip native ::selection. Click-to-select and drag-select paint
+ * `data-chip-selected` on the chip (or its React wrapper). NodeSelection is
+ * a fallback: ProseMirror puts `ProseMirror-selectednode` on the wrapper,
+ * not `.composer-file-ref`, so both selectors are needed. */
 .composer-editor-shell [data-chip-selected].composer-file-ref,
 .composer-editor-shell [data-chip-selected] .composer-file-ref,
 .composer-editor-shell .composer-file-ref[data-chip-selected],
+.composer-editor-shell .composer-file-ref.ProseMirror-selectednode,
+.composer-editor-shell .ProseMirror-selectednode .composer-file-ref,
 .composer-editor-shell .composer-mention[data-chip-selected],
+.composer-editor-shell .composer-mention.ProseMirror-selectednode,
+.composer-editor-shell .ProseMirror-selectednode .composer-mention,
 .composer-editor-shell .composer-chip[data-chip-selected] {
   border-radius: 0.12rem;
   background: Highlight;
@@ -419,7 +428,8 @@
   box-shadow: none;
 }
 
-.composer-editor-shell [data-chip-selected] .composer-file-ref-range {
+.composer-editor-shell [data-chip-selected] .composer-file-ref-range,
+.composer-editor-shell .ProseMirror-selectednode .composer-file-ref-range {
   color: HighlightText;
 }
 
@@ -455,11 +465,6 @@
 .composer-mention::selection {
   background: transparent;
   color: inherit;
-}
-
-.composer-mention.ProseMirror-selectednode {
-  box-shadow: 0 0 0 1px
-    color-mix(in oklch, var(--composer-skill-ink) 40%, var(--ring));
 }
 
 .composer-editor-shell .tiptap.is-editor-empty p.is-empty::before {

@@ -1,6 +1,6 @@
 import type { ComposerFileAttrs } from "./composer-file";
 
-/** `start:end:path` info string of a file-preview citation fence. */
+/** `start:end:path` info string of a legacy file-preview citation fence. */
 const CITATION_INFO = /^(\d+):(\d+):(.+)$/;
 /** First line of the mini patch a diff-gutter quote expands to. */
 const DIFF_FILE_HEADER = /^diff --git a\/(.+) b\/(.+)$/;
@@ -12,9 +12,11 @@ const DIFF_HUNK_HEADER =
  * Reads a fenced quote payload back into the chip attrs it was expanded from.
  *
  * Sending a prompt flattens chips through `composerFilePlainText`, so surfaces
- * that only hold the sent text — chat history — need the inverse to show the
- * same chip the composer did. Returns null for every other fence so ordinary
- * code blocks keep rendering as code.
+ * that only hold the sent text — chat history, and a text-only draft restore —
+ * need the inverse to show the same chip the composer did. Today only
+ * diff-gutter quotes emit a fence; the `start:end:path` citation arm is kept
+ * so messages sent before the change still rebuild their chip. Returns null for
+ * every other fence so ordinary code blocks keep rendering as code.
  *
  * @param info Fence info string (language plus meta, joined by a space).
  * @param body Fence contents without the surrounding markers.

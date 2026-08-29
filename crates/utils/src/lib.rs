@@ -19,6 +19,7 @@ pub mod html;
 #[cfg(feature = "http")]
 pub mod http;
 pub mod path;
+pub mod process;
 mod slug;
 #[cfg(feature = "validation")]
 pub mod svg;

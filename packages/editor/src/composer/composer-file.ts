@@ -5,18 +5,18 @@ export interface ComposerFileAttrs {
   startLine?: number;
   endLine?: number;
   /**
-   * Source text captured at quote time. File-preview quotes expand to a
-   * `start:end:path` citation fence. Diff quotes store unified `+/-/ ` lines
-   * and expand to a mini `diff --git` patch so the agent sees an existing
-   * git change (add vs delete), not current file contents.
+   * Unified `+/-/ ` lines captured at quote time. Only diff-gutter quotes carry
+   * it; send expands them to a mini `diff --git` patch so the agent sees an
+   * existing git change (add vs delete), not current file contents. File-quote
+   * snippets are never captured, so those references stay a `path:range`.
    */
   snippet?: string;
   /** When `directory`, the chip renders a folder glyph; payload stays a path. */
   kind?: "file" | "directory";
   /**
-   * Diff-gutter quotes. File explorer / @ mentions omit this so send stays a
-   * source citation. Send expands to a `diff --git` patch the agent can treat
-   * as a review comment on that change.
+   * Diff-gutter quotes. File explorer / file-viewer quotes omit this so send
+   * stays a `path:range` reference. Send expands to a `diff --git` patch the
+   * agent can treat as a review comment on that change.
    */
   origin?: "diff";
   /**
@@ -54,24 +54,25 @@ export function composerFileLineRangeLabel(
 
 /**
  * Agent payload: diff-gutter quotes become a mini `diff --git` patch
- * (add/delete visible); file-preview quotes stay a `start:end:path` citation;
- * path-only `@` mentions stay a backtick path.
+ * (add/delete visible); every other reference — file-preview quotes and
+ * path-only `@` mentions — stays a backtick path (`path` or `path:range`).
+ * The selected lines never expand to the file body: the agent reads them from
+ * disk itself, so the composer chip and what is sent stay a reference.
  */
 export function composerFilePlainText(attrs: ComposerFileAttrs): string {
-  if (attrs.snippet !== undefined && attrs.startLine !== undefined) {
-    const end = attrs.endLine ?? attrs.startLine;
-    const fence = codeFenceMarker(attrs.snippet);
-    if (attrs.origin === "diff") {
-      return diffQuotePlainText(
-        attrs.path,
-        attrs.startLine,
-        end,
-        attrs.snippet,
-        attrs.diffSide,
-        fence,
-      );
-    }
-    return `\n${fence}${attrs.startLine}:${end}:${attrs.path}\n${attrs.snippet}\n${fence}\n`;
+  if (
+    attrs.origin === "diff" &&
+    attrs.snippet !== undefined &&
+    attrs.startLine !== undefined
+  ) {
+    return diffQuotePlainText(
+      attrs.path,
+      attrs.startLine,
+      attrs.endLine ?? attrs.startLine,
+      attrs.snippet,
+      attrs.diffSide,
+      codeFenceMarker(attrs.snippet),
+    );
   }
   const range = lineRange(attrs);
   const target = range === null ? attrs.path : `${attrs.path}:${range}`;
@@ -79,8 +80,8 @@ export function composerFilePlainText(attrs: ComposerFileAttrs): string {
 }
 
 /**
- * Hover title for the chip. Multiline payloads (citation fences / diff patches)
- * use the path so the native tooltip stays one line; ranged `@` mentions keep
+ * Hover title for the chip. Only the multi-line diff patch uses the bare path
+ * so the native tooltip stays one line; every single-line reference keeps
  * `path:start-end` without wrapping backticks.
  */
 export function composerFileChipTitle(attrs: ComposerFileAttrs): string {

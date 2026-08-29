@@ -24,12 +24,16 @@ export interface WorkspaceFileMatchTarget {
   line: number;
   column: number;
   matchedText: string;
+  /** Inclusive end of a cited range; omitted for a single line or search match. */
+  endLine?: number;
 }
 
 interface WorkspaceFileViewerProps {
   content: string;
   path: string;
   target: WorkspaceFileMatchTarget | null;
+  /** Clears the Files header jump label after a citation wash is dismissed. */
+  onDismissJump?: () => void;
 }
 
 interface ShikiTokenStyle extends CSSProperties {
@@ -51,6 +55,7 @@ export function WorkspaceFileViewer({
   content,
   path,
   target,
+  onDismissJump,
 }: WorkspaceFileViewerProps) {
   const { t } = useTranslation();
   const targetRow = useRef<HTMLSpanElement | null>(null);
@@ -66,10 +71,9 @@ export function WorkspaceFileViewer({
 
   const anchors = useMemo<QuoteLineAnchor[]>(
     () =>
-      lines.map((line, index) => ({
+      lines.map((_line, index) => ({
         key: String(index + 1),
         lineNumber: index + 1,
-        snippet: line,
         path,
       })),
     [lines, path],
@@ -83,6 +87,28 @@ export function WorkspaceFileViewer({
     onNumberClick,
     onNumberKeyDown,
   } = useQuoteLineSelection({ anchors });
+  // Jump/search wash is only a locate-then-read cue. Remembering the dismissed
+  // target object (not a boolean) means a later jump with a new object paints
+  // again without an effect to reset state.
+  const [dismissedTarget, setDismissedTarget] =
+    useState<WorkspaceFileMatchTarget | null>(null);
+  const highlightTarget =
+    target !== null && Object.is(target, dismissedTarget) ? null : target;
+  const isSearchMatch =
+    highlightTarget !== null && highlightTarget.matchedText.length > 0;
+  const citationStart = isSearchMatch ? undefined : highlightTarget?.line;
+  const citationEnd =
+    isSearchMatch || highlightTarget === null
+      ? undefined
+      : (highlightTarget.endLine ?? highlightTarget.line);
+  const citationLo =
+    citationStart === undefined || citationEnd === undefined
+      ? undefined
+      : Math.min(citationStart, citationEnd);
+  const citationHi =
+    citationStart === undefined || citationEnd === undefined
+      ? undefined
+      : Math.max(citationStart, citationEnd);
 
   useEffect(() => {
     let active = true;
@@ -133,22 +159,47 @@ export function WorkspaceFileViewer({
           data-quote-root
           data-selectable
           className="workspace-file-viewer min-w-max py-4 font-mono text-xs leading-5 text-foreground"
+          onMouseDown={(event) => {
+            if (event.button !== 0 || highlightTarget === null) return;
+            // Search matches stay until the user picks another result.
+            if (isSearchMatch) return;
+            if (!(event.target instanceof Element)) return;
+            if (event.target.closest("button") !== null) return;
+            const hit = event.target.closest("[data-cited-range='true']");
+            if (hit === null) {
+              setDismissedTarget(target);
+              onDismissJump?.();
+            }
+          }}
         >
           <code>
             {lines.map((line, index) => {
               const lineNumber = index + 1;
-              const isTarget = target?.line === lineNumber;
-              const match = isTarget
-                ? matchRange(line, target.column, target.matchedText)
+              const inCitedRange =
+                citationLo !== undefined &&
+                citationHi !== undefined &&
+                lineNumber >= citationLo &&
+                lineNumber <= citationHi;
+              const isSearchLine =
+                isSearchMatch && highlightTarget.line === lineNumber;
+              const isScrollTarget =
+                isSearchLine || (inCitedRange && lineNumber === citationStart);
+              const match = isSearchLine
+                ? matchRange(
+                    line,
+                    highlightTarget.column,
+                    highlightTarget.matchedText,
+                  )
                 : null;
               return (
                 <span
                   key={lineNumber}
-                  ref={isTarget ? targetRow : undefined}
-                  aria-current={isTarget ? "location" : undefined}
+                  ref={isScrollTarget ? targetRow : undefined}
+                  aria-current={isScrollTarget ? "location" : undefined}
                   data-line-number={lineNumber}
                   data-quote-key={lineNumber}
-                  className={`workspace-file-line group/line relative block ${isTarget ? "bg-amber-500/10" : ""}`}
+                  data-cited-range={inCitedRange ? "true" : undefined}
+                  className={`workspace-file-line group/line relative block ${isSearchLine ? "bg-amber-500/10" : ""}`}
                   onMouseDown={(event) => {
                     if (event.button !== 0) return;
                     if (

@@ -1,7 +1,6 @@
 mod commands;
-mod config;
-mod dashboard;
 mod error;
+mod legacy_config;
 mod open_external;
 mod open_location;
 mod settings_commands;
@@ -9,11 +8,12 @@ mod spec_commands;
 mod state;
 mod stream_forwarding;
 mod surface;
+mod update;
 mod workspace_files;
 
-use crate::config::DesktopConfigStore;
 use crate::error::DesktopBootstrapError;
 use crate::state::{BundledBinaryPaths, DesktopRuntimeGuard, DesktopState};
+use crate::update::DesktopUpdateMode;
 use ora_backend::{Backend, BackendError, BackendPaths};
 use ora_logging::{
     FileLoggingConfig, LogLevel, LogOutput, LoggingConfig, RotationPolicy, init_logging, ora_error,
@@ -45,8 +45,9 @@ const PLUGIN_HOME_DIRECTORY_NAME: &str = ".ora";
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = surface::register_workbench_protocol(tauri::Builder::default());
-    builder
+    let run_result = builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let (state, guard) = bootstrap_desktop(app)?;
             surface::install(app.handle(), &state.surfaces, &state.backend);
@@ -54,14 +55,23 @@ pub fn run() {
                 message = "bundled binary paths registered",
                 ripgrep_path = %state.binary_paths.ripgrep_path().display(),
                 deno_path = %state.binary_paths.deno_path().display(),
+                reaper_path = %state.binary_paths.reaper_path().display(),
             );
             app.manage(state);
             app.manage(guard);
             Ok(())
         })
         .invoke_handler(include!("app_commands.rs"))
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!());
+    // Tauri has released managed backend state at this point, so process owners already had an
+    // opportunity to shut down gracefully. The reaper now forcefully clears any survivors.
+    if let Err(error) = ora_process::shutdown_reaper() {
+        ora_error!(
+            message = "process reaper failed during Desktop shutdown",
+            error = %error,
+        );
+    }
+    run_result.expect("error while running tauri application");
 }
 
 /// Resolves Desktop paths and constructs configuration, logging, and Backend state.
@@ -73,8 +83,6 @@ fn bootstrap_desktop(
         .path()
         .home_dir()
         .map_err(DesktopBootstrapError::AppDataDirectory)?;
-    let config = DesktopConfigStore::load_or_create(&app_data_directory, &home_directory)?;
-    let config_snapshot = config.snapshot()?;
     let resolved_timezone = read_system_timezone();
     let startup_override = read_desktop_log_level_override(|key| std::env::var(key).ok())?;
     let provisional_log_level = startup_override.unwrap_or(LogLevel::Info);
@@ -114,19 +122,23 @@ fn bootstrap_desktop(
             return Err(error.into());
         }
     };
+    ora_process::initialize_reaper(binary_paths.reaper_path())
+        .map_err(DesktopBootstrapError::ProcessReaper)?;
     let ripgrep_path = binary_paths.ripgrep_path().to_path_buf();
+    let default_worktree_root = legacy_config::default_worktree_root(&home_directory);
     let backend = Backend::open(BackendPaths {
         database_path: app_data_directory.join("ora.sqlite3"),
         data_directory: home_directory.join(PLUGIN_HOME_DIRECTORY_NAME),
         deno_path: binary_paths.deno_path().to_path_buf(),
-        worktree_root: config_snapshot.worktree_root().to_path_buf(),
-        home_directory,
+        worktree_root: default_worktree_root,
+        home_directory: home_directory.clone(),
         relative_path_base: desktop_relative_path_base(&app_data_directory),
         sessions_root: app_data_directory.join("sessions"),
         skills_root: app_data_directory.join("atoms").join("skills"),
         ripgrep_path: ripgrep_path.clone(),
         timezone: resolved_timezone.timezone,
     })?;
+    legacy_config::migrate(&backend, &app_data_directory, &home_directory)?;
     let (configured_log_level, resolved_log_level) =
         tauri::async_runtime::block_on(load_desktop_log_level(&backend, startup_override))
             .map_err(DesktopBootstrapError::RuntimePreference)?;
@@ -142,6 +154,18 @@ fn bootstrap_desktop(
     );
     let workspace_files = Arc::new(workspace_files::WorkspaceFileApi::new(ripgrep_path));
     let surfaces = surface::SurfaceService::new(app.handle().clone(), backend.plugin_gateway());
+    let update = update::UpdateService::start(
+        app.handle().clone(),
+        backend.clone(),
+        &home_directory,
+        resolved_timezone.timezone,
+        if cfg!(debug_assertions) {
+            DesktopUpdateMode::Disabled
+        } else {
+            DesktopUpdateMode::Enabled
+        },
+    )
+    .map_err(DesktopBootstrapError::Update)?;
     let runtime_log_level = RuntimeLogLevelManager::new(
         level_control,
         backend.preferred_log_level_store(),
@@ -151,11 +175,10 @@ fn bootstrap_desktop(
     Ok((
         DesktopState {
             backend,
-            config,
+            update,
             runtime_log_level,
             workspace_files,
             binary_paths,
-            app_data_directory: app_data_directory.clone(),
             stream_cancellations: Arc::new(Mutex::new(HashMap::new())),
             surfaces,
         },

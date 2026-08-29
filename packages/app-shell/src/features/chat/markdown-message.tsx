@@ -45,6 +45,7 @@ import {
 import {
   fileQuoteMarkdownComponents,
   remarkComposerFileQuote,
+  remarkComposerFileReference,
 } from "./user-message-file-quotes";
 
 interface MarkdownMessageProps {
@@ -331,6 +332,7 @@ const compactMarkdownComponents = {
 const compactRemarkPlugins = [
   ...markdownRemarkPlugins,
   remarkComposerHighlight,
+  remarkComposerFileReference,
   remarkComposerFileQuote,
 ];
 

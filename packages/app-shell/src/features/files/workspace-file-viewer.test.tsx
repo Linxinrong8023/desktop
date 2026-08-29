@@ -44,6 +44,179 @@ describe("WorkspaceFileViewer", () => {
     });
   });
 
+  it("highlights every line in a cited range and scrolls to the start", async () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+
+    const { container } = render(
+      <WorkspaceFileViewer
+        content={"one\ntwo\nthree\nfour"}
+        path="README.md"
+        target={{ line: 2, column: 1, matchedText: "", endLine: 4 }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-line-number="2"]')).not.toBeNull(),
+    );
+    expect(container.querySelector('[data-line-number="2"]')).toHaveAttribute(
+      "aria-current",
+      "location",
+    );
+    expect(
+      container.querySelectorAll("[data-cited-range='true']"),
+    ).toHaveLength(3);
+    expect(
+      [...container.querySelectorAll("[data-cited-range='true']")].map((node) =>
+        node.getAttribute("data-line-number"),
+      ),
+    ).toEqual(["2", "3", "4"]);
+    expect(
+      container.querySelectorAll(
+        "[data-cited-range='true'] [data-quote-gutter]",
+      ),
+    ).toHaveLength(3);
+    expect(
+      container.querySelector('[data-line-number="1"]'),
+    ).not.toHaveAttribute("aria-current");
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      block: "center",
+      inline: "nearest",
+    });
+  });
+
+  it("keeps a search match when clicking another line", async () => {
+    const { container } = render(
+      <WorkspaceFileViewer
+        content={"first\nα main()\nlast"}
+        path="src/main.rs"
+        target={{ line: 2, column: 4, matchedText: "main" }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("main")).toBeInTheDocument());
+    fireEvent.mouseDown(container.querySelector('[data-line-number="1"]')!, {
+      button: 0,
+    });
+
+    expect(screen.getByText("main").closest("mark")).not.toBeNull();
+    expect(container.querySelector('[data-line-number="2"]')).toHaveAttribute(
+      "aria-current",
+      "location",
+    );
+    expect(container.querySelector("[data-cited-range='true']")).toBeNull();
+  });
+
+  it("does not dismiss a cited range when clicking the gutter + control", async () => {
+    const { container } = render(
+      <WorkspaceFileViewer
+        content={"one\ntwo\nthree\nfour"}
+        path="README.md"
+        target={{ line: 2, column: 1, matchedText: "", endLine: 4 }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", {
+          name: appI18n.t("files.quoteLineToChat", { line: 1 }),
+        }),
+      ).toBeInTheDocument(),
+    );
+    fireEvent.mouseDown(
+      screen.getByRole("button", {
+        name: appI18n.t("files.quoteLineToChat", { line: 1 }),
+      }),
+      { button: 0 },
+    );
+
+    expect(
+      container.querySelectorAll("[data-cited-range='true']"),
+    ).toHaveLength(3);
+  });
+
+  it("clears the cited-range highlight when clicking another line", async () => {
+    const { container } = render(
+      <WorkspaceFileViewer
+        content={"one\ntwo\nthree\nfour"}
+        path="README.md"
+        target={{ line: 2, column: 1, matchedText: "", endLine: 4 }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll("[data-cited-range='true']"),
+      ).toHaveLength(3),
+    );
+
+    fireEvent.mouseDown(container.querySelector('[data-line-number="1"]')!, {
+      button: 0,
+    });
+
+    expect(
+      container.querySelectorAll("[data-cited-range='true']"),
+    ).toHaveLength(0);
+    expect(
+      container.querySelector('[data-line-number="2"]'),
+    ).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps the cited-range highlight when clicking inside it", async () => {
+    const { container } = render(
+      <WorkspaceFileViewer
+        content={"one\ntwo\nthree\nfour"}
+        path="README.md"
+        target={{ line: 2, column: 1, matchedText: "", endLine: 4 }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-line-number="3"]')).not.toBeNull(),
+    );
+
+    fireEvent.mouseDown(container.querySelector('[data-line-number="3"]')!, {
+      button: 0,
+    });
+
+    expect(
+      container.querySelectorAll("[data-cited-range='true']"),
+    ).toHaveLength(3);
+  });
+
+  it("restores the cited-range highlight when a new jump target arrives", async () => {
+    const { container, rerender } = render(
+      <WorkspaceFileViewer
+        content={"one\ntwo\nthree\nfour"}
+        path="README.md"
+        target={{ line: 2, column: 1, matchedText: "", endLine: 4 }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll("[data-cited-range='true']"),
+      ).toHaveLength(3),
+    );
+    fireEvent.mouseDown(container.querySelector('[data-line-number="1"]')!, {
+      button: 0,
+    });
+    expect(
+      container.querySelectorAll("[data-cited-range='true']"),
+    ).toHaveLength(0);
+
+    rerender(
+      <WorkspaceFileViewer
+        content={"one\ntwo\nthree\nfour"}
+        path="README.md"
+        target={{ line: 2, column: 1, matchedText: "", endLine: 4 }}
+      />,
+    );
+
+    expect(
+      container.querySelectorAll("[data-cited-range='true']"),
+    ).toHaveLength(3);
+  });
+
   it("enables horizontal scrolling for long source lines", async () => {
     const { container } = render(
       <WorkspaceFileViewer
@@ -134,7 +307,7 @@ describe("WorkspaceFileViewer", () => {
     );
 
     expect(addComposerFileSelections).toHaveBeenCalledWith([
-      { path: "README.md", startLine: 2, endLine: 2, snippet: "two" },
+      { path: "README.md", startLine: 2, endLine: 2 },
     ]);
   });
 
@@ -167,7 +340,6 @@ describe("WorkspaceFileViewer", () => {
         path: "README.md",
         startLine: 2,
         endLine: 4,
-        snippet: "two\nthree\nfour",
       },
     ]);
   });
@@ -205,7 +377,6 @@ describe("WorkspaceFileViewer", () => {
         path: "README.md",
         startLine: 2,
         endLine: 4,
-        snippet: "two\nthree\nfour",
       },
     ]);
   });
@@ -269,7 +440,7 @@ describe("WorkspaceFileViewer", () => {
 
     fireEvent.keyDown(line(3), { key: "Enter", ctrlKey: true });
     expect(addComposerFileSelections).toHaveBeenCalledWith([
-      { path: "README.md", startLine: 2, endLine: 3, snippet: "two\nthree" },
+      { path: "README.md", startLine: 2, endLine: 3 },
     ]);
   });
 

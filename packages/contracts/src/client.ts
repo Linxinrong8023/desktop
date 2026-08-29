@@ -66,6 +66,12 @@ export function createContractsClient(
     workspace: {
       list: (request, options) =>
         executeOperation("listWorkspaces", request, transport, options),
+      getDiff: (request, options) =>
+        executeOperation("getWorkspaceDiff", request, transport, options),
+      commitChanges: (request, options) =>
+        executeOperation("commitWorkspaceChanges", request, transport, options),
+      pushBranch: (request, options) =>
+        executeOperation("pushWorkspaceBranch", request, transport, options),
     },
     task: {
       create: (request, options) =>
@@ -80,12 +86,6 @@ export function createContractsClient(
         executeOperation("updateTask", request, transport, options),
       delete: (request, options) =>
         executeOperation("deleteTask", request, transport, options),
-      getDiff: (request, options) =>
-        executeOperation("getTaskDiff", request, transport, options),
-      commitChanges: (request, options) =>
-        executeOperation("commitTaskChanges", request, transport, options),
-      pushBranch: (request, options) =>
-        executeOperation("pushTaskBranch", request, transport, options),
     },
     session: {
       warm: (request, options) =>
@@ -175,20 +175,42 @@ export function createContractsClient(
         executeOperation("listAvailablePlugins", request, transport, options),
       syncAvailable: (request, options) =>
         executeOperation("syncAvailablePlugins", request, transport, options),
+      readReadme: (request, options) =>
+        executeOperation("readPluginReadme", request, transport, options),
+      listSources: (request, options) =>
+        executeOperation("listMarketplaceSources", request, transport, options),
+      addSource: (request, options) =>
+        executeOperation("addMarketplaceSource", request, transport, options),
+      deleteSource: (request, options) =>
+        executeOperation(
+          "deleteMarketplaceSource",
+          request,
+          transport,
+          options,
+        ),
+      updateSource: (request, options) =>
+        executeOperation("updateMarketplaceSource", request, transport, options),
+
       listInstalled: (request, options) =>
         executeOperation("listInstalledPlugins", request, transport, options),
       getConfiguration: (request, options) =>
         executeOperation("getPluginConfiguration", request, transport, options),
       saveConfiguration: (request, options) =>
-        executeOperation("savePluginConfiguration", request, transport, options),
+        executeOperation(
+          "savePluginConfiguration",
+          request,
+          transport,
+          options,
+        ),
       resetConfiguration: (request, options) =>
-        executeOperation("resetPluginConfiguration", request, transport, options),
+        executeOperation(
+          "resetPluginConfiguration",
+          request,
+          transport,
+          options,
+        ),
       scan: (request, options) =>
         executeOperation("scanPlugins", request, transport, options),
-      enable: (request, options) =>
-        executeOperation("enablePlugin", request, transport, options),
-      disable: (request, options) =>
-        executeOperation("disablePlugin", request, transport, options),
       activate: (request, options) =>
         executeOperation("activatePlugin", request, transport, options),
       stop: (request, options) =>
@@ -197,8 +219,16 @@ export function createContractsClient(
         executeOperation("uninstallPlugin", request, transport, options),
       install: (request, options) =>
         executeOperation("installPlugin", request, transport, options),
+      update: (request, options) =>
+        executeOperation("updatePlugin", request, transport, options),
       import: (request, options) =>
         executeOperation("importPlugin", request, transport, options),
+    },
+    proxy: {
+      get: (request, options) =>
+        executeOperation("getProxySettings", request, transport, options),
+      set: (request, options) =>
+        executeOperation("setProxySettings", request, transport, options),
     },
     fileSystem: {
       listWorkspaceDirectory: (request, options) =>

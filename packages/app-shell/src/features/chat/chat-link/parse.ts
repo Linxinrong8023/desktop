@@ -21,6 +21,8 @@ const KNOWN_WORKSPACE_DIRECTORIES = new Set([
 export interface ParsedPathCandidate {
   path: string;
   line: number | undefined;
+  /** Inclusive end of a cited line range; omitted for a single-line jump. */
+  endLine: number | undefined;
   column: number | undefined;
 }
 
@@ -99,6 +101,23 @@ function countCharacter(value: string, target: string): number {
 
 /** Splits supported 1-based line/column suffixes from a path stem. */
 function splitLineSuffix(value: string): ParsedPathCandidate {
+  const lineRangePhrase = value.match(
+    /^(.*)\s+\(lines?\s+([1-9]\d*)\s*-\s*([1-9]\d*)(?:\s*,\s*col(?:umn)?\s+([1-9]\d*))?\)$/i,
+  );
+  if (lineRangePhrase !== null) {
+    const start = Number(lineRangePhrase[2]);
+    const end = Number(lineRangePhrase[3]);
+    return {
+      path: lineRangePhrase[1]!.trim(),
+      line: Math.min(start, end),
+      endLine: Math.max(start, end),
+      column:
+        lineRangePhrase[4] === undefined
+          ? undefined
+          : Number(lineRangePhrase[4]),
+    };
+  }
+
   const linePhrase = value.match(
     /^(.*)\s+\(line\s+([1-9]\d*)(?:\s*,\s*col(?:umn)?\s+([1-9]\d*))?\)$/i,
   );
@@ -106,7 +125,23 @@ function splitLineSuffix(value: string): ParsedPathCandidate {
     return {
       path: linePhrase[1]!.trim(),
       line: Number(linePhrase[2]),
+      endLine: undefined,
       column: linePhrase[3] === undefined ? undefined : Number(linePhrase[3]),
+    };
+  }
+
+  const fragmentRange = value.match(
+    /^(.*?)#L([1-9]\d*)-([1-9]\d*)(?:C([1-9]\d*))?$/i,
+  );
+  if (fragmentRange !== null) {
+    const start = Number(fragmentRange[2]);
+    const end = Number(fragmentRange[3]);
+    return {
+      path: fragmentRange[1]!,
+      line: Math.min(start, end),
+      endLine: Math.max(start, end),
+      column:
+        fragmentRange[4] === undefined ? undefined : Number(fragmentRange[4]),
     };
   }
 
@@ -115,6 +150,7 @@ function splitLineSuffix(value: string): ParsedPathCandidate {
     return {
       path: fragment[1]!,
       line: Number(fragment[2]),
+      endLine: undefined,
       column: fragment[3] === undefined ? undefined : Number(fragment[3]),
     };
   }
@@ -126,22 +162,48 @@ function splitLineSuffix(value: string): ParsedPathCandidate {
     return {
       path: query[1]!,
       line: Number(query[2]),
+      endLine: undefined,
       column: query[3] === undefined ? undefined : Number(query[3]),
+    };
+  }
+
+  const colonRange = value.match(
+    /^(.*?):([1-9]\d*)-([1-9]\d*)(?::([1-9]\d*))?$/,
+  );
+  if (colonRange !== null && !/^[A-Za-z]$/.test(colonRange[1]!)) {
+    const start = Number(colonRange[2]);
+    const end = Number(colonRange[3]);
+    return {
+      path: colonRange[1]!,
+      line: Math.min(start, end),
+      endLine: Math.max(start, end),
+      column: colonRange[4] === undefined ? undefined : Number(colonRange[4]),
     };
   }
 
   const match = value.match(/^(.*?):([1-9]\d*)(?::([1-9]\d*))?$/);
   if (match === null) {
-    return { path: value, line: undefined, column: undefined };
+    return {
+      path: value,
+      line: undefined,
+      endLine: undefined,
+      column: undefined,
+    };
   }
   const stem = match[1]!;
   // A single letter before a colon is a Windows drive, not a line number.
   if (/^[A-Za-z]$/.test(stem)) {
-    return { path: value, line: undefined, column: undefined };
+    return {
+      path: value,
+      line: undefined,
+      endLine: undefined,
+      column: undefined,
+    };
   }
   return {
     path: stem,
     line: Number(match[2]),
+    endLine: undefined,
     column: match[3] === undefined ? undefined : Number(match[3]),
   };
 }
@@ -157,6 +219,7 @@ export function parsePathCandidate(raw: string): ParsedPathCandidate {
   return {
     path: stripRelativePrefix(parsed.path),
     line: parsed.line,
+    endLine: parsed.endLine,
     column: parsed.column,
   };
 }

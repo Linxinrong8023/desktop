@@ -1,11 +1,14 @@
 use crate::declaration::parse_strict_json;
 use crate::filesystem::{ConfigurationFileSystem, StandardConfigurationFileSystem};
+use crate::mcp::{
+    CompileConfigurationFileError, CompiledConfigurationFile, compile_configuration_file,
+};
 use crate::values::{StoredConfiguration, details_from, validate_values};
 use crate::{
     CompileDeclarationError, CompiledDeclaration, MAX_DECLARATION_BYTES, SettingDeclaration,
-    SettingValue, compile_declaration,
+    SettingValue,
 };
-use ora_utils::Slug;
+use ora_domain::PluginId;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -86,7 +89,7 @@ pub enum ConfigurationError {
         source: std::io::Error,
     },
     #[error("Plugin Configuration declaration is invalid: {0}")]
-    InvalidDeclaration(#[from] CompileDeclarationError),
+    InvalidDeclaration(#[from] CompileConfigurationFileError),
     #[error("plugin does not declare configuration")]
     NotDeclared,
     #[error("Plugin Configuration declaration changed while it was being edited")]
@@ -120,6 +123,14 @@ pub enum ConfigurationError {
     },
 }
 
+impl From<CompileDeclarationError> for ConfigurationError {
+    /// Keeps `?` working for Settings-only compile failures after the variant broadened to
+    /// carry both strict `assets/config.json` shapes.
+    fn from(error: CompileDeclarationError) -> Self {
+        Self::InvalidDeclaration(error.into())
+    }
+}
+
 /// Owns declaration lookup and Stored Setting Value resolution below one host data root.
 #[derive(Debug, Clone)]
 pub struct ConfigurationService<FileSystem = StandardConfigurationFileSystem> {
@@ -145,12 +156,26 @@ impl ConfigurationService<StandardConfigurationFileSystem> {
     pub fn declaration_from_package(
         package_root: &Path,
     ) -> Result<Option<CompiledDeclaration>, ConfigurationError> {
+        Self::package_service().load_declaration(package_root)
+    }
+
+    /// Loads and compiles one package `assets/config.json` in whichever strict shape it declares.
+    ///
+    /// Package validation dispatches on the result to enforce kind policy: an MCP package must
+    /// compile to the MCP shape and every other kind must not.
+    pub fn configuration_file_from_package(
+        package_root: &Path,
+    ) -> Result<Option<CompiledConfigurationFile>, ConfigurationError> {
+        Self::package_service().load_configuration_file(package_root)
+    }
+
+    /// Builds a throwaway service for package-scoped reads that never touch a data root.
+    fn package_service() -> Self {
         Self {
             data_root: PathBuf::new(),
             file_system: StandardConfigurationFileSystem,
             locks: Arc::new(Mutex::new(BTreeMap::new())),
         }
-        .load_declaration(package_root)
     }
 }
 
@@ -346,10 +371,29 @@ where
     }
 
     /// Loads and compiles the optional immutable package declaration.
+    ///
+    /// An MCP-shaped file contributes exactly its Settings subset here, so the value editor and
+    /// summaries treat an MCP package without Settings like any package without a declaration.
     fn load_declaration(
         &self,
         package_root: &Path,
     ) -> Result<Option<CompiledDeclaration>, ConfigurationError> {
+        Ok(self
+            .load_configuration_file(package_root)?
+            .and_then(|file| match file {
+                CompiledConfigurationFile::Settings(declaration) => Some(declaration),
+                CompiledConfigurationFile::Mcp(configuration) => configuration.settings,
+                // A Hook Configuration may declare a future plugin-global Settings subset; RTK
+                // v0.1.0 declares none, so the settings summary stays NotDeclared until one ships.
+                CompiledConfigurationFile::Hook(configuration) => configuration.settings,
+            }))
+    }
+
+    /// Loads and compiles the optional `assets/config.json` in whichever strict shape it declares.
+    fn load_configuration_file(
+        &self,
+        package_root: &Path,
+    ) -> Result<Option<CompiledConfigurationFile>, ConfigurationError> {
         let declaration_path = package_root.join("assets").join("config.json");
         // `NotADirectory` means an intermediate path component is a file (common when uninstall
         // staging leaves a non-directory package root). That is the same as a missing declaration
@@ -368,7 +412,7 @@ where
                 });
             }
         };
-        Ok(Some(compile_declaration(&source)?))
+        Ok(Some(compile_configuration_file(&source)?))
     }
 
     /// Reads one revisioned value file while preserving malformed data for explicit recovery.
@@ -444,31 +488,23 @@ where
 
     /// Resolves a plugin-global value path from a validated namespaced identifier.
     fn store_path(&self, plugin_id: &str) -> Result<PathBuf, ConfigurationError> {
-        let Some((namespace, name)) = plugin_id.split_once('/') else {
-            return Err(ConfigurationError::InvalidPluginId {
-                plugin_id: plugin_id.to_string(),
-            });
-        };
-        let namespace =
-            Slug::parse(namespace).map_err(|_| ConfigurationError::InvalidPluginId {
+        let plugin_id =
+            PluginId::parse(plugin_id).map_err(|_| ConfigurationError::InvalidPluginId {
                 plugin_id: plugin_id.to_string(),
             })?;
-        let name = Slug::parse(name).map_err(|_| ConfigurationError::InvalidPluginId {
-            plugin_id: plugin_id.to_string(),
-        })?;
         Ok(self
             .data_root
             .join("plugins")
             .join("data")
-            .join(namespace.as_str())
-            .join(name.as_str())
+            .join(plugin_id.namespace())
+            .join(plugin_id.name())
             .join("store.json"))
     }
 
     /// Returns the process-local serialization gate for one plugin identifier.
     fn plugin_lock(&self, plugin_id: &str) -> Result<Arc<Mutex<()>>, ConfigurationError> {
-        // The store path is constructed from canonical Slugs, so differently cased requests use
-        // the same lock on case-insensitive filesystems as well as the same value file.
+        // The store path is constructed from canonical plugin-id segments, so differently cased
+        // requests use the same lock on case-insensitive filesystems as well as the same value file.
         let lock_key = self.store_path(plugin_id)?;
         let mut locks = self
             .locks
@@ -658,6 +694,61 @@ mod tests {
                 actual: 1,
             })
         ));
+    }
+
+    /// Plugin ids whose name segment contains `.` use the same store layout as hyphenated names.
+    #[test]
+    fn persists_settings_for_dotted_plugin_name_segments() {
+        let temporary = TempDir::new().expect("create plugin configuration root");
+        let package_root = temporary.path().join("package");
+        fs::create_dir_all(package_root.join("assets")).expect("create package assets");
+        fs::write(
+            package_root.join("assets").join("config.json"),
+            r#"{
+              "schemaVersion": 1,
+              "settings": {
+                "apiKey": {
+                  "type": "string",
+                  "title": "API key",
+                  "description": "Credential",
+                  "required": true
+                }
+              }
+            }"#,
+        )
+        .expect("write declaration");
+        let service = ConfigurationService::new(temporary.path());
+        let loaded = service
+            .get("official/ora-space.tavily-search", &package_root)
+            .expect("load dotted plugin id")
+            .expect("declaration is present");
+        let saved = service
+            .save(
+                "official/ora-space.tavily-search",
+                &package_root,
+                loaded.revision,
+                &loaded.declaration.fingerprint,
+                BTreeMap::from([(
+                    "apiKey".to_string(),
+                    SettingValue::String("tvly-test".to_string()),
+                )]),
+            )
+            .expect("save dotted plugin id settings");
+        assert_eq!(
+            saved.summary,
+            ConfigurationSummary::Available {
+                completeness: ConfigurationCompleteness::Complete,
+            }
+        );
+        assert_eq!(
+            fs::read_to_string(
+                temporary
+                    .path()
+                    .join("plugins/data/official/ora-space.tavily-search/store.json")
+            )
+            .expect("read store.json"),
+            r#"{"schemaVersion":1,"revision":1,"values":{"apiKey":"tvly-test"}}"#
+        );
     }
 
     /// Upgrades hide removed values, surface incompatible values, and prune both on the next save.

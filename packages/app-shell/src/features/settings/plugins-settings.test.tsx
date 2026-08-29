@@ -39,12 +39,27 @@ function renderSettings(
   );
 }
 
+/** Opens the header management menu and picks "Manage plugins" from the marketplace. */
+async function openManagePlugins(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole("button", {
+      name: /插件管理操作|Plugin management actions/,
+    }),
+  );
+  await user.click(
+    await screen.findByRole("menuitem", { name: /管理插件|Manage plugins/ }),
+  );
+}
+
 /** The registry-supplied brand mark, already security-validated by the backend. */
 const WEATHER_LOGO =
   '<svg xmlns="http://www.w3.org/2000/svg"><rect width="8"/></svg>';
 
 function clientWithWeather(logo: string | null = null) {
   const state = createMockClientState();
+  // This file exercises install/import flows in isolation from the seeded agent
+  // packages, so installed-plugin assertions can count exactly the fixture under test.
+  state.installedPlugins = [];
   state.availablePlugins.push({
     id: "official/weather",
     name: "weather",
@@ -54,6 +69,7 @@ function clientWithWeather(logo: string | null = null) {
     version: "1.2.0",
     description: "Weather plugin",
     logo,
+    compatibility: "compatible",
   });
   return { state, client: createMockClient(state) };
 }
@@ -71,7 +87,6 @@ function weatherInstalled(): InstalledPlugin {
     license: null,
     kind: "agent",
     agentDisplayName: "weather",
-    enabled: false,
     logo: null,
     installationValidity: { validity: "valid" },
     configuration: { state: "not_declared" },
@@ -123,9 +138,6 @@ it("renders marketplace plugins from the registry index", async () => {
   renderSettings(client);
 
   expect(await screen.findByText("Weather")).toBeInTheDocument();
-  expect(
-    screen.getByText(/weather · official · agent · 1.2.0/),
-  ).toBeInTheDocument();
   expect(screen.getByText("Weather plugin")).toBeInTheDocument();
 });
 
@@ -146,7 +158,7 @@ it("installs a marketplace plugin through the backend", async () => {
     version: "1.2.0",
   });
   expect(
-    await screen.findByRole("button", { name: /卸载|Uninstall/ }),
+    await screen.findByRole("button", { name: /已安装|Installed/ }),
   ).toBeInTheDocument();
 });
 
@@ -207,6 +219,7 @@ it("imports a local archive through the backend", async () => {
     .mockImplementation(() => "toast");
   renderSettings(client, platform);
 
+  await openManagePlugins(user);
   await user.click(
     await screen.findByRole("button", { name: /导入插件|Import plugin/ }),
   );
@@ -219,7 +232,6 @@ it("imports a local archive through the backend", async () => {
   await waitFor(() => expect(state.installedPlugins).toHaveLength(1));
   expect(state.installedPlugins[0]).toMatchObject({
     id: "official/weather",
-    enabled: true,
   });
   expect(successToast).toHaveBeenCalledWith(
     expect.stringMatching(/插件已导入|Plugin imported/),
@@ -238,6 +250,7 @@ it("reports a path-picker failure when importing", async () => {
     .mockImplementation(() => "toast");
   renderSettings(client, platform);
 
+  await openManagePlugins(user);
   await user.click(
     await screen.findByRole("button", { name: /导入插件|Import plugin/ }),
   );
@@ -278,15 +291,41 @@ it("renders the brand mark of an installed plugin in the manager", async () => {
 
   await user.click(await screen.findByRole("button", { name: /安装|Install/ }));
   await waitFor(() => expect(state.installedPlugins).toHaveLength(1));
-  await user.click(
-    screen.getByRole("button", { name: /管理插件|Manage plugins/ }),
-  );
+  await openManagePlugins(user);
 
   await screen.findByText("official/weather");
   expect(container.querySelector("img")).toHaveAttribute(
     "src",
     `data:image/svg+xml;charset=utf-8,${encodeURIComponent(WEATHER_LOGO)}`,
   );
+});
+
+/** The manager exposes lifecycle controls that start and stop an installed plugin. */
+it("starts and stops an installed plugin from the manager", async () => {
+  const user = userEvent.setup();
+  const state = createMockClientState();
+  state.installedPlugins = [weatherInstalled()];
+  const client = createMockClient(state);
+  renderSettings(client);
+
+  await openManagePlugins(user);
+  await screen.findByText("official/weather");
+
+  await user.click(await screen.findByRole("button", { name: /启动|Start/ }));
+  await waitFor(() => {
+    expect(
+      screen.getByRole("button", { name: /停止|Stop/ }),
+    ).toBeInTheDocument();
+  });
+  expect(state.installedPlugins[0].runtime).toBe("running");
+
+  await user.click(screen.getByRole("button", { name: /停止|Stop/ }));
+  await waitFor(() => {
+    expect(
+      screen.getByRole("button", { name: /启动|Start/ }),
+    ).toBeInTheDocument();
+  });
+  expect(state.installedPlugins[0].runtime).toBe("stopped");
 });
 
 /** Host-rendered fields preserve defaults and explicit boolean false through Save. */
@@ -355,9 +394,7 @@ it("configures declared plugin settings and keeps the editor open after save", a
   const save = vi.spyOn(client.plugin, "saveConfiguration");
   renderSettings(client);
 
-  await user.click(
-    await screen.findByRole("button", { name: /管理插件|Manage plugins/ }),
-  );
+  await openManagePlugins(user);
   await user.click(
     await screen.findByRole("button", { name: /配置|Configure/ }),
   );
@@ -391,9 +428,7 @@ it("removes an existing stored override when one field is reset and saved", asyn
   const save = vi.spyOn(client.plugin, "saveConfiguration");
   renderSettings(client);
 
-  await user.click(
-    await screen.findByRole("button", { name: /管理插件|Manage plugins/ }),
-  );
+  await openManagePlugins(user);
   await user.click(
     await screen.findByRole("button", { name: /配置|Configure/ }),
   );
@@ -412,9 +447,7 @@ it("requires an explicit decision before leaving a dirty configuration editor", 
   const { client } = clientWithPluginConfiguration();
   renderSettings(client);
 
-  await user.click(
-    await screen.findByRole("button", { name: /管理插件|Manage plugins/ }),
-  );
+  await openManagePlugins(user);
   await user.click(
     await screen.findByRole("button", { name: /配置|Configure/ }),
   );
@@ -437,9 +470,7 @@ it("preserves a configuration draft when the declaration changes during save", a
   const { state, client } = clientWithPluginConfiguration();
   renderSettings(client);
 
-  await user.click(
-    await screen.findByRole("button", { name: /管理插件|Manage plugins/ }),
-  );
+  await openManagePlugins(user);
   await user.click(
     await screen.findByRole("button", { name: /配置|Configure/ }),
   );
@@ -473,9 +504,7 @@ it("confirms corrupt configuration recovery before replacing values", async () =
   const reset = vi.spyOn(client.plugin, "resetConfiguration");
   renderSettings(client);
 
-  await user.click(
-    await screen.findByRole("button", { name: /管理插件|Manage plugins/ }),
-  );
+  await openManagePlugins(user);
   await user.click(
     await screen.findByRole("button", { name: /配置|Configure/ }),
   );
@@ -501,4 +530,168 @@ it("confirms corrupt configuration recovery before replacing values", async () =
     }),
   );
   expect(await screen.findByLabelText(/Endpoint/)).toBeInTheDocument();
+});
+
+/** Host-incompatible marketplace listings keep Install disabled and explain why. */
+it("disables install for a host-incompatible marketplace plugin", async () => {
+  const state = createMockClientState();
+  state.availablePlugins.push({
+    id: "official/rtk-ai.rtk",
+    name: "rtk-ai.rtk",
+    title: "RTK",
+    kind: "hook",
+    namespace: "official",
+    version: "0.1.0",
+    description: "RTK command rewrite hook",
+    logo: null,
+    compatibility: "incompatible",
+    reason:
+      "this release supports x86_64-pc-windows-msvc but your host is aarch64-apple-darwin",
+  });
+  renderSettings(createMockClient(state));
+
+  expect(await screen.findByText("RTK")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /安装|Install/ })).toBeDisabled();
+  expect(
+    screen.getByText(
+      /this release supports x86_64-pc-windows-msvc but your host is aarch64-apple-darwin/,
+    ),
+  ).toBeInTheDocument();
+});
+
+/** A Hook package without Settings has no Configure action and surfaces its descriptor. */
+it("shows hook descriptor fields and hides configure when settings are not declared", async () => {
+  const user = userEvent.setup();
+  const state = createMockClientState();
+  state.installedPlugins.push({
+    id: "official/rtk-ai.rtk",
+    namespace: "official",
+    name: "rtk-ai.rtk",
+    displayName: "rtk-ai.rtk",
+    version: "0.1.0",
+    description: "RTK command rewrite hook",
+    homepage: null,
+    license: null,
+    kind: "hook",
+    protocol: "rtk-rewrite-v1",
+    command: "rtk",
+    target: "x86_64-pc-windows-msvc",
+    toolVersion: "0.45.0",
+    logo: null,
+    installationValidity: { validity: "valid" },
+    configuration: { state: "not_declared" },
+    runtime: "stopped",
+  });
+  renderSettings(createMockClient(state));
+
+  await openManagePlugins(user);
+  expect(await screen.findByText("official/rtk-ai.rtk")).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      /0\.1\.0 · hook · stopped · rtk-rewrite-v1 · rtk · x86_64-pc-windows-msvc · 0\.45\.0/,
+    ),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /配置|Configure/ }),
+  ).not.toBeInTheDocument();
+});
+
+/** A command-alias conflict is a successful install that the toast must name the colliding plugin. */
+it("reports a command-alias conflict after a successful install", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithWeather();
+  state.installOutcome = {
+    state: "installed_with_command_conflict",
+    conflictPluginId: "official/other-rtk",
+  };
+  const successToast = vi
+    .spyOn(toast, "success")
+    .mockClear()
+    .mockImplementation(() => "toast");
+  renderSettings(client);
+
+  await user.click(await screen.findByRole("button", { name: /安装|Install/ }));
+
+  await waitFor(() => expect(state.installedPlugins).toHaveLength(1));
+  await waitFor(() => expect(successToast).toHaveBeenCalled());
+  expect(successToast.mock.calls[0]?.[0]).toEqual(
+    expect.stringMatching(/official\/other-rtk/),
+  );
+});
+
+/** The header gear offers the manage-plugin and manage-marketplace destinations. */
+it("opens the management menu from the marketplace header", async () => {
+  const user = userEvent.setup();
+  const { client } = clientWithWeather();
+  renderSettings(client);
+
+  await user.click(
+    await screen.findByRole("button", {
+      name: /插件管理操作|Plugin management actions/,
+    }),
+  );
+
+  expect(
+    await screen.findByRole("menuitem", { name: /管理插件|Manage plugins/ }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("menuitem", { name: /管理市场|Manage marketplace/ }),
+  ).toBeInTheDocument();
+});
+
+/** Clicking a marketplace card opens its README detail page rendered from the backend. */
+it("opens the README page when a marketplace card is clicked", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithWeather();
+  state.pluginReadmes.set(
+    "official/weather",
+    "# Weather\n\nLive forecasts every hour.",
+  );
+  renderSettings(client);
+
+  await user.click(await screen.findByText("Weather"));
+
+  expect(
+    await screen.findByText("Live forecasts every hour."),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Weather" }),
+  ).toBeInTheDocument();
+});
+
+/** The README page breadcrumb returns to the marketplace grid. */
+it("returns from the README page to the marketplace grid", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithWeather();
+  state.pluginReadmes.set("official/weather", "# Weather");
+  renderSettings(client);
+
+  await user.click(await screen.findByText("Weather"));
+  await user.click(await screen.findByRole("button", { name: /插件|Plugins/ }));
+
+  expect(await screen.findByText("Weather plugin")).toBeInTheDocument();
+});
+
+/** A listing with no README still opens its detail page and explains the absence. */
+it("shows an empty state when a listing publishes no README", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithWeather();
+  state.pluginReadmes.delete("official/weather");
+  renderSettings(client);
+
+  await user.click(await screen.findByText("Weather"));
+
+  expect(
+    await screen.findByText(/该插件没有提供 README|does not ship a README/),
+  ).toBeInTheDocument();
+});
+
+/** Marketplace descriptions stay on one line and ellipsize instead of wrapping. */
+it("keeps marketplace descriptions to a single truncated line", async () => {
+  const { client } = clientWithWeather();
+  renderSettings(client);
+
+  const description = await screen.findByText("Weather plugin");
+  expect(description).toHaveClass("truncate");
+  expect(description).not.toHaveClass("line-clamp-2");
 });

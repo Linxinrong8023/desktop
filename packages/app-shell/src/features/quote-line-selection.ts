@@ -9,7 +9,8 @@ import { addComposerFileSelections } from "./chat/add-composer-file-selection";
 export interface QuoteLineAnchor {
   key: string;
   lineNumber: number;
-  snippet: string;
+  /** Unified `+/-/ ` line text — diff quotes only; file previews omit it (send stays a path reference). */
+  snippet?: string;
   path: string;
   /** Drag lock group (diff side). Undefined means a single flat surface. */
   group?: string;
@@ -22,7 +23,8 @@ export interface QuoteLineSelection {
   path: string;
   startLine: number;
   endLine: number;
-  snippet: string;
+  /** Diff `+/-/ ` body; absent for file-preview quotes. */
+  snippet?: string;
   origin?: "diff";
   /** Present when every quoted line is the same side; mixed add/delete omits it. */
   diffSide?: "old" | "new";
@@ -476,7 +478,9 @@ export function useQuoteLineSelection<T extends QuoteLineAnchor>({
 /**
  * One chip for a visual run. Diff mixed add/delete still uses min–max line
  * numbers (Cursor-style `L1-5`) and the new-side path when any insert/context
- * row is present; `diffSide` is omitted when the run spans both sides.
+ * row is present; `diffSide` is omitted when the run spans both sides. The
+ * unified `+/-/ ` snippet is only carried when the run is a diff quote — file
+ * previews reference path + lines so the agent reads the body itself.
  */
 function selectionFromAnchors<T extends QuoteLineAnchor>(
   run: readonly T[],
@@ -489,11 +493,14 @@ function selectionFromAnchors<T extends QuoteLineAnchor>(
     if (anchor.lineNumber > endLine) endLine = anchor.lineNumber;
   }
   const newSide = run.find((anchor) => anchor.diffSide === "new");
+  const snippets = run.map((anchor) => anchor.snippet);
   const selection: QuoteLineSelection = {
     path: newSide?.path ?? first.path,
     startLine,
     endLine,
-    snippet: run.map((anchor) => anchor.snippet).join("\n"),
+    ...(snippets.some((snippet) => snippet !== undefined)
+      ? { snippet: snippets.map((snippet) => snippet ?? "").join("\n") }
+      : {}),
   };
   if (run.some((anchor) => anchor.origin === "diff")) {
     selection.origin = "diff";

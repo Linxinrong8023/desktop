@@ -1,36 +1,64 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { AvailablePlugin, InstalledPlugin } from "@ora/contracts";
+import type { TFunction } from "i18next";
+import type {
+  AvailablePlugin,
+  InstalledPlugin,
+  InstallOutcome,
+} from "@ora/contracts";
 import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
   Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   Input,
   toast,
 } from "@ora/ui";
 import {
+  IconArrowBigUpLines,
+  IconCircleCheck,
   IconLoader2,
+  IconPlus,
+  IconProgressDown,
   IconRefresh,
   IconSearch,
-  IconUpload,
+  IconSettings,
 } from "@tabler/icons-react";
 import { localizeContractError } from "../../i18n/contract-error";
 import { usePlatform } from "../../platform";
 import { useAvailablePlugins } from "../../state/hooks/use-available-plugins";
 import { useInstallPlugin } from "../../state/hooks/use-install-plugin";
+import { useUpdatePlugin } from "../../state/hooks/use-update-plugin";
 import { useInstalledPlugins } from "../../state/hooks/use-installed-plugins";
 import { usePluginImport } from "../../state/hooks/use-plugin-import";
-import { usePluginMutations } from "../../state/hooks/use-plugin-mutations";
 import { usePluginRegistrySync } from "../../state/hooks/use-plugin-registry-sync";
 import { PluginLogo } from "./plugin-logo";
+import { PluginSourcesManager } from "./plugin-sources-manager";
 import { PluginManager } from "./plugin-manager";
+import { PluginReadmeView } from "./plugin-readme-view";
 import { PluginConfigurationEditor } from "./plugin-configuration-editor";
 import type { PluginConfigurationNavigationGuard } from "./plugin-configuration-editor";
+
+/** The registry kind order shown in the marketplace, mirroring the contracts docs. */
+const MARKETPLACE_KIND_ORDER = [
+  "agent",
+  "workbench",
+  "webview",
+  "skill",
+  "mcp",
+  "hook",
+];
+
+/** Readable marketplace section labels for the known plugin kinds. */
+const MARKETPLACE_KIND_LABELS: Record<string, string> = {
+  agent: "Agent",
+  workbench: "Workbench",
+  webview: "Webview",
+  skill: "Skill",
+  mcp: "MCP",
+  hook: "Hook",
+};
 
 /**
  * The plugin marketplace pane backed by the registry contract: the browse grid reads the
@@ -47,11 +75,15 @@ export function PluginsSettings({
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [managing, setManaging] = useState(false);
+  const [managingSources, setManagingSources] = useState(false);
   const [configurationPlugin, setConfigurationPlugin] = useState<{
     id: string;
     displayName: string;
   } | null>(null);
   const [selecting, setSelecting] = useState(false);
+  const [readmePlugin, setReadmePlugin] = useState<AvailablePlugin | null>(
+    null,
+  );
 
   const platform = usePlatform();
   const available = useAvailablePlugins();
@@ -64,6 +96,13 @@ export function PluginsSettings({
     for (const plugin of installed.data ?? []) byId.set(plugin.id, plugin);
     return byId;
   }, [installed.data]);
+
+  const availableById = useMemo(() => {
+    const byId = new Map<string, AvailablePlugin>();
+    for (const plugin of available.data?.plugins ?? [])
+      byId.set(plugin.id, plugin);
+    return byId;
+  }, [available.data]);
 
   const needle = query.trim().toLowerCase();
   const visiblePlugins = useMemo(
@@ -83,6 +122,24 @@ export function PluginsSettings({
     [available.data, needle],
   );
 
+  const groupedPlugins = useMemo(() => {
+    const byKind = new Map<string, AvailablePlugin[]>();
+    for (const plugin of visiblePlugins) {
+      const group = byKind.get(plugin.kind) ?? [];
+      group.push(plugin);
+      byKind.set(plugin.kind, group);
+    }
+    return [...byKind.entries()].sort(([left], [right]) => {
+      const leftRank = MARKETPLACE_KIND_ORDER.indexOf(left);
+      const rightRank = MARKETPLACE_KIND_ORDER.indexOf(right);
+      const leftIndex =
+        leftRank === -1 ? MARKETPLACE_KIND_ORDER.length : leftRank;
+      const rightIndex =
+        rightRank === -1 ? MARKETPLACE_KIND_ORDER.length : rightRank;
+      return leftIndex - rightIndex || left.localeCompare(right);
+    });
+  }, [visiblePlugins]);
+
   const updatedAt = available.data?.updatedAt;
   const lastSynced =
     updatedAt === undefined || updatedAt === 0n
@@ -99,7 +156,14 @@ export function PluginsSettings({
       importPlugin.mutate(
         { path },
         {
-          onSuccess: () => toast.success(t("settings.plugins.importSuccess")),
+          onSuccess: (response) =>
+            toast.success(
+              installOutcomeMessage(
+                response.outcome,
+                t,
+                "settings.plugins.importSuccess",
+              ),
+            ),
           onError: (cause) =>
             toast.error(t("settings.plugins.importFailed"), {
               description: localizeContractError(cause, t),
@@ -117,6 +181,19 @@ export function PluginsSettings({
     }
   };
 
+  if (readmePlugin !== null) {
+    return (
+      <PluginReadmeView
+        plugin={readmePlugin}
+        onBack={() => setReadmePlugin(null)}
+      />
+    );
+  }
+
+  if (managingSources) {
+    return <PluginSourcesManager onBack={() => setManagingSources(false)} />;
+  }
+
   if (managing) {
     if (configurationPlugin !== null) {
       return (
@@ -132,6 +209,9 @@ export function PluginsSettings({
       <PluginManager
         plugins={installed.data ?? []}
         onBack={() => setManaging(false)}
+        availableById={availableById}
+        onImport={() => void handleImport()}
+        importing={importPlugin.isPending || selecting}
         onConfigure={(plugin) =>
           setConfigurationPlugin({
             id: plugin.id,
@@ -145,67 +225,74 @@ export function PluginsSettings({
   return (
     <div className="space-y-5">
       <header>
-        <h2 className="text-lg font-semibold">{t("settings.plugins.title")}</h2>
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-lg font-semibold">
+            {t("settings.plugins.title")}
+          </h2>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label={t("settings.plugins.manageActions")}
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-accent data-popup-open:text-foreground"
+            >
+              <IconSettings className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44">
+              <DropdownMenuItem onClick={() => setManaging(true)}>
+                {t("settings.plugins.manageInstalled")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setManagingSources(true)}>
+                {t("settings.plugins.manageSources")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           {t("settings.plugins.description")}
         </p>
       </header>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={sync.isPending}
-          onClick={() =>
-            sync.mutate(undefined, {
-              onError: (cause) => {
-                toast.error(t("settings.plugins.syncFailed"), {
-                  description: localizeContractError(cause, t),
-                });
-              },
-            })
-          }
-          aria-label={t("settings.plugins.syncMarketplace")}
-        >
-          {sync.isPending ? (
-            <IconLoader2 className="animate-spin" />
-          ) : (
-            <IconRefresh />
-          )}
-          <span className="hidden sm:inline">
-            {t("settings.plugins.syncMarketplace")}
-          </span>
-        </Button>
-        <span className="text-xs text-muted-foreground">{lastSynced}</span>
-        <div className="relative min-w-0 flex-1 sm:ml-auto">
-          <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t("settings.plugins.search")}
-            aria-label={t("settings.plugins.search")}
-            className="pl-8"
-          />
+      <div className="space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 flex-1">
+            <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("settings.plugins.search")}
+              aria-label={t("settings.plugins.search")}
+              className="pl-8"
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 min-w-32"
+            disabled={sync.isPending}
+            onClick={() =>
+              sync.mutate(undefined, {
+                onError: (cause) => {
+                  toast.error(t("settings.plugins.syncFailed"), {
+                    description: localizeContractError(cause, t),
+                  });
+                },
+              })
+            }
+            aria-label={t("settings.plugins.syncMarketplace")}
+          >
+            {sync.isPending ? (
+              <IconLoader2 className="animate-spin" />
+            ) : (
+              <IconRefresh />
+            )}
+            <span className="hidden sm:inline">
+              {t("settings.plugins.syncMarketplace")}
+            </span>
+          </Button>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setManaging(true)}>
-          {t("settings.plugins.manageInstalled")}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={importPlugin.isPending || selecting}
-          onClick={() => void handleImport()}
-          aria-label={t("settings.plugins.import")}
-        >
-          {importPlugin.isPending || selecting ? (
-            <IconLoader2 className="animate-spin" />
-          ) : (
-            <IconUpload />
-          )}
-          <span className="hidden sm:inline">
-            {t("settings.plugins.import")}
-          </span>
-        </Button>
+
+        <span className="block text-xs text-muted-foreground">
+          {lastSynced}
+        </span>
       </div>
 
       {visiblePlugins.length === 0 ? (
@@ -213,13 +300,23 @@ export function PluginsSettings({
           {t("settings.plugins.empty")}
         </p>
       ) : (
-        <div className="divide-y divide-border border-y border-border">
-          {visiblePlugins.map((plugin) => (
-            <AvailablePluginRow
-              key={plugin.id}
-              plugin={plugin}
-              installed={installedById.get(plugin.id)}
-            />
+        <div className="space-y-6">
+          {groupedPlugins.map(([kind, plugins]) => (
+            <section key={kind}>
+              <h3 className="mb-2 text-sm font-semibold">
+                {MARKETPLACE_KIND_LABELS[kind] ?? kind}
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {plugins.map((plugin) => (
+                  <AvailablePluginCard
+                    key={plugin.id}
+                    plugin={plugin}
+                    installed={installedById.get(plugin.id)}
+                    onSelect={setReadmePlugin}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       )}
@@ -227,126 +324,147 @@ export function PluginsSettings({
   );
 }
 
-/** One registry entry with backend-driven install and uninstall actions. */
-function AvailablePluginRow({
+/** One marketplace entry presented as a compact card with its brand, title, and summary. */
+function AvailablePluginCard({
   plugin,
   installed,
+  onSelect,
 }: {
   plugin: AvailablePlugin;
   installed: InstalledPlugin | undefined;
+  onSelect: (plugin: AvailablePlugin) => void;
 }) {
   const { t } = useTranslation();
   const install = useInstallPlugin(plugin.id);
-  const mutations = usePluginMutations(
-    plugin.id,
-    installed?.kind === "agent" ? installed.name : undefined,
-  );
-  const busy = install.isPending || mutations.uninstall.isPending;
-  const [uninstallOpen, setUninstallOpen] = useState(false);
-  const [deleteData, setDeleteData] = useState(true);
+  const update = useUpdatePlugin(plugin.id);
+  const busy = install.isPending || update.isPending;
+  const hasUpdate = plugin.version !== installed?.version;
+  const incompatible = plugin.compatibility === "incompatible";
 
   const failInstall = (cause: unknown) => {
     toast.error(t("settings.plugins.installFailed"), {
       description: localizeContractError(cause, t),
     });
   };
-  const failUninstall = (cause: unknown) => {
-    toast.error(t("settings.plugins.uninstallFailed"), {
+  const succeedInstall = (response: { outcome: InstallOutcome }) => {
+    toast.success(
+      installOutcomeMessage(
+        response.outcome,
+        t,
+        "settings.plugins.installSuccess",
+      ),
+    );
+  };
+  const failUpdate = (cause: unknown) => {
+    toast.error(t("settings.plugins.updateFailed"), {
       description: localizeContractError(cause, t),
     });
   };
 
   return (
-    <>
-      <div className="flex items-center gap-3 py-3">
-        <PluginLogo logo={plugin.logo} />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">
-            {plugin.title || plugin.name}
-          </span>
-          <span className="block truncate text-xs text-muted-foreground">
-            {[plugin.name, plugin.namespace, plugin.kind, plugin.version]
-              .filter(Boolean)
-              .join(" · ")}
-          </span>
-          {plugin.description !== "" && (
-            <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/80">
-              {plugin.description}
-            </span>
-          )}
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={t("settings.plugins.viewReadme", {
+        title: plugin.title || plugin.name,
+      })}
+      onClick={() => onSelect(plugin)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect(plugin);
+        }
+      }}
+      className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <PluginLogo logo={plugin.logo} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium">
+          {plugin.title || plugin.name}
         </span>
+        {plugin.description !== "" && (
+          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+            {plugin.description}
+          </span>
+        )}
+        {incompatible && (
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            {plugin.reason}
+          </span>
+        )}
+      </span>
+      <span className="flex shrink-0 items-center">
         {busy ? (
-          <Button variant="outline" size="sm" disabled className="shrink-0">
-            <IconLoader2 className="animate-spin" />
-            {t(
-              installed === undefined
-                ? "settings.plugins.installing"
-                : "settings.plugins.uninstalling",
+          <Button
+            variant="outline"
+            size="icon-sm"
+            disabled
+            className="shrink-0"
+            aria-label={t(
+              update.isPending
+                ? "settings.plugins.updating"
+                : "settings.plugins.installing",
             )}
+          >
+            <IconProgressDown />
           </Button>
         ) : installed === undefined ? (
           <Button
             variant="outline"
-            size="sm"
+            size="icon-sm"
             className="shrink-0"
-            onClick={() => install.mutate({}, { onError: failInstall })}
+            disabled={incompatible}
+            aria-label={t("settings.plugins.install")}
+            onClick={(event) => {
+              event.stopPropagation();
+              install.mutate(
+                {},
+                { onError: failInstall, onSuccess: succeedInstall },
+              );
+            }}
           >
-            {t("settings.plugins.install")}
+            <IconPlus />
+          </Button>
+        ) : hasUpdate ? (
+          <Button
+            variant="outline"
+            size="icon-sm"
+            className="shrink-0"
+            aria-label={t("settings.plugins.update")}
+            onClick={(event) => {
+              event.stopPropagation();
+              update.mutate({}, { onError: failUpdate });
+            }}
+          >
+            <IconArrowBigUpLines />
           </Button>
         ) : (
           <Button
             variant="outline"
-            size="sm"
+            size="icon-sm"
+            disabled
             className="shrink-0"
-            onClick={() => setUninstallOpen(true)}
+            aria-label={t("settings.plugins.installed")}
           >
-            {t("settings.plugins.uninstall")}
+            <IconCircleCheck />
           </Button>
         )}
-      </div>
-      <AlertDialog
-        open={uninstallOpen}
-        onOpenChange={(open) => {
-          setUninstallOpen(open);
-          if (open) setDeleteData(true);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("settings.plugins.uninstallTitle", { name: plugin.name })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("settings.plugins.uninstallDescription")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={deleteData}
-              onChange={(event) => setDeleteData(event.target.checked)}
-            />
-            {t("settings.plugins.deleteConfigurationData")}
-          </label>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={mutations.uninstall.isPending}>
-              {t("common.cancel")}
-            </AlertDialogCancel>
-            <Button
-              variant="destructive"
-              disabled={mutations.uninstall.isPending}
-              onClick={() =>
-                mutations.uninstall.mutate(deleteData ? "delete" : "retain", {
-                  onError: failUninstall,
-                  onSuccess: () => setUninstallOpen(false),
-                })
-              }
-            >
-              {t("settings.plugins.uninstall")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+      </span>
+    </div>
   );
+}
+
+/** Maps a typed install outcome to the toast the settings surface already shows. */
+function installOutcomeMessage(
+  outcome: InstallOutcome,
+  t: TFunction,
+  successKey:
+    "settings.plugins.installSuccess" | "settings.plugins.importSuccess",
+): string {
+  if (outcome.state === "installed_with_command_conflict") {
+    return t("settings.plugins.installCommandConflict", {
+      pluginId: outcome.conflictPluginId,
+    });
+  }
+  return t(successKey);
 }

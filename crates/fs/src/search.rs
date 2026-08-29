@@ -67,7 +67,8 @@ where
         let spec = ProcessSpec::new(self.ripgrep_path.as_os_str())
             .args(arguments)
             .cwd(root.as_path())
-            .stdin(ProcessStdio::Null);
+            .stdin(ProcessStdio::Null)
+            .skip_reaper_registration();
         let mut process = self.process_spawner.spawn(spec).map_err(|source| {
             WorkspaceFileSystemError::SearchToolUnavailable {
                 path: self.ripgrep_path.clone(),

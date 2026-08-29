@@ -3,6 +3,9 @@ export { usePlatform, useOptionalPlatform } from "./use-platform";
 export {
   PathSelectionInProgressError,
   type LocationActionsCapability,
+  type DesktopUpdateCapability,
+  type DesktopUpdateStatus,
+  type ManualUpdateReason,
   type LocationTarget,
   type PathSelectionKind,
   type PlatformAdapter,

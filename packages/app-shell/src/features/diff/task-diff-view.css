@@ -243,6 +243,27 @@
   scrollbar-gutter: auto;
 }
 
+/* Click feedback for tree selection: a one-second wash over the selected file
+   section, so a click that needs no scrolling still reads as acknowledged.
+   Same wash family as the chat-jump line highlight. */
+.ora-diff-file-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: color-mix(in oklab, var(--selection-wash) 16%, transparent);
+  animation: ora-diff-file-flash 1s ease-out forwards;
+}
+
+@keyframes ora-diff-file-flash {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
 .ora-diff-scroll-region::-webkit-scrollbar {
   width: 6px;
 }

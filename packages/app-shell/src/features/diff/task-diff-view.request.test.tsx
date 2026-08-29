@@ -1,5 +1,11 @@
 import { createElement, type ReactNode } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppI18nProvider } from "../../i18n/i18n";
@@ -42,7 +48,7 @@ function renderRequestedDiff(fileRequest?: {
   line?: number;
 }) {
   const client = createMockClient(createMockClientState());
-  client.task.getDiff = async () => ({
+  client.workspace.getDiff = async () => ({
     baseCommitId: "base",
     headCommitId: "head",
     patch: MULTI_FILE_PATCH,
@@ -62,7 +68,8 @@ function renderRequestedDiff(fileRequest?: {
     );
   return render(
     <TaskDiffView
-      taskId="task-1"
+      workspaceId="task-1"
+      hasBaseline
       viewType="unified"
       fileTreeOpen
       fileRequest={{
@@ -125,6 +132,7 @@ describe("TaskDiffView file requests", () => {
     Reflect.deleteProperty(HTMLElement.prototype, "offsetHeight");
     Reflect.deleteProperty(HTMLElement.prototype, "offsetTop");
     Reflect.deleteProperty(HTMLElement.prototype, "scrollTop");
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollLeft");
   });
 
   it("keeps the requested file selected after the changes list mounts", async () => {
@@ -234,8 +242,65 @@ describe("TaskDiffView file requests", () => {
     });
   });
 
-  it("highlights and scrolls the requested new-side line", async () => {
-    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+  it("vertically centers the requested line without shifting the diff sideways", async () => {
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      writable: true,
+      value(arg?: ScrollToOptions | number) {
+        if (typeof arg === "object" && arg !== null) scrollTo(arg);
+      },
+    });
+    // The scrollport reports a stable rounded geometry so the vertical center
+    // is deterministic, while a non-zero scrollLeft proves it is preserved.
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return this.classList?.contains("ora-diff-scroll-region")
+          ? DIFF_VIEWPORT_HEIGHT
+          : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        return 120;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+      configurable: true,
+      get() {
+        return 800;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+      configurable: true,
+      get() {
+        return 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollLeft", {
+      configurable: true,
+      get() {
+        return 120;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: function (this: HTMLElement) {
+        if (this.classList?.contains("ora-diff-scroll-region")) {
+          return boxRect(0, 800, DIFF_VIEWPORT_HEIGHT);
+        }
+        if (
+          this.classList?.contains("diff-code-selected") ||
+          this.classList?.contains("diff-selected")
+        ) {
+          return boxRect(1000, 800, 120);
+        }
+        return nativeGetBoundingClientRect.call(this);
+      },
+    });
+
     const patch = [
       "diff --git a/src/main.rs b/src/main.rs",
       "new file mode 100644",
@@ -249,7 +314,7 @@ describe("TaskDiffView file requests", () => {
       "",
     ].join("\n");
     const client = createMockClient(createMockClientState());
-    client.task.getDiff = async () => ({
+    client.workspace.getDiff = async () => ({
       baseCommitId: "base",
       headCommitId: "head",
       patch,
@@ -269,7 +334,8 @@ describe("TaskDiffView file requests", () => {
       );
     const { container } = render(
       <TaskDiffView
-        taskId="task-1"
+        workspaceId="task-1"
+        hasBaseline
         viewType="unified"
         fileTreeOpen
         fileRequest={{ path: "src/main.rs", requestId: 1, line: 2 }}
@@ -287,10 +353,191 @@ describe("TaskDiffView file requests", () => {
         container.querySelector(".diff-code-selected, .diff-selected"),
       ).not.toBeNull();
     });
-    expect(scrollIntoView).toHaveBeenCalledWith({
-      block: "center",
-      inline: "nearest",
+    // 1000 - 0 + 0 = 1000 content offset; center pulls it up by
+    // (400 - 120) / 2 = 140 while keeping the original scrollLeft of 120.
+    expect(scrollTo).toHaveBeenCalledWith({ top: 860, left: 120 });
+  });
+
+  it("highlights every new-side line in a cited range", async () => {
+    const patch = [
+      "diff --git a/src/main.rs b/src/main.rs",
+      "new file mode 100644",
+      "index 0000000..1111111",
+      "--- /dev/null",
+      "+++ b/src/main.rs",
+      "@@ -0,0 +1,3 @@",
+      "+fn main() {",
+      '+    println!("hi");',
+      "+}",
+      "",
+    ].join("\n");
+    const client = createMockClient(createMockClientState());
+    client.workspace.getDiff = async () => ({
+      baseCommitId: "base",
+      headCommitId: "head",
+      patch,
     });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(
+          ContractsClientContext.Provider,
+          { value: client },
+          createElement(AppI18nProvider, null, children),
+        ),
+      );
+    const { container } = render(
+      <TaskDiffView
+        workspaceId="task-1"
+        hasBaseline
+        viewType="unified"
+        fileTreeOpen
+        fileRequest={{
+          path: "src/main.rs",
+          requestId: 1,
+          line: 1,
+          endLine: 3,
+        }}
+        onFileTreeOpenChange={() => undefined}
+      />,
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(
+        container.querySelectorAll(".diff-code-selected, .diff-selected"),
+      ).toHaveLength(3);
+    });
+  });
+
+  it("highlights an old-side cited range on the delete rows", async () => {
+    const patch = [
+      "diff --git a/src/example.ts b/src/example.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/example.ts",
+      "+++ b/src/example.ts",
+      "@@ -1,3 +1,3 @@",
+      " keep",
+      "-removed",
+      "+added",
+      "",
+    ].join("\n");
+    const client = createMockClient(createMockClientState());
+    client.workspace.getDiff = async () => ({
+      baseCommitId: "base",
+      headCommitId: "head",
+      patch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(
+          ContractsClientContext.Provider,
+          { value: client },
+          createElement(AppI18nProvider, null, children),
+        ),
+      );
+    const { container } = render(
+      <TaskDiffView
+        workspaceId="task-1"
+        hasBaseline
+        viewType="unified"
+        fileTreeOpen
+        fileRequest={{
+          path: "src/example.ts",
+          requestId: 1,
+          line: 2,
+          endLine: 2,
+          side: "old",
+        }}
+        onFileTreeOpenChange={() => undefined}
+      />,
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(
+        container.querySelectorAll(".diff-code-selected, .diff-selected")
+          .length,
+      ).toBeGreaterThan(0);
+    });
+    const selectedText = [
+      ...container.querySelectorAll(".diff-code-selected, .diff-selected"),
+    ]
+      .map((node) => node.textContent ?? "")
+      .join("");
+    expect(selectedText).toContain("removed");
+    expect(selectedText).not.toContain("added");
+  });
+
+  it("clears the jump highlight when clicking another diff line", async () => {
+    const patch = [
+      "diff --git a/src/main.rs b/src/main.rs",
+      "new file mode 100644",
+      "index 0000000..1111111",
+      "--- /dev/null",
+      "+++ b/src/main.rs",
+      "@@ -0,0 +1,3 @@",
+      "+fn main() {",
+      '+    println!("hi");',
+      "+}",
+      "",
+    ].join("\n");
+    const client = createMockClient(createMockClientState());
+    client.workspace.getDiff = async () => ({
+      baseCommitId: "base",
+      headCommitId: "head",
+      patch,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0 } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(
+          ContractsClientContext.Provider,
+          { value: client },
+          createElement(AppI18nProvider, null, children),
+        ),
+      );
+    const { container } = render(
+      <TaskDiffView
+        workspaceId="task-1"
+        hasBaseline
+        viewType="unified"
+        fileTreeOpen
+        fileRequest={{ path: "src/main.rs", requestId: 1, line: 2 }}
+        onFileTreeOpenChange={() => undefined}
+      />,
+      { wrapper },
+    );
+
+    await waitFor(() => {
+      expect(
+        container.querySelector(".diff-code-selected, .diff-selected"),
+      ).not.toBeNull();
+    });
+    const unselected = [...container.querySelectorAll(".diff-code")].find(
+      (node) =>
+        !node.classList.contains("diff-code-selected") &&
+        !node.classList.contains("diff-selected"),
+    );
+    expect(unselected).toBeDefined();
+    fireEvent.mouseDown(unselected!, { button: 0 });
+
+    expect(
+      container.querySelector(".diff-code-selected, .diff-selected"),
+    ).toBeNull();
   });
 
   it("still selects the file when the requested line is absent from the patch", async () => {
@@ -323,7 +570,7 @@ describe("TaskDiffView collapsed context", () => {
       ...Array.from({ length: 10 }, (_, index) => ` line ${index + 11}`),
       "",
     ].join("\n");
-    client.task.getDiff = async () => ({
+    client.workspace.getDiff = async () => ({
       baseCommitId: "base",
       headCommitId: "head",
       patch: longContextPatch,
@@ -344,7 +591,8 @@ describe("TaskDiffView collapsed context", () => {
 
     render(
       <TaskDiffView
-        taskId="task-1"
+        workspaceId="task-1"
+        hasBaseline
         viewType="unified"
         fileTreeOpen={false}
         onFileTreeOpenChange={() => undefined}
