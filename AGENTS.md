@@ -5,7 +5,7 @@
 3. **Design for Testability (DfT)**: Favor Dependency Injection and decoupled components. Define interfaces via Traits to allow easy mocking, and prefer small, pure functions that can be unit-tested in isolation.
 4. **Prefer Static Dispatch**: Use Generics and Trait Bounds over Trait Objects (e.g., `Box<dyn Trait>`) to leverage monomorphization and compiler optimizations, unless runtime polymorphism is strictly necessary.
 5. **Make Illegal States Unrepresentable**: Use Enums with associated data to model state machines, rather than Structs with many optional fields.
-6. **Backward Compatibility for Existing Users**: The product has existing users, so preserve compatibility for user-facing behavior, persisted data, public APIs, IPC/protocols, and other established integrations. When a breaking change is necessary, provide an explicit migration or deprecation path, document the impact, and remove compatibility code only after the supported transition period. Keep internal code clean by adapting old inputs at well-defined boundaries rather than spreading compatibility concerns through new code.
+6. **Compatibility Boundaries**: Prioritize architectural cleanliness over preserving compatibility in code, public APIs, IPC/protocols, and user-facing behavior. Treat the local filesystem layout as a hard compatibility boundary: changes must not create path collisions or leave upgrades from older versions unable to start or operate safely. When changing the layout, detect, migrate, isolate, or otherwise safely handle existing files before using the new layout.
 
 Ora is an IDE for AI Agent. In the crates folder where the rust code lives:
 

@@ -1,9 +1,7 @@
 use ora_application::{LocalSkillSourceRevision, RepositoryError, SkillRepository};
 use ora_domain::{AuditFields, Namespace, PluginId, Skill, SkillId};
-use ora_effect::{
-    Digest, FilesystemResourceAdapter, SkillName, SkillSourceKey, SkillSourceKind,
-    SourceRevisionKey,
-};
+use ora_effect::{Digest, SkillName, SkillSourceKey, SkillSourceKind, SourceRevisionKey};
+use ora_effect_skill::SkillDirectoryResourceAdapter;
 use rusqlite::{OptionalExtension, Row, TransactionBehavior, params};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -434,7 +432,7 @@ fn publish_source(
     updated_at: i64,
     changed_scopes: &mut BTreeSet<String>,
 ) -> Result<(), crate::DatabaseError> {
-    let package_fingerprint = FilesystemResourceAdapter::package_fingerprint(package_root)
+    let package_fingerprint = SkillDirectoryResourceAdapter::package_fingerprint(package_root)
         .map_err(|error| crate::DatabaseError::CorruptEffectState(error.to_string()))?;
     let publication = PublishedSkillRevision {
         source: skill_source_key(source_kind, namespace, identifier)?,

@@ -52,6 +52,7 @@ pub struct ResolvedMaterialization {
     pub desired_effect: DesiredEffectIdentity,
     pub revision: EffectRevisionId,
     pub native_identity: NativeResourceIdentity,
+    pub fingerprint: Fingerprint,
     pub contract: MaterializationContract,
     pub input_digest: Digest,
     pub input: VersionedMaterializationInput,

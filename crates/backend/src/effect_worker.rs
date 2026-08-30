@@ -10,9 +10,10 @@ use ora_domain::PluginId;
 use ora_effect::{
     AdapterReceipt, ConsumerAdapter, ConsumerAdapterError, CoordinationContract, CoordinationPlan,
     CoordinationReceipt, CoordinationReceiptState, EffectReconciler, EffectRepository,
-    EffectTarget, EffectTargetId, FilesystemResourceAdapter, LocalTimestamp, ReadinessReceipt,
-    ReconcileOutcome, SkillPlanner, TargetProjection, WorkerIdentity,
+    EffectTarget, EffectTargetId, LocalTimestamp, ReadinessReceipt, ReconcileOutcome,
+    TargetProjection, WorkerIdentity,
 };
+use ora_effect_skill::{SkillDirectoryResourceAdapter, SkillPlanner};
 use ora_logging::{ora_info, ora_warn};
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -234,7 +235,7 @@ impl<Sessions: ReplacedAgentSessions> EffectWorker<Sessions> {
         lease_until: LocalTimestamp,
     ) {
         let planner = SkillPlanner;
-        let resource_adapter = FilesystemResourceAdapter;
+        let resource_adapter = SkillDirectoryResourceAdapter;
         let consumer_adapter = PluginConsumerAdapter {
             plugin_host: self.plugin_host.as_ref(),
             sessions: self.sessions.as_ref(),

@@ -81,6 +81,7 @@ pub(crate) fn registered_consumer_declaration(
             Ok(FilesystemResourceTemplate {
                 relative_path,
                 materialization_format: format,
+                materialization_contract: materialization.clone(),
                 accepts: CapabilityRequirement {
                     effect_protocols: BTreeMap::from([(EffectKind::skill(), 1)]),
                     materialization_contracts: BTreeSet::from([materialization.capability_key()]),

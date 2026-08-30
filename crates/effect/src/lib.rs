@@ -1,7 +1,6 @@
 //! Generic Target Effect convergence with independent Resource ownership and recovery.
 
 mod desired;
-mod filesystem;
 mod identity;
 mod operation;
 mod planner;
@@ -19,9 +18,6 @@ pub use desired::{
     EffectRevision, EffectSource, EffectSourceLifecycle, RevisionAvailability, SkillDefinition,
     SkillParameters, SkillSourceKey, SkillSourceKind, StableReason, TargetInclusion,
     TargetSelector, ValidatedEffectDefinition, ValidatedEffectParameters,
-};
-pub use filesystem::{
-    FilesystemEffectError, FilesystemResourceAdapter, MARKER_FILE_NAME, ManagedItemMarker,
 };
 pub use identity::{
     ArtifactId, AuditEventId, ConditionId, ConsumerAdapterIdentity, ConsumerIdentity, ConsumerKind,
@@ -41,7 +37,7 @@ pub use operation::{
 };
 pub use planner::{
     EffectKindPlanner, PlannedMutation, PlannedResourceChange, PlannerError, PlanningResult,
-    ResourcePlan, ResourcePlanner, ResourcePlanningInput, SkillPlanner, TargetPlanningInput,
+    ResourcePlan, ResourcePlanner, ResourcePlanningInput, TargetPlanningInput,
 };
 pub use ports::{
     ApplyReceipt, AttemptFinalization, CleanupReceipt, ConsumerAdapter, ConsumerAdapterError,

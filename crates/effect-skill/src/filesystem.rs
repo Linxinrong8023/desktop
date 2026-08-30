@@ -1,4 +1,4 @@
-use crate::{
+use ora_effect::{
     AdapterReceipt, ApplyReceipt, ArtifactId, ArtifactRole, ArtifactState, CleanupReceipt,
     EffectMutation, EffectOperation, EffectOperationId, EffectOperationIntent, EffectResource,
     EffectResourceId, ExactPlannedState, ExactPreviousState, FilesystemOperationPlan, Fingerprint,
@@ -45,11 +45,11 @@ impl ManagedItemMarker {
 
 /// Local filesystem implementation of the versioned directory Resource contract.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct FilesystemResourceAdapter;
+pub struct SkillDirectoryResourceAdapter;
 
-impl FilesystemResourceAdapter {
+impl SkillDirectoryResourceAdapter {
     /// Computes the exact content fingerprint used by immutable Skill definitions and observations.
-    pub fn package_fingerprint(path: &Path) -> Result<Fingerprint, FilesystemEffectError> {
+    pub fn package_fingerprint(path: &Path) -> Result<Fingerprint, SkillDirectoryError> {
         fingerprint(path)
     }
 
@@ -58,11 +58,11 @@ impl FilesystemResourceAdapter {
         &self,
         resource: &EffectResource,
         attempt: ReconcileAttemptId,
-        generation: crate::Generation,
+        generation: ora_effect::Generation,
         sequence: u32,
         mutation: PlannedMutation,
         prepared_at: LocalTimestamp,
-    ) -> Result<PreparedOperation, FilesystemEffectError> {
+    ) -> Result<PreparedOperation, SkillDirectoryError> {
         let resource_root = resource_root(resource)?;
         let VersionedResourceDescriptor::FilesystemDirectoryV1(descriptor) = &resource.descriptor;
         let operation_id = EffectOperationId::random();
@@ -126,7 +126,7 @@ impl FilesystemResourceAdapter {
     fn observe_resource(
         self,
         resource: &EffectResource,
-    ) -> Result<ResourceObservation, FilesystemEffectError> {
+    ) -> Result<ResourceObservation, SkillDirectoryError> {
         let root = resolve_resource_root(resource, RootAccess::Observe)?;
         let Some(root) = root else {
             return Ok(ResourceObservation {
@@ -136,11 +136,11 @@ impl FilesystemResourceAdapter {
             });
         };
         let mut items = BTreeMap::new();
-        for entry in fs::read_dir(&root).map_err(|source| FilesystemEffectError::Io {
+        for entry in fs::read_dir(&root).map_err(|source| SkillDirectoryError::Io {
             path: root.clone(),
             source,
         })? {
-            let entry = entry.map_err(|source| FilesystemEffectError::Io {
+            let entry = entry.map_err(|source| SkillDirectoryError::Io {
                 path: root.clone(),
                 source,
             })?;
@@ -149,15 +149,15 @@ impl FilesystemResourceAdapter {
                 continue;
             }
             let native_identity = NativeResourceIdentity::parse(entry_name.clone())
-                .map_err(|_| FilesystemEffectError::InvalidNativeIdentity(entry_name))?;
+                .map_err(|_| SkillDirectoryError::InvalidNativeIdentity(entry_name))?;
             let path = entry.path();
             let metadata =
-                fs::symlink_metadata(&path).map_err(|source| FilesystemEffectError::Io {
+                fs::symlink_metadata(&path).map_err(|source| SkillDirectoryError::Io {
                     path: path.clone(),
                     source,
                 })?;
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(FilesystemEffectError::UnsupportedResourceEntry { path });
+                return Err(SkillDirectoryError::UnsupportedResourceEntry { path });
             }
             let fingerprint = fingerprint(&path)?;
             let ownership_evidence = read_marker(&path)
@@ -165,19 +165,20 @@ impl FilesystemResourceAdapter {
                     marker.schema_version == MARKER_SCHEMA_VERSION
                         && marker.resource == resource.identity
                 })
-                .map_or(crate::OwnershipEvidence::NoOwnershipEvidence, |marker| {
-                    crate::OwnershipEvidence::Claims(marker.managed_identity)
-                });
+                .map_or(
+                    ora_effect::OwnershipEvidence::NoOwnershipEvidence,
+                    |marker| ora_effect::OwnershipEvidence::Claims(marker.managed_identity),
+                );
             items.insert(
                 native_identity.clone(),
-                crate::ObservedItem {
+                ora_effect::ObservedItem {
                     native_identity,
                     fingerprint,
                     ownership_evidence,
                 },
             );
         }
-        let summary = serde_json::to_vec(&items).map_err(FilesystemEffectError::MarkerJson)?;
+        let summary = serde_json::to_vec(&items).map_err(SkillDirectoryError::MarkerJson)?;
         Ok(ResourceObservation {
             resource: resource.identity.clone(),
             items,
@@ -189,7 +190,7 @@ impl FilesystemResourceAdapter {
     fn apply_operation(
         self,
         operation: &EffectOperation,
-    ) -> Result<ApplyReceipt, FilesystemEffectError> {
+    ) -> Result<ApplyReceipt, SkillDirectoryError> {
         let VersionedAdapterPlan::FilesystemDirectoryV1(plan) = operation.payload();
         ensure_operation_paths_are_scoped(plan)?;
         let resolved_root = resolve_declared_root(
@@ -197,15 +198,15 @@ impl FilesystemResourceAdapter {
             &plan.resource_relative_path,
             RootAccess::Mutate,
         )?
-        .ok_or(FilesystemEffectError::UnsafeOperationPath)?;
+        .ok_or(SkillDirectoryError::UnsafeOperationPath)?;
         if resolved_root != plan.resource_root {
-            return Err(FilesystemEffectError::UnsafeOperationPath);
+            return Err(SkillDirectoryError::UnsafeOperationPath);
         }
         if state_matches_planned(operation, plan)? {
             return Ok(apply_receipt(operation));
         }
         if !state_matches_expected(operation, plan)? {
-            return Err(FilesystemEffectError::RecoveryRequired {
+            return Err(SkillDirectoryError::RecoveryRequired {
                 operation: operation.identity().clone(),
             });
         }
@@ -215,10 +216,10 @@ impl FilesystemResourceAdapter {
                 stage(operation, plan)?;
                 let target = planned_path(operation, plan)?;
                 if target.exists() {
-                    return Err(FilesystemEffectError::TargetOccupied { path: target });
+                    return Err(SkillDirectoryError::TargetOccupied { path: target });
                 }
                 fs::rename(&plan.staging_path, &target).map_err(|source| {
-                    FilesystemEffectError::Io {
+                    SkillDirectoryError::Io {
                         path: target,
                         source,
                     }
@@ -231,25 +232,25 @@ impl FilesystemResourceAdapter {
                 fs::create_dir_all(
                     plan.backup_path
                         .parent()
-                        .ok_or(FilesystemEffectError::UnsafeOperationPath)?,
+                        .ok_or(SkillDirectoryError::UnsafeOperationPath)?,
                 )
-                .map_err(|source| FilesystemEffectError::Io {
+                .map_err(|source| SkillDirectoryError::Io {
                     path: plan.backup_path.clone(),
                     source,
                 })?;
                 fs::rename(&previous, &plan.backup_path).map_err(|source| {
-                    FilesystemEffectError::Io {
+                    SkillDirectoryError::Io {
                         path: previous.clone(),
                         source,
                     }
                 })?;
                 if target != previous && target.exists() {
                     restore_backup(&plan.backup_path, &previous);
-                    return Err(FilesystemEffectError::TargetOccupied { path: target });
+                    return Err(SkillDirectoryError::TargetOccupied { path: target });
                 }
                 if let Err(source) = fs::rename(&plan.staging_path, &target) {
                     restore_backup(&plan.backup_path, &previous);
-                    return Err(FilesystemEffectError::Io {
+                    return Err(SkillDirectoryError::Io {
                         path: target,
                         source,
                     });
@@ -260,14 +261,14 @@ impl FilesystemResourceAdapter {
                 fs::create_dir_all(
                     plan.backup_path
                         .parent()
-                        .ok_or(FilesystemEffectError::UnsafeOperationPath)?,
+                        .ok_or(SkillDirectoryError::UnsafeOperationPath)?,
                 )
-                .map_err(|source| FilesystemEffectError::Io {
+                .map_err(|source| SkillDirectoryError::Io {
                     path: plan.backup_path.clone(),
                     source,
                 })?;
                 fs::rename(&previous, &plan.backup_path).map_err(|source| {
-                    FilesystemEffectError::Io {
+                    SkillDirectoryError::Io {
                         path: previous,
                         source,
                     }
@@ -281,10 +282,10 @@ impl FilesystemResourceAdapter {
     fn verify_operation(
         self,
         operation: &EffectOperation,
-    ) -> Result<VerificationReceipt, FilesystemEffectError> {
+    ) -> Result<VerificationReceipt, SkillDirectoryError> {
         let VersionedAdapterPlan::FilesystemDirectoryV1(plan) = operation.payload();
         if !state_matches_planned(operation, plan)? {
-            return Err(FilesystemEffectError::VerificationFailed {
+            return Err(SkillDirectoryError::VerificationFailed {
                 operation: operation.identity().clone(),
             });
         }
@@ -301,15 +302,15 @@ impl FilesystemResourceAdapter {
     fn cleanup_artifact(
         self,
         artifact: &OperationArtifact,
-    ) -> Result<CleanupReceipt, FilesystemEffectError> {
+    ) -> Result<CleanupReceipt, SkillDirectoryError> {
         let VersionedResourceLocator::FilesystemPathV1(path) = &artifact.locator;
         if path.exists() {
             if fingerprint(path)? != artifact.expected_fingerprint {
-                return Err(FilesystemEffectError::ArtifactFingerprintMismatch {
+                return Err(SkillDirectoryError::ArtifactFingerprintMismatch {
                     artifact: artifact.identity.clone(),
                 });
             }
-            fs::remove_dir_all(path).map_err(|source| FilesystemEffectError::Io {
+            fs::remove_dir_all(path).map_err(|source| SkillDirectoryError::Io {
                 path: path.clone(),
                 source,
             })?;
@@ -324,7 +325,7 @@ impl FilesystemResourceAdapter {
     }
 }
 
-impl ResourceAdapter for FilesystemResourceAdapter {
+impl ResourceAdapter for SkillDirectoryResourceAdapter {
     fn observe(
         &self,
         resource: &EffectResource,
@@ -359,17 +360,17 @@ impl ResourceAdapter for FilesystemResourceAdapter {
     }
 }
 
-impl ResourceOperationPreparer for FilesystemResourceAdapter {
+impl ResourceOperationPreparer for SkillDirectoryResourceAdapter {
     fn prepare_operation(
         &self,
         resource: &EffectResource,
         attempt: ReconcileAttemptId,
-        generation: crate::Generation,
+        generation: ora_effect::Generation,
         sequence: u32,
         mutation: PlannedMutation,
         prepared_at: LocalTimestamp,
     ) -> Result<PreparedOperation, ResourceAdapterError> {
-        FilesystemResourceAdapter::prepare_operation(
+        SkillDirectoryResourceAdapter::prepare_operation(
             self,
             resource,
             attempt,
@@ -394,7 +395,7 @@ enum RootAccess {
 fn resolve_resource_root(
     resource: &EffectResource,
     access: RootAccess,
-) -> Result<Option<PathBuf>, FilesystemEffectError> {
+) -> Result<Option<PathBuf>, SkillDirectoryError> {
     let VersionedResourceDescriptor::FilesystemDirectoryV1(descriptor) = &resource.descriptor;
     resolve_declared_root(
         &descriptor.workspace_root,
@@ -406,22 +407,22 @@ fn resolve_resource_root(
 /// Resolves a filesystem descriptor while refusing links and optionally creating safe segments.
 fn resolve_declared_root(
     workspace_root: &Path,
-    relative_path: &crate::ResourcePath,
+    relative_path: &ora_effect::ResourcePath,
     access: RootAccess,
-) -> Result<Option<PathBuf>, FilesystemEffectError> {
+) -> Result<Option<PathBuf>, SkillDirectoryError> {
     let root_metadata = fs::symlink_metadata(workspace_root).map_err(|source| {
-        FilesystemEffectError::WorkspaceUnavailable {
+        SkillDirectoryError::WorkspaceUnavailable {
             path: workspace_root.to_path_buf(),
             source,
         }
     })?;
     if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
-        return Err(FilesystemEffectError::UnsafeResourcePath {
+        return Err(SkillDirectoryError::UnsafeResourcePath {
             path: workspace_root.to_path_buf(),
         });
     }
     let canonical_workspace = workspace_root.canonicalize().map_err(|source| {
-        FilesystemEffectError::WorkspaceUnavailable {
+        SkillDirectoryError::WorkspaceUnavailable {
             path: workspace_root.to_path_buf(),
             source,
         }
@@ -430,7 +431,7 @@ fn resolve_declared_root(
     let mut path_is_missing = false;
     for component in relative_path.to_path_buf().components() {
         let std::path::Component::Normal(segment) = component else {
-            return Err(FilesystemEffectError::UnsafeResourcePath { path: current });
+            return Err(SkillDirectoryError::UnsafeResourcePath { path: current });
         };
         current = current.join(segment);
         if path_is_missing {
@@ -438,21 +439,21 @@ fn resolve_declared_root(
         }
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                return Err(FilesystemEffectError::UnsafeResourcePath { path: current });
+                return Err(SkillDirectoryError::UnsafeResourcePath { path: current });
             }
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => match access {
                 RootAccess::Observe => return Ok(None),
                 RootAccess::Prepare => path_is_missing = true,
                 RootAccess::Mutate => {
-                    fs::create_dir(&current).map_err(|source| FilesystemEffectError::Io {
+                    fs::create_dir(&current).map_err(|source| SkillDirectoryError::Io {
                         path: current.clone(),
                         source,
                     })?;
                 }
             },
             Err(source) => {
-                return Err(FilesystemEffectError::Io {
+                return Err(SkillDirectoryError::Io {
                     path: current,
                     source,
                 });
@@ -463,12 +464,12 @@ fn resolve_declared_root(
         }
         let canonical = current
             .canonicalize()
-            .map_err(|source| FilesystemEffectError::Io {
+            .map_err(|source| SkillDirectoryError::Io {
                 path: current.clone(),
                 source,
             })?;
         if !canonical.starts_with(&canonical_workspace) {
-            return Err(FilesystemEffectError::UnsafeResourcePath { path: current });
+            return Err(SkillDirectoryError::UnsafeResourcePath { path: current });
         }
         current = canonical;
     }
@@ -476,27 +477,27 @@ fn resolve_declared_root(
 }
 
 /// Resolves the Resource root for intent preparation without creating it yet.
-fn resource_root(resource: &EffectResource) -> Result<PathBuf, FilesystemEffectError> {
+fn resource_root(resource: &EffectResource) -> Result<PathBuf, SkillDirectoryError> {
     let VersionedResourceDescriptor::FilesystemDirectoryV1(descriptor) = &resource.descriptor;
     resolve_declared_root(
         &descriptor.workspace_root,
         &descriptor.relative_path,
         RootAccess::Prepare,
     )?
-    .ok_or(FilesystemEffectError::UnsafeOperationPath)
+    .ok_or(SkillDirectoryError::UnsafeOperationPath)
 }
 
 /// Prevents a journal payload from redirecting artifacts outside its Resource directory.
 fn ensure_operation_paths_are_scoped(
     plan: &FilesystemOperationPlan,
-) -> Result<(), FilesystemEffectError> {
+) -> Result<(), SkillDirectoryError> {
     let Some(staging_parent) = plan.staging_path.parent() else {
-        return Err(FilesystemEffectError::UnsafeOperationPath);
+        return Err(SkillDirectoryError::UnsafeOperationPath);
     };
     if !staging_parent.starts_with(&plan.resource_root)
         || !plan.backup_path.starts_with(staging_parent)
     {
-        return Err(FilesystemEffectError::UnsafeOperationPath);
+        return Err(SkillDirectoryError::UnsafeOperationPath);
     }
     Ok(())
 }
@@ -505,18 +506,18 @@ fn ensure_operation_paths_are_scoped(
 fn stage(
     operation: &EffectOperation,
     plan: &FilesystemOperationPlan,
-) -> Result<(), FilesystemEffectError> {
+) -> Result<(), SkillDirectoryError> {
     let source_root = plan
         .source_root
         .as_ref()
-        .ok_or(FilesystemEffectError::MissingMaterializationInput)?;
+        .ok_or(SkillDirectoryError::MissingMaterializationInput)?;
     if plan.staging_path.exists() {
         if !state_matches_path(
             operation.planned(),
             &plan.staging_path,
             operation.resource(),
         )? {
-            return Err(FilesystemEffectError::StagingMismatch {
+            return Err(SkillDirectoryError::StagingMismatch {
                 path: plan.staging_path.clone(),
             });
         }
@@ -525,8 +526,8 @@ fn stage(
     let operation_root = plan
         .staging_path
         .parent()
-        .ok_or(FilesystemEffectError::UnsafeOperationPath)?;
-    fs::create_dir_all(operation_root).map_err(|source| FilesystemEffectError::Io {
+        .ok_or(SkillDirectoryError::UnsafeOperationPath)?;
+    fs::create_dir_all(operation_root).map_err(|source| SkillDirectoryError::Io {
         path: operation_root.to_path_buf(),
         source,
     })?;
@@ -540,12 +541,12 @@ fn stage(
         ExactPlannedState::Present {
             managed_identity, ..
         } => managed_identity.clone(),
-        ExactPlannedState::Missing => return Err(FilesystemEffectError::MissingPlannedItem),
+        ExactPlannedState::Missing => return Err(SkillDirectoryError::MissingPlannedItem),
     };
     let marker = ManagedItemMarker::current(operation.resource().clone(), managed_identity);
-    let marker_bytes = serde_json::to_vec(&marker).map_err(FilesystemEffectError::MarkerJson)?;
+    let marker_bytes = serde_json::to_vec(&marker).map_err(SkillDirectoryError::MarkerJson)?;
     let marker_path = plan.staging_path.join(MARKER_FILE_NAME);
-    fs::write(&marker_path, marker_bytes).map_err(|source| FilesystemEffectError::Io {
+    fs::write(&marker_path, marker_bytes).map_err(|source| SkillDirectoryError::Io {
         path: marker_path,
         source,
     })?;
@@ -554,7 +555,7 @@ fn stage(
         &plan.staging_path,
         operation.resource(),
     )? {
-        return Err(FilesystemEffectError::StagingMismatch {
+        return Err(SkillDirectoryError::StagingMismatch {
             path: plan.staging_path.clone(),
         });
     }
@@ -565,35 +566,35 @@ fn stage(
 fn validate_staged_skill(
     operation: &EffectOperation,
     staging: &Path,
-) -> Result<(), FilesystemEffectError> {
+) -> Result<(), SkillDirectoryError> {
     let VersionedAdapterPlan::FilesystemDirectoryV1(plan) = operation.payload();
     let source_root = plan
         .source_root
         .as_ref()
-        .ok_or(FilesystemEffectError::MissingMaterializationInput)?;
+        .ok_or(SkillDirectoryError::MissingMaterializationInput)?;
     let source_manifest =
-        fs::read(source_root.join("SKILL.md")).map_err(|source| FilesystemEffectError::Io {
+        fs::read(source_root.join("SKILL.md")).map_err(|source| SkillDirectoryError::Io {
             path: source_root.join("SKILL.md"),
             source,
         })?;
     let staged_manifest =
-        fs::read(staging.join("SKILL.md")).map_err(|source| FilesystemEffectError::Io {
+        fs::read(staging.join("SKILL.md")).map_err(|source| SkillDirectoryError::Io {
             path: staging.join("SKILL.md"),
             source,
         })?;
     let parsed = parse_manifest(&staged_manifest, Limits::default().max_manifest_bytes)
-        .map_err(|_| FilesystemEffectError::InvalidSkillManifest)?;
+        .map_err(|_| SkillDirectoryError::InvalidSkillManifest)?;
     if source_manifest != staged_manifest {
-        return Err(FilesystemEffectError::SourceChanged);
+        return Err(SkillDirectoryError::SourceChanged);
     }
     let planned_name = match operation.planned() {
         ExactPlannedState::Present {
             native_identity, ..
         } => native_identity,
-        ExactPlannedState::Missing => return Err(FilesystemEffectError::MissingPlannedItem),
+        ExactPlannedState::Missing => return Err(SkillDirectoryError::MissingPlannedItem),
     };
     if !parsed.name.eq_ignore_ascii_case(planned_name.as_str()) {
-        return Err(FilesystemEffectError::ManifestNameMismatch);
+        return Err(SkillDirectoryError::ManifestNameMismatch);
     }
     Ok(())
 }
@@ -602,7 +603,7 @@ fn validate_staged_skill(
 fn state_matches_expected(
     operation: &EffectOperation,
     plan: &FilesystemOperationPlan,
-) -> Result<bool, FilesystemEffectError> {
+) -> Result<bool, SkillDirectoryError> {
     match operation.expected() {
         ExactPreviousState::Missing => {
             let path = planned_path(operation, plan)?;
@@ -620,7 +621,7 @@ fn state_matches_expected(
 fn state_matches_planned(
     operation: &EffectOperation,
     plan: &FilesystemOperationPlan,
-) -> Result<bool, FilesystemEffectError> {
+) -> Result<bool, SkillDirectoryError> {
     match operation.planned() {
         ExactPlannedState::Missing => {
             let path = expected_path(operation, plan)?;
@@ -639,7 +640,7 @@ fn state_matches_path(
     state: &impl PresentState,
     path: &Path,
     resource: &EffectResourceId,
-) -> Result<bool, FilesystemEffectError> {
+) -> Result<bool, SkillDirectoryError> {
     let Some((fingerprint_expected, managed_identity)) = state.present() else {
         return Ok(!path.exists());
     };
@@ -688,12 +689,12 @@ impl PresentState for ExactPlannedState {
 fn expected_path(
     operation: &EffectOperation,
     plan: &FilesystemOperationPlan,
-) -> Result<PathBuf, FilesystemEffectError> {
+) -> Result<PathBuf, SkillDirectoryError> {
     match operation.expected() {
         ExactPreviousState::Present {
             native_identity, ..
         } => Ok(plan.resource_root.join(native_identity.as_str())),
-        ExactPreviousState::Missing => Err(FilesystemEffectError::MissingExpectedItem),
+        ExactPreviousState::Missing => Err(SkillDirectoryError::MissingExpectedItem),
     }
 }
 
@@ -701,12 +702,12 @@ fn expected_path(
 fn planned_path(
     operation: &EffectOperation,
     plan: &FilesystemOperationPlan,
-) -> Result<PathBuf, FilesystemEffectError> {
+) -> Result<PathBuf, SkillDirectoryError> {
     match operation.planned() {
         ExactPlannedState::Present {
             native_identity, ..
         } => Ok(plan.resource_root.join(native_identity.as_str())),
-        ExactPlannedState::Missing => Err(FilesystemEffectError::MissingPlannedItem),
+        ExactPlannedState::Missing => Err(SkillDirectoryError::MissingPlannedItem),
     }
 }
 
@@ -729,11 +730,11 @@ fn apply_receipt(operation: &EffectOperation) -> ApplyReceipt {
 }
 
 /// Converts the generic directory fingerprint into Effect's distinct observed-state type.
-fn fingerprint(path: &Path) -> Result<Fingerprint, FilesystemEffectError> {
+fn fingerprint(path: &Path) -> Result<Fingerprint, SkillDirectoryError> {
     let fingerprint: DirectoryFingerprint =
         fingerprint_directory(path, &[OsStr::new(MARKER_FILE_NAME)])?;
     Fingerprint::parse(fingerprint.as_str().to_string())
-        .map_err(|_| FilesystemEffectError::InvalidDirectoryFingerprint)
+        .map_err(|_| SkillDirectoryError::InvalidDirectoryFingerprint)
 }
 
 /// Restores the previous tree when a swap cannot install its staging directory.
@@ -745,9 +746,9 @@ fn restore_backup(backup: &Path, previous: &Path) {
 
 /// Reports filesystem validation, observation, mutation, and recovery failures.
 #[derive(Debug, Error)]
-pub enum FilesystemEffectError {
+pub enum SkillDirectoryError {
     #[error(transparent)]
-    Operation(#[from] crate::OperationTransitionError),
+    Operation(#[from] ora_effect::OperationTransitionError),
     #[error("Workspace root is unavailable: {path:?}")]
     WorkspaceUnavailable {
         path: PathBuf,

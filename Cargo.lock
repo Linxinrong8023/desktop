@@ -3033,6 +3033,7 @@ dependencies = [
  "ora-db",
  "ora-domain",
  "ora-effect",
+ "ora-effect-skill",
  "ora-fs",
  "ora-history",
  "ora-logging",
@@ -3087,6 +3088,7 @@ dependencies = [
  "ora-contracts",
  "ora-domain",
  "ora-effect",
+ "ora-effect-skill",
  "ora-logging",
  "ora-skill-package",
  "ora-user-config",
@@ -3161,15 +3163,27 @@ name = "ora-effect"
 version = "0.0.0"
 dependencies = [
  "ora-domain",
- "ora-skill-package",
  "ora-utils",
  "pretty_assertions",
  "serde",
  "serde_json",
  "sha2",
- "tempfile",
  "thiserror 2.0.20",
  "uuid",
+]
+
+[[package]]
+name = "ora-effect-skill"
+version = "0.0.0"
+dependencies = [
+ "ora-domain",
+ "ora-effect",
+ "ora-skill-package",
+ "ora-utils",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

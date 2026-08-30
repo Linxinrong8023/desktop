@@ -7,6 +7,7 @@ use ora_domain::{
     WorkspaceLocation,
 };
 use ora_effect::*;
+use ora_effect_skill::{SkillDirectoryResourceAdapter, SkillPlanner};
 use ora_logging::with_trace_logging;
 use pretty_assertions::assert_eq;
 use rusqlite::params;
@@ -154,6 +155,7 @@ fn declaration(stable_key: &str) -> ConsumerDeclaration {
             relative_path: ResourcePath::parse(".agents/skills")
                 .unwrap_or_else(|error| panic!("resource path: {error}")),
             materialization_format: MaterializationFormat::skill_directory_v1(),
+            materialization_contract: MaterializationContract::skill_directory_v1(),
             accepts: CapabilityRequirement::default(),
             coordination: CoordinationRequirement::Uninterrupted,
         }],
@@ -341,7 +343,7 @@ fn reconciler_materializes_and_finalizes_one_complete_target_generation() {
         .unwrap_or_else(|error| panic!("claim Target: {error}"))
         .remove(0);
     let planner = SkillPlanner;
-    let filesystem = FilesystemResourceAdapter;
+    let filesystem = SkillDirectoryResourceAdapter;
     let outcome =
         EffectReconciler::new(&repository, &planner, &planner, &ReadyConsumer, &filesystem)
             .reconcile(

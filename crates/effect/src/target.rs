@@ -269,6 +269,7 @@ pub struct TargetDeclaration {
 pub struct FilesystemResourceTemplate {
     pub relative_path: ResourcePath,
     pub materialization_format: MaterializationFormat,
+    pub materialization_contract: MaterializationContract,
     pub accepts: CapabilityRequirement,
     pub coordination: CoordinationRequirement,
 }
@@ -314,7 +315,7 @@ impl ConsumerDeclaration {
     pub fn validate(&self) -> Result<(), DeclarationError> {
         let mut formats = BTreeMap::new();
         for resource in &self.resources {
-            let contract = MaterializationContract::skill_directory_v1().capability_key();
+            let contract = resource.materialization_contract.capability_key();
             if !self
                 .capabilities
                 .materialization_contracts

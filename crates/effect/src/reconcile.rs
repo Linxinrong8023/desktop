@@ -685,19 +685,18 @@ fn projected_managed(
     plans
         .iter()
         .flat_map(|(resource, plan)| {
-            plan.projection.items.values().map(move |materialization| {
-                let crate::VersionedMaterializationInput::SkillDirectoryV1(input) =
-                    &materialization.input;
-                ManagedItem {
+            plan.projection
+                .items
+                .values()
+                .map(move |materialization| ManagedItem {
                     identity: materialization.managed_identity.clone(),
                     resource: resource.clone(),
                     desired_effect: materialization.desired_effect.clone(),
                     applied_revision: materialization.revision.clone(),
                     native_identity: materialization.native_identity.clone(),
-                    fingerprint: input.package_fingerprint.clone(),
+                    fingerprint: materialization.fingerprint.clone(),
                     applied_generation: generation,
-                }
-            })
+                })
         })
         .collect()
 }
@@ -711,7 +710,7 @@ pub fn recovery_condition(
     ConditionProposal {
         owner: ConditionOwner::Target(target.clone()),
         subject: ConditionSubject::Operation(operation.clone()),
-        code: StableConditionCode::built_in("recovery_required"),
+        code: StableConditionCode::from_static("recovery_required"),
         impact: ConditionImpact::Blocking,
         retry: ConditionRetry::Manual,
         generation: ConditionGeneration::At(generation),
@@ -731,7 +730,7 @@ pub fn resource_recovery_condition(
     ConditionProposal {
         owner: ConditionOwner::Resource(resource.clone()),
         subject: ConditionSubject::Operation(operation.clone()),
-        code: StableConditionCode::built_in("recovery_required"),
+        code: StableConditionCode::from_static("recovery_required"),
         impact: ConditionImpact::Blocking,
         retry: ConditionRetry::Manual,
         generation: ConditionGeneration::At(generation),
