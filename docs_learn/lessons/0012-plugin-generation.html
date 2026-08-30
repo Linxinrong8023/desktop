@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第十二课：Plugin Generation</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0012 · Generation</p>
+  <h1>插件 ID 没变，为什么连接不能继续复用？</h1>
+  <p class="lead">同一个插件可以停止、崩溃并重启。插件 ID 仍是 <code>official/my-agent</code>，但重启后的进程已经不是原来的那一个，所以每次启动尝试都有独立 generation。</p>
+
+  <h2>Generation 是“这一次进程生命”的编号</h2>
+  <div class="card">
+    <p>可以把插件 ID 想成酒店房间号，generation 想成这一批房卡的版本。房间仍是 302，但上一位住客的旧房卡不能打开新住客时期的 302。</p>
+    <p>同样，插件重启后，旧连接、旧注册能力和迟到通知都属于上一代进程，不能混进新一代。</p>
+  </div>
+
+  <pre><code>Plugin ID: official/my-agent
+
+generation 1：Deno 进程 A → 注册 A → 通知流 A
+                     ↓ 崩溃 / 停止
+generation 2：Deno 进程 B → 注册 B → 通知流 B</code></pre>
+
+  <h2>连接为什么要钉在 generation 上</h2>
+  <p><code>PluginGenerationLease</code> 只允许调用它取得时对应的那一代进程，并携带该 generation 的注册信息。进程结束后，旧 lease 不能复活，也不能自动跳到新进程。</p>
+
+  <p>需要再次调用时，消费者重新向 Lifecycle 获取当前连接。这样调用者不会拿着 generation 1 的 handle，误把请求发给 generation 2。</p>
+
+  <h2>通知也必须携带 generation</h2>
+  <p>通知是异步的，旧进程退出附近可能还有消息在队列中。Lifecycle 把每条 inbound notification 标记为：</p>
+
+  <pre><code>{
+  plugin_id: "official/my-agent",
+  generation: 1,
+  method: "agent/acp",
+  params: ...
+}</code></pre>
+
+  <p>如果当前连接已经是 generation 2，消费者就能识别并丢弃 generation 1 的迟到消息，避免旧 Agent 的回复进入新会话连接。</p>
+
+  <div class="callout warning">
+    <strong>不允许两代重叠：</strong>停止一代时，Lifecycle 会等待插件进程及其受管子进程树真正退出，再允许替代 generation 启动。generation 标记负责识别归属，等待退出负责避免两套进程同时拥有同一插件身份。
+  </div>
+
+  <h2>为什么不在原来的 main.js 上无限重试 agent/start？</h2>
+  <p>因为一次失败可能是“部分成功”，Host 无法证明原进程仍然干净：</p>
+
+  <pre><code>Host 调用 agent/start
+  ↓
+main.js 已经拉起 CLI 进程 A
+  ↓
+但响应丢失或超时
+  ↓
+Host 只知道“没有拿到成功响应”
+并不知道 CLI A 是否已经存在</code></pre>
+
+  <p>如果直接在同一个 <code>main.js</code> 上再次调用 <code>agent/start</code>，插件可能又拉起 CLI B，旧管道、监听器、定时器和迟到通知也可能继续存在。除非协议明确保证 <code>agent/start</code> 幂等并且能彻底复位，否则重复调用不能证明系统回到了干净状态。</p>
+
+  <p>Ora 选择把整个 generation 当作故障隔离边界：先尝试 <code>agent/stop</code>，再由 Lifecycle 结束并回收插件进程树，下一次从新的 <code>main.js</code>、新注册、新管道和新 CLI 开始。这样无需要求每个第三方插件都正确实现复杂的进程内恢复。</p>
+
+  <div class="callout">
+    <strong>Generation 的定义：</strong>它不是“Actor 正在消费的消息编号”，而是同一个 Plugin ID 的一次完整进程生命，包括这一代 <code>main.js</code>、注册信息、子进程、RPC 连接和通知流。Actor 不接收旧代消息只是 generation 隔离带来的结果。
+  </div>
+
+  <h2>当前重试有没有次数限制？</h2>
+  <ul>
+    <li><strong>Agent CLI 未安装、插件被禁用或暂时不存在：</strong>不会因为次数耗尽而停止；从 250ms 开始指数退避，最长间隔 30s，在本次 Ora 进程生命周期内持续尝试。</li>
+    <li><strong>真正的启动错误或连接崩溃：</strong>一分钟内前三次允许重试，第四次失败打开 restart circuit，状态变成 <code>Failing</code>，本次 Ora 进程内停止自动重试。超过一分钟的旧失败会移出计数窗口。</li>
+    <li><strong>Agent 运行时合同不完整：</strong>属于确定性错误，立即变成 <code>Failing</code>，不进行无意义重试。</li>
+  </ul>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Plugin ID 标识安装身份，generation 标识一次具体启动。Lifecycle 的 lease、registration 和 notifications 都绑定 generation；旧 lease 不能自动跳到新进程，迟到通知带 generation 可被识别。替换前还会 shutdown-and-wait，避免同一插件的两代进程重叠。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="插件 ID 只能说明来自哪个插件，generation 才能说明来自该插件的哪一次进程生命；旧消息不能进入新连接。">
+    <h2>只检查这一件事</h2>
+    <p>generation 1 崩溃并启动 generation 2 后，一条迟到的 generation 1 ACP notification 应该怎样处理？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">交给 generation 2 的 Session actor</button>
+      <button data-answer="correct">识别为旧代消息并丢弃</button>
+      <button data-answer="incorrect">修改 generation 字段后继续使用</button>
+      <button data-answer="incorrect">重新写入 orax.toml</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>插件 ID 已经能确定是哪个插件，为什么还需要 generation？旧 lease 为什么不能自动连接到重启后的新进程？</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-lifecycle/src/connection.rs">PluginGenerationLease</a>、<a href="../../crates/plugin-lifecycle/src/launch.rs">attempt-guarded transitions</a> 与 <a href="../../crates/plugin-lifecycle/README.md">Lifecycle data plane</a>。</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0013-lifecycle-sole-owner.html">Plugin Lifecycle 为什么必须是唯一进程所有者</a>。
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第二课：文件、进程与数据</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0002 · 三样东西分开</p>
+  <h1>插件文件、插件进程、插件数据</h1>
+  <p class="lead">这一课只做一件事：分清“安装了什么”“现在是否运行”和“用户改过什么配置”。</p>
+
+  <h2>继续用手机 App 类比</h2>
+  <div class="flow">
+    <div><strong>插件文件</strong>像已经安装的微信 App。即使没有打开，它仍然占据磁盘空间。</div>
+    <div><strong>插件进程</strong>像此刻正在运行的微信。关闭 App 后进程消失，安装文件还在。</div>
+    <div><strong>插件数据</strong>像登录偏好和设置。升级 App 时，通常希望这些内容继续保留。</div>
+  </div>
+
+  <h2>Ora 当前的两个磁盘位置</h2>
+  <pre><code>&lt;data-dir&gt;/plugins/
+├── installed/&lt;namespace&gt;/&lt;name&gt;/&lt;version&gt;/  插件包文件
+└── data/&lt;namespace&gt;/&lt;name&gt;/                插件可写数据
+    └── store.json                            宿主保存的配置值</code></pre>
+
+  <p><code>installed</code> 下按版本保存只读的插件包，供 Ora 发现和读取。<code>data</code> 下是插件唯一的可写数据目录，因此更新插件包时不必把配置和插件代码混在一起。</p>
+
+  <div class="callout warning">
+    <strong>版本目录不等于已经支持回滚：</strong>当前更新流程先验证并落下新版本，成功后会删除同一插件的其他旧版本目录。下载或验证失败时旧版本不会受影响，但更新成功后并没有保留旧版本供用户一键回退。版本目录当前更重要的作用是让包的版本身份明确，并验证目录名与 Manifest 版本一致。
+  </div>
+
+  <div class="callout warning">
+    <strong>重要纠正：</strong><code>store.json</code> 保存的是插件声明过的全局配置值，不保存插件进程的 running/stopped 状态。Ora 每次打开时，Lifecycle 中的插件初始都是 stopped；这个运行状态由内存中的生命周期管理器维护。
+  </div>
+
+  <h2>密钥会被特殊加密吗？</h2>
+  <p><strong>当前实现不能这样承诺。</strong>配置版本一只支持字符串、数字和布尔值，保存时直接序列化进 <code>store.json</code>。MCP 和 Hook 配置还会直接拒绝 <code>secret</code> 类型。也就是说，不能把 <code>store.json</code> 当作系统钥匙串或加密保险箱。</p>
+
+  <div class="interview">
+    <p><strong>准确说法：</strong>Ora 把只读的已安装插件包和插件的可写数据分目录保存；插件进程状态属于内存中的 Lifecycle，而 <code>store.json</code> 只持久化插件配置。当前配置 schema 没有通用 secret 存储，因此不能声称密码会自动加密。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="已安装是磁盘事实，运行中是进程状态，store.json 则是持久化配置；三者生命周期不同。">
+    <h2>只检查这一件事</h2>
+    <p>关闭 Ora 后，下面哪一项仍然成立？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">插件进程仍然在后台运行</button>
+      <button data-answer="correct">插件包文件仍然保存在 installed 目录</button>
+      <button data-answer="incorrect">running 状态被写入 store.json</button>
+      <button data-answer="incorrect">所有密码都已自动存入系统钥匙串</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>从插件 1.0 成功更新到 2.0 后，旧的 1.0 包目录和独立的 data 目录分别会怎样？这算不算已经支持版本回滚？</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-lifecycle/README.md">Plugin Lifecycle README</a>、<a href="../../crates/plugin-config/README.md">Plugin Configuration README</a>、<a href="../../crates/plugin-config/src/declaration.rs">SettingType 定义</a>。</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0003-manifest.html">Ora 怎样知道一个文件夹是什么插件——Manifest</a>。
+  </div>
+</main>
+</body>
+</html>

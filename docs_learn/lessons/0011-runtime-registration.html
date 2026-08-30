@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第十一课：ora/register 能力注册</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0011 · Handshake</p>
+  <h1>main.js 启动后，Ora 怎么知道它会什么？</h1>
+  <p class="lead">Manifest 说明磁盘包是什么类型；<code>ora/register</code> 则由已经启动的进程声明“这一代进程实际实现了哪些调用和通知”。</p>
+
+  <h2>Manifest 与 Register 不重复</h2>
+  <table>
+    <thead><tr><th>阶段</th><th>信息来源</th><th>回答的问题</th></tr></thead>
+    <tbody>
+      <tr><td>安装/发现</td><td><code>orax.toml</code></td><td>这个磁盘包是谁、什么 kind、什么版本</td></tr>
+      <tr><td>进程启动</td><td><code>ora/register</code></td><td>这一代运行进程实际接受和发出哪些消息</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Agent 插件进程会声明什么</h2>
+  <pre><code>{
+  "method": "ora/register",
+  "params": {
+    "methods": [
+      "agent/start",
+      "agent/stop",
+      "agent/listModels"
+    ],
+    "emits": ["agent/acp"],
+    "effectSurfaces": []
+  }
+}</code></pre>
+
+  <p><code>methods</code> 表示 Ora 可以 request/invoke 的方法；<code>emits</code> 表示插件可以主动发出的 notification；<code>effectSurfaces</code> 是可选的 Agent Skill 消费目录声明。这里的声明者是运行 <code>main.js</code> 的 Deno 插件进程，不是真实 Agent CLI。</p>
+
+  <h2>为什么必须先注册再使用</h2>
+  <div class="card">
+    <p>如果 Ora 不先检查合同，只在用户发送第一条 prompt 时才发现插件没有 <code>agent/acp</code>，错误就会发生在真实用户操作中。</p>
+    <p>现在合同会在连接建立时整体检查。缺少 start、stop、listModels 或 emitted agent/acp 的 Agent 插件会直接进入失败状态，不会等到某个会话运行一半才暴露。</p>
+  </div>
+
+  <h2>为什么注册后不能修改</h2>
+  <p>一代进程只允许发送一次 <code>ora/register</code>。如果运行中随意增删能力，Host 的调用许可、notification 白名单和消费者假设会在并发请求中突然变化，很难确定某条消息到达时合同是什么。</p>
+
+  <p>需要改变合同，就启动新的一代插件进程，重新注册一份完整快照。第二次注册本身是协议错误。</p>
+
+  <div class="callout warning">
+    <strong>注册不等于信任插件自称：</strong>Plugin Runtime 解析注册，Lifecycle 做通用 kind 规则检查，而 Agent runtime 的 plugin_agent adapter 还会验证完整 Agent 合同。只有全部匹配，才调用 <code>agent/start</code>。
+  </div>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>每个插件进程在启动时通过唯一且不可变的 <code>ora/register</code> 声明 methods、emits 和可选 Effect surfaces。Host 在任何会话开始前校验注册与安装 kind 的合同一致性；运行中改变能力必须通过新 generation，而不是原地修改注册。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="磁盘包仍然已安装，但运行进程没有满足 Agent contract，连接在用户会话开始前就被拒绝。">
+    <h2>只检查这一件事</h2>
+    <p>一个包合法声明 <code>kind = "agent"</code>，但进程注册时没有声明能发出 <code>agent/acp</code>，会怎样？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">照常运行，第一条 prompt 再决定</button>
+      <button data-answer="correct">安装仍存在，但 Agent 运行时合同验证失败</button>
+      <button data-answer="incorrect">Manifest 自动替它补充 agent/acp</button>
+      <button data-answer="incorrect">前端负责直接读取 CLI stdout</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p><code>orax.toml</code> 已经声明了 <code>kind = "agent"</code>，为什么运行时仍然需要 <code>ora/register</code>？为什么注册必须不可变？</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-runtime/README.md">ora/register protocol</a>、<a href="../../packages/plugin-sdk/src/plugin.ts">Plugin SDK registration</a> 与 <a href="../../crates/backend/src/agent_runtime/plugin_agent/README.md">Agent contract verification</a>。</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0012-plugin-generation.html">同一个插件重启后为什么必须是新 generation</a>。
+  </div>
+</main>
+</body>
+</html>

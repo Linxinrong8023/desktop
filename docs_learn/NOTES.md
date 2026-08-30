@@ -1,0 +1,40 @@
+# Teaching Notes
+
+- 用户有大模型算法背景，但不是传统软件工程出身；术语必须先用白话和类比建立直觉。
+- 用户明确反馈自己目前“连概念都不懂、没有基础”。历史课程笔记只代表接触过相关内容，不能推断为已经理解或掌握。
+- 一次只讲一个概念，确认理解后再继续，避免一次倾倒完整系统。
+- 用户重视“为什么这样设计”，面试场景需要明确动机、替代方案、取舍和失败语义。
+- 使用真实代码路径作证；持续区分设计、当前实现和未来切片。
+- 每课包含主动回忆题。用户先作答，教师再点评；仅仅看过不记为已经学会。
+- 插件专题从“插件是什么、内置与插件化有什么区别”重新开始；在用户用自己的话答对检查题之前，不引入下一组工程术语。
+- 2026-08-29：用户已能用“胶水层”准确解释 Agent 插件连接 Ora 与具体 Agent，并说明插件化减少主程序修改；下一步学习文件与进程的区别。
+- 2026-08-29：用户已掌握“插件文件仍在不等于插件进程仍在”，并知道 installed/data 分目录；需要纠正 `store.json` 的职责和当前没有通用 secret 安全存储这一实现边界。
+- 2026-08-29：用户已理解代码与数据生命周期分离；曾从版本目录推断可回滚，但当前 Installer 更新成功后会清理旧版本，需要通过下一次复述固定这一实现事实。
+- 2026-08-29：用户已准确复述更新失败保护与版本回滚的区别；“文件、进程、代码目录、数据目录”基础完成，下一步学习 Manifest。
+- 2026-08-29：用户已理解 Manifest 的 kind 不能由 `main.js` 推断，并主动指出每种 kind 需要独立包校验；下一步学习 Manifest crate 与 Manager 的两阶段验证边界。
+- 2026-08-29：用户已掌握 Manifest 纯声明验证与 Manager 磁盘包验证的边界；下一步学习验证结果 `InstalledPlugin`。
+- 2026-08-29：用户已理解 `InstalledPlugin` 作为集中验证后的可信宿主视图；下一步学习 `PluginContribution` 枚举与非法状态不可表示。
+- 2026-08-29：用户准确发现 `kind` 与 Contribution 的讲解层次混淆；需固定三步转换：TOML kind → PluginKind 标签 → 携带已验证数据的 PluginContribution。
+- 2026-08-29：用户继续追问布尔/Option 方案为什么不行；需明确它“可以实现但允许非法内存状态”，enum 的优势是编译时绑定标签与必需数据，而不是唯一可行语法。
+- 2026-08-29：用户已理解 Contribution enum 的 variant 唯一互斥；还需用一次回答确认“variant 与专属数据不可分割”，并限制“可信视图”的含义。
+- 2026-08-29：用户已掌握 Contribution 的唯一 variant 与专属数据绑定；下一步学习 contribution 与 runtime 分离。
+- 2026-08-29：用户已理解 Skill 静态贡献与 Agent 动态 runtime 差异，并关联 Effect 和 main.js；需精确区分 Effect 的交付职责与 Agent 自主使用 Skill，下一步学习 Agent 双进程模型。
+- 2026-08-29：用户已掌握 Agent 双进程职责和避免重新内置 CLI 的动机；下一步区分 Plugin JSON-RPC 控制面与 `agent/acp` 携带的 ACP 数据流。
+- 2026-08-29：用户不理解双重 correlation/timeout；协议课必须退回单条消息，从 request/response 与 notification 的 id 差异讲起。
+- 2026-08-29：用户已理解 agent/acp notification 与控制 request/response，并识别外层自定义协议；需校正 adapter 通常透明转发 ACP，以及业务解析发生在 Backend ACP Peer/Session actor。
+- 2026-08-29：用户已主动把 main.js 的职责从“协议转换”修正为“解封装/转发/再封装”；下一次需确认 Plugin SDK、main.js Agent handler、ACP Peer 三者的解析层级。
+- 2026-08-29：用户已完整复述 main.js/SDK → Plugin Runtime → ACP Peer → Session actor → 前端的返回链；下一步学习 ora/register 与运行时合同验证。
+- 2026-08-29：用户主动纠正注册声明者是 Deno Agent 插件进程而非 Agent CLI，并掌握 Manifest kind 与运行时合同区别；下一步学习 generation。
+- 2026-08-29：用户已理解旧 generation 消息必须丢弃；补充其根因是 ACP/session correlation 与上下文归属，下一步学习 Lifecycle 单一进程所有权。
+- 2026-08-29：Lifecycle 课信息过载，用户只记住“统一管理”但不理解原因。必须退回“Lifecycle 管进程 A、Supervisor 私启进程 B”的单一冲突案例，暂不讲状态机、锁、卸载和 lease。
+- 2026-08-29：用户已掌握 Lifecycle 单一进程所有权是为了防止真实进程状态打架，并能区分 Lifecycle 的插件进程状态、Supervisor 的 ACP 连接状态和 Session actor 的聊天状态。
+- 2026-08-29：用户已掌握 generation 是一次完整插件进程生命，而非单个消息编号；能用“agent/start 部分成功但响应丢失”解释为什么必须回收旧 generation 后再重试。
+- 2026-08-29：用户已理解 Agent 插件决定要启动的 CLI，而 Host 通过 `ora/childprocess/spawn` 和 `ora-process` 创建、持有 stdio 并回收真实 OS 进程。
+- 2026-08-29：当前官方 marketplace 已有 OpenCode、Claude Code、Codex 三个 Agent 插件；OpenCode 插件按目标平台随包携带 `assets/bin/opencode[.exe]`，默认通过 `packageCommand` 启动。
+- 2026-08-29：用户反馈连续追问打乱课程主线。已建立 Agent 插件阶段总结，下一步只学习 `connection()` 与 `ensure_running()` 的副作用边界，不立即展开完整 Lifecycle 状态机。
+- 2026-08-29：用户已掌握 `ensure_running()` 的 get-or-start 与 `connection()` 的无启动查询边界；Effect/Skill 热加载讨论已降级为扩展设计旁支。下一步不再深挖协调策略，先用一次 Agent 插件全链路口述验收恢复整体结构。
+- 2026-08-29：用户已通过 Agent 插件主线口述验收，能完整串起安装校验、InstalledPlugin、Supervisor/Lifecycle、Deno 插件、Agent CLI、`agent/acp`、ACP Peer、actor 与前端。后续只需固定 Supervisor 的运行期创建时机，以及 `agent/start` 后仍需 ACP `initialize` 才算 Ready。
+- 2026-08-30：用户能从“Agent 需要运行 JavaScript 进程”解释 Runtime，但说不清 Supervisor。第 16 课将根因提升为“Agent 是长期动态服务”，并固定三层所有权：Lifecycle 管插件进程，Supervisor 管 Agent connection 可用性，Session actor 管一次逻辑会话。
+- 2026-08-30：用户已通过第 16 课口述检查，能说出 Supervisor 负责请求连接、确认/维持连接状态和故障重试。需避免把 Lifecycle 缩窄成只负责启动；它拥有插件进程的完整生命周期。
+- 2026-08-30：用户主动识别一个 Agent connection 服务多个 Session 时存在路由隔离问题。第 17 课聚焦两个 Session ID、AcpPeer pending correlation、RouteRegistry、独立有界队列和 generation/token 防旧路由污染。
+- 2026-08-30：用户已掌握共享 connection 的两阶段 Session 路由，并指出“找到 Channel 即找到会话 actor”。教学时不要把概念等价的表述当成重大错误；先确认其模型足以解释系统，再将 `agent_session_id → SessionChannel` 与 `→ ora_session_id` 的源码差异标为实现补充。

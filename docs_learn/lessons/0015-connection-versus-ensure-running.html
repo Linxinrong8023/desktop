@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第十五课：connection 与 ensure_running</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0015 · 查询与确保</p>
+  <h1>想使用插件时，为什么有两个入口？</h1>
+  <p class="lead"><code>connection()</code> 只查看当前有没有可用连接；<code>ensure_running()</code> 表达“我确实要使用它”，必要时请求 Lifecycle 启动并等待。</p>
+
+  <h2>先用一句白话区分</h2>
+  <div class="card">
+    <p><strong><code>connection()</code>：</strong>“灯现在亮着吗？”只看，不碰开关。</p>
+    <p><strong><code>ensure_running()</code>：</strong>“我现在需要灯亮。”没亮就请唯一负责人打开，并等待结果。</p>
+  </div>
+
+  <h2>同一个 Stopped 插件，两种结果</h2>
+  <pre><code>connection(plugin_id)
+  ↓
+发现 Stopped
+  ↓
+返回 NotRunning
+不会启动任何进程
+
+ensure_running(plugin_id, wait)
+  ↓
+发现 Stopped
+  ↓
+请求 Lifecycle activate
+  ↓
+等待 Starting → Running
+  ↓
+返回绑定当前 generation 的 PluginGenerationLease</code></pre>
+
+  <h2>Agent Supervisor 走哪一个？</h2>
+  <p>Supervisor 确实需要建立 Agent 连接，所以 Backend 的 <code>attach_agent</code> 使用 <code>ensure_running()</code>。拿到 lease 后，再为同一个 generation 打开 notification tap。</p>
+
+  <pre><code>ConnectionSupervisor
+  ↓ attach_agent(plugin_id)
+Lifecycle.ensure_running(...)
+  ↓
+PluginGenerationLease(generation N)
+  +
+Notification tap(generation N)</code></pre>
+
+  <p>这样调用和通知属于同一代：不会拿 generation 2 的调用句柄，却监听 generation 1 的通知。</p>
+
+  <h2>当前谁真正使用 connection()？</h2>
+  <p>一个重要使用者是 Effect worker。Worker 会扫描所有 Workspace 的待处理 surface；每次 reconcile 只处理其中一个 Workspace 的一个 surface。Agent 进程不是该 Workspace 专属的，而是一个 application-scoped Agent 连接可以服务多个 Workspace 和 Session。</p>
+
+  <p>修改某个 Workspace 的 Skill surface 时，Effect 只需要协调<strong>此刻存在的 live generation</strong>：</p>
+
+  <pre><code>Effect worker 调用 connection(plugin_id)
+  ↓
+Agent 已运行 → 拿到当前 runtime，询问 wait-for-idle
+Agent 没运行 → 返回空，直接跳过协调
+不会把 Effect reconcile 变成一次 Agent 启动或可用性等待</code></pre>
+
+  <p>在当前实现中，每个已安装 Agent 的 Supervisor 会主动尝试建立并维持连接，所以稳定状态下通常确实已有 Agent 进程。但这不等于每个 Workspace 各有一个 Agent 进程，也不保证 Effect 执行时连接一定存在：Backend 启动竞态、连接失败、generation 替换和插件停止期间都可能暂时没有 live connection。</p>
+
+  <p>没有 live generation 时，也没有正在读取该 surface 的 Agent turn 需要等待 idle。Effect 可以完成文件物化；Agent 下一次成功启动或重连时再读取新 surface。因此这里使用 <code>connection()</code>，不是为了实现“闲置 Agent 永不启动”的产品策略，而是为了保持职责边界：Effect 只协调现实中已经存在的消费者，不负责改变 Agent 的可用性。</p>
+
+  <div class="callout">
+    <strong>为什么 idle 后还要 restart：</strong><code>waitForIdle</code> 只建立“可以安全修改文件”的边界，并拦住随后到达的新 prompt；OpenCode CLI 只在启动时扫描 <code>.opencode/skills</code>，不会自动热加载，所以文件写完后插件要重启 Agent CLI，再按顺序放行暂存的 prompt。这里通常保留同一个 Deno 插件 generation；<code>effect/restart</code> 参数里的 generation 是 Skill Desired State 的 Effect generation，不是 Plugin process generation。
+  </div>
+
+  <p>设置页不是通过 <code>connection()</code> 查状态。它调用 <code>listInstalledPlugins</code>，Lifecycle 把自己维护的 <code>Stopped / Starting / Running / Failed</code> 状态投影进列表响应。点击启动和停止则分别走显式的 activate/stop 操作。</p>
+
+  <p><code>PluginGateway</code> 也暴露了 <code>connection()</code>，但当前 Workbench 调用仍使用 <code>ensure_running()</code>，因为打开页面并调用方法时确实需要插件运行。</p>
+
+  <div class="callout">
+    <strong>为什么要分两个 API：</strong>查询不应偷偷产生启动进程这种副作用；真正需要使用插件的消费者，则可以通过 <code>ensure_running()</code> 明确表达需求，同时仍由 Lifecycle 决定是否启动。
+  </div>
+
+  <p>如果等待超时，<code>ensure_running()</code> 返回 <code>Timeout</code>；这表示当前调用者不再等待，不等于正在进行的启动一定被取消。</p>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong><code>connection()</code> 是无副作用的当前代查询，<code>ensure_running()</code> 是有明确需求的 get-or-start；两者成功时都只返回绑定某个 generation 的 lease，不转移插件进程所有权。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="Supervisor 需要真实可用的 Agent 连接，因此应使用 ensure_running；connection 对 Stopped 只返回 NotRunning，不会启动进程。">
+    <h2>只检查这一件事</h2>
+    <p>插件当前是 <code>Stopped</code>，Agent Supervisor 现在必须使用它。应该调用哪一个？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect"><code>connection()</code>，它会自动启动</button>
+      <button data-answer="correct"><code>ensure_running()</code>，它会请求 Lifecycle 启动并等待</button>
+      <button data-answer="incorrect">直接用 <code>ora-process</code> 启动，绕开 Lifecycle</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p><code>connection()</code> 与 <code>ensure_running()</code> 的区别是什么？为什么前者不应该偷偷启动插件？</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-lifecycle/src/connection.rs">connection.rs</a>、<a href="../../crates/backend/src/plugin.rs">PluginApi::attach_agent</a>。</p>
+
+  <p class="next"><a href="0016-runtime-and-supervisor.html">下一课：为什么 Agent 需要 Runtime 与 Supervisor →</a></p>
+</main>
+</body>
+</html>

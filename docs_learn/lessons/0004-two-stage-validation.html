@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第四课：插件要过两道检查</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0004 · Validation</p>
+  <h1>为什么插件要过两道检查？</h1>
+  <p class="lead">Manifest 写得合法，不代表磁盘上的插件包真的符合声明。Ora 把这两类问题分给两个模块。</p>
+
+  <h2>第一道：检查“身份证写得对不对”</h2>
+  <div class="card">
+    <p><strong>ora-plugin-manifest</strong> 接收 <code>orax.toml</code> 的文本，检查语法、必填字段、kind 拼写、版本格式，以及不同字段能否合法组合。</p>
+    <p>它不访问磁盘，所以不知道 <code>main.js</code> 是否真的存在。就像证件审核员只检查申请表本身，不能隔空检查箱子里的货物。</p>
+  </div>
+
+  <h2>第二道：检查“箱子里是否真有对应货物”</h2>
+  <div class="card">
+    <p><strong>ora-plugin-manager</strong> 已经知道插件包在磁盘上的位置。它根据通过第一关的 <code>kind</code>，检查实际文件和宿主规则。</p>
+    <p>例如：Agent 和 Workbench 必须有 <code>main.js</code>；Workbench 还必须有页面；Skill 必须有一个或多个 <code>assets/&lt;name&gt;/SKILL.md</code>。</p>
+  </div>
+
+  <div class="flow">
+    <div><strong>orax.toml 文本</strong>插件自己的原始声明。</div>
+    <div><strong>Manifest 验证</strong>文本结构与字段组合是否合法。</div>
+    <div><strong>Manager 验证</strong>声明与磁盘文件、宿主规则是否一致。</div>
+    <div><strong>InstalledPlugin</strong>两关通过后得到的可信宿主视图。</div>
+  </div>
+
+  <div class="callout warning">
+    <strong>关键边界：</strong>Manifest 模块不负责读取文件系统，Manager 也不重新发明 TOML 语法校验。两者各自只拥有自己能可靠判断的事实。
+  </div>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Ora 把插件验证分为 schema 验证和 host-side package 验证。Manifest crate 把不可信文本解析成满足字段不变量的结构；Plugin Manager 再结合磁盘和插件 kind 校验入口、资源与禁止项，最终生成可信的 InstalledPlugin。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="缺少 main.js 是磁盘包与 Agent kind 不一致，只有持有 package root 的 Plugin Manager 能验证。">
+    <h2>只检查这一件事</h2>
+    <p><code>orax.toml</code> 合法声明 <code>kind = "agent"</code>，但包中没有 <code>main.js</code>。哪一层应该拒绝？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">Manifest，因为它负责启动 Agent</button>
+      <button data-answer="correct">Plugin Manager，因为它负责检查磁盘包</button>
+      <button data-answer="incorrect">Agent 自己，因为前两层都不验证文件</button>
+      <button data-answer="incorrect">不应拒绝，kind 声明已经足够可信</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>一个 Agent 插件的 Manifest 语法完全合法，但缺少 <code>main.js</code>。为什么第一关能通过、第二关必须失败？</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-manifest/README.md">Manifest 边界</a>、<a href="../../crates/plugin-manager/README.md">Manager validation split</a> 与 <a href="../../crates/plugin-manager/src/validation.rs">validation.rs</a>。</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0005-installed-plugin.html">两关通过后得到什么——InstalledPlugin</a>。
+  </div>
+</main>
+</body>
+</html>

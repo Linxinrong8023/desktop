@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ora 插件系统速查图</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <p class="eyebrow">Reference · Plugin System</p>
+  <h1>Ora 插件系统速查图</h1>
+  <p class="lead">从可下载的发布清单，到可信的安装贡献，再到可选的进程数据面。记忆主轴：<strong>先验证“是什么”，再决定“谁消费”，只有少数贡献需要进程。</strong></p>
+
+  <div class="flow">
+    <div><strong>Registry</strong>找到发布版本、URL、SHA-256 与目标平台。</div>
+    <div><strong>Manifest</strong>把 TOML 解析成满足语义约束的领域对象。</div>
+    <div><strong>Manager</strong>检查磁盘内容，产出唯一的 Contribution 枚举。</div>
+    <div><strong>Consumer</strong>Lifecycle、Agent、Surface、Skill Catalog 等按类型消费。</div>
+  </div>
+
+  <table>
+    <thead><tr><th>Kind</th><th>包的核心贡献</th><th>Deno 进程</th><th>主要消费者</th></tr></thead>
+    <tbody>
+      <tr><td>agent</td><td><code>main.js</code> Agent adapter；可携带 CLI binary</td><td>按需</td><td>Agent Runtime</td></tr>
+      <tr><td>workbench</td><td>包内页面 + <code>main.js</code> bridge backend</td><td>首次 bridge 调用时</td><td>Surface Host</td></tr>
+      <tr><td>webview</td><td>远程 HTTPS URL、origin 与下载策略</td><td>无</td><td>Surface Host</td></tr>
+      <tr><td>skill</td><td>一个或多个静态 Skill package</td><td>无</td><td>Skill Catalog / Effect</td></tr>
+      <tr><td>mcp</td><td>静态 transport + settings configuration</td><td>无</td><td>安装与配置层；运行时后续实现</td></tr>
+      <tr><td>hook</td><td>Hook 协议描述 + 原生 executable</td><td>无</td><td>未来 Hook consumer</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>面试高频陷阱：</strong>“没有 Deno 插件进程”不等于“没有可执行文件”。Hook 自身就是原生 artifact；MCP stdio 也声明包内 command；区别在于它们不是由通用 Plugin Runtime 启动的长期 JavaScript 插件进程。
+  </div>
+
+  <h2>层与所有权</h2>
+  <table>
+    <thead><tr><th>层</th><th>只负责</th><th>刻意不负责</th></tr></thead>
+    <tbody>
+      <tr><td>plugin-manifest</td><td>纯文本 schema 与语义</td><td>磁盘、网络、进程</td></tr>
+      <tr><td>plugin-manager</td><td>安装、发现、磁盘验证</td><td>启动、停止、协议通信</td></tr>
+      <tr><td>plugin-runtime</td><td>一个 Deno 进程与双向协议</td><td>插件类型的业务含义</td></tr>
+      <tr><td>plugin-lifecycle</td><td>进程唯一所有权、状态、generation</td><td>Agent/Surface 上层语义</td></tr>
+      <tr><td>backend consumers</td><td>把 Contribution 适配成 Agent、Skill、Surface 等产品能力</td><td>绕过底座自行启动插件</td></tr>
+    </tbody>
+  </table>
+
+  <p class="source-list">主要依据：<a href="../../crates/plugin-manager/src/validation.rs">PluginContribution 源码</a>、<a href="../../crates/plugin-lifecycle/README.md">Lifecycle README</a>、<a href="../../crates/backend/src/agent_runtime/plugin_agent/README.md">Agent Adapter README</a>。</p>
+</main>
+</body>
+</html>

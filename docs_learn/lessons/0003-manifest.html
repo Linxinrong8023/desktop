@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第三课：Manifest 是插件的身份证</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0003 · Manifest</p>
+  <h1>Ora 怎样认出一个插件？</h1>
+  <p class="lead">一个目录里可能有 JavaScript、图片和说明文件。Ora 不能靠猜，需要一张格式固定的“插件身份证”：<code>orax.toml</code>。</p>
+
+  <h2>Manifest 是什么</h2>
+  <div class="card">
+    <p><strong>Manifest</strong> 中文通常叫“清单”。它是插件包根目录中的一个文本文件，告诉 Ora：我是谁、属于谁、是哪种插件、版本是多少。</p>
+    <p>它类似快递箱外面的面单。面单描述箱子，而不是箱子里的机器本身；同样，Manifest 描述插件，但不会替代插件代码运行。</p>
+  </div>
+
+  <pre><code>identifier = "my-agent"
+namespace = "official"
+kind = "agent"
+version = "1.2.0"
+description = "An Agent plugin"</code></pre>
+
+  <h2>这五项先这样理解</h2>
+  <div class="flow">
+    <div><strong>namespace + identifier</strong>共同组成插件的唯一身份，例如 <code>official/my-agent</code>。</div>
+    <div><strong>kind</strong>说明它贡献什么能力，例如 Agent、Skill 或 MCP。</div>
+    <div><strong>version</strong>说明当前包是哪一个版本，并且必须与版本目录一致。</div>
+    <div><strong>description</strong>是给人看的简介，不决定插件怎样运行。</div>
+  </div>
+
+  <h2>为什么不能只看有没有 main.js</h2>
+  <p>因为文件名只能说明“这里可能有一段代码”，却不能可靠说明插件身份、类型和版本。Ora 先严格解析并验证 Manifest，再根据 <code>kind</code> 检查这个插件包还必须有什么、禁止有什么。</p>
+
+  <div class="callout warning">
+    <strong>自我声明不等于自动可信：</strong>插件自己写 <code>kind = "agent"</code> 只是声明。Ora 仍要检查字段是否合法、目录版本是否一致，以及 Agent 插件需要的文件是否真的存在。验证失败的包不能被当作正常插件运行。
+  </div>
+
+  <div class="interview">
+    <p><strong>初级面试表达：</strong>每个插件包用根目录下的 <code>orax.toml</code> 声明身份、类型和版本。Manifest 层只负责把文本解析成经过验证的结构；磁盘文件是否满足该类型的要求，则由 Plugin Manager 继续检查。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="Manifest 提供明确、可验证的身份和类型；仅凭某个文件名无法可靠判断整个插件包的含义。">
+    <h2>只检查这一件事</h2>
+    <p>为什么 Ora 不应该看到目录里有 <code>main.js</code>，就直接把它当成 Agent 插件？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">因为 Ora 完全不能读取 JavaScript 文件</button>
+      <button data-answer="correct">因为文件名不能确定插件的身份、类型和版本</button>
+      <button data-answer="incorrect">因为所有 Agent 插件都只能使用 Rust 编写</button>
+      <button data-answer="incorrect">因为 Manifest 负责代替插件代码运行</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>如果任何文件夹只要放一个 <code>main.js</code> 就能冒充 Agent 插件，Ora 会缺少哪些判断依据？</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-manifest/README.md">Plugin Manifest README</a> 与 <a href="../../crates/plugin-manager/src/discovery.rs">Plugin discovery</a>。</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0004-two-stage-validation.html">为什么插件要过两道检查</a>。
+  </div>
+</main>
+</body>
+</html>

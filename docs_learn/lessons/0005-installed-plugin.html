@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第五课：InstalledPlugin 是验证结果</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0005 · Trusted View</p>
+  <h1>两关通过后，Ora 得到什么？</h1>
+  <p class="lead">Ora 不会让后续每个模块重新阅读 Manifest、重新检查文件。Plugin Manager 把验证结果整理成一个 <code>InstalledPlugin</code>。</p>
+
+  <h2>从“申请材料”变成“已核验档案”</h2>
+  <div class="card">
+    <p>原始插件包和 <code>orax.toml</code> 像申请人自己提交的材料，内容还不能直接信任。</p>
+    <p><code>InstalledPlugin</code> 像审核机构签发的档案：身份、版本、包位置和能力类型已经经过两道检查，后续模块可以按这份档案办事。</p>
+  </div>
+
+  <div class="flow">
+    <div><strong>Package</strong>磁盘上的原始插件文件。</div>
+    <div><strong>Manifest</strong>解析并验证插件自己的声明。</div>
+    <div><strong>Manager</strong>验证声明与实际包内容一致。</div>
+    <div><strong>InstalledPlugin</strong>提供给后续模块的宿主可信视图。</div>
+  </div>
+
+  <h2>里面包含什么</h2>
+  <pre><code>InstalledPlugin
+├── package_root   已验证插件包的位置
+├── id             namespace/name
+├── version        已验证版本
+├── metadata       名称、描述、主页等
+└── contributes    已验证的能力类型和专属信息</code></pre>
+
+  <p>例如 Agent contribution 内已经带有验证过的 <code>main.js</code> 相对路径；Skill contribution 内已经带有解析过的 Skill 列表。后续消费者不必再靠 <code>kind</code> 字符串猜文件结构。</p>
+
+  <div class="callout warning">
+    <strong>“可信”有范围：</strong>这里只表示结构、路径和 kind 规则已经通过宿主验证，不代表插件代码一定没有恶意或运行时永远不会失败。运行安全和故障隔离是后面的层次。
+  </div>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Plugin Manager 把不可信的包和声明收敛为 <code>InstalledPlugin</code>。它携带经过验证的身份、版本、包根和类型化 contribution，让 Lifecycle 与各类消费者依赖已建立的不变量，而不必重复解析 Manifest 或检查包布局。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="InstalledPlugin 的价值是集中建立并携带验证结果，让后续模块依赖不变量，而不是重复解释原始声明。">
+    <h2>只检查这一件事</h2>
+    <p>为什么不直接把原始 <code>orax.toml</code> 传给 Lifecycle？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">因为 Lifecycle 完全不能处理任何文本</button>
+      <button data-answer="correct">否则后续模块还要重复验证声明和磁盘包</button>
+      <button data-answer="incorrect">因为 InstalledPlugin 会自动修复所有错误</button>
+      <button data-answer="incorrect">因为 Manifest 只允许在前端读取</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>如果 Lifecycle 只拿到原始 Manifest，而没有 <code>InstalledPlugin</code>，它还要重复做哪些工作？这会带来什么问题？</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-manager/src/validation.rs">InstalledPlugin 与 PluginContribution</a>。</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0006-plugin-contribution.html">PluginContribution：插件到底贡献什么</a>。
+  </div>
+</main>
+</body>
+</html>
