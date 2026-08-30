@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第七课：Contribution 不等于 Runtime</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0007 · Runtime</p>
+  <h1>插件贡献能力，不等于一定启动进程</h1>
+  <p class="lead"><code>PluginContribution</code> 回答“它提供什么”；Plugin Runtime 回答“是否需要运行一个长期通信的 <code>main.js</code> 进程”。</p>
+
+  <h2>继续用手机 App 类比</h2>
+  <div class="card">
+    <p>一套离线壁纸安装后就能被系统读取，不需要一直运行一个壁纸程序。</p>
+    <p>聊天 App 则需要运行，才能持续接收和发送消息。同样，不同插件贡献能力的方式不同，不能认为“只要是插件就必须有进程”。</p>
+  </div>
+
+  <h2>Ora 当前的六种 contribution</h2>
+  <table>
+    <thead><tr><th>类型</th><th>通用 Deno Plugin Runtime</th><th>直观原因</th></tr></thead>
+    <tbody>
+      <tr><td>Agent</td><td>需要</td><td><code>main.js</code> 要与 Ora 长期双向通信，并连接具体 Agent</td></tr>
+      <tr><td>Workbench</td><td>需要</td><td><code>main.js</code> 为工作台页面提供调用能力</td></tr>
+      <tr><td>Skill</td><td>不需要</td><td>宿主读取并注册包内的 Skill 文件</td></tr>
+      <tr><td>Webview</td><td>不需要</td><td>宿主根据已验证描述展示远程页面</td></tr>
+      <tr><td>MCP</td><td>不需要</td><td>当前贡献的是已验证 transport 描述，不运行通用插件进程</td></tr>
+      <tr><td>Hook</td><td>不需要</td><td>当前贡献的是 Hook 描述与可执行物，不运行通用插件进程</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warning">
+    <strong>措辞要准确：</strong>这里的“不需要进程”特指不启动 Ora 的通用 Deno Plugin Runtime。MCP 或 Hook 的后续消费者可能使用命令或可执行物，但那不是 Lifecycle 为该插件维持的 <code>main.js</code> 进程。
+  </div>
+
+  <h2>Skill 与 Effect 的关系</h2>
+  <p>Skill 插件本身贡献静态文件。Backend 会把已验证的 Skill 元数据同步进共享目录与 Effect source；Effect Worker 再按照 Workspace 的 Desired 状态，把选中的 Skill 物化到 Agent 插件声明的 Skill surface，例如 <code>.agents/skills</code>。</p>
+
+  <p>Effect 负责的是<strong>交付与安全更新</strong>：复制哪些 Skill、目标目录当前是否一致、Agent 是否需要等待空闲和重启。它不读取 Skill 内容替 Agent 做决策，也不执行 Skill；最终由真实 Agent 从自己的发现目录读取并使用。</p>
+
+  <div class="callout warning">
+    <strong>文档漂移：</strong><code>docs/effect-skill-state.md</code> 仍写着没有 product worker 或真实 Agent 集成，但当前代码已有 <code>effect_worker</code>、Agent Effect surface 注册和 SDK coordination callbacks。学习以当前实现为准。
+  </div>
+
+  <h2>所以 stopped 不一定是故障</h2>
+  <p>Lifecycle 只为 Agent 和 Workbench 管理通用插件进程。Skill、Webview、MCP、Hook 没有这种进程，因此它们即使已安装并可用，runtime 状态仍会显示 <code>stopped</code>。</p>
+
+  <pre><code>已安装 / 可用     说明磁盘包通过验证
+Contribution      说明插件提供什么能力
+Runtime running   只说明通用插件进程此刻正在运行</code></pre>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Ora 把安装可用性、贡献类型和运行时状态分开。只有需要持续双向通信的 Agent 与 Workbench contribution 进入通用 Deno runtime；Skill、Webview、MCP、Hook 由静态或专属消费者使用，所以已安装但 runtime 为 stopped 是正常状态。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="Skill contribution 由宿主读取包内文件，不存在需要 Lifecycle 维持的 main.js 进程，因此 stopped 是设计状态。">
+    <h2>只检查这一件事</h2>
+    <p>一个 Skill 插件已经安装且可以使用，但 runtime 显示 <code>stopped</code>，说明什么？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">插件一定损坏了</button>
+      <button data-answer="correct">它本来就没有通用插件进程</button>
+      <button data-answer="incorrect">Manager 忘记读取 orax.toml</button>
+      <button data-answer="incorrect">Skill 必须补充 main.js</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>为什么“插件已经安装可用”和“插件 runtime 正在运行”不是同一件事？请用 Skill 与 Agent 各举一个例子。</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-lifecycle/README.md">Plugin Lifecycle README</a> 与 <a href="../../crates/plugin-manager/src/validation.rs">entrypoint()</a>。</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0008-agent-two-processes.html">Agent 插件为什么有两个进程</a>。
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第八课：Agent 插件的双进程模型</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0008 · Agent Focus</p>
+  <h1>Agent 插件为什么有两个进程？</h1>
+  <p class="lead">运行 Agent 插件时，<code>main.js</code> 和真正的 Agent CLI 不是同一个程序。前者是适配器，后者才是提供对话能力的 Agent。</p>
+
+  <h2>两层分别是谁</h2>
+  <div class="flow">
+    <div><strong>Ora Backend</strong>需要一种统一方式使用所有 Agent。</div>
+    <div><strong>Deno 插件进程</strong>运行 <code>main.js</code>，把统一合同转换成具体 Agent 操作。</div>
+    <div><strong>Agent CLI 进程</strong>Claude、Codex、OpenCode 等真正的 Agent 程序。</div>
+    <div><strong>模型与工具</strong>由 Agent CLI 自己管理上下文、模型调用和工具行为。</div>
+  </div>
+
+  <pre><code>Ora Backend
+    ↕ Plugin JSON-RPC
+Deno: main.js                 适配器 / 胶水层
+    ↕ ACP over child stdio
+真实 Agent CLI                真正的 Agent</code></pre>
+
+  <h2>启动不是执行 main.js 后立刻完成</h2>
+  <ol>
+    <li>Agent Supervisor 请求连接已安装的 Agent 插件。</li>
+    <li>Plugin Lifecycle 按需启动 Deno，并在里面执行 <code>main.js</code>。</li>
+    <li><code>main.js</code> 注册 Agent 合同：start、stop、listModels、ACP 通道等。</li>
+    <li>Backend 验证合同后调用 <code>agent/start</code>。</li>
+    <li>插件选择具体 CLI，并通常通过 <code>ora/childprocess/spawn</code> 请宿主拉起它。</li>
+    <li>此后插件在 Ora 与 CLI 之间双向转发 ACP 帧。</li>
+  </ol>
+
+  <h2>main.js 不只是“启动脚本”</h2>
+  <p>它至少承担四类适配职责：</p>
+  <ul>
+    <li>决定如何启动与停止具体 CLI；</li>
+    <li>向 Ora 报告可选模型；</li>
+    <li>在 Ora 与 CLI 之间转发 ACP；</li>
+    <li>可选地声明 Skill surface，并配合 Effect 等待空闲和重启。</li>
+  </ul>
+
+  <div class="callout warning">
+    <strong>所有权要分清：</strong>插件逻辑上决定并管理 Agent CLI 的生命周期；但为了可靠清理进程树，CLI 通常由宿主的 childprocess API 在操作系统层真正创建和回收。Lifecycle 则是 Deno 插件进程的唯一所有者。
+  </div>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Agent 插件采用双进程适配模型。Lifecycle 启动 Deno 执行 <code>main.js</code>，它实现 Ora 统一的 Agent 插件合同；收到 <code>agent/start</code> 后，适配器选择并通过宿主 childprocess 能力启动真实 Agent CLI，再透明转发 ACP。这样 Ora 不需要内置每个 CLI 的启动方式和差异。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="main.js 是遵守 Ora 插件合同的适配器；真正管理模型上下文并提供 Agent 行为的是它连接的 Agent CLI。">
+    <h2>只检查这一件事</h2>
+    <p>Deno 中运行的 <code>main.js</code> 与真实 Agent CLI 的根本区别是什么？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">两者只是同一进程的两个文件名</button>
+      <button data-answer="correct">前者是适配器，后者是真正的 Agent 程序</button>
+      <button data-answer="incorrect">前者负责大模型推理，后者只读取 Manifest</button>
+      <button data-answer="incorrect">真实 Agent CLI 由 Plugin Manager 在安装时启动</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>从用户选择一个 Agent 开始，请用自己的话说明 Deno 插件进程和 Agent CLI 进程分别负责什么，以及两者为什么要分开。</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/backend/src/agent_runtime/plugin_agent/README.md">plugin_agent</a>、<a href="../../packages/plugin-sdk/src/agent.ts">Agent SDK</a> 与 <a href="../../crates/plugin-lifecycle/README.md">childprocess host</a>。</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0009-plugin-rpc-and-acp.html">Plugin JSON-RPC 与 ACP 不是同一层协议</a>。
+  </div>
+</main>
+</body>
+</html>

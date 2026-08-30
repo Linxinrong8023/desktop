@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第十课：一条 Prompt 的完整路径</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0010 · End-to-End</p>
+  <h1>一条 prompt 到底在哪里被包装和解析？</h1>
+  <p class="lead">同一条消息经过三层代码，但每层只理解自己负责的协议：ACP 层理解 Agent 业务，Plugin Runtime 理解外层信封，main.js 负责适配和转发。</p>
+
+  <h2>从前端发往 Agent</h2>
+  <div class="flow">
+    <div><strong>前端</strong>通过 Ora 前端契约发送用户 prompt，不直接构造 ACP。</div>
+    <div><strong>Session actor + ACP Peer</strong>构造带 ACP id 的 <code>session/prompt</code>。</div>
+    <div><strong>Plugin transport</strong>把完整 ACP JSON 放进 <code>agent/acp</code> notification。</div>
+    <div><strong>main.js</strong>取出 ACP，按具体 CLI 的 stdio framing 写给真实 Agent。</div>
+  </div>
+
+  <pre><code>前端 Prompt
+  ↓ Ora 前端/后端契约
+Session actor
+  ↓ 构造 ACP request id=42
+ACP Peer
+  ↓
+agent/acp notification { params: ACP(id=42) }
+  ↓ Plugin Runtime framed JSON-RPC
+main.js
+  ↓ CLI stdio
+真实 Agent CLI</code></pre>
+
+  <h2>Agent 返回前端</h2>
+  <pre><code>真实 Agent CLI
+  ↓ ACP 更新 / ACP response id=42
+main.js
+  ↓ agent/acp notification { params: ACP(id=42) }
+Plugin Runtime / plugin_agent bridge
+  ↓ 基本不解释 ACP 业务内容
+ACP Peer
+  ↓ 解析 ACP、按 id=42 找到原 prompt
+Session actor
+  ↓ 转换成 Ora 会话事件
+前端
+  ↓ 渲染文本、工具调用、状态等</code></pre>
+
+  <h2>每层到底理解什么</h2>
+  <table>
+    <thead><tr><th>层</th><th>理解的内容</th><th>不负责</th></tr></thead>
+    <tbody>
+      <tr><td>Plugin Runtime</td><td>外层帧、JSON-RPC id、method、注册能力</td><td>不理解 session/prompt、工具调用等 ACP 语义</td></tr>
+      <tr><td>main.js adapter</td><td>Agent 启停、CLI stdio、ACP 转发、Agent 差异</td><td>通常不替 Ora 处理会话业务</td></tr>
+      <tr><td>ACP Peer / Session actor</td><td>ACP request/response、session update、取消与路由</td><td>不关心 Deno 帧怎样编码</td></tr>
+      <tr><td>前端</td><td>Ora 的会话事件和展示模型</td><td>不直接处理插件协议或 CLI stdio</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warning">
+    <strong>“透明转发”的范围：</strong>对 Ora 的 <code>plugin_agent</code> bridge 而言，ACP payload 基本是不透明的；进入 Backend 的 ACP Peer 后才会解析。具体 <code>main.js</code> 可以处理换行 framing，未来也可以把某个私有 CLI 协议翻译成 ACP，但它对 Ora 一侧必须呈现标准 ACP。
+  </div>
+
+  <div class="callout">
+    <strong>SDK 与 main.js 再分一层：</strong>Plugin SDK 负责读取四字节长度、帧类型和外层 Plugin JSON-RPC，随后才调用 main.js 注册的 <code>onAcp(frame)</code>。因此 Agent-specific main.js 通常拿到的已经是 ACP JSON 对象；它主要处理 CLI stdio 的读写和 framing，再调用 SDK 的 <code>notify("agent/acp", frame)</code> 发回。业务语义仍由 ACP Peer 处理。
+  </div>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>前端不感知插件协议。Session actor 通过 ACP Peer 生成 ACP，plugin transport 将整帧作为 <code>agent/acp</code> notification payload 穿过 framed Plugin JSON-RPC；main.js 转给真实 CLI。返回路径相反，Plugin bridge 保持 payload 透明，ACP Peer 才负责业务解析与 correlation，Session actor 再映射成前端事件。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="Plugin Runtime 只理解外层信封；ACP Peer 才理解信封内部的 session/prompt、response id 和 session updates。">
+    <h2>只检查这一件事</h2>
+    <p>真实 Agent 返回 ACP response 后，哪一层负责按 ACP id 找到原 prompt？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">Manifest parser</button>
+      <button data-answer="incorrect">通用 Plugin Runtime</button>
+      <button data-answer="correct">Backend 的 ACP Peer</button>
+      <button data-answer="incorrect">前端浏览器</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>请从 Agent CLI 返回一条 ACP response 开始，说明 main.js、Plugin Runtime、ACP Peer、Session actor 和前端分别做什么。</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/backend/src/agent_runtime/plugin_agent/README.md">plugin_agent boundary</a>、<a href="../../crates/backend/src/agent_runtime/plugin_agent/transport.rs">Plugin transport</a> 与 <a href="../../crates/acp/">ACP Peer</a>。</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0011-runtime-registration.html">插件进程如何用 ora/register 声明能力</a>。
+  </div>
+</main>
+</body>
+</html>

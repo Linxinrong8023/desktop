@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第一课：插件到底是什么</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0001 · 从零开始</p>
+  <h1>插件到底是什么？</h1>
+  <p class="lead">这一课只学一个概念：插件是一个可以后来安装、用来给主程序增加能力的独立组件。</p>
+
+  <h2>先把 Ora 想成一部手机</h2>
+  <div class="card">
+    <p><strong>Ora 主程序</strong>像手机系统，负责窗口、任务、会话这些共同能力。</p>
+    <p><strong>插件</strong>像后来安装的 App。装地图 App，手机多了导航能力；装音乐 App，手机多了听歌能力。</p>
+    <p>手机系统不必提前把全世界所有 App 都写进自己里面。它只要规定好：App 怎样安装、能使用什么能力、怎样与系统交流。</p>
+  </div>
+
+  <h2>“内置”与“插件化”的区别</h2>
+  <div class="flow">
+    <div><strong>以前：内置</strong>想支持 Agent A，就把 Agent A 的接入代码直接写进 Ora。</div>
+    <div><strong>遇到变化</strong>想再支持 Agent B，通常还要修改、测试并重新发布 Ora。</div>
+    <div><strong>现在：插件化</strong>Ora 先规定统一的“插口规则”，具体 Agent 的接入放到独立插件里。</div>
+    <div><strong>以后扩展</strong>安装一个符合规则的新插件，就能增加新的 Agent 能力。</div>
+  </div>
+
+  <div class="callout">
+    <strong>一句话定义：</strong>插件是在主程序之外独立提供、可以按约定接入主程序，从而增加某种能力的组件。
+  </div>
+
+  <h2>Agent 插件不是“大模型本身”</h2>
+  <p>在 Ora 里，Agent 插件更像一只<strong>转换插头</strong>：一头符合 Ora 规定的插口，另一头连接某个具体 Agent 程序。它让 Ora 能使用这个 Agent，但插件本身不等于模型，也不等于整个 Ora。</p>
+
+  <pre><code>Ora 主程序  ←  统一插口  ←  Agent 插件  ←  具体 Agent 程序</code></pre>
+
+  <p>这里先不用理解“统一插口”内部怎么实现。后面的课会把它拆成文件、程序、进程和通信规则，一个一个学。</p>
+
+  <h2>为什么值得插件化</h2>
+  <p>核心原因是<strong>把“稳定的主程序”和“经常增加或变化的具体能力”分开</strong>。这样新增 Agent 时，理想情况下只增加或更新对应插件，不必反复修改 Ora 主程序的核心代码。</p>
+
+  <div class="interview">
+    <p><strong>最初级的面试说法：</strong>插件系统让主程序先定义稳定的接入规则，再把具体能力放在可独立安装的插件中。这样新增一种 Agent 能力时，可以主要新增插件，而不是把每个 Agent 的特殊逻辑都继续写进 Ora 主程序。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="插件的重点是作为独立组件，在不把所有能力都写死进主程序的情况下扩展主程序。">
+    <h2>只检查这一件事</h2>
+    <p>下面哪句话最接近“插件”？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">重新编译主程序时使用的源代码</button>
+      <button data-answer="correct">后来安装并扩展主程序能力的组件</button>
+      <button data-answer="incorrect">完全替代主程序运行的新系统</button>
+      <button data-answer="incorrect">只负责保存用户数据的文件夹</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>请先不看上面的定义，用自己的话回答一个问题：如果 Ora 将来要支持一个新的 Agent，插件化设计希望我们“修改 Ora 主程序”，还是“增加一个符合规则的插件”？这样做有什么好处？</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0002-files-processes-and-data.html">插件文件、插件进程与插件数据</a>。
+  </div>
+</main>
+</body>
+</html>

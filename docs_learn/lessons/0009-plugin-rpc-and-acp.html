@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第九课：Plugin JSON-RPC 与 ACP</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0009 · Protocol Layers</p>
+  <h1>“都用 ACP 通信”为什么还不够准确？</h1>
+  <p class="lead">ACP 是 Agent 业务协议，但 Ora Backend 与 <code>main.js</code> 之间还需要插件底座自己的通信协议来启动、停止和承载 ACP。</p>
+
+  <h2>用快递信封理解两层协议</h2>
+  <div class="card">
+    <p><strong>ACP 帧</strong>像信纸上的业务内容：创建会话、发送 prompt、工具调用、流式更新。</p>
+    <p><strong>Plugin JSON-RPC</strong>像 Ora 插件系统规定的快递信封：它既能发送 start/stop 等控制请求，也能把整张 ACP 信纸装进名为 <code>agent/acp</code> 的通知里。</p>
+  </div>
+
+  <pre><code>Ora Backend
+  │
+  │ Plugin Runtime 二进制帧
+  │ └── JSON-RPC notification: method = "agent/acp"
+  │     └── params = 一个完整 ACP JSON 消息
+  ▼
+main.js 适配器
+  │
+  │ Agent CLI 的 stdio
+  │ └── 转发 ACP 消息
+  ▼
+真实 Agent CLI</code></pre>
+
+  <h2>哪些不是 ACP</h2>
+  <table>
+    <thead><tr><th>消息</th><th>所属层</th><th>用途</th></tr></thead>
+    <tbody>
+      <tr><td><code>ora/register</code></td><td>Plugin Runtime</td><td>插件声明它实现哪些方法、能发哪些通知</td></tr>
+      <tr><td><code>agent/start</code></td><td>Agent Plugin 控制合同</td><td>让适配器准备好真实 CLI</td></tr>
+      <tr><td><code>agent/stop</code></td><td>Agent Plugin 控制合同</td><td>停止真实 CLI</td></tr>
+      <tr><td><code>agent/listModels</code></td><td>Agent Plugin 控制合同</td><td>在会话外列出模型</td></tr>
+      <tr><td><code>agent/acp</code></td><td>Plugin Runtime notification</td><td>承载一个完整 ACP 消息</td></tr>
+    </tbody>
+  </table>
+
+  <h2>为什么 ACP 用 notification 承载</h2>
+  <h3>先认识 request/response</h3>
+  <p>JSON-RPC request 带一个 id，发送者会等待相同 id 的 response：</p>
+
+  <pre><code>发送：{ "id": 7, "method": "agent/start" }
+等待：{ "id": 7, "result": { "protocol": "acp" } }</code></pre>
+
+  <p>这适合 <code>agent/start</code>：Backend 需要知道启动是否成功，并且这个控制调用应该在较短时间内结束。</p>
+
+  <h3>notification 是只负责投递</h3>
+  <p>JSON-RPC notification 没有 id，外层发送者不等待外层 response：</p>
+
+  <pre><code>发送：{ "method": "agent/acp", "params": ACP消息 }
+外层到此结束，不等待 agent/acp 的 Plugin RPC response</code></pre>
+
+  <h3>ACP 内部已经自带 request/response</h3>
+  <p>例如一条简化的 ACP prompt 自己已经有 id：</p>
+
+  <pre><code>ACP 请求：{ "id": 42, "method": "session/prompt", ... }
+...中间可以持续几分钟并产生很多流式更新...
+ACP 响应：{ "id": 42, "result": ... }</code></pre>
+
+  <p>如果把这条 ACP 请求再包装成 Plugin RPC request，就会变成：</p>
+
+  <pre><code>外层 Plugin request id = 7
+└── 内层 ACP request id = 42</code></pre>
+
+  <p>这时插件面临两个都不理想的选择：</p>
+  <ol>
+    <li>立刻回答外层 id 7：只能表示“收到信封”，不能表示内层 id 42 的 prompt 已完成；外层 id 没提供有用结果。</li>
+    <li>等 prompt 完成再回答 id 7：prompt 可能运行几分钟，外层控制调用的 timeout 会先到；取消时还要判断取消 id 7、id 42，还是两个都取消。</li>
+  </ol>
+
+  <p>因此外层只用 notification 把完整 ACP 消息送过去，不再增加第二个 id。真正的请求、响应、取消和长时间运行全部由内层 ACP 的 id 42 管理。Ora 的 Agent adapter 基本不解释、不改写这个 payload，只负责把它送到另一端。</p>
+
+  <div class="callout warning">
+    <strong>Plugin Runtime 的物理帧：</strong>Ora 与 Deno 的 stdio 上，每条消息使用四字节大端长度、一个帧类型字节和 UTF-8 JSON payload。stdout 只承载协议，日志走 stderr，避免普通输出破坏协议流。
+  </div>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Agent 插件有协议分层。外层是 Plugin Runtime 的 framed bidirectional JSON-RPC，用于注册和控制调用；ACP 作为 <code>agent/acp</code> notification 的 payload 透明穿过外层，再由适配器转给 CLI。因为 ACP 已有自己的 correlation 和 cancellation，使用 notification 可以避免双重超时与请求关联。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="外层 notification 只负责投递；真正需要等待的 prompt 结果由内层 ACP 自己的 id 关联。">
+    <h2>只检查这一件事</h2>
+    <p>外层 <code>agent/acp</code> notification 没有 id，那 prompt 的响应靠什么找到原请求？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">依靠插件进程的操作系统 PID</button>
+      <button data-answer="correct">依靠 notification 内部 ACP 消息自己的 id</button>
+      <button data-answer="incorrect">依靠 orax.toml 中的版本号</button>
+      <button data-answer="incorrect">无法关联，所以 prompt 不会返回响应</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>外层 notification 没有 id，为什么内层 ACP prompt 仍然可以收到正确响应？如果外层再增加一个 id，会多出哪两种等待结果？</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-runtime/README.md">Plugin Runtime protocol</a>、<a href="../../crates/backend/src/agent_runtime/plugin_agent/README.md">Agent adapter</a> 与 <a href="../../packages/plugin-sdk/src/agent.ts">Agent SDK</a>。</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0010-one-prompt-end-to-end.html">一条 prompt 从前端到 Agent 再回来</a>。
+  </div>
+</main>
+</body>
+</html>

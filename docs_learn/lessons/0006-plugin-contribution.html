@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第六课：PluginContribution</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0006 · Contribution</p>
+  <h1>这个插件到底贡献什么能力？</h1>
+  <p class="lead">Manifest 中的 <code>kind</code> 是插件自己的字符串声明；验证完成后的 <code>PluginContribution</code> 是 Ora 内部可以直接使用的类型化结果。</p>
+
+  <h2>Contribution 是什么意思</h2>
+  <div class="card">
+    <p><strong>Contribution</strong> 可以理解为“这个插件给 Ora 增加的能力”。Agent 插件贡献一个可连接的 Agent；Skill 插件贡献一组 Skill；Webview 插件贡献一个可展示的远程页面能力。</p>
+    <p>它不是又一份 Manifest，而是 Manager 检查完 Manifest 和磁盘文件后整理出的结果。</p>
+  </div>
+
+  <h2>为什么使用 enum</h2>
+  <p>Rust 的 enum 可以先理解成一个“只能六选一的盒子”。每个 <code>InstalledPlugin</code> 恰好装入下面一种 contribution，并随身携带该类型专属的数据。</p>
+
+  <pre><code>PluginContribution
+├── Agent(已验证的 main.js 入口)
+├── Workbench(入口 + 页面资源)
+├── Webview(已验证的页面描述)
+├── Skill(已解析的 Skill 列表)
+├── Mcp(已编译的 MCP 描述)
+└── Hook(已验证的 Hook 描述)</code></pre>
+
+  <h2>布尔开关不是不能用，而是允许矛盾状态</h2>
+  <p>下面这种内部结构能够工作，但它把正确性留给程序员手动维护：</p>
+
+  <pre><code>struct LoosePlugin {
+  is_agent: bool,
+  is_skill: bool,
+  agent_data: Option&lt;AgentData&gt;,
+  skill_data: Option&lt;SkillData&gt;,
+}</code></pre>
+
+  <p>一个合法 Agent 应该是 <code>true / false / Some / None</code>。但同一个结构也允许造出以下值：</p>
+
+  <pre><code>// 声称是 Agent，却没有 Agent 必需数据
+is_agent = true
+agent_data = None
+
+// 同时声称是两种插件
+is_agent = true
+is_skill = true
+
+// 不是 Agent，却带着 Agent 数据
+is_agent = false
+agent_data = Some(...)</code></pre>
+
+  <p>这些值可以进入内存并通过函数参数传递；只有运行到手写的检查代码时才会报错。如果某个调用点忘记检查，就产生 bug。</p>
+
+  <p>即使只保留一个 <code>kind: PluginKind</code>，再配多个 <code>Option</code>，仍然可能出现 <code>kind = Agent</code> 但 <code>agent_data = None</code>。所以问题不只是“类型标签会不会重复”，还包括“标签与专属数据是否永远一致”。</p>
+
+  <p>Contribution enum 则只允许直接构造完整的合法形状：</p>
+
+  <pre><code>enum PluginContribution {
+  Agent(AgentData),
+  Skill(SkillData),
+}</code></pre>
+
+  <p>选了 <code>Agent</code> 就必须同时交出 <code>AgentData</code>；同一个 enum 值也不可能同时选择两个 variant。检查从“运行时靠人记得写”变成“编译时由类型保证”。</p>
+
+  <div class="callout">
+    <strong>输入与输出：</strong><code>kind = "agent"</code> 是待验证的输入；<code>PluginContribution::Agent(...)</code> 是验证后的输出。
+  </div>
+
+  <h2>为什么 Contribution 不直接替代 TOML 的 kind</h2>
+  <p>因为它们不在同一层。<code>kind</code> 是磁盘文本中的一个字段；<code>PluginContribution</code> 是 Rust 程序在内存中构造的数据。完整转换是：</p>
+
+  <pre><code>TOML: kind = "agent"              插件自己的文字
+          ↓ Manifest 解析
+PluginKind::Agent                 只有类型标签
+          ↓ Manager 检查 main.js
+PluginContribution::Agent(
+  InstalledPluginAgent { entrypoint }
+)                                 类型 + 已验证专属数据</code></pre>
+
+  <p>把 TOML 字段从 <code>kind</code> 改名为 <code>contribution</code>，它仍然只是一个待验证的字符串。真正的差别不在字段叫什么，而在 Manager 能否把“Agent 标签”和“已经验证的 Agent 入口”绑定成一个不可矛盾的内部值。</p>
+
+  <p>同样，多个布尔开关的反例是在说明一种<strong>能运行但容易产生非法状态的内部结构</strong>，不是说当前 TOML 会出现多个字段。当前 TOML 用唯一的 <code>kind</code> 本来就不会遇到多类型声明问题；enum 解决的是解析完成之后，Rust 内部的标签与数据一致性。</p>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Plugin Manager 不把 kind 保留成一个裸字符串加若干可选字段，而是构造封闭的 <code>PluginContribution</code> 枚举。每个 variant 携带该 kind 已验证的专属 descriptor，因此一个 InstalledPlugin 恰好贡献一种能力，非法字段组合无法进入后续系统。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="布尔值或 kind + Option 也能实现，但非法组合仍可进入内存；enum 让标签与必需数据只能一起构造。">
+    <h2>只检查这一件事</h2>
+    <p>为什么 Manager 验证后不只保留 <code>PluginKind::Agent</code>，还要构造 <code>PluginContribution::Agent(...)</code>？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">因为 PluginKind 不能表示 Agent 这个标签</button>
+      <button data-answer="correct">因为 Contribution 同时携带已验证的 Agent 专属数据</button>
+      <button data-answer="incorrect">因为 Contribution 会自动运行 main.js</button>
+      <button data-answer="incorrect">因为 TOML 不能包含 kind 字段</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p><code>kind: PluginKind</code> 加 <code>agent_data: Option&lt;AgentData&gt;</code> 明明也能写出功能，为什么 enum 仍然更可靠？请说出一种前者允许、后者无法构造的矛盾状态。</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-manager/src/validation.rs">PluginContribution enum</a>。</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0007-contribution-versus-runtime.html">贡献能力不等于启动进程</a>。
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent 插件主线阶段总结</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <p class="eyebrow">Checkpoint · 回到主线</p>
+  <h1>Agent 插件目前只需要记住这一条链</h1>
+  <p class="lead">安装解决“系统认识它”，运行解决“进程活起来”，协议解决“消息走得通”，generation 解决“重启后不串线”。</p>
+
+  <h2>一、安装阶段：插件怎样进入 Ora</h2>
+  <pre><code>Marketplace 发布清单
+  ↓ 下载并校验 .orax
+Plugin Manager 解压、检查包内容
+  ↓
+installed/&lt;namespace&gt;/&lt;name&gt;/&lt;version&gt;
+  ↓ 扫描
+InstalledPlugin + PluginContribution</code></pre>
+
+  <p><code>orax.toml</code> 的 <code>kind</code> 声明插件类型；Manifest 模块检查声明格式，Manager 再检查磁盘内容和类型专属要求。通过后才形成可信宿主视图。</p>
+
+  <h2>二、运行阶段：Agent 怎样真正活起来</h2>
+  <pre><code>已安装 Agent 插件
+  ↓ Backend 为它建立 ConnectionSupervisor
+Supervisor 调用 attach_agent
+  ↓
+Plugin Lifecycle.ensure_running
+  ↓ 启动并拥有
+Agent 插件 main.js（Deno 进程）
+  ↓ ora/register + agent/start
+ora/childprocess/spawn
+  ↓ Host 使用 ora-process
+真正的 Agent CLI</code></pre>
+
+  <h2>三、协议阶段：一条消息怎样往返</h2>
+  <pre><code>Ora ↔ main.js
+Plugin RPC over stdio
+控制：request/response
+ACP：agent/acp notification
+
+main.js ↔ Agent CLI
+CLI stdin/stdout 中的 ACP JSON-RPC</code></pre>
+
+  <p>返回时依次经过 <code>main.js → Plugin Runtime → ACP Peer → Session actor → 前端</code>。外层 Plugin RPC 负责运输，ACP Peer 才理解内层 ACP 的 request id、response、取消和 Session 语义。</p>
+
+  <h2>四、三个负责人</h2>
+  <div class="card">
+    <p><strong>Plugin Lifecycle：</strong>插件 Deno 进程的唯一所有者。</p>
+    <p><strong>Connection Supervisor：</strong>Agent CLI/ACP 连接、重试和路由的负责人。</p>
+    <p><strong>Session actor：</strong>一段具体聊天的串行状态负责人。</p>
+  </div>
+
+  <h2>五、Generation 只解决一件事</h2>
+  <pre><code>同一个 Plugin ID
+  ├── generation 1：main.js A + CLI A + 注册 A + 通知流 A
+  └── generation 2：main.js B + CLI B + 注册 B + 通知流 B</code></pre>
+
+  <p>旧代必须先被完整回收，旧代迟到消息必须丢弃。因为一次启动失败可能已经产生部分副作用，Host 不能假设旧进程仍然干净。</p>
+
+  <div class="callout">
+    <strong>面试主线：</strong>Ora 把 Agent 从内置实现改为可安装贡献；Manager 建立可信包视图，Lifecycle 统一拥有插件进程，Agent 插件适配并拉起真实 CLI，Plugin RPC 承载 ACP，Supervisor 和 generation 保证连接恢复时不串线。
+  </div>
+
+  <div class="next">
+    <strong>继续主线：</strong><a href="../lessons/0015-connection-versus-ensure-running.html"><code>connection()</code> 与 <code>ensure_running()</code></a>。
+  </div>
+</main>
+</body>
+</html>

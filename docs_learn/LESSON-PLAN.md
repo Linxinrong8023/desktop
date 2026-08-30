@@ -6,6 +6,23 @@
 > 说明：第 1~6 课在“基础学习 session”中完成（本 session 开始时 workflow 尚未出现，lesson-06 的实际内容以本 session 的 gitlancer + Task/Worktree 为准，workflow 相关内容作为新专题按下文规划后续学习）。
 > 四个 ⭐ 专题为**必须单独学习**的环节（用户特别指定）。
 
+## 当前优先级调整：插件系统专题
+
+为面试准备，原第 18~21 课暂缓，先完成独立的 HTML 微课程。每课以面试表达和主动回忆为验收，不以“阅读过”作为完成。
+
+> 2026-08-29 起点校正：用户明确表示没有插件系统和软件工程概念基础。以下每个序号都可以继续拆成多次对话；只有主动回忆通过后才前进。
+
+1. **插件是什么**：主程序、内置能力、外部安装能力；为什么插件化能降低扩展成本。
+2. **四个必备积木**：文件、程序、进程、通信规则，一次只学习一个。
+3. **Package / Contribution / Runtime 三分法**：为什么安装、能力类型和进程状态必须解耦。
+4. **发布到安装的供应链**：Registry → Manifest → Installer → Discovery → InstalledPlugin。
+5. **Plugin Runtime 协议**：Deno、帧协议、双向 JSON-RPC、不可变 capability registration。
+6. **Lifecycle 控制面与数据面**：唯一进程所有者、按需启动、generation、connection、notification sink。
+7. **Agent 插件端到端**：Ora → Plugin adapter → Agent CLI 的双进程模型，ACP 透明转发与 Supervisor。
+8. **静态贡献对比**：Skill、MCP、Webview 如何不启动通用 runtime；补充 Workbench 与 Hook。
+9. **安全与故障语义**：包路径、权限、Host requests、进程树、失败隔离及当前沙箱缺口。
+10. **面试白板与扩展演练**：三分钟讲解、深挖问题、设计一种新插件类型并定位改动层。
+
 ---
 
 ## 第一段：Rust 后端纵深（业务 → 运行时 → 功能模块）

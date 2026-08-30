@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第十七课：一个 Agent 如何准确服务多个 Session</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0017 · Multiplexing 与 Session Route</p>
+  <h1>一条 Agent 连接，怎么保证多个对话不串线？</h1>
+  <p class="lead">Ora 为每个 Agent 维护一条共享 connection，但为每个 Agent Session 建立独立路由。消息不是广播给所有会话，而是根据 <code>agent_session_id</code> 投递到唯一的 Session channel。</p>
+
+  <h2>类比：一栋楼只有一个大门</h2>
+  <div class="card">
+    <p><strong>共享 Agent connection</strong> 像整栋楼共用的大门。</p>
+    <p><strong>agent_session_id</strong> 像房间号。</p>
+    <p><strong>RouteRegistry</strong> 像门卫手中的“房间号 → 独立信箱”登记表。</p>
+  </div>
+
+  <p>所有消息都从同一个 Agent connection 进来，但门卫先看房间号，再投入对应信箱，所以 Session A 不会读到 Session B 的事件。</p>
+
+  <h2>先区分两个 Session ID</h2>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>谁创建</th><th>主要用途</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>ora_session_id</code></td><td>Ora</td><td>数据库、历史记录、前端与 Session actor 的稳定身份</td></tr>
+      <tr><td><code>agent_session_id</code></td><td>Agent 在 <code>session/new</code> 时返回；load 时复用已有值</td><td>ACP 连接上的实际会话地址，也是中心路由表的键</td></tr>
+    </tbody>
+  </table>
+
+  <p>一个 Ora Session 绑定一个 Agent Session。Ora Session 可以长期存在；更换 Agent 或重建连接后，它可以绑定新的 <code>agent_session_id</code>。</p>
+
+  <h2>不是一张表，而是两张关键表</h2>
+  <table>
+    <thead>
+      <tr><th>表</th><th>键 → 值</th><th>解决的问题</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>RouteRegistry</code></td><td><code>agent_session_id → SessionChannel</code></td><td>已经知道 Agent Session 后，消息应该投进哪个 actor 的队列？</td></tr>
+      <tr><td><code>PendingRequests</code></td><td><code>request_id → agent_session_id</code></td><td>普通 response 只有 request ID 时，它原来属于哪个 Agent Session？</td></tr>
+    </tbody>
+  </table>
+
+  <p>路由时不必先把 <code>agent_session_id</code> 转换成 <code>ora_session_id</code>：<code>RouteRegistry</code> 已经直接指向对应 actor 的 <code>SessionChannel</code>。代码里另有一张 <code>agent_session_id → ora_session_id</code> 的 <code>SessionTraceRegistry</code>，但它主要用于日志和追踪，不承担正常事件分发。</p>
+
+  <h2>路由是什么时候注册的？</h2>
+  <pre><code>Session setup
+  ↓ 向共享 AcpPeer 发送 session/new
+Agent 返回 agent_session_id = "provider-42"
+  ↓
+Supervisor.open_session_channel("provider-42", ora_session_id)
+  ↓
+RouteRegistry 写入：
+"provider-42" → Session A 的独立事件队列</code></pre>
+
+  <p>每个 Session actor 持有自己的 <code>SessionChannel</code>。这个 channel 包含当前共享 connection、独立事件队列、故障控制队列以及一份自动注销的路由凭证。</p>
+
+  <h2>发送 Prompt 时怎么走？</h2>
+  <pre><code>Session A actor
+  ↓ session/prompt(sessionId = "provider-42")
+AcpPeer 分配 request id = 17
+  ↓ 记住 17 属于 provider-42
+共享 agent/acp transport
+  ↓
+Agent</code></pre>
+
+  <p><code>AcpPeer</code> 的 pending 表同时记录 ACP request ID 与 Agent Session ID。因此并发的 Session A、B 即使都在等待响应，也能按各自的 request ID 正确关联。</p>
+
+  <pre><code>发送之前：
+PendingRequests[17] = agent-101
+PendingRequests[18] = agent-205
+
+收到 response(id = 17)：
+取出 PendingRequests[17]
+→ 恢复 agent-101
+→ 再查 RouteRegistry[agent-101]</code></pre>
+
+  <h2>Agent 返回消息时怎么分流？</h2>
+  <p>Agent 回来的消息主要有三类：</p>
+
+  <table>
+    <thead>
+      <tr><th>消息</th><th>怎样找到 Session</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>session/update</code></td><td>消息参数本身带 <code>sessionId</code></td></tr>
+      <tr><td>权限请求</td><td>请求参数本身带 <code>sessionId</code></td></tr>
+      <tr><td>Prompt 最终响应</td><td>响应只带 request ID；AcpPeer 从 pending 表找回对应的 <code>agent_session_id</code></td></tr>
+    </tbody>
+  </table>
+
+  <pre><code>Agent 返回 ACP frame
+  ↓ Plugin Runtime 解开 agent/acp 外层
+AcpPeer 解析并补全 agent_session_id
+  ↓
+RouteRegistry[agent_session_id]
+  ↓
+唯一 SessionChannel
+  ↓
+对应 Session actor
+  ↓
+对应前端对话</code></pre>
+
+  <h2>为什么不会因为一个慢 Session 拖垮所有人？</h2>
+  <p>每个 Session 都有独立、有界的 FIFO 事件队列，当前容量是 256。这样：</p>
+
+  <ul>
+    <li>同一 Session 内，update 与最终 response 保持进入连接时的顺序。</li>
+    <li>Session A 的队列满了，只移除 A 的路由并通知它 overflow。</li>
+    <li>Session B 仍继续使用相同的 Agent connection。</li>
+  </ul>
+
+  <h2>还有三个防串线保护</h2>
+  <div class="card">
+    <p><strong>generation：</strong>每条路由记录属于哪一代 connection。旧 generation 断开时只使旧路由失效。</p>
+    <p><strong>route token：</strong>同一个 session id 重新注册后，旧 actor 销毁时不能误删新路由。</p>
+    <p><strong>setup buffer：</strong><code>session/new</code> 尚未返回 session id 时，Agent 可能已经发送 update；Supervisor 在 setup 窗口暂存它，注册路由后再补投。</p>
+  </div>
+
+  <div class="callout">
+    <strong>职责边界：</strong>Supervisor 拥有共享 connection 和中心 <code>RouteRegistry</code>；每个 Session actor 只消费自己的 <code>SessionChannel</code>。Agent CLI 负责生成 ACP 消息，但不需要知道 Ora 的前端窗口或数据库 Session。
+  </div>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>一个 Agent connection 可以复用给多个 Session。在 <code>session/new</code> 返回 provider session id，或 load 恢复已有 id 后，Ora 在 Supervisor 的 <code>RouteRegistry</code> 中注册一条 generation-bound 路由，目标是该 Session actor 的独立有界 FIFO。通知和权限请求直接携带 session id；普通响应由 AcpPeer 用 request id 从 pending 表恢复 session id，然后统一分流。队列隔离、generation 和 route token 共同防止慢会话、旧连接和旧 actor 污染其他 Session。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="共享连接上的入站消息使用 Agent Session ID 查找唯一 SessionChannel；Ora Session ID主要用于宿主内部持久身份。">
+    <h2>只检查这一件事</h2>
+    <p>RouteRegistry 主要根据什么把 Agent 事件送到正确对话？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">根据前端窗口编号进行路由</button>
+      <button data-answer="correct">根据代理会话编号进行路由</button>
+      <button data-answer="incorrect">根据插件进程编号进行路由</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>Agent 的最终响应通常只有 request ID，没有 session ID。Ora 为什么仍然知道它属于哪个 Session？</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/backend/src/agent_runtime/routing.rs">RouteRegistry 与 SessionChannel</a>、<a href="../../crates/acp/src/pending.rs">ACP pending correlation</a>、<a href="../../crates/acp/src/peer.rs">AcpPeer 入站解析</a>、<a href="../../crates/backend/src/agent_runtime/connection.rs">共享 connection 的分流循环</a>。</p>
+
+  <p class="next"><a href="0016-runtime-and-supervisor.html">← 回看第十六课</a> · <a href="../reference/agent-plugin-mainline.html">查看 Agent 主线速查</a></p>
+</main>
+</body>
+</html>

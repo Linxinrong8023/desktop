@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第十六课：为什么 Agent 需要 Runtime 与 Supervisor</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0016 · 静态资料与动态服务</p>
+  <h1>为什么 Agent 需要 Runtime 和 Supervisor？</h1>
+  <p class="lead">Skill 插件交付的是“放在那里供人读取的资料”；Agent 插件交付的是“必须持续在线并能双向通信的服务”。Runtime 让服务运行，Supervisor 让服务保持可用。</p>
+
+  <h2>先不用术语：一本书与一条客服电话</h2>
+  <div class="card">
+    <p><strong>Skill 像一本书：</strong>文件安装完成后，内容就在那里。Ora 可以索引、选择并物化它；真正需要时，Agent 再读取。书不需要自己醒来等待请求。</p>
+    <p><strong>Agent 像客服电话：</strong>只有安装号码远远不够。电话必须接通、对方必须在线、通话中断还要恢复，并且多个用户的通话不能串线。</p>
+  </div>
+
+  <p>因此，Agent 需要 Runtime 的根因不是“它使用 JavaScript”，而是它提供<strong>随时间运行的行为</strong>。即使以后插件入口改成其他语言，只要它仍是一项长期通信服务，就仍需要运行环境和生命周期管理。</p>
+
+  <h2>Skill 安装后，Ora 已经拿到了完整价值</h2>
+  <pre><code>Skill 插件包
+  ↓ Manager 校验 SKILL.md 和目录
+InstalledPlugin::Skill
+  ↓ Backend 读取并写入 Skill catalog / Effect source
+需要使用时再物化到 Agent 声明的目录</code></pre>
+
+  <p>这条链没有一个 Skill 自己的进程。Skill 插件不接收 JSON-RPC 请求，不发送 notification，也没有“运行到一半崩溃”的状态。它可能有错误文件，但不会有连接丢失、握手超时或进程崩溃。</p>
+
+  <h2>Agent 安装后，只拿到了启动它的方法</h2>
+  <pre><code>Agent 插件包
+  ↓
+Deno main.js 插件进程
+  ↓ agent/start
+Agent CLI 子进程
+  ↓ ACP initialize
+可用的 Agent connection</code></pre>
+
+  <p>任何一层都可能失败：Deno 可能启动失败，运行时合同可能缺方法，<code>agent/start</code> 可能失败，Agent CLI 可能退出，ACP <code>initialize</code> 也可能超时。因此仅仅“有进程”不等于“用户现在能对话”。</p>
+
+  <h2>Runtime 到底负责什么？</h2>
+  <p>在这套系统里需要区分两个相邻概念：</p>
+
+  <table>
+    <thead>
+      <tr><th>层</th><th>主要职责</th><th>它回答的问题</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Plugin Runtime</td><td>运行 Deno <code>main.js</code>，处理注册与外层 Plugin JSON-RPC</td><td>插件代码能否运行并与 Ora 通信？</td></tr>
+      <tr><td>Agent Runtime</td><td>建立 ACP Peer、协商能力并把 Session 接到共享 Agent connection</td><td>这个 Agent 是否真的能服务对话？</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Supervisor 不是“启动脚本”，而是连接监督者</h2>
+  <p>每个已安装 Agent 都有一个 application-scoped <code>ConnectionSupervisor</code>。它的核心目标是：</p>
+
+  <div class="flow">
+    <div><strong>建立连接</strong>请求 Lifecycle 确保插件运行，再调用 Agent 合同</div>
+    <div><strong>确认 Ready</strong>完成 <code>agent/start</code> 与 ACP <code>initialize</code></div>
+    <div><strong>维持连接</strong>观察当前 generation，连接丢失时让路由失败</div>
+    <div><strong>故障恢复</strong>退避重试，频繁失败时打开熔断并标记 Failing</div>
+  </div>
+
+  <p>它还向其他模块提供 <code>Starting / Ready / Unavailable / Failing</code> 状态，并让 Session 根据 <code>AgentRef</code> 找到正确的共享连接。</p>
+
+  <div class="callout">
+    <strong>最容易混淆的所有权：</strong>Supervisor 负责 Agent 连接的可用性，但不私自拥有 Deno 插件进程。它通过 <code>ensure_running()</code> 请求 Plugin Lifecycle；Lifecycle 仍是插件进程的唯一所有者。
+  </div>
+
+  <h2>为什么只有 Lifecycle 还不够？</h2>
+  <p>Lifecycle 看到的是：</p>
+  <pre><code>main.js 进程正在运行 → Running</code></pre>
+
+  <p>但用户真正需要的是：</p>
+  <pre><code>合同完整
++ agent/start 成功
++ Agent CLI 存活
++ ACP initialize 成功
+= Agent Ready</code></pre>
+
+  <p>这些 Agent 专属事实不应该塞进通用 Plugin Lifecycle。否则 Lifecycle 就必须理解 ACP、模型目录、Session 路由和 Agent 重试策略，最终不再是所有插件共用的底层模块。</p>
+
+  <h2>为什么 Skill 不需要 Supervisor？</h2>
+  <p>Supervisor 解决的是<strong>长期服务不可靠</strong>的问题。Skill 没有自己的长期服务：</p>
+
+  <table>
+    <thead>
+      <tr><th>问题</th><th>Agent</th><th>Skill</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>需要常驻进程</td><td>需要</td><td>不需要</td></tr>
+      <tr><td>需要双向协议</td><td>Plugin RPC + ACP</td><td>不需要</td></tr>
+      <tr><td>需要 Ready 状态</td><td>需要</td><td>不需要</td></tr>
+      <tr><td>可能运行中掉线</td><td>可能</td><td>不存在掉线</td></tr>
+      <tr><td>需要退避重试</td><td>需要</td><td>读取或物化失败时由调用方重试</td></tr>
+    </tbody>
+  </table>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Skill 插件贡献的是静态声明和文件，安装校验后由 Host 索引与物化，不存在独立连接生命周期。Agent 插件贡献的是长期动态服务，必须运行适配器与 Agent CLI，并维护 ACP 连接。Plugin Lifecycle 统一拥有插件进程；Connection Supervisor 则在其上负责 Agent 的启动编排、ACP 初始化、Ready 状态、generation 隔离和故障恢复。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="Supervisor 监督的是 Agent 连接可用性；Skill 没有自己的长期连接，所以无需 Supervisor。">
+    <h2>只检查这一件事</h2>
+    <p>下面哪一项最接近 Agent Supervisor 的核心职责？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">保存技能文件并负责内容解析</button>
+      <button data-answer="correct">维持代理连接并负责故障恢复</button>
+      <button data-answer="incorrect">替代会话对象并负责前端渲染</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>如果面试官说：“Plugin Lifecycle 已经能启动进程了，为什么还要 Agent Supervisor？”请只用两句话回答。</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-manager/src/validation.rs">PluginContribution 与进程入口</a>、<a href="../../crates/backend/src/plugin.rs">Skill 静态同步</a>、<a href="../../crates/backend/src/agent_runtime/connection.rs">ConnectionSupervisor</a>、<a href="../../crates/plugin-lifecycle/src/registration.rs">运行时注册边界</a>。</p>
+
+  <p class="next"><a href="0015-connection-versus-ensure-running.html">← 回看第十五课</a> · <a href="0017-shared-agent-session-routing.html">下一课：共享 Agent 的 Session 路由 →</a></p>
+</main>
+</body>
+</html>

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第十四课：插件 Running 不等于 Agent Ready</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0014 · 区分两层状态</p>
+  <h1>插件 Running，为什么 Agent 仍可能不可用？</h1>
+  <p class="lead"><code>Running</code> 只证明插件的 Deno 进程活着；<code>Ready</code> 还要求它成功拉起 Agent CLI，并完成 ACP 握手。</p>
+
+  <h2>一层一层看</h2>
+  <pre><code>main.js Deno 进程启动并完成插件注册
+  ↓
+Plugin Lifecycle：Running
+  ↓
+main.js 尝试拉起 Agent CLI
+  ↓
+Ora 与 Agent CLI 完成 ACP initialize
+  ↓
+Connection Supervisor：Ready</code></pre>
+
+  <p>在连接建立过程中，插件进程可以已经是 <code>Running</code>，但 Agent 连接还不能成为 <code>Ready</code>。如果后续启动或握手失败，Supervisor 会请求 Lifecycle 停止这一代插件进程，再按策略重试，所以这些状态会继续变化。</p>
+
+  <h2>常见例子</h2>
+  <div class="card">
+    <p><strong>CLI 没安装：</strong><code>main.js</code> 还活着，但找不到真正的 Agent 程序。</p>
+    <p><strong>配置或环境错误：</strong>CLI 启动失败，插件外壳本身没有退出。</p>
+    <p><strong>ACP 握手失败：</strong>CLI 已启动，但 <code>initialize</code> 超时或返回错误。</p>
+    <p><strong>Agent 合同不完整：</strong>插件已注册为运行中，但缺少 Agent 必需的 method 或 <code>agent/acp</code> emit，Supervisor 会把它判为不可服务。</p>
+  </div>
+
+  <div class="callout">
+    <strong>这一课唯一要记住的句子：</strong>插件进程存活是 Agent 可用的必要条件，但不是充分条件。
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="Lifecycle 只确认插件进程；Supervisor 还需要确认 Agent CLI 和 ACP 连接。">
+    <h2>检查理解</h2>
+    <p>在连接建立过程中，<code>main.js</code> 已经运行，但 Agent CLI 尚未成功启动。哪组状态最合理？</p>
+    <div class="quiz-options">
+      <button data-answer="correct">Lifecycle 是 Running，Supervisor 不是 Ready</button>
+      <button data-answer="incorrect">Lifecycle 必须是 Stopped，Supervisor 是 Ready</button>
+      <button data-answer="incorrect">两者必须永远保持相同状态</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>为什么 <code>Plugin Lifecycle = Running</code> 不能直接证明用户已经可以和 Agent 对话？</p>
+
+  <div class="next">
+    <strong>下一课：</strong><a href="./0015-connection-versus-ensure-running.html"><code>connection()</code> 与 <code>ensure_running()</code></a>。
+  </div>
+</main>
+</body>
+</html>

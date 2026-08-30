@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第十三课：为什么进程只能有一个负责人</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0013 · 只学一个原因</p>
+  <h1>为什么插件进程必须统一管理？</h1>
+  <p class="lead">因为如果两个模块都能自己启动和停止进程，系统会同时出现两个互相矛盾的“真相”。</p>
+
+  <h2>只看这个具体事故</h2>
+  <div class="card">
+    <p><strong>第一步：</strong>Plugin Lifecycle 启动了 Deno 进程 A，并记录“插件正在运行”。</p>
+    <p><strong>第二步：</strong>Agent Supervisor 不经过 Lifecycle，又自己启动了 Deno 进程 B。</p>
+    <p><strong>第三步：</strong>用户在设置页点击停止。Lifecycle 只知道 A，于是停止 A，并显示 <code>stopped</code>。</p>
+    <p><strong>结果：</strong>进程 B 仍在后台运行。页面说已停止，电脑里却还有真实插件进程。</p>
+  </div>
+
+  <pre><code>Lifecycle 知道：进程 A
+Supervisor 私有：进程 B
+
+用户点击 Stop
+  ↓
+Lifecycle 停止 A
+  ↓
+UI 显示 stopped
+  ↓
+但 B 仍在运行  ← 系统状态已经自相矛盾</code></pre>
+
+  <h2>统一管理解决什么</h2>
+  <p>规则变成：</p>
+
+  <pre><code>任何模块想使用插件
+        ↓
+都向 Lifecycle 提出请求
+        ↓
+只有 Lifecycle 能真正启动或停止进程</code></pre>
+
+  <p>这样 Lifecycle 说 <code>running</code> 时，确实有它管理的进程；它说 <code>stopped</code> 时，也不会有其他模块偷偷留下第二个进程。</p>
+
+  <div class="callout">
+    <strong>这一课唯一要记住的句子：</strong>统一管理不是为了代码看起来整齐，而是为了让“系统报告的状态”和“电脑里真实存在的进程”始终是同一个事实。
+  </div>
+
+  <h2>主要原因不是避免重复代码</h2>
+  <p>Claude、Codex、Gemini 对应的 Supervisor，是同一个 <code>ConnectionSupervisor</code> 实现创建出的多个内存实例，不需要为每个插件重新写一套启动代码。</p>
+
+  <pre><code>同一份 ConnectionSupervisor 代码
+  ├── 实例 A：监督 Claude 连接
+  ├── 实例 B：监督 Codex 连接
+  └── 实例 C：监督 Gemini 连接</code></pre>
+
+  <p>即使把启动代码放进这个公共实现，也能复用代码。真正的问题是：Supervisor 和设置页、更新流程如果都能启动或停止插件，就会有多个模块同时声称自己掌握插件的真实运行状态。因此 Ora 把进程所有权交给 Lifecycle；Supervisor 只提出“请确保它正在运行”的请求。</p>
+
+  <p>重复启动还可能进一步造成两个 Agent CLI、两份 ACP 回复和双倍资源消耗，但这些都是“出现两个真实进程”之后的后果，本轮不用继续展开。</p>
+
+  <section class="quiz" data-quiz data-explanation="Lifecycle 只停止自己知道的 A；Supervisor 私自启动的 B 会继续运行，于是 UI 状态与真实进程不一致。">
+    <h2>只检查这一件事</h2>
+    <p>Lifecycle 管理进程 A，Supervisor 私自启动进程 B。用户点击停止后，最核心的问题是什么？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">orax.toml 的版本号会自动增加</button>
+      <button data-answer="correct">UI 显示 stopped，但进程 B 仍然运行</button>
+      <button data-answer="incorrect">Skill 插件会自动变成 Agent 插件</button>
+      <button data-answer="incorrect">ACP 消息会失去 JSON 格式</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>为什么 Agent Supervisor 即使需要使用 Agent 插件，也只能请求 Lifecycle 启动，而不能自己另起一个 Deno 进程？</p>
+
+  <p class="source-list"><strong>稍后再看的代码：</strong><a href="../../crates/plugin-lifecycle/README.md">Lifecycle responsibilities</a>。本轮不要求阅读状态机源码。</p>
+</main>
+</body>
+</html>
