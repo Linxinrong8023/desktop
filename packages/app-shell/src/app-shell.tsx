@@ -19,6 +19,7 @@ import { WorkspaceSidebar } from "./features/workspace/workspace-sidebar";
 import { WorkspaceView } from "./features/workspace/workspace-view";
 import { WorkspaceDialogs } from "./features/workspace/workspace-dialogs";
 import { SettingsDialog } from "./features/settings/settings-dialog";
+import { PluginOperationEventBridge } from "./features/settings/plugin-operation-event-bridge";
 import { SurfaceDownloadPrompt } from "./features/surface/surface-download-prompt";
 import { SurfaceDownloadToaster } from "./features/surface/surface-download-toaster";
 import { SurfaceEventBridge } from "./features/surface/surface-event-bridge";
@@ -85,7 +86,7 @@ function AppShellContent({
   platform,
   user: injectedUser,
 }: AppShellProps) {
-  // Mirror theme/density onto <html> for the shell's lifetime.
+  // Mirror theme onto <html> for the shell's lifetime.
   useEffect(() => startThemeSubscription(), []);
   // Track which sessions finished a turn while the user was looking elsewhere.
   useSessionUnreadSync(chatStore);
@@ -105,10 +106,6 @@ function AppShellContent({
   const surfaceVisible = useEmbeddedSurfaceVisible();
   const { t } = useTranslation();
   const sidebarPanelRef = useRef<ResizablePanelHandle | null>(null);
-  const handleSignOut = () => {
-    chatStore.getState().clearAll();
-    window.location.reload();
-  };
 
   // Collapse in place instead of swapping the tree: a ternary that remounts
   // WorkspaceView would drop in-memory editor drafts and chat pending-send state.
@@ -172,7 +169,7 @@ function AppShellContent({
                     aria-hidden={sidebarCollapsed || undefined}
                     inert={sidebarCollapsed || undefined}
                   >
-                    <WorkspaceSidebar user={user} onSignOut={handleSignOut} />
+                    <WorkspaceSidebar user={user} />
                   </div>
                 </ResizablePanel>
                 <ResizableHandle
@@ -196,6 +193,7 @@ function AppShellContent({
                 </ResizablePanel>
               </ResizablePanelGroup>
               <SettingsDialog />
+              <PluginOperationEventBridge />
               <SurfaceEventBridge />
               <SurfaceDownloadToaster />
               <SurfaceDownloadPrompt />

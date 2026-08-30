@@ -5,7 +5,9 @@ use crate::limits::package_extract_limits;
 use ora_plugin_manifest::{HookTarget, PluginKind, PluginManifest, PluginReleaseSource};
 use ora_utils::archive::{ArchiveFormat, extract_archive};
 use ora_utils::hash;
-use ora_utils::http::{Checksum, DownloadOptions, DownloadRequest, DownloadSource, HttpDownload};
+use ora_utils::http::{
+    Checksum, DownloadOptions, DownloadRequest, DownloadSource, HttpDownload, ProgressCallback,
+};
 use semver::Version;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -274,8 +276,32 @@ where
         source: ResolvedReleaseSource,
         data_dir: &Path,
     ) -> Result<PathBuf, InstallError> {
+        self.install_package(manifest, source, data_dir, /*progress*/ None)
+            .await
+    }
+
+    /// Installs a release while forwarding byte-level network download progress to the caller.
+    pub async fn install_with_progress(
+        &self,
+        manifest: &PluginManifest,
+        source: ResolvedReleaseSource,
+        data_dir: &Path,
+        progress: ProgressCallback,
+    ) -> Result<PathBuf, InstallError> {
+        self.install_package(manifest, source, data_dir, Some(progress))
+            .await
+    }
+
+    /// Shares the atomic install path between callers that do and do not observe the transfer.
+    async fn install_package(
+        &self,
+        manifest: &PluginManifest,
+        source: ResolvedReleaseSource,
+        data_dir: &Path,
+        progress: Option<ProgressCallback>,
+    ) -> Result<PathBuf, InstallError> {
         let archive_path = self
-            .download_package(manifest, source.clone(), data_dir)
+            .download_package(manifest, source.clone(), data_dir, progress)
             .await?;
         let namespace = manifest.namespace();
         let name = manifest.name();
@@ -524,6 +550,7 @@ where
         manifest: &PluginManifest,
         source: ResolvedReleaseSource,
         data_dir: &Path,
+        progress: Option<ProgressCallback>,
     ) -> Result<PathBuf, InstallError> {
         let digest = source.sha256();
         let cache_dir = data_dir.join("plugins").join(CACHE_ROOT);
@@ -543,7 +570,7 @@ where
             destination: archive_path.clone(),
             checksum: Some(Checksum::sha256(digest.to_vec())),
             options: DownloadOptions::default(),
-            progress: None,
+            progress,
             cancel: None,
         };
         self.downloader.download(request).await?;

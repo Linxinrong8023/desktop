@@ -39,7 +39,7 @@ use ora_plugin_manager::{
 };
 use ora_plugin_manifest::PluginManifest;
 use ora_plugin_registry::{RegistryEntry, RegistryError, RegistryIndex, RegistrySync};
-use ora_utils::http::{ProxyConfig, ReqwestDownloader};
+use ora_utils::http::{ProgressCallback, ProxyConfig, ReqwestDownloader};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -622,6 +622,24 @@ impl PluginApi {
         &self,
         request: InstallPluginRequest,
     ) -> Result<InstallPluginResponse, BackendError> {
+        self.install_package(request, /*progress*/ None).await
+    }
+
+    /// Installs a marketplace plugin and forwards network transfer progress to the host shell.
+    pub(crate) async fn install_with_progress(
+        &self,
+        request: InstallPluginRequest,
+        progress: ProgressCallback,
+    ) -> Result<InstallPluginResponse, BackendError> {
+        self.install_package(request, Some(progress)).await
+    }
+
+    /// Keeps release resolution and finalization identical for observed and unobserved installs.
+    async fn install_package(
+        &self,
+        request: InstallPluginRequest,
+        progress: Option<ProgressCallback>,
+    ) -> Result<InstallPluginResponse, BackendError> {
         let (manifest, use_proxy) = self.resolve_marketplace_release(&request.plugin_id)?;
         let release_source = self.select_marketplace_release(&manifest)?;
         match release_source.download() {
@@ -633,10 +651,25 @@ impl PluginApi {
             }
         }
         let download_proxy = self.download_proxy_for(use_proxy)?;
-        Installer::new(ReqwestDownloader::new(download_proxy))
-            .install(&manifest, release_source, &self.data_directory)
-            .await
-            .map_err(|error| self.map_install_error("failed to install plugin", error))?;
+        let installer = Installer::new(ReqwestDownloader::new(download_proxy));
+        match progress {
+            Some(progress) => {
+                installer
+                    .install_with_progress(
+                        &manifest,
+                        release_source,
+                        &self.data_directory,
+                        progress,
+                    )
+                    .await
+            }
+            None => {
+                installer
+                    .install(&manifest, release_source, &self.data_directory)
+                    .await
+            }
+        }
+        .map_err(|error| self.map_install_error("failed to install plugin", error))?;
         let outcome = self.finalize_new_install(&request.plugin_id).await?;
         ora_info!(plugin_id = %request.plugin_id, outcome = ?outcome, "installed marketplace plugin");
         Ok(InstallPluginResponse {

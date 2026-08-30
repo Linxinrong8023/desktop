@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import {
@@ -8,12 +9,14 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
+  Input,
 } from "@ora/ui";
 import {
   IconCheck,
   IconChevronDown,
   IconLoader2,
   IconRobot,
+  IconSearch,
 } from "@tabler/icons-react";
 import { useChatStore } from "../../chat-store-context";
 import { useSettingsStore } from "../../state/stores/settings-store";
@@ -62,6 +65,10 @@ export function ModelSelector({
   sessionId?: string;
 }) {
   const { t } = useTranslation();
+  // Local to the picker rather than persisted: it is a scratch filter on
+  // whatever the current model list is, not a preference worth remembering
+  // once the menu closes.
+  const [modelQuery, setModelQuery] = useState("");
   const updateSettings = useSettingsStore((state) => state.updateSettings);
   const selection = useWorkspaceSelectionStore((state) => state.selection);
   const chatStore = useChatStore();
@@ -235,8 +242,14 @@ export function ModelSelector({
     });
   };
 
+  const modelValues = modelOption ? selectableValues(modelOption) : [];
+  const needle = modelQuery.trim().toLowerCase();
+  const visibleModelValues = needle
+    ? modelValues.filter((value) => value.name.toLowerCase().includes(needle))
+    : modelValues;
+
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => !open && setModelQuery("")}>
       <DropdownMenuTrigger
         render={
           <Button
@@ -245,7 +258,7 @@ export function ModelSelector({
             size="sm"
             disabled={disabled}
             aria-label={t("chat.modelSelector.label")}
-            className="group/model h-7 gap-1.5 rounded-md px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+            className="group/model h-7 gap-1.5 rounded-md px-2 text-xs font-normal text-muted-foreground hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring/50"
           />
         }
       >
@@ -276,7 +289,11 @@ export function ModelSelector({
           />
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top" className="w-56">
+      <DropdownMenuContent
+        align="end"
+        side="top"
+        className="w-56 max-h-[min(24rem,var(--available-height))]"
+      >
         <DropdownMenuGroup className="p-1">
           <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
             {t("chat.modelSelector.agent")}
@@ -315,6 +332,31 @@ export function ModelSelector({
               </span>
             )}
           </DropdownMenuLabel>
+          {/* Kept out of the agent group above: the agent list is short and
+              unsearched, and a query here should never be mistaken for
+              filtering which CLI is offered. */}
+          {modelValues.length > 0 && (
+            <div className="relative px-0.5 pb-1">
+              <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={modelQuery}
+                onChange={(event) => setModelQuery(event.target.value)}
+                placeholder={t("chat.modelSelector.search")}
+                aria-label={t("chat.modelSelector.search")}
+                className="h-7 border-transparent bg-muted/50 pl-8 text-xs shadow-none focus-visible:ring-1 focus-visible:ring-ring/50"
+                // Excluded from the tab order so the menu's own focus manager,
+                // which moves focus to the popup's first tabbable descendant
+                // on open, does not land here — opening the menu should not
+                // steal focus into the search box. A click still focuses it.
+                tabIndex={-1}
+                // The dropdown's own typeahead and arrow-key navigation listen
+                // on the popup element, so unfiltered keystrokes here would be
+                // swallowed as menu navigation instead of reaching the input.
+                onKeyDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              />
+            </div>
+          )}
           {modelOption === null ? (
             <p className="px-2 py-4 text-center text-xs text-muted-foreground">
               {t(
@@ -323,8 +365,12 @@ export function ModelSelector({
                   : "chat.modelSelector.empty",
               )}
             </p>
+          ) : visibleModelValues.length === 0 ? (
+            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+              {t("chat.modelSelector.noResults")}
+            </p>
           ) : (
-            selectableValues(modelOption).map((value) => (
+            visibleModelValues.map((value) => (
               <DropdownMenuItem
                 key={value.value}
                 className="gap-1.5 rounded-sm px-2 py-1.5 text-xs"

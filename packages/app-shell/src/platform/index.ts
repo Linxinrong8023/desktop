@@ -5,6 +5,8 @@ export {
   type LocationActionsCapability,
   type DesktopUpdateCapability,
   type DesktopUpdateStatus,
+  type PluginInstallProgress,
+  type PluginMarketplaceCapability,
   type ManualUpdateReason,
   type LocationTarget,
   type PathSelectionKind,

@@ -21,6 +21,7 @@ import {
   ComposerEditor,
   type ComposerEditorHandle,
 } from "../editor/composer-editor";
+import type { PromptTokenKind } from "@ora/editor/composer";
 import {
   EMPTY_COMPOSER_QUERY,
   queryStateFromText,
@@ -28,11 +29,10 @@ import {
   type ComposerQueryState,
 } from "../editor/composer-query";
 import type { JSONContent } from "@tiptap/core";
-import type { Skill } from "@ora/contracts";
+import type { Agent, Skill } from "@ora/contracts";
 import { useTranslation } from "react-i18next";
 import { ModelSelector } from "./model-selector";
 import { PermissionSelector } from "./permission-selector";
-import { WorkflowToggle } from "../workflow/workflow-toggle";
 import { ComposerActionMenu } from "./composer-action-menu";
 import { ImagePreviewDialog } from "./image-preview-dialog";
 import {
@@ -74,11 +74,6 @@ interface ComposerProps {
   /** Project checkout used for @ mentions when no task is selected yet. */
   projectId?: string;
   onSend: (text: string, images?: acp.ImageContent[]) => void | Promise<void>;
-  /**
-   * Invoked when Enter (or send) is pressed with an empty input. Used in Spec mode
-   * to run the highlighted stage directly; absent when there is nothing to launch.
-   */
-  onEmptySubmit?: () => void;
   onStop?: () => void;
   isResponding: boolean;
   /**
@@ -97,6 +92,7 @@ interface ComposerProps {
   placeholder?: string;
   autoFocus?: boolean;
   skills?: Skill[];
+  roles?: Agent[];
   availableCommands?: acp.AvailableCommand[];
 }
 
@@ -127,7 +123,6 @@ export function Composer({
   taskId,
   projectId,
   onSend,
-  onEmptySubmit,
   onStop,
   isResponding,
   isStreaming = false,
@@ -137,6 +132,7 @@ export function Composer({
   placeholder,
   autoFocus = false,
   skills = [],
+  roles = [],
   availableCommands = [],
 }: ComposerProps) {
   const { t } = useTranslation();
@@ -444,13 +440,14 @@ export function Composer({
       buildComposerActions({
         skills,
         commands: availableCommands,
+        roles,
         plugins: composerPlugins,
         translatePluginSummary: (summaryKey) => t(summaryKey),
         includeAttachments: true,
         attachmentLabel: t("chat.actionMenu.addImages"),
         attachmentDescription: t("chat.actionMenu.addImagesDescription"),
       }),
-    [availableCommands, composerPlugins, skills, t],
+    [availableCommands, composerPlugins, roles, skills, t],
   );
   const filteredActions = useMemo(() => {
     if (plusMenuOpen) return filterComposerActions(allActions, "");
@@ -488,20 +485,12 @@ export function Composer({
     (visibleActions.length > 0 || fileMentionActive);
 
   const hasText = !query.isBlank;
-  // With an empty input the send affordance still fires when there is a stage to
-  // launch, so pressing Enter runs the highlighted step.
   const canSend =
-    (hasText || attachments.length > 0 || onEmptySubmit !== undefined) &&
-    !isResponding &&
-    !disabled;
+    (hasText || attachments.length > 0) && !isResponding && !disabled;
 
   const submit = () => {
     if (isResponding || disabled) return;
     const text = (editorRef.current?.getText() ?? "").trim();
-    if (text === "" && attachments.length === 0) {
-      onEmptySubmit?.();
-      return;
-    }
     const sentAttachments = attachments;
     const sentDoc = editorRef.current?.getJSON();
     const sentImages =
@@ -598,8 +587,8 @@ export function Composer({
     })();
   };
 
-  /** Inserts a skill or command mention so the token stays distinct from body text. */
-  const insertPromptToken = (kind: "skill" | "command", name: string) => {
+  /** Inserts a skill, command, or role mention so the token stays distinct from body text. */
+  const insertPromptToken = (kind: PromptTokenKind, name: string) => {
     editorRef.current?.insertPromptToken(kind, name);
     closeActionMenu();
     requestAnimationFrame(() => editorRef.current?.focus());
@@ -631,6 +620,9 @@ export function Composer({
         return;
       case "commands":
         insertPromptToken("command", action.command.name);
+        return;
+      case "roles":
+        insertPromptToken("role", action.role.name);
         return;
       case "plugins":
         applyPlugin(action.plugin);
@@ -994,7 +986,6 @@ export function Composer({
               />
             )}
             <PermissionSelector disabled={disabled} />
-            <WorkflowToggle disabled={disabled} />
             {selectedPlugins.length > 0 && (
               <SelectedPluginsButton
                 selected={selectedPlugins}

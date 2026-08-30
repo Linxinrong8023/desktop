@@ -109,6 +109,39 @@ describe("TauriPlatformAdapter", () => {
     expect(stop).toHaveBeenCalledOnce();
   });
 
+  it("forwards marketplace install progress and stops listening on unsubscribe", async () => {
+    const stop = vi.fn();
+    const listener = vi.fn();
+    let forward: ((event: { payload: unknown }) => void) | undefined;
+    listenMock.mockImplementation(async (_event, handler) => {
+      forward = handler as (event: { payload: unknown }) => void;
+      return stop;
+    });
+    const adapter = createTauriPlatformAdapter();
+
+    const unsubscribe =
+      await adapter.pluginMarketplace.onInstallProgress(listener);
+    forward?.({
+      payload: {
+        pluginId: "official/weather",
+        downloaded: 4,
+        total: 10,
+      },
+    });
+    unsubscribe();
+
+    expect(listenMock).toHaveBeenCalledWith(
+      "plugin-install-progress",
+      expect.any(Function),
+    );
+    expect(listener).toHaveBeenCalledWith({
+      pluginId: "official/weather",
+      downloaded: 4,
+      total: 10,
+    });
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
   it("reads and updates the desktop worktree root through Tauri commands", async () => {
     invokeMock.mockResolvedValueOnce({ worktreeRoot: "/home/ora/worktrees" });
     const adapter = createTauriPlatformAdapter();

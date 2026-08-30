@@ -344,7 +344,6 @@ export const translationResources = {
     "workflowRun.rerunFailed": "重新运行失败。",
     "account.label": "{{name}} 的账户",
     "account.unknownIdentity": "匿名用户",
-    "account.logout": "退出登录",
     "account.language": "语言",
     "account.switchEnglish": "English",
     "account.switchChinese": "简体中文",
@@ -534,7 +533,7 @@ export const translationResources = {
     "settings.workflow.publishDraft": "发布当前草稿",
     "settings.workflow.publishTitle": "发布工作流",
     "settings.workflow.publishDescription":
-      "发布会把当前草稿保存为一个不可变的版本。",
+      "发布后，当前草稿将固化为可运行的工作流版本。",
     "settings.workflow.publishVersionPlaceholder":
       "版本名（可选，留空自动生成）",
     "settings.workflow.publishError": "发布工作流失败。",
@@ -590,8 +589,6 @@ export const translationResources = {
     "settings.nav.privacy": "数据与隐私",
     "settings.nav.developer": "开发者选项",
     "settings.appearance.title": "外观",
-    "settings.appearance.description":
-      "调整 Ora 在桌面端和 Web 端的显示方式。更改会立即应用。",
     "settings.appearance.theme": "主题",
     "settings.appearance.themeDescription":
       "选择界面的明暗外观，或跟随操作系统设置。",
@@ -601,15 +598,9 @@ export const translationResources = {
     "settings.appearance.language": "界面语言",
     "settings.appearance.languageDescription":
       "设置菜单、提示和 Agent 工作区使用的语言。",
-    "settings.appearance.density": "界面密度",
-    "settings.appearance.densityDescription":
-      "控制工作区列表和设置项的信息密度。",
-    "settings.appearance.comfortable": "舒适",
-    "settings.appearance.compact": "紧凑",
     "common.save": "保存",
     "settings.roles.title": "角色",
-    "settings.roles.description":
-      "管理可在 Ora 会话中调用的角色（原 Agents）。这里的命令直接使用共享 contracts。",
+    "settings.roles.description": "管理可在 Ora 会话或工作流节点中调用的角色。",
     "settings.roles.sectionLabel": "Roles",
     "settings.roles.search": "搜索名称或描述",
     "settings.roles.new": "新建 Role",
@@ -647,7 +638,7 @@ export const translationResources = {
       "该角色将从可用命令中移除，此操作无法撤销。",
     "settings.skills.title": "技能",
     "settings.skills.description":
-      "管理可在 Ora 会话中调用的技能。这里的命令直接使用共享 contracts。",
+      "管理可在 Ora 会话或工作流节点中调用的技能。",
     "settings.skills.sectionLabel": "Skills",
     "settings.skills.search": "搜索名称或描述",
     "settings.skills.new": "新建 Skill",
@@ -752,8 +743,7 @@ export const translationResources = {
     "surface.openDirectory": "打开目录",
     "surface.openFailed": "无法打开扩展面板",
     "settings.plugins.title": "插件",
-    "settings.plugins.description":
-      "在你常用的工具中与 Ora Agent 协作。插件目录为原型数据，安装状态不会持久化。",
+    "settings.plugins.description": "在常用工具中使用 Ora Agent。",
     "settings.plugins.search": "搜索插件",
     "settings.plugins.clearSearch": "清除搜索",
     "settings.plugins.installed": "已安装",
@@ -861,6 +851,7 @@ export const translationResources = {
       "插件进程会先停止，然后移除已安装的代码。",
     "settings.plugins.deleteConfigurationData": "同时删除配置数据（推荐）",
     "settings.plugins.installing": "安装中",
+    "settings.plugins.downloadProgress": "插件下载进度",
     "settings.plugins.cancel": "取消",
     "settings.plugins.installFailed": "安装失败",
     "settings.plugins.installSuccess": "插件已安装。",
@@ -1021,8 +1012,7 @@ export const translationResources = {
     "settings.permissions.timeoutMinutes": "{{count}} 分钟",
     "settings.permissions.noTimeout": "不限制",
     "settings.privacy.title": "数据与隐私",
-    "settings.privacy.description":
-      "控制本地会话记录、诊断数据以及原型数据清理。",
+    "settings.privacy.description": "管理工作树的存储位置。",
     "settings.privacy.worktreeRoot": "工作树存储位置",
     "settings.privacy.worktreeRootDescription":
       "新建工作树会存储在此目录；更改位置不会移动已有工作树。",
@@ -1272,6 +1262,8 @@ export const translationResources = {
     "chat.modelSelector.model": "模型",
     "chat.modelSelector.updating": "更新中…",
     "chat.modelSelector.empty": "该 Agent 未提供可选模型",
+    "chat.modelSelector.search": "搜索模型",
+    "chat.modelSelector.noResults": "未找到匹配的模型",
     "chat.agentUnavailable.title": "当前 Agent 不可用",
     "chat.agentUnavailable.uninstalled":
       "提供该 Agent 的插件已被卸载，重新安装后才能继续这段对话。",
@@ -1291,6 +1283,7 @@ export const translationResources = {
     "chat.actionMenu.files": "Files",
     "chat.actionMenu.skills": "Skills",
     "chat.actionMenu.commands": "Commands",
+    "chat.actionMenu.roles": "角色",
     "chat.actionMenu.plugins": "Plugins",
     "chat.actionMenu.actions": "Actions",
     "chat.actionMenu.showMore": "显示另外 {{count}} 项",
@@ -1349,16 +1342,6 @@ export const translationResources = {
     "chat.activity.cluster.tool": "{{count}} 次工具调用",
     "chat.plan": "执行计划",
     "chat.planProgress": "已完成 {{completed}}/{{total}}",
-    "workflow.toggle": "Spec 模式",
-    "workflow.next": "下一步",
-    "workflow.skip": "跳过",
-    "workflow.node.explore": "探索",
-    "workflow.node.propose": "提案",
-    "workflow.node.apply": "实现",
-    "workflow.node.sync": "同步",
-    "workflow.node.archive": "归档",
-    "workflow.startNode": "开始 {{node}}",
-    "workflow.cancel": "取消",
     "chat.toolPending": "等待中",
     "chat.toolRunning": "执行中",
     "chat.toolCompleted": "已完成",
@@ -1877,7 +1860,6 @@ export const translationResources = {
     "workflowRun.rerunFailed": "Failed to run again.",
     "account.label": "{{name}} account",
     "account.unknownIdentity": "Anonymous user",
-    "account.logout": "Log out",
     "account.language": "Language",
     "account.switchEnglish": "English",
     "account.switchChinese": "简体中文",
@@ -2081,7 +2063,7 @@ export const translationResources = {
     "settings.workflow.publishDraft": "Publish this draft",
     "settings.workflow.publishTitle": "Publish workflow",
     "settings.workflow.publishDescription":
-      "Publishing saves the current draft as an immutable version.",
+      "Publishing freezes the current draft into a runnable workflow version.",
     "settings.workflow.publishVersionPlaceholder":
       "Version name (optional; auto-generated when empty)",
     "settings.workflow.publishError": "Failed to publish the workflow.",
@@ -2139,8 +2121,6 @@ export const translationResources = {
     "settings.nav.privacy": "Data & privacy",
     "settings.nav.developer": "Developer options",
     "settings.appearance.title": "Appearance",
-    "settings.appearance.description":
-      "Adjust how Ora looks across desktop and web. Changes apply immediately.",
     "settings.appearance.theme": "Theme",
     "settings.appearance.themeDescription":
       "Choose a light or dark interface, or follow the operating system.",
@@ -2150,15 +2130,10 @@ export const translationResources = {
     "settings.appearance.language": "Display language",
     "settings.appearance.languageDescription":
       "Set the language used by menus, prompts, and the agent workspace.",
-    "settings.appearance.density": "Interface density",
-    "settings.appearance.densityDescription":
-      "Control the information density of workspace lists and settings.",
-    "settings.appearance.comfortable": "Comfortable",
-    "settings.appearance.compact": "Compact",
     "common.save": "Save",
     "settings.roles.title": "Roles",
     "settings.roles.description":
-      "Manage the roles (formerly Agents) available to Ora sessions. Commands use the shared contracts directly.",
+      "Manage the roles callable from Ora sessions and workflow nodes.",
     "settings.roles.sectionLabel": "Roles",
     "settings.roles.search": "Search name or description",
     "settings.roles.new": "New role",
@@ -2198,7 +2173,7 @@ export const translationResources = {
       "This role will be removed from available commands. This cannot be undone.",
     "settings.skills.title": "Skills",
     "settings.skills.description":
-      "Manage the skills available to Ora sessions. Commands use the shared contracts directly.",
+      "Manage the skills callable from Ora sessions and workflow nodes.",
     "settings.skills.sectionLabel": "Skills",
     "settings.skills.search": "Search name or description",
     "settings.skills.new": "New skill",
@@ -2313,7 +2288,7 @@ export const translationResources = {
     "surface.openFailed": "Could not open the surface",
     "settings.plugins.title": "Plugins",
     "settings.plugins.description":
-      "Work with Ora agents inside the tools you already use. The catalog is prototype data and install state is not persisted.",
+      "Use Ora agents inside your everyday tools.",
     "settings.plugins.search": "Search plugins",
     "settings.plugins.clearSearch": "Clear search",
     "settings.plugins.installed": "Installed",
@@ -2428,6 +2403,7 @@ export const translationResources = {
     "settings.plugins.deleteConfigurationData":
       "Also delete configuration data (recommended)",
     "settings.plugins.installing": "Installing",
+    "settings.plugins.downloadProgress": "Plugin download progress",
     "settings.plugins.cancel": "Cancel",
     "settings.plugins.installFailed": "Install failed",
     "settings.plugins.installSuccess": "Plugin installed.",
@@ -2629,8 +2605,7 @@ export const translationResources = {
     "settings.permissions.timeoutMinutes": "{{count}} min",
     "settings.permissions.noTimeout": "No limit",
     "settings.privacy.title": "Data & privacy",
-    "settings.privacy.description":
-      "Control local conversation records, diagnostics, and prototype data cleanup.",
+    "settings.privacy.description": "Manage where new worktrees are stored.",
     "settings.privacy.worktreeRoot": "Worktree storage location",
     "settings.privacy.worktreeRootDescription":
       "New worktrees are stored here. Changing it does not move existing worktrees.",
@@ -2893,6 +2868,8 @@ export const translationResources = {
     "chat.modelSelector.model": "Model",
     "chat.modelSelector.updating": "Updating…",
     "chat.modelSelector.empty": "This agent offers no model choice",
+    "chat.modelSelector.search": "Search models",
+    "chat.modelSelector.noResults": "No matching models",
     "chat.agentUnavailable.title": "This session's agent is unavailable",
     "chat.agentUnavailable.uninstalled":
       "The plugin that provided this agent was uninstalled. Reinstall it to continue this conversation.",
@@ -2914,6 +2891,7 @@ export const translationResources = {
     "chat.actionMenu.files": "Files",
     "chat.actionMenu.skills": "Skills",
     "chat.actionMenu.commands": "Commands",
+    "chat.actionMenu.roles": "Roles",
     "chat.actionMenu.plugins": "Plugins",
     "chat.actionMenu.actions": "Actions",
     "chat.actionMenu.showMore": "Show {{count}} more",
@@ -2987,16 +2965,6 @@ export const translationResources = {
     "chat.activity.cluster.tool_other": "{{count}} tool calls",
     "chat.plan": "Execution plan",
     "chat.planProgress": "{{completed}}/{{total}} completed",
-    "workflow.toggle": "Spec mode",
-    "workflow.next": "Next",
-    "workflow.skip": "Skip",
-    "workflow.node.explore": "Explore",
-    "workflow.node.propose": "Propose",
-    "workflow.node.apply": "Apply",
-    "workflow.node.sync": "Sync",
-    "workflow.node.archive": "Archive",
-    "workflow.startNode": "Start {{node}}",
-    "workflow.cancel": "Cancel",
     "chat.toolPending": "Pending",
     "chat.toolRunning": "Running",
     "chat.toolCompleted": "Completed",

@@ -8,10 +8,23 @@ use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::State;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::ipc::Channel;
+use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
+
+const PLUGIN_INSTALL_PROGRESS_EVENT: &str = "plugin-install-progress";
+const PLUGIN_PROGRESS_EVENT_INTERVAL: u64 = 1024 * 1024;
+
+/// Carries byte-level marketplace package progress to the plugin card that started the install.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginInstallProgressEvent {
+    plugin_id: String,
+    downloaded: u64,
+    total: Option<u64>,
+}
 
 /// Executes one synchronous backend operation on the runtime's blocking executor.
 async fn run_backend<Request, Response>(
@@ -1124,13 +1137,43 @@ async_backend_command!(
     uninstall_plugin,
     "Stops and removes one installed plugin."
 );
-async_backend_command!(
-    install_plugin,
-    InstallPluginRequest,
-    InstallPluginResponse,
-    install_plugin,
-    "Installs one marketplace plugin by downloading, verifying, and extracting it."
-);
+/// Installs one marketplace plugin and emits throttled byte-level download progress.
+#[tauri::command]
+pub async fn install_plugin(
+    state: State<'_, DesktopState>,
+    app: AppHandle,
+    request: InstallPluginRequest,
+) -> Result<InstallPluginResponse, CommandError> {
+    let plugin_id = request.plugin_id.clone();
+    let last_emitted = Arc::new(AtomicU64::new(0));
+    let progress = Arc::new(move |progress: ora_utils::http::Progress| {
+        let previous = last_emitted.load(Ordering::Relaxed);
+        let complete = progress.total == Some(progress.bytes);
+        if previous != 0
+            && progress.bytes < previous.saturating_add(PLUGIN_PROGRESS_EVENT_INTERVAL)
+            && !complete
+        {
+            return;
+        }
+        last_emitted.store(progress.bytes, Ordering::Relaxed);
+        let event = PluginInstallProgressEvent {
+            plugin_id: plugin_id.clone(),
+            downloaded: progress.bytes,
+            total: progress.total,
+        };
+        if let Err(error) = app.emit(PLUGIN_INSTALL_PROGRESS_EVENT, event) {
+            ora_logging::ora_warn!(message = "Failed to emit plugin install progress", error = %error);
+        }
+    });
+
+    run_async_backend(
+        "install_plugin",
+        state
+            .backend
+            .install_plugin_with_progress(request, progress),
+    )
+    .await
+}
 async_backend_command!(
     update_plugin,
     UpdatePluginRequest,

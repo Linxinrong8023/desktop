@@ -16,6 +16,7 @@ import { useProjects } from "../../state/hooks/use-projects";
 import { useTasks } from "../../state/hooks/use-tasks";
 import { useSessions } from "../../state/hooks/use-sessions";
 import { useSkills } from "../../state/hooks/use-skills";
+import { useAgents } from "../../state/hooks/use-agents";
 import { useWorkspaces } from "../../state/hooks/use-workspaces";
 import { useWorkspaceCwd } from "../../state/hooks/use-workspace-cwd";
 import {
@@ -28,13 +29,6 @@ import { useUiStore } from "../../state/stores/ui-store";
 import { useTargetAgentCli } from "../../state/hooks/use-target-agent-cli";
 import { usePendingAgentStore } from "../../state/stores/pending-agent-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
-import {
-  buildWorkflowReminder,
-  getRun,
-  kickNode,
-  useWorkflowStore,
-  type WorkflowNodeId,
-} from "../../state/stores/workflow-store";
 import { conversationKeyFor } from "../../state/stores/conversation-key";
 import { useComposerPluginSelectionStore } from "../../state/stores/composer-plugin-selection-store";
 import { useComposerInputStore } from "../../state/stores/composer-input-store";
@@ -49,11 +43,10 @@ import { useChatStore } from "../../chat-store-context";
 import { DragRegion } from "../../components/drag-region";
 import { WindowControls } from "../../components/window-controls";
 import { ChatView } from "../chat/chat-view";
+import { expandPromptRoleTokens } from "../chat/expand-prompt-role-tokens";
 import { ComposerContextBar } from "../chat/composer-context-bar";
 import { SessionAgentBanner } from "../chat/session-agent-banner";
 import { SessionHistoryBanner } from "../chat/session-history-banner";
-import { WorkflowStepper } from "../workflow/workflow-stepper";
-import { useWorkflowDetection } from "../workflow/use-workflow-detection";
 import type { ChatTurn } from "@ora/chat";
 import { LocationActionsButton } from "./location-actions-button";
 import { SurfaceLauncher } from "../surface/surface-launcher";
@@ -76,9 +69,6 @@ function upsertById<T extends { id: string }>(
 ): T[] {
   return [...(current ?? []).filter((item) => item.id !== entity.id), entity];
 }
-
-/** Stable empty-turns reference so the workflow detection effect does not re-run each render. */
-const EMPTY_TURNS: ChatTurn[] = [];
 
 /** Reduces a thrown value to the text shown against a turn that never reached the agent. */
 function errorMessage(error: unknown): string {
@@ -155,6 +145,7 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
   const { data: workspaces = [] } = useWorkspaces();
   const sessionsQuery = useSessions();
   const skillsQuery = useSkills();
+  const agentsQuery = useAgents();
   const sessions = sessionsQuery.data ?? [];
   const selection = useWorkspaceSelectionStore((s) => s.selection);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
@@ -167,6 +158,15 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
   const chatStore = useChatStore();
   useWorkspaceDiffLiveSync(chatStore, sessions);
   const client = useContractsClient();
+  // Fetches one role's persona content for prompt expansion; a miss is ordinary
+  // (the role may have been created before content was required).
+  const resolveAgentContent = async (agentId: string) => {
+    try {
+      return (await client.agent.get({ agentId })).agent;
+    } catch {
+      return undefined;
+    }
+  };
   const queryClient = useQueryClient();
   // Opens the provider session for this surface before anything is sent, so the
   // model picker has real options and the send path skips the agent handshake.
@@ -236,8 +236,6 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
       : state.conversations[conversationSessionId],
   );
 
-  // Workflow state is isolated per session (per task before the session exists).
-  const workflowKey = conversationKeyFor(selection);
   // Deriving what to show rather than clearing on a transition is what makes the
   // handover atomic: the render that adopts the session both retires this turn
   // and shows the real one, with no frame carrying neither or both.
@@ -245,18 +243,6 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
     pendingSend?.surfaceKey === chatSurfaceKeyFor(selection)
       ? pendingSend.turn
       : null;
-  // Absolute path to the OpenSpec skills, so the agent finds them from its Workspace
-  // cwd even when `.opencode/skills` lives only at the main Workspace.
-  const skillsDir =
-    workspaceCwdQuery.data === undefined || workspaceCwdQuery.data === ""
-      ? ".opencode/skills"
-      : `${workspaceCwdQuery.data.replace(/[\\/]+$/, "")}/.opencode/skills`;
-  // The highlighted (blue) stage, if any, so pressing Enter on an empty composer
-  // launches it directly.
-  const workflowRun = useWorkflowStore((state) => getRun(state, workflowKey));
-  const quickLaunchNodeId = kickNode(workflowRun);
-  // Best-effort: reflect any OpenSpec status JSON the agent emits into the stepper.
-  useWorkflowDetection(workflowKey, conversation?.turns ?? EMPTY_TURNS);
 
   useEffect(() => {
     if (
@@ -464,9 +450,8 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
       // navigates away mid-attach; cleared once that catch settles. Keyed by the
       // pre-rekey conversation so project/task landings (no draft) work too.
       noteComposerSendAdoptedSession(currentKey, sessionId);
-      // The workflow run and composer-local stores follow the conversation onto
-      // its final session id before the optimistic turn changes surfaces.
-      useWorkflowStore.getState().rekey(currentKey, sessionId);
+      // Composer-local stores follow the conversation onto its final session id
+      // before the optimistic turn changes surfaces.
       useComposerPluginSelectionStore.getState().rekey(currentKey, sessionId);
       useComposerInputStore.getState().rekey(currentKey, sessionId);
       const selectionStore = useWorkspaceSelectionStore.getState();
@@ -547,39 +532,23 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
     }
   };
 
-  // Composer send. In Spec mode, a message typed while a stage is highlighted (none
-  // running) launches that stage and rides its reminder; the reminder shows only in
-  // `agentText`, never the transcript. Within a running stage nothing is injected.
+  // Composer send. The transcript keeps the `@role` chip while the agent reads
+  // the role's title, description, and persona content from `agentText`. The
+  // user's own message must stay first in `agentText`: the backend records the
+  // prompt as the user turn, so leading with the tokens is what lets history
+  // re-render the skill/role chips after a restart.
   const sendOrStartSession = async (
     text: string,
     images: acp.ImageContent[] = [],
   ) => {
-    const key = conversationKeyFor(
-      useWorkspaceSelectionStore.getState().selection,
+    const roleExpansion = await expandPromptRoleTokens(
+      text,
+      agentsQuery.data ?? [],
+      resolveAgentContent,
     );
-    const nodeId = kickNode(getRun(useWorkflowStore.getState(), key));
-    let agentText: string | undefined;
-    if (nodeId !== null) {
-      useWorkflowStore.getState().launchNode(key, nodeId);
-      agentText = `${buildWorkflowReminder(nodeId, skillsDir)}\n\n${text}`;
-    }
+    const agentText =
+      roleExpansion === null ? undefined : `${text}\n\n${roleExpansion}`;
     await dispatchSend(text, agentText, images);
-  };
-
-  // Clicking the highlighted stepper node sends its OpenSpec command now, so the
-  // agent starts that stage. The transcript shows a short action label while the
-  // agent receives the full reminder; the node flips to running.
-  const launchWorkflowNode = (id: WorkflowNodeId) => {
-    const key = conversationKeyFor(
-      useWorkspaceSelectionStore.getState().selection,
-    );
-    useWorkflowStore.getState().launchNode(key, id);
-    const displayText = t("workflow.startNode", {
-      node: t(`workflow.node.${id}`),
-    });
-    void dispatchSend(displayText, buildWorkflowReminder(id, skillsDir)).catch(
-      () => undefined,
-    );
   };
 
   // Graph workflow definition editor owns the main pane while it is open.
@@ -684,6 +653,7 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
             error={chatError}
             pendingPermissions={conversation?.pendingPermissions ?? []}
             skills={skillsQuery.data ?? []}
+            roles={agentsQuery.data ?? []}
             availableCommands={conversation?.availableCommands ?? []}
             disabled={!canChat}
             // An untouched chat cannot send yet, but disabling this picker as
@@ -703,20 +673,9 @@ export function WorkspaceView({ userName }: WorkspaceViewProps) {
                 <ComposerContextBar />
               ) : undefined
             }
-            workflowBar={
-              <WorkflowStepper
-                onLaunch={launchWorkflowNode}
-                disabled={!canChat}
-              />
-            }
             // Failures land in chatError; the rejection also lets the composer
             // restore unsent text when the surface never left the draft.
             onSend={(text, images) => sendOrStartSession(text, images)}
-            onEmptySubmit={
-              quickLaunchNodeId === null
-                ? undefined
-                : () => launchWorkflowNode(quickLaunchNodeId)
-            }
             // A pending send has no session to stop — abandoning it before its
             // handshake resolves is what stops it.
             // Otherwise the selected id, not session.id: during the optimistic

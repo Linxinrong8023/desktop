@@ -309,3 +309,85 @@ describe("ModelSelector agent availability", () => {
     );
   });
 });
+
+describe("ModelSelector model search", () => {
+  it("filters the model list by typed text without the menu swallowing keystrokes", async () => {
+    const user = userEvent.setup();
+    renderModelSelector();
+
+    act(() => useWorkspaceSelectionStore.getState().selectTask("t1", "p1"));
+    const menu = await openAgentList(user);
+    await waitFor(() =>
+      expect(within(menu).queryByText("Big Pickle")).not.toBeNull(),
+    );
+
+    const search = within(menu).getByRole("textbox", {
+      name: /搜索模型|Search models/,
+    });
+    await user.type(search, "Small");
+    expect(search).toHaveValue("Small");
+    expect(within(menu).queryByText("Big Pickle")).toBeNull();
+    expect(within(menu).queryByText("Small Pickle")).not.toBeNull();
+
+    await user.clear(search);
+    expect(within(menu).queryByText("Big Pickle")).not.toBeNull();
+    expect(within(menu).queryByText("Small Pickle")).not.toBeNull();
+  });
+
+  it("reports no matches for a query nothing in the model list satisfies", async () => {
+    const user = userEvent.setup();
+    renderModelSelector();
+
+    act(() => useWorkspaceSelectionStore.getState().selectTask("t1", "p1"));
+    const menu = await openAgentList(user);
+    await waitFor(() =>
+      expect(within(menu).queryByText("Big Pickle")).not.toBeNull(),
+    );
+
+    const search = within(menu).getByRole("textbox", {
+      name: /搜索模型|Search models/,
+    });
+    await user.type(search, "nonexistent-model");
+
+    expect(within(menu).queryByText("Big Pickle")).toBeNull();
+    expect(within(menu).queryByText("Small Pickle")).toBeNull();
+    await waitFor(() =>
+      expect(
+        within(menu).queryByText(/未找到匹配的模型|No matching models/),
+      ).not.toBeNull(),
+    );
+  });
+
+  it("does not move focus into the search box just from opening the menu", async () => {
+    const user = userEvent.setup();
+    renderModelSelector();
+
+    act(() => useWorkspaceSelectionStore.getState().selectTask("t1", "p1"));
+    const menu = await openAgentList(user);
+    await waitFor(() =>
+      expect(within(menu).queryByText("Big Pickle")).not.toBeNull(),
+    );
+
+    const search = within(menu).getByRole("textbox", {
+      name: /搜索模型|Search models/,
+    });
+    expect(document.activeElement).not.toBe(search);
+  });
+
+  it("does not offer a search box in the agent group", async () => {
+    const user = userEvent.setup();
+    renderModelSelector();
+
+    act(() => useWorkspaceSelectionStore.getState().selectTask("t1", "p1"));
+    const menu = await openAgentList(user);
+    await waitFor(() =>
+      expect(within(menu).queryByText("Big Pickle")).not.toBeNull(),
+    );
+
+    expect(
+      within(menu).getAllByRole("textbox", {
+        name: /搜索模型|Search models/,
+      }),
+    ).toHaveLength(1);
+  });
+});
