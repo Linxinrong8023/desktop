@@ -67,7 +67,7 @@ The configured root is only a creation target. Existing worktree locations are r
 
 ## Persistent Paths
 
-The Tauri identifier is `space.ora.desktop`. Tauri's system `app_data_dir` owns all default runtime state:
+The Tauri identifier is `space.ora.desktop`. Desktop keeps persistent state in two explicitly named roots:
 
 - SQLite: `app_data_dir/ora.sqlite3`
 - User configuration, including `worktree_root` and `network_proxy_settings`: `app_data_dir/ora.sqlite3`, table `user_config`
@@ -75,8 +75,9 @@ The Tauri identifier is `space.ora.desktop`. Tauri's system `app_data_dir` owns 
 - Default new-worktree root: `~/.ora/worktrees`
 - Session history: `app_data_dir/sessions`
 - Skill packages root: `app_data_dir/atoms/skills`
+- Plugins, registry data, and plugin storage: `~/.ora/plugins`
 
-On first launch, Desktop creates the app data directory and `~/.ora/worktrees`, then persists the selected worktree root in SQLite when initialization completes. Existing installations are migrated once: if `config.json` contains a valid version-1 `worktreeRoot`, that value is written to `user_config.worktree_root` and the legacy file is removed. An existing SQLite value takes precedence. Invalid legacy configuration is fatal and is kept intact for diagnosis.
+On first launch, Desktop creates the app data directory and `~/.ora/worktrees`. A worktree root already selected in SQLite takes precedence over that default.
 
 `ORA_DATA_DIR` controls Desktop's runtime data root. `task run:desktop` points it at the repo `.data` directory for local development. Relative project roots stored in that database are resolved against the data directory's parent (the repo root), not the Tauri process cwd — `tauri dev` starts in `apps/desktop/src-tauri`, which would otherwise miss paths such as `.data/rustun`. Without `ORA_DATA_DIR`, runtime data paths come from Tauri's `app_data_dir`; the first-run worktree root remains `~/.ora/worktrees`, and folder-picker selections are already absolute.
 

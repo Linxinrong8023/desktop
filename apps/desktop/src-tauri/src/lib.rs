@@ -1,6 +1,5 @@
 mod commands;
 mod error;
-mod legacy_config;
 mod open_external;
 mod open_location;
 mod settings_commands;
@@ -38,8 +37,8 @@ macro_rules! desktop_command_registry {
 
 const LOG_LEVEL_ENV_VAR: &str = "ORA_LOG_LEVEL";
 
-/// The directory name under the user home where plugin and registry data lives.
-const PLUGIN_HOME_DIRECTORY_NAME: &str = ".ora";
+/// The directory name under the user home where Ora-owned plugins and worktrees live.
+const ORA_HOME_DIRECTORY_NAME: &str = ".ora";
 
 /// Starts the Tauri application with the persisted shared Backend and command adapters.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -106,10 +105,11 @@ fn bootstrap_desktop(
     app: &tauri::AppHandle,
 ) -> Result<(DesktopState, DesktopRuntimeGuard), DesktopBootstrapError> {
     let app_data_directory = desktop_data_directory(app)?;
-    let home_directory = app
+    let user_home_directory = app
         .path()
         .home_dir()
-        .map_err(DesktopBootstrapError::AppDataDirectory)?;
+        .map_err(DesktopBootstrapError::OraHomeDirectory)?;
+    let home_directory = user_home_directory.join(ORA_HOME_DIRECTORY_NAME);
     let resolved_timezone = read_system_timezone();
     let startup_override = read_desktop_log_level_override(|key| std::env::var(key).ok())?;
     let provisional_log_level = startup_override.unwrap_or(LogLevel::Info);
@@ -152,20 +152,16 @@ fn bootstrap_desktop(
     ora_process::initialize_reaper(binary_paths.reaper_path())
         .map_err(DesktopBootstrapError::ProcessReaper)?;
     let ripgrep_path = binary_paths.ripgrep_path().to_path_buf();
-    let default_worktree_root = legacy_config::default_worktree_root(&home_directory);
-    let backend = Backend::open(BackendPaths {
-        database_path: app_data_directory.join("ora.sqlite3"),
-        data_directory: home_directory.join(PLUGIN_HOME_DIRECTORY_NAME),
-        deno_path: binary_paths.deno_path().to_path_buf(),
-        worktree_root: default_worktree_root,
+    let backend_paths = BackendPaths {
+        app_data_directory: app_data_directory.clone(),
         home_directory: home_directory.clone(),
+        deno_path: binary_paths.deno_path().to_path_buf(),
         relative_path_base: desktop_relative_path_base(&app_data_directory),
-        sessions_root: app_data_directory.join("sessions"),
-        skills_root: app_data_directory.join("atoms").join("skills"),
         ripgrep_path: ripgrep_path.clone(),
         timezone: resolved_timezone.timezone,
-    })?;
-    legacy_config::migrate(&backend, &app_data_directory, &home_directory)?;
+    };
+    let home_directory = backend_paths.home_directory.clone();
+    let backend = Backend::open(backend_paths)?;
     let (configured_log_level, resolved_log_level) =
         tauri::async_runtime::block_on(load_desktop_log_level(&backend, startup_override))
             .map_err(DesktopBootstrapError::RuntimePreference)?;
@@ -611,14 +607,10 @@ mod tests {
     /// Builds a complete Backend path set rooted in one isolated Desktop data directory.
     fn test_backend_paths(root: &std::path::Path) -> BackendPaths {
         BackendPaths {
-            database_path: root.join("ora.sqlite3"),
-            data_directory: root.to_path_buf(),
-            deno_path: std::path::PathBuf::from("deno"),
-            worktree_root: root.join("worktrees"),
+            app_data_directory: root.to_path_buf(),
             home_directory: root.to_path_buf(),
+            deno_path: std::path::PathBuf::from("deno"),
             relative_path_base: root.to_path_buf(),
-            sessions_root: root.join("sessions"),
-            skills_root: root.join("atoms").join("skills"),
             ripgrep_path: std::path::PathBuf::from("rg"),
             timezone: chrono_tz::UTC,
         }

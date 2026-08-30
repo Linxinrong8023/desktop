@@ -164,7 +164,7 @@ pub(crate) struct PluginApi {
     marketplace_sources: MarketplaceSourceStore,
     user_config: Arc<UserConfigApi>,
     registry_index_path: PathBuf,
-    data_directory: PathBuf,
+    home_directory: PathBuf,
     installer: Installer<ReqwestDownloader>,
     notifications: BroadcastNotificationSink,
     pub(crate) configuration: ConfigurationService,
@@ -184,16 +184,16 @@ impl PluginApi {
     /// Opens plugin lifecycle state with the concrete backend adapters.
     pub(crate) fn open(
         pool: RepositoryPool,
-        data_directory: PathBuf,
+        home_directory: PathBuf,
         deno_path: PathBuf,
         clock: SystemClock,
         publisher: AppEventPublisher,
         user_config: Arc<UserConfigApi>,
     ) -> Result<Self, BackendError> {
-        let plugins_directory = data_directory.join("plugins");
+        let plugins_directory = home_directory.join("plugins");
         let marketplace_sources = MarketplaceSourceStore::open(
             SqlitePluginMarketplaceSourceRepository::new(pool.clone()),
-            &data_directory,
+            &home_directory,
             clock.now_timestamp_millis(),
         )
         .map_err(|error| {
@@ -205,10 +205,10 @@ impl PluginApi {
         let registry_index_path = plugins_directory.join("cache").join("registry_index.json");
         let installer = Installer::new(ReqwestDownloader::new(ProxyConfig::default()));
         let notifications = BroadcastNotificationSink::new();
-        let configuration = ConfigurationService::new(data_directory.clone());
+        let configuration = ConfigurationService::new(home_directory.clone());
         let lifecycle = PluginLifecycle::open(
             PluginLifecycleConfig {
-                data_directory: data_directory.clone(),
+                data_directory: home_directory.clone(),
                 deno_path,
             },
             DenoPluginRuntimeLauncher::new(PluginRuntimeTimeouts::default()),
@@ -222,7 +222,7 @@ impl PluginApi {
             marketplace_sources,
             user_config,
             registry_index_path,
-            data_directory,
+            home_directory,
             installer,
             notifications,
             configuration,
@@ -245,7 +245,7 @@ impl PluginApi {
 
     /// Rebuilds catalog projections for every Skill plugin already installed on disk.
     pub(crate) fn sync_installed_skills(&self) -> Result<(), BackendError> {
-        let manager = PluginManager::discover(&self.data_directory);
+        let manager = PluginManager::discover(&self.home_directory);
         for plugin in manager.installed_plugins() {
             if matches!(plugin.contributes, PluginContribution::Skill(_)) {
                 self.persist_discovered_plugin_skills(plugin)?;
@@ -658,14 +658,14 @@ impl PluginApi {
                     .install_with_progress(
                         &manifest,
                         release_source,
-                        &self.data_directory,
+                        &self.home_directory,
                         progress,
                     )
                     .await
             }
             None => {
                 installer
-                    .install(&manifest, release_source, &self.data_directory)
+                    .install(&manifest, release_source, &self.home_directory)
                     .await
             }
         }
@@ -708,7 +708,7 @@ impl PluginApi {
             .map_err(BackendError::from)?;
         let download_proxy = self.download_proxy_for(use_proxy)?;
         Installer::new(ReqwestDownloader::new(download_proxy))
-            .update(&manifest, release_source, &self.data_directory)
+            .update(&manifest, release_source, &self.home_directory)
             .await
             .map_err(|error| self.map_update_error("failed to update plugin", error))?;
         self.finalize_new_install(&request.plugin_id).await?;
@@ -815,12 +815,12 @@ impl PluginApi {
         // pool instead of a tokio worker thread; the downloader is cloned only for the task
         // and is needed because `install_local` is an `Installer` method.
         let installer = self.installer.clone();
-        let data_directory = self.data_directory.clone();
+        let home_directory = self.home_directory.clone();
         let host_target = ora_plugin_registry::current_host_target();
         let package = tokio::task::spawn_blocking(move || {
             installer.install_local(
                 &archive_path,
-                &data_directory,
+                &home_directory,
                 ora_plugin_manager::HostTarget::from_option(host_target.as_ref()),
             )
         })
@@ -876,7 +876,7 @@ impl PluginApi {
     /// The new Hook itself is excluded so a re-install of the same package does not conflict
     /// with its own contribution.
     fn detect_hook_command_conflict(&self, plugin_id: &str) -> Option<String> {
-        let manager = PluginManager::discover(&self.data_directory);
+        let manager = PluginManager::discover(&self.home_directory);
         let installed = manager.installed_plugins();
         let new_hook = installed
             .iter()
@@ -906,7 +906,7 @@ impl PluginApi {
 
     /// Projects validated static Skill metadata into the shared catalog and Effect source tables.
     fn sync_plugin_skills(&self, plugin_id: &str) -> Result<(), BackendError> {
-        let manager = PluginManager::discover(&self.data_directory);
+        let manager = PluginManager::discover(&self.home_directory);
         let plugin = manager
             .installed_plugins()
             .iter()

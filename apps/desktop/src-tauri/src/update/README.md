@@ -32,9 +32,9 @@ Desktop application self-update orchestration around Tauri's signed updater plug
 
 ## Lifecycle
 
-1. `UpdateService::start` opens the versioned artifact store, removes interrupted staging entries
-   and the abandoned fixed-slot schema, discards releases the running build already includes, and
-   — in `Enabled` mode — registers the delayed check and the cron job.
+1. `UpdateService::start` opens the versioned artifact store, removes interrupted staging entries,
+   discards releases the running build already includes, and — in `Enabled` mode — registers the
+   delayed check and the cron job.
 2. Each check rebuilds the updater so a proxy the user changed since the last check is picked up,
    then asks the plugin for an update.
 3. A fresh manifest identity is matched against committed artifacts. Matching bytes are checked

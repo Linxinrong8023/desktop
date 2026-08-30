@@ -180,7 +180,7 @@ pub(super) struct UpdateArtifactStore {
 impl UpdateArtifactStore {
     /// Opens the versioned store, removes interrupted writes, and drops superseded entries.
     pub(super) fn open(home_directory: &Path, current: &Version) -> Result<Self, UpdateError> {
-        let cache_directory = home_directory.join(".ora").join("cache");
+        let cache_directory = home_directory.join("cache");
         let root = cache_directory.join(STORE_DIRECTORY).join(STORE_VERSION);
         let entries = root.join(ENTRIES_DIRECTORY);
         let staging = root.join(STAGING_DIRECTORY);
@@ -188,7 +188,6 @@ impl UpdateArtifactStore {
         std::fs::create_dir_all(&staging).map_err(UpdateError::CacheDirectory)?;
         let store = Self { entries, staging };
         store.clear_directory(&store.staging);
-        store.remove_legacy_files(&cache_directory);
         store.discard_superseded(current)?;
         Ok(store)
     }
@@ -363,23 +362,6 @@ impl UpdateArtifactStore {
             if entry.file_name() != retained_id {
                 self.remove_invalid_entry(&entry.path());
             }
-        }
-    }
-
-    /// Removes fixed-slot files from the abandoned schema instead of maintaining a migration.
-    fn remove_legacy_files(&self, cache_directory: &Path) {
-        for file_name in [
-            "ora-update.exe",
-            "ora-update.AppImage",
-            "ora-update.app.tar.gz",
-            "ora-update.json",
-            "ora-update.exe.tmp",
-            "ora-update.AppImage.tmp",
-            "ora-update.app.tar.gz.tmp",
-            "ora-update.json.tmp",
-            "ora-update.tmp",
-        ] {
-            let _ = std::fs::remove_file(cache_directory.join(file_name));
         }
     }
 

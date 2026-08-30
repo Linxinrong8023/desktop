@@ -31,10 +31,10 @@ impl MarketplaceSourceStore {
     /// Loads existing sources or seeds the default source when the table is empty.
     pub(crate) fn open(
         repository: SqlitePluginMarketplaceSourceRepository,
-        data_directory: &Path,
+        home_directory: &Path,
         now_ms: i64,
     ) -> Result<Self, MarketplaceSourceStoreError> {
-        let sources_root = data_directory.join("plugins").join("sources");
+        let sources_root = home_directory.join("plugins").join("sources");
         let store = Self {
             repository,
             sources_root,

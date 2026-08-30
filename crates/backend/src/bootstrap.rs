@@ -34,22 +34,18 @@ use thiserror::Error;
 /// Names the persistent paths required to construct the shared backend.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BackendPaths {
-    pub database_path: PathBuf,
-    /// Root containing the installed `plugins` directory.
-    pub data_directory: PathBuf,
+    /// Tauri application data root containing SQLite, sessions, and formal Skills.
+    pub app_data_directory: PathBuf,
+    /// Ora home root (`~/.ora`) containing plugins and worktrees.
+    pub home_directory: PathBuf,
     /// Bundled Deno executable used for plugin activation.
     pub deno_path: PathBuf,
-    pub worktree_root: PathBuf,
-    pub home_directory: PathBuf,
     /// Directory against which persisted relative local Workspace locations are resolved.
     ///
     /// Relative locations are stored against the directory from which `ORA_DATA_DIR`
     /// was created. Live process cwd is not used: Desktop `tauri dev` starts in
     /// `src-tauri`, which is not that directory.
     pub relative_path_base: PathBuf,
-    pub sessions_root: PathBuf,
-    /// Root of the formal skill package tree (`<data>/atoms/skills`).
-    pub skills_root: PathBuf,
     /// Bundled ripgrep executable used by shared specification discovery.
     pub ripgrep_path: PathBuf,
     /// IANA timezone used by backend-owned cron and delayed work.
@@ -121,18 +117,17 @@ pub struct Backend {
 impl Backend {
     /// Opens persistent storage and constructs every shared CRUD API.
     ///
-    /// Installed agent plugins join the built-in CLIs as agent providers; they are discovered by
-    /// the plugin lifecycle under `paths.data_directory`, which also owns their processes.
+    /// Installed agent plugins join the built-in CLIs as agent providers; they are discovered
+    /// under `paths.home_directory`, which also owns their processes and default worktrees.
     pub fn open(paths: BackendPaths) -> Result<Self, BackendBootstrapError> {
-        ensure_directory(
-            paths
-                .database_path
-                .parent()
-                .unwrap_or_else(|| Path::new(".")),
-        )?;
+        let database_path = paths.app_data_directory.join("ora.sqlite3");
+        let skills_root = paths.app_data_directory.join("atoms").join("skills");
+        let sessions_root = paths.app_data_directory.join("sessions");
+        let default_worktree_root = paths.home_directory.join("worktrees");
+        ensure_directory(&paths.app_data_directory)?;
         let catalog = default_migration_catalog().map_err(BackendBootstrapError::Database)?;
         let pool = DatabaseBootstrapper::system()
-            .bootstrap_repository_pool(&DatabaseLocation::path(&paths.database_path), &catalog)
+            .bootstrap_repository_pool(&DatabaseLocation::path(&database_path), &catalog)
             .map_err(BackendBootstrapError::Database)?;
         let user_config = Arc::new(UserConfigApi::new(pool.clone()));
         let stored_worktree_root = user_config
@@ -146,11 +141,11 @@ impl Backend {
                 root
             }
             None => {
-                ensure_directory(&paths.worktree_root)?;
-                paths.worktree_root
+                ensure_directory(&default_worktree_root)?;
+                default_worktree_root
             }
         };
-        crate::skill_reconciliation::reconcile_skill_storage(&pool, &paths.skills_root)
+        crate::skill_reconciliation::reconcile_skill_storage(&pool, &skills_root)
             .map_err(BackendBootstrapError::SkillStorageReconciliation)?;
         crate::skill_reconciliation::cleanup_import_temp_sessions()
             .map_err(BackendBootstrapError::SkillStorageReconciliation)?;
@@ -160,7 +155,7 @@ impl Backend {
         let plugin = Arc::new(
             PluginApi::open(
                 pool.clone(),
-                paths.data_directory,
+                paths.home_directory.clone(),
                 paths.deno_path,
                 clock,
                 app_events.publisher(),
@@ -173,7 +168,6 @@ impl Backend {
             .map_err(BackendBootstrapError::PluginSkillCatalog)?;
         let scheduler = Scheduler::new(paths.timezone);
         let worktree_root = Arc::new(RwLock::new(configured_worktree_root));
-        let sessions_root = paths.sessions_root;
         // Side files holding the worktree baseline an interactive node diffs at completion.
         let baselines_root = sessions_root.join("node-baselines");
         let relative_path_base = paths.relative_path_base;
@@ -254,11 +248,7 @@ impl Backend {
             session: Arc::new(SessionApi::new(pool.clone())),
             agent_runtime,
             plugin,
-            skill: Arc::new(SkillApi::new(
-                pool.clone(),
-                paths.skills_root.clone(),
-                clock,
-            )),
+            skill: Arc::new(SkillApi::new(pool.clone(), skills_root.clone(), clock)),
             agent: Arc::new(AgentApi::new(pool.clone(), clock)),
             spec: Arc::new(SpecApi::new(
                 pool.clone(),
@@ -267,7 +257,7 @@ impl Backend {
                 relative_path_base.clone(),
             )),
             workflow: Arc::new(WorkflowApi::new(pool.clone(), clock)),
-            workflow_run: Arc::new(WorkflowRunApi::new(pool.clone(), paths.skills_root, clock)),
+            workflow_run: Arc::new(WorkflowRunApi::new(pool.clone(), skills_root, clock)),
             workflow_run_engine,
             run_locks,
             completing_node_runs: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -1668,7 +1658,20 @@ mod tests {
     use ora_logging::LogLevel;
     use ora_test_support::GitTestScaffold;
     use std::fs;
+    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
+
+    /// Builds Backend paths with independently selectable application-data and Ora-home roots.
+    fn backend_paths(app_data_directory: &Path, home_directory: &Path) -> BackendPaths {
+        BackendPaths {
+            app_data_directory: app_data_directory.to_path_buf(),
+            home_directory: home_directory.to_path_buf(),
+            deno_path: PathBuf::from("deno"),
+            relative_path_base: app_data_directory.to_path_buf(),
+            ripgrep_path: PathBuf::from("rg"),
+            timezone: chrono_tz::UTC,
+        }
+    }
 
     /// Verifies the shared composition owns storage bootstrap and complete non-Git CRUD flows.
     #[tokio::test]
@@ -1676,18 +1679,10 @@ mod tests {
         let temporary = TempDir::new().expect("create temporary backend directory");
         let database_path = temporary.path().join("data").join("ora.sqlite3");
         let worktree_root = temporary.path().join("worktrees");
-        let backend = Backend::open(BackendPaths {
-            database_path: database_path.clone(),
-            data_directory: temporary.path().to_path_buf(),
-            deno_path: std::path::PathBuf::from("deno"),
-            worktree_root: worktree_root.clone(),
-            home_directory: temporary.path().to_path_buf(),
-            relative_path_base: temporary.path().to_path_buf(),
-            sessions_root: temporary.path().join("sessions"),
-            skills_root: temporary.path().join("atoms").join("skills"),
-            ripgrep_path: std::path::PathBuf::from("rg"),
-            timezone: chrono_tz::UTC,
-        })
+        let backend = Backend::open(backend_paths(
+            database_path.parent().expect("database has parent"),
+            temporary.path(),
+        ))
         .expect("open shared backend");
 
         assert!(database_path.is_file());
@@ -1823,9 +1818,9 @@ mod tests {
     #[test]
     fn opens_with_plugin_skills_written_to_the_existing_database_schema() {
         let temporary = TempDir::new().expect("create temporary backend directory");
-        let package_root = temporary
-            .path()
-            .join("plugins/installed/official/review-pack/1.0.0");
+        let app_data_directory = temporary.path().join("app-data");
+        let home_directory = temporary.path().join("ora-home");
+        let package_root = home_directory.join("plugins/installed/official/review-pack/1.0.0");
         let skill_root = package_root.join("assets/review");
         fs::create_dir_all(&skill_root).expect("create installed Skill tree");
         fs::write(
@@ -1839,19 +1834,11 @@ mod tests {
         )
         .expect("write Skill manifest");
 
-        let backend = Backend::open(BackendPaths {
-            database_path: temporary.path().join("ora.sqlite3"),
-            data_directory: temporary.path().to_path_buf(),
-            deno_path: std::path::PathBuf::from("deno"),
-            worktree_root: temporary.path().join("worktrees"),
-            home_directory: temporary.path().to_path_buf(),
-            relative_path_base: temporary.path().to_path_buf(),
-            sessions_root: temporary.path().join("sessions"),
-            skills_root: temporary.path().join("atoms/skills"),
-            ripgrep_path: std::path::PathBuf::from("rg"),
-            timezone: chrono_tz::UTC,
-        })
-        .expect("open shared backend");
+        let backend = Backend::open(backend_paths(&app_data_directory, &home_directory))
+            .expect("open shared backend");
+
+        assert!(app_data_directory.join("ora.sqlite3").is_file());
+        assert!(home_directory.join("worktrees").is_dir());
 
         let skills = backend
             .list_skills(ListSkillsRequest {})
@@ -1875,20 +1862,11 @@ mod tests {
     #[test]
     fn update_preserves_other_package_files() {
         let temporary = TempDir::new().expect("create temporary backend directory");
-        let skills_root = temporary.path().join("atoms").join("skills");
-        let backend = Backend::open(BackendPaths {
-            database_path: temporary.path().join("ora.sqlite3"),
-            data_directory: temporary.path().to_path_buf(),
-            deno_path: std::path::PathBuf::from("deno"),
-            worktree_root: temporary.path().join("worktrees"),
-            home_directory: temporary.path().to_path_buf(),
-            relative_path_base: temporary.path().to_path_buf(),
-            sessions_root: temporary.path().join("sessions"),
-            skills_root: skills_root.clone(),
-            ripgrep_path: std::path::PathBuf::from("rg"),
-            timezone: chrono_tz::UTC,
-        })
-        .expect("open shared backend");
+        let app_data_directory = temporary.path().join("app-data");
+        let home_directory = temporary.path().join("ora-home");
+        let skills_root = app_data_directory.join("atoms").join("skills");
+        let backend = Backend::open(backend_paths(&app_data_directory, &home_directory))
+            .expect("open shared backend");
 
         let skill = backend
             .create_skill(CreateSkillRequest {
@@ -1917,6 +1895,7 @@ mod tests {
         let manifest =
             fs::read_to_string(skills_root.join("review").join("SKILL.md")).expect("read manifest");
         assert!(manifest.contains("description: Reviews pull requests"));
+        assert!(!home_directory.join("atoms").exists());
     }
 
     /// Verifies task deletion hides Ora records while deliberately preserving the Git worktree.
@@ -1932,20 +1911,9 @@ mod tests {
             .stage_all_and_commit("initial")
             .expect("create repository seed commit");
         let repository_root = scaffold.repo_path().to_path_buf();
-        let original_worktree_root = temporary.path().join("original-worktrees");
-        let backend = Backend::open(BackendPaths {
-            database_path: temporary.path().join("ora.sqlite3"),
-            data_directory: temporary.path().to_path_buf(),
-            deno_path: std::path::PathBuf::from("deno"),
-            worktree_root: original_worktree_root.clone(),
-            home_directory: temporary.path().to_path_buf(),
-            relative_path_base: temporary.path().to_path_buf(),
-            sessions_root: temporary.path().join("sessions"),
-            skills_root: temporary.path().join("atoms").join("skills"),
-            ripgrep_path: std::path::PathBuf::from("rg"),
-            timezone: chrono_tz::UTC,
-        })
-        .expect("open shared backend");
+        let original_worktree_root = temporary.path().join("worktrees");
+        let backend = Backend::open(backend_paths(temporary.path(), temporary.path()))
+            .expect("open shared backend");
         let project = backend
             .create_project(CreateProjectRequest {
                 name: "Ora".to_string(),
@@ -2013,19 +1981,8 @@ mod tests {
 
         let temporary = TempDir::new().expect("create temporary backend directory");
         let data_directory = temporary.path().to_path_buf();
-        let backend = Backend::open(BackendPaths {
-            database_path: data_directory.join("ora.sqlite3"),
-            data_directory: data_directory.clone(),
-            deno_path: std::path::PathBuf::from("deno"),
-            worktree_root: data_directory.join("worktrees"),
-            home_directory: data_directory.clone(),
-            relative_path_base: data_directory.clone(),
-            sessions_root: data_directory.join("sessions"),
-            skills_root: data_directory.join("atoms").join("skills"),
-            ripgrep_path: std::path::PathBuf::from("rg"),
-            timezone: chrono_tz::UTC,
-        })
-        .expect("open shared backend");
+        let backend = Backend::open(backend_paths(&data_directory, &data_directory))
+            .expect("open shared backend");
 
         backend
             .import_plugin(ImportPluginRequest {
@@ -2184,19 +2141,8 @@ mod tests {
         )
         .expect("stage marketplace registry");
 
-        let backend = Backend::open(BackendPaths {
-            database_path: data_directory.join("ora.sqlite3"),
-            data_directory: data_directory.clone(),
-            deno_path: std::path::PathBuf::from("deno"),
-            worktree_root: data_directory.join("worktrees"),
-            home_directory: data_directory.clone(),
-            relative_path_base: data_directory.clone(),
-            sessions_root: data_directory.join("sessions"),
-            skills_root: data_directory.join("atoms").join("skills"),
-            ripgrep_path: std::path::PathBuf::from("rg"),
-            timezone: chrono_tz::UTC,
-        })
-        .expect("open shared backend");
+        let backend = Backend::open(backend_paths(&data_directory, &data_directory))
+            .expect("open shared backend");
 
         backend
             .install_plugin(InstallPluginRequest {
@@ -2282,19 +2228,8 @@ mod tests {
         }
 
         let temporary = TempDir::new().expect("create temporary backend directory");
-        let backend = Backend::open(BackendPaths {
-            database_path: temporary.path().join("ora.sqlite3"),
-            data_directory,
-            deno_path: std::path::PathBuf::from("deno"),
-            worktree_root: temporary.path().join("worktrees"),
-            home_directory: temporary.path().to_path_buf(),
-            relative_path_base: temporary.path().to_path_buf(),
-            sessions_root: temporary.path().join("sessions"),
-            skills_root: temporary.path().join("atoms").join("skills"),
-            ripgrep_path: std::path::PathBuf::from("rg"),
-            timezone: chrono_tz::UTC,
-        })
-        .expect("open shared backend");
+        let backend = Backend::open(backend_paths(temporary.path(), &data_directory))
+            .expect("open shared backend");
 
         let installed = backend
             .list_installed_plugins(ListInstalledPluginsRequest {})
