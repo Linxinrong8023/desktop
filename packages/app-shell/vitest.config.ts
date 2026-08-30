@@ -19,6 +19,11 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Set ORA_VITEST_MAX_WORKERS only on machines that need a lower memory peak;
+    // leaving it unset preserves Vitest's existing defaults for everyone else.
+    maxWorkers: process.env.ORA_VITEST_MAX_WORKERS
+      ? Number.parseInt(process.env.ORA_VITEST_MAX_WORKERS, 10)
+      : undefined,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     css: false,
