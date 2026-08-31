@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>第 4 课：Agent NodeRun 如何获得 Session</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+    <script src="../assets/quiz.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="eyebrow">Lesson 0004 · Agent 执行链</div>
+        <h1>NodeRun 已创建，<br />Session 在哪里？</h1>
+        <p class="lede">
+          Agent 节点被调度后，NodeRun 会先以 Running、session_id
+          为空的状态落库。执行器随后完成 warm、attach、模型选择、Prompt
+          组装与提交；只有首个 owning prompt 被接受后，Session 才绑定到 NodeRun
+          并对界面可见。
+        </p>
+        <div class="win">
+          本课胜利条件：仅凭 NodeRun 状态与 session_id，就能划定故障阶段
+        </div>
+      </header>
+
+      <section>
+        <h2>事故现场：Running，却没有 Session</h2>
+        <div class="scenario">
+          <span class="label">Incident</span>
+          <p>
+            Agent A 已经出现一条 <code>workflow_node_runs</code> 记录，状态是
+            <code>Running</code>，但
+            <code>session_id = NULL</code>。这证明调度器已经把 A 选入 ready wave
+            并持久化，却不能证明 Agent Session 从未创建。
+          </p>
+          <p>
+            <strong>为什么？</strong>因为 Session 会先在执行器内部
+            warm/attach，等 owning prompt 被接受以后才公开绑定。
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2>一条 Agent 节点的真实时间线</h2>
+        <div class="flow">
+          <article class="flow-step">
+            <small>01 · Persist</small><b>NodeRun 先落库</b>
+            <p>状态 Running，session_id 暂时为空；随后才派发执行器。</p>
+          </article>
+          <article class="flow-step">
+            <small>02 · Warm</small><b>准备 Agent Session</b>
+            <p>
+              按 Workspace 和 agentCli 取得 provider Session 与可用模型配置。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>03 · Prepare</small><b>Attach 与组装请求</b>
+            <p>
+              选择模型、读取 Role、解析 Skill 回执、构造 Prompt、抓取文件基线。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>04 · Admit</small><b>提交 owning prompt</b>
+            <p>Agent actor 接受 Prompt 后，执行所有权才稳定。</p>
+          </article>
+          <article class="flow-step">
+            <small>05 · Publish</small><b>绑定并公开 Session</b>
+            <p>写入 NodeRun.session_id，随后 UI 才能发现并跟随这条 Session。</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>为什么不在 Warm 后立刻绑定？</h2>
+        <div class="relationship">
+          Warm / Attach 已完成 │ │ Session 尚未公开 ▼ 设置模型、组装
+          Prompt、提交 owning prompt │ ├─ 失败：停止并丢弃未公开
+          Session，NodeRun 失败 │ └─ Prompt 被接受 ▼ 绑定 session_id + 发布给 UI
+        </div>
+        <p>
+          如果 Session 过早对 UI 可见，界面加载会话可能与节点的首个 Prompt
+          争抢同一个 actor，造成
+          <code>session_busy</code> 或错误卸载。当前实现让工作流自己的 Prompt
+          先获得所有权，之后 UI 只能作为 follower 加入。
+        </p>
+      </section>
+
+      <section>
+        <h2>Prompt 提交前到底准备什么</h2>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>步骤</th>
+              <th>读取来源</th>
+              <th>典型故障</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>解析 Agent</td>
+              <td>Snapshot.agentCli</td>
+              <td>空引用、插件/provider 不可用</td>
+            </tr>
+            <tr>
+              <td>选择模型</td>
+              <td>Snapshot.modelId + warm 返回的模型列表</td>
+              <td>模型没有被该 Agent 公布</td>
+            </tr>
+            <tr>
+              <td>读取 Role</td>
+              <td>Agent Definition 数据库</td>
+              <td>Repository 读取失败；Role 内容未冻结</td>
+            </tr>
+            <tr>
+              <td>解析 Skill</td>
+              <td>Run payload 的物化回执 + Workspace</td>
+              <td>回执无绑定、路径不合法</td>
+            </tr>
+            <tr>
+              <td>组装 Prompt</td>
+              <td>节点配置、Run 输入、Graph、上游 NodeRun 输出</td>
+              <td>冻结 payload 或上下文无效</td>
+            </tr>
+            <tr>
+              <td>提交 Prompt</td>
+              <td>Agent Runtime</td>
+              <td>Session Busy、Provider 错误、Prompt 未被接受</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>看到什么，能证明什么</h2>
+        <div class="term-grid">
+          <article class="term-card">
+            <span class="status">Running · session_id NULL</span>
+            <h3>尚未越过绑定点</h3>
+            <p>
+              NodeRun 已调度；执行器可能尚未 warm，也可能已创建内部 Session
+              但准备或 Prompt 提交失败。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">Running · session_id 有值</span>
+            <h3>Prompt 已被接受</h3>
+            <p>
+              Session 已与同一 Workspace 校验并公开；可以查 Session 事件与历史。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">Pending · session_id 有值</span>
+            <h3>HITL 正在等待</h3>
+            <p>
+              交互节点第一轮自然结束，Session
+              保持开放，等待用户下一轮输入或手动完成。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">Failed</span>
+            <h3>先看 NodeRun.error</h3>
+            <p>
+              无 session_id 偏向绑定前失败；有 session_id
+              则说明曾越过绑定点，再结合 Session 与日志定位。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>绑定本身也有事务门禁</h2>
+        <ul class="invariant-list">
+          <li>
+            NodeRun 必须仍为 Running；Cancel 已经获胜时，绑定返回 NotRunning。
+          </li>
+          <li>Run 必须仍为 Running，不能把 Session 发布到终态 Run。</li>
+          <li>Session 必须存在、未删除，并且属于与 Run 相同的 Workspace。</li>
+          <li>
+            检查通过后才把 session_id 写入 NodeRun；随后执行器再发布给观察者。
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>绑定之后如何结束</h2>
+        <div class="relationship">
+          Session 事件流 │ ├─ 自动节点 EndTurn / MaxTokens │ └─ Stop Session →
+          计算文件差异 → complete_node │ ├─ Refusal / 未知 StopReason / 执行错误
+          │ └─ fail_node │ └─ 交互节点第一轮自然结束 └─ NodeRun Running →
+          Pending Session 保持开放，等待 HITL
+        </div>
+      </section>
+
+      <section class="interview">
+        <div class="eyebrow">Interview pressure</div>
+        <h2>面试官会怎么追问</h2>
+        <details>
+          <summary>
+            NodeRun 没有 session_id，能断言 Agent Session 从未创建吗？
+          </summary>
+          <p>
+            不能。Warm 和 Attach 发生在绑定之前；只能断言 owning prompt
+            尚未成功越过公开绑定点。
+          </p>
+        </details>
+        <details>
+          <summary>为什么绑定时还要重新检查 Run 和 NodeRun 状态？</summary>
+          <p>
+            准备 Session 是异步过程，期间 Cancel
+            可能先完成。重新检查能让迟到绑定成为 no-op，并清理未公开 Session。
+          </p>
+        </details>
+        <details>
+          <summary>一个 Agent 节点是否总有一个 Session？</summary>
+          <p>
+            只有真正启动的 Agent NodeRun 才尝试创建专属 Session；Start、Output
+            等控制节点不创建 Session，绑定前失败的 Agent NodeRun
+            也可能始终没有公开 session_id。
+          </p>
+        </details>
+      </section>
+
+      <section>
+        <h2>闭卷检索</h2>
+        <div class="quiz-grid">
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="c"
+            data-explanation="Session 可能已经 warm/attach；NULL 只证明 owning prompt 尚未成功越过公开绑定点。"
+          >
+            <h3>1. Running NodeRun 的 session_id 为 NULL，最准确的结论是？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">调度器没运行</button
+              ><button data-choice="b">Session 表一定没有记录</button
+              ><button data-choice="c">尚未越过公开绑定点</button
+              ><button data-choice="d">节点正在 HITL</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="b"
+            data-explanation="绑定前要确保工作流首个 Prompt 已被 actor 接受，避免 UI 会话加载抢占所有权。"
+          >
+            <h3>2. 为什么先提交 Prompt，再绑定 session_id？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">为了减少数据库字段</button
+              ><button data-choice="b">先稳定 Prompt 所有权</button
+              ><button data-choice="c">为了冻结 Snapshot</button
+              ><button data-choice="d">为了创建 NodeRun</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="d"
+            data-explanation="交互节点第一轮结束后会停在 Pending，并保留已绑定 Session 等待用户。"
+          >
+            <h3>3. Pending NodeRun 且 session_id 有值通常表示？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">尚未调度</button
+              ><button data-choice="b">模型不存在</button
+              ><button data-choice="c">Run 已成功</button
+              ><button data-choice="d">HITL 等待输入</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+        </div>
+      </section>
+
+      <section class="source-box">
+        <h2>本课依据</h2>
+        <ul>
+          <li>
+            <a href="../../crates/backend/src/workflow/run/executor.rs"
+              >仓库：Agent 节点 Session Driver</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/db/src/repository/workflow_run_engine.rs"
+              >仓库：Session 绑定事务门禁</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/backend/src/workflow/run/prompt.rs"
+              >仓库：Workflow Prompt 组装</a
+            >
+          </li>
+          <li>
+            <a
+              href="../../crates/backend/src/workflow/run/interactive/README.md"
+              >仓库：交互节点约束</a
+            >
+          </li>
+        </ul>
+      </section>
+
+      <section class="next">
+        <p>
+          <strong>你的回合：</strong>一个 Agent NodeRun 已是 Failed，但
+          session_id 为空。它至少证明了什么？你会先查 NodeRun.error、Session
+          历史，还是后端日志？为什么？
+        </p>
+        <a href="../reference/workflow-glossary.html">打开术语速查表</a>
+      </section>
+    </main>
+  </body>
+</html>
