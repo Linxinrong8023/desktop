@@ -1,15 +1,15 @@
 use super::{SkillPlanner, blocking_condition, digest_serializable};
 use ora_effect::{
-    ConditionOwner, ConditionRetry, ConditionSubject, DesiredEffectIdentity, EffectKindPlanner,
-    EffectResourceId, MaterializationContract, PlannerError, PlanningResult, ProjectionDigest,
-    ResourceRequirement, RevisionAvailability, TargetPlanningInput, TargetProjection,
+    ConditionOwner, ConditionRetry, ConditionSubject, DesiredEffectIdentity, EffectResourceId,
+    MaterializationContract, PlannerError, PlanningResult, ProjectionDigest, ResourceRequirement,
+    RevisionAvailability, TargetPlanningInput, TargetProjection,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
-impl EffectKindPlanner for SkillPlanner {
-    fn project(
-        &self,
+impl SkillPlanner {
+    /// Projects Skill intent into one complete Target snapshot for the shared reconciler.
+    pub(super) fn project_target_snapshot(
         input: TargetPlanningInput<'_>,
     ) -> Result<PlanningResult<TargetProjection>, PlannerError> {
         validate_target_input(&input)?;
@@ -107,7 +107,18 @@ impl EffectKindPlanner for SkillPlanner {
                 ));
                 continue;
             }
-            let contract = MaterializationContract::skill_directory_v1();
+            if binding.materialization_contract != MaterializationContract::skill_directory_v1() {
+                conditions.push(blocking_condition(
+                    owner.clone(),
+                    ConditionSubject::Resource(binding.resource.clone()),
+                    "unsupported_materialization_contract",
+                    input.desired.generation,
+                    "The Skill planner does not support the declared materialization contract.",
+                    ConditionRetry::OnChange,
+                ));
+                continue;
+            }
+            let contract = binding.materialization_contract.clone();
             let draft = ResourceRequirementDigest {
                 target: input.target.identity.as_str(),
                 resource: binding.resource.as_str(),

@@ -437,7 +437,10 @@ pub struct StableConditionCode(String);
 impl StableConditionCode {
     /// Constructs a code from a trusted non-empty static literal owned by a planner or Core.
     pub fn from_static(value: &'static str) -> Self {
-        debug_assert!(!value.is_empty());
+        assert!(
+            !value.trim().is_empty(),
+            "a static Effect Condition code must not be empty"
+        );
         Self(value.to_string())
     }
 

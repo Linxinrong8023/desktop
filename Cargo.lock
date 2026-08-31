@@ -3092,6 +3092,7 @@ dependencies = [
  "ora-logging",
  "ora-skill-package",
  "ora-user-config",
+ "ora-utils",
  "pretty_assertions",
  "r2d2",
  "rusqlite",

@@ -1,11 +1,11 @@
 use ora_effect::{
     ConditionGeneration, ConditionImpact, ConditionOwner, ConditionProposal, ConditionRetry,
-    ConditionSubject, Digest, EffectMutation, ExactPlannedState, ExactPreviousState, Generation,
-    ManagedIdentity, ManagedItem, MaterializationContract, NativeResourceIdentity,
+    ConditionSubject, Digest, EffectMutation, EffectPlanner, ExactPlannedState, ExactPreviousState,
+    Generation, ManagedIdentity, ManagedItem, MaterializationContract, NativeResourceIdentity,
     OwnershipEvidence, PlannedMutation, PlannedResourceChange, PlannerError, PlanningResult,
     PreservedItem, ProjectionDigest, ResolvedMaterialization, ResourceObservation, ResourcePlan,
-    ResourcePlanner, ResourcePlanningInput, ResourceProjection, SafeConditionDetails,
-    SkillMaterializationInput, StableConditionCode, VersionedMaterializationInput,
+    ResourcePlanningInput, ResourceProjection, SafeConditionDetails, SkillMaterializationInput,
+    StableConditionCode, VersionedMaterializationInput,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,8 +16,15 @@ mod target;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SkillPlanner;
 
-impl ResourcePlanner for SkillPlanner {
-    fn merge(
+impl EffectPlanner for SkillPlanner {
+    fn project_target(
+        &self,
+        input: ora_effect::TargetPlanningInput<'_>,
+    ) -> Result<PlanningResult<ora_effect::TargetProjection>, PlannerError> {
+        Self::project_target_snapshot(input)
+    }
+
+    fn plan_resource(
         &self,
         input: ResourcePlanningInput<'_>,
     ) -> Result<PlanningResult<ResourcePlan>, PlannerError> {
@@ -29,12 +36,38 @@ impl ResourcePlanner for SkillPlanner {
         let mut conditions = Vec::new();
         let mut contributors = BTreeSet::new();
         let mut desired_ids = BTreeSet::new();
+        let mut materialization_contracts = BTreeSet::new();
         for requirement in input.requirements {
             if requirement.resource != input.resource.identity {
                 return Err(PlannerError::RequirementResourceMismatch);
             }
             contributors.insert(requirement.target.clone());
             desired_ids.extend(requirement.desired_effects.iter().cloned());
+            materialization_contracts.insert(requirement.materialization_contract.clone());
+        }
+        if materialization_contracts.len() > 1 {
+            return Ok(PlanningResult::Blocked(vec![blocking_condition(
+                owner,
+                ConditionSubject::Resource(input.resource.identity.clone()),
+                "materialization_contract_conflict",
+                input.generation,
+                "Target contributions require incompatible Resource materialization contracts.",
+                ConditionRetry::OnChange,
+            )]));
+        }
+        let materialization_contract = materialization_contracts
+            .into_iter()
+            .next()
+            .unwrap_or_else(MaterializationContract::skill_directory_v1);
+        if materialization_contract != MaterializationContract::skill_directory_v1() {
+            return Ok(PlanningResult::Blocked(vec![blocking_condition(
+                owner,
+                ConditionSubject::Resource(input.resource.identity.clone()),
+                "unsupported_materialization_contract",
+                input.generation,
+                "The Skill planner does not support the Resource materialization contract.",
+                ConditionRetry::OnChange,
+            )]));
         }
 
         let managed_by_desired = input
@@ -98,7 +131,7 @@ impl ResourcePlanner for SkillPlanner {
                     revision: revision.identity.clone(),
                     native_identity,
                     fingerprint: definition.package_fingerprint.clone(),
-                    contract: MaterializationContract::skill_directory_v1(),
+                    contract: materialization_contract.clone(),
                     input_digest: digest_serializable(&materialization_input)?,
                     input: materialization_input,
                 },

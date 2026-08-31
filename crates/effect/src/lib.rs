@@ -36,14 +36,14 @@ pub use operation::{
     VersionedResourceLocator, VersionedSafeAuditPayload,
 };
 pub use planner::{
-    EffectKindPlanner, PlannedMutation, PlannedResourceChange, PlannerError, PlanningResult,
-    ResourcePlan, ResourcePlanner, ResourcePlanningInput, TargetPlanningInput,
+    EffectPlanner, PlannedMutation, PlannedResourceChange, PlannerError, PlanningResult,
+    ResourcePlan, ResourcePlanningInput, TargetPlanningInput,
 };
 pub use ports::{
     ApplyReceipt, AttemptFinalization, CleanupReceipt, ConsumerAdapter, ConsumerAdapterError,
     EffectRepository, PreparedOperation, ProjectionCommit, ReconcileSnapshot,
     RelatedTargetSnapshot, ReplaceDesiredStateOutcome, RepositoryError, ResourceAdapter,
-    ResourceAdapterError, ResourceOperationPreparer, VerificationReceipt,
+    ResourceAdapterError, VerificationReceipt,
 };
 pub use projection::{
     ManagedItem, ObservedItem, OwnershipEvidence, PreservedItem, ResolvedMaterialization,

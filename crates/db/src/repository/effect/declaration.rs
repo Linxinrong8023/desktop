@@ -256,6 +256,7 @@ fn upsert_workspace_target(
         let binding = TargetResourceBinding {
             target: target_id.clone(),
             resource: resource_id.clone(),
+            materialization_contract: template.materialization_contract.clone(),
             accepts: template.accepts.clone(),
             coordination: template.coordination.clone(),
         };

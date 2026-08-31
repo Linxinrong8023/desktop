@@ -4,6 +4,10 @@
 `ora-effect`.
 
 It owns Skill target projection, shared Skill directory planning, filesystem observation and
-mutation, ownership markers, staged `SKILL.md` validation, and package fingerprinting. Callers
-compose `SkillPlanner` and `SkillDirectoryResourceAdapter` with `EffectReconciler`; `ora-effect` does
-not re-export either adapter.
+mutation, ownership markers, staged `SKILL.md` validation, and managed-directory fingerprinting.
+Callers compose one `SkillPlanner` and one `SkillDirectoryResourceAdapter` with `EffectReconciler`;
+`ora-effect` does not re-export either implementation.
+
+The planner carries the materialization contract from the Consumer template through each Target
+binding and Resource requirement. Shared contributors with different contracts block before an
+operation can be prepared.

@@ -245,7 +245,6 @@ impl<Sessions: ReplacedAgentSessions> EffectWorker<Sessions> {
         let reconciler = EffectReconciler::new(
             &self.repository,
             &planner,
-            &planner,
             &consumer_adapter,
             &resource_adapter,
         );

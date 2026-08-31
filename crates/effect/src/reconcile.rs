@@ -2,12 +2,11 @@ use crate::{
     ArtifactState, AttemptFinalization, ConditionGeneration, ConditionImpact, ConditionOwner,
     ConditionProposal, ConditionRetry, ConditionSubject, ConsumerAdapter, ConsumerAdapterError,
     CoordinationPlan, CoordinationReceipt, CoordinationReceiptState, CoordinationRequirement,
-    EffectKindPlanner, EffectOperationId, EffectRepository, EffectResourceId, EffectTargetId,
+    EffectOperationId, EffectPlanner, EffectRepository, EffectResourceId, EffectTargetId,
     Generation, LocalTimestamp, ManagedItem, PlanningResult, ProjectionCommit, ReconcileAttempt,
     ReconcileAttemptId, ReconcileAttemptIntent, ReconcileClaim, RepositoryError, ResourceAdapter,
-    ResourceAdapterError, ResourceOperationPreparer, ResourcePlan, ResourcePlanner,
-    ResourcePlanningInput, SafeConditionDetails, StableConditionCode, StatusTransitionError,
-    TargetIssueState, TargetPlanningInput,
+    ResourceAdapterError, ResourcePlan, ResourcePlanningInput, SafeConditionDetails,
+    StableConditionCode, StatusTransitionError, TargetIssueState, TargetPlanningInput,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
@@ -32,11 +31,9 @@ pub enum ReconcileOutcome {
 }
 
 /// Durable Generic Target reconciler with statically dispatched planners and adapters.
-pub struct EffectReconciler<'a, Repository, KindPlanner, MaterializationPlanner, Consumer, Resource>
-{
+pub struct EffectReconciler<'a, Repository, Planner, Consumer, Resource> {
     repository: &'a Repository,
-    kind_planner: &'a KindPlanner,
-    resource_planner: &'a MaterializationPlanner,
+    planner: &'a Planner,
     consumer_adapter: &'a Consumer,
     resource_adapter: &'a Resource,
 }
@@ -60,26 +57,23 @@ enum SnapshotPlan {
     },
 }
 
-impl<'a, Repository, KindPlanner, MaterializationPlanner, Consumer, Resource>
-    EffectReconciler<'a, Repository, KindPlanner, MaterializationPlanner, Consumer, Resource>
+impl<'a, Repository, Planner, Consumer, Resource>
+    EffectReconciler<'a, Repository, Planner, Consumer, Resource>
 where
     Repository: EffectRepository,
-    KindPlanner: EffectKindPlanner,
-    MaterializationPlanner: ResourcePlanner,
+    Planner: EffectPlanner,
     Consumer: ConsumerAdapter,
-    Resource: ResourceAdapter + ResourceOperationPreparer,
+    Resource: ResourceAdapter,
 {
     pub fn new(
         repository: &'a Repository,
-        kind_planner: &'a KindPlanner,
-        resource_planner: &'a MaterializationPlanner,
+        planner: &'a Planner,
         consumer_adapter: &'a Consumer,
         resource_adapter: &'a Resource,
     ) -> Self {
         Self {
             repository,
-            kind_planner,
-            resource_planner,
+            planner,
             consumer_adapter,
             resource_adapter,
         }
@@ -165,7 +159,7 @@ where
         if snapshot.target_status.progress().desired() < generation {
             snapshot.target_status.request_generation(generation, now)?;
         }
-        let target_projection = match self.kind_planner.project(TargetPlanningInput {
+        let target_projection = match self.planner.project_target(TargetPlanningInput {
             desired: &snapshot.desired,
             target: &snapshot.target,
             consumer_revision: &snapshot.consumer_revision,
@@ -197,7 +191,7 @@ where
                 let related_projection = if related.target.identity == target_projection.target {
                     target_projection.clone()
                 } else {
-                    match self.kind_planner.project(TargetPlanningInput {
+                    match self.planner.project_target(TargetPlanningInput {
                         desired: &snapshot.desired,
                         target: &related.target,
                         consumer_revision: &related.consumer_revision,
@@ -254,7 +248,7 @@ where
                 .get(resource_id)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            match self.resource_planner.merge(ResourcePlanningInput {
+            match self.planner.plan_resource(ResourcePlanningInput {
                 resource,
                 generation,
                 requirements,

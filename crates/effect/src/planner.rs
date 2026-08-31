@@ -62,25 +62,24 @@ pub struct ResourcePlan {
     pub changes: Vec<PlannedResourceChange>,
 }
 
-/// Projects one Effect kind onto a complete Generic Target.
+/// Plans one complete Target and every independently mutable Resource it references.
 ///
 /// Implementations must be deterministic pure logic and report unsupported or invalid input as
-/// structured Conditions rather than silently dropping it.
-pub trait EffectKindPlanner {
+/// structured Conditions rather than silently dropping it. Target and Resource planning share one
+/// interface because the current built-in planner owns both halves of the same materialization
+/// contract; callers must not assemble mismatched planners.
+pub trait EffectPlanner {
     /// Produces the complete Target snapshot for one Desired generation and Consumer Revision.
-    fn project(
+    fn project_target(
         &self,
         input: TargetPlanningInput<'_>,
     ) -> Result<PlanningResult<TargetProjection>, PlannerError>;
-}
 
-/// Merges all Target requirements and plans one independently locked Resource.
-///
-/// Implementations must preserve external items without exact ledger evidence and may only plan
-/// updates/deletes for matching Managed Items.
-pub trait ResourcePlanner {
     /// Produces the unique Resource projection and exact mutation plan for a generation.
-    fn merge(
+    ///
+    /// Implementations must preserve external items without exact ledger evidence and may only
+    /// plan updates or deletes for matching Managed Items.
+    fn plan_resource(
         &self,
         input: ResourcePlanningInput<'_>,
     ) -> Result<PlanningResult<ResourcePlan>, PlannerError>;

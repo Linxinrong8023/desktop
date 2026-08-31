@@ -242,6 +242,16 @@ where
         let _ = storage.remove_temp(&staging);
         return CandidateOutcome::Failed { error_code };
     }
+    let source_revision =
+        match imported_source_revision(storage, snapshot, candidate, &skill.name, &staging) {
+            Ok(source) => source,
+            Err(_) => {
+                let _ = storage.remove_temp(&staging);
+                return CandidateOutcome::Failed {
+                    error_code: "skill_storage_error".to_string(),
+                };
+            }
+        };
     let promoted = if let Some(existing) = &existing {
         match commit_restored_package(
             storage,
@@ -267,7 +277,6 @@ where
             Err(error) => return promote_failure(storage, &staging, error),
         }
     };
-    let source_revision = imported_source_revision(storage, snapshot, candidate, &skill.name);
     let persisted = if existing.is_some() {
         persist_promoted_package(storage, &promoted, || match source_revision {
             Some(source) => repository.update_skill_with_source(skill, source),
@@ -344,6 +353,16 @@ where
         let _ = storage.remove_temp(&staging);
         return CandidateOutcome::Failed { error_code };
     }
+    let source_revision =
+        match imported_source_revision(storage, snapshot, candidate, &skill.name, &staging) {
+            Ok(source) => source,
+            Err(_) => {
+                let _ = storage.remove_temp(&staging);
+                return CandidateOutcome::Failed {
+                    error_code: "skill_storage_error".to_string(),
+                };
+            }
+        };
     let promoted = match commit_existing_package(
         storage,
         &skill.id,
@@ -355,7 +374,6 @@ where
         Ok(promoted) => promoted,
         Err(error) => return promote_failure(storage, &staging, error),
     };
-    let source_revision = imported_source_revision(storage, snapshot, candidate, &skill.name);
     let persisted = persist_promoted_package(storage, &promoted, || match source_revision {
         Some(source) => repository.update_skill_with_source(skill, source),
         None => repository.update_skill(skill),
@@ -454,11 +472,21 @@ fn imported_source_revision<Storage: SkillStorage>(
     snapshot: &SnapshotHandle,
     candidate: &ImportCandidate,
     final_name: &str,
-) -> Option<LocalSkillSourceRevision> {
-    let package_root = storage.formal_package_path(final_name)?;
-    let manifest = fs::read(candidate.source_path.to_path(&snapshot.root)).ok()?;
-    Some(LocalSkillSourceRevision {
-        skill_md_digest: Digest::sha256(&manifest),
+    fingerprint_root: &Path,
+) -> Result<Option<LocalSkillSourceRevision>, crate::skill::SkillStorageError> {
+    let Some(package_root) = storage.formal_package_path(final_name) else {
+        return Ok(None);
+    };
+    let manifest_path = candidate.source_path.to_path(&snapshot.root);
+    let manifest = fs::read(&manifest_path).map_err(|error| {
+        crate::skill::SkillStorageError::OperationFailed {
+            message: format!("failed to read {}: {error}", manifest_path.display()),
+        }
+    })?;
+    LocalSkillSourceRevision::from_package(
+        Digest::sha256(&manifest),
         package_root,
-    })
+        fingerprint_root,
+    )
+    .map(Some)
 }

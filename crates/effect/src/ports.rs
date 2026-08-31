@@ -317,11 +317,12 @@ pub struct PreparedOperation {
     pub artifacts: Vec<OperationArtifact>,
 }
 
-/// Internal Resource seam that turns a pure mutation proposal into versioned adapter intent.
+/// Adapter at the seam between generic Resource facts and one external Resource protocol.
 ///
-/// The production adapter and its tests both use this seam so operation paths and artifact
-/// authority are produced in one place before persistence.
-pub trait ResourceOperationPreparer {
+/// Implementations turn pure mutation proposals into durable intent, make apply idempotent against
+/// exact expected/planned state, and refuse to guess when neither state matches. Cleanup uses only
+/// durable operation artifact authority.
+pub trait ResourceAdapter {
     /// Builds one immutable operation and all artifact authority without applying side effects.
     fn prepare_operation(
         &self,
@@ -332,13 +333,7 @@ pub trait ResourceOperationPreparer {
         mutation: crate::PlannedMutation,
         prepared_at: LocalTimestamp,
     ) -> Result<PreparedOperation, ResourceAdapterError>;
-}
 
-/// Adapter at the seam between generic operation journals and one Resource protocol.
-///
-/// Implementations must make apply idempotent against exact expected/planned state and refuse to
-/// guess when neither matches. Cleanup uses only durable operation artifact authority.
-pub trait ResourceAdapter {
     /// Observes a complete normalized snapshot without granting ownership.
     fn observe(
         &self,

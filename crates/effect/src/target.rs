@@ -251,6 +251,9 @@ pub enum CoordinationRequirement {
 pub struct TargetResourceBinding {
     pub target: EffectTargetId,
     pub resource: EffectResourceId,
+    /// Older v1 declarations omitted this field because Skill was the only materialization.
+    #[serde(default = "MaterializationContract::skill_directory_v1")]
+    pub materialization_contract: MaterializationContract,
     pub accepts: CapabilityRequirement,
     pub coordination: CoordinationRequirement,
 }
@@ -308,12 +311,14 @@ pub enum DeclarationError {
     MissingMaterializationCapability(String),
     #[error("one Consumer declaration assigns incompatible formats to Resource {0}")]
     IncompatibleResourceFormats(ResourceKey),
+    #[error("one Consumer declaration assigns incompatible contracts to Resource {0}")]
+    IncompatibleResourceContracts(ResourceKey),
 }
 
 impl ConsumerDeclaration {
     /// Validates capabilities and duplicate Resource keys before a declaration reaches persistence.
     pub fn validate(&self) -> Result<(), DeclarationError> {
-        let mut formats = BTreeMap::new();
+        let mut resources = BTreeMap::new();
         for resource in &self.resources {
             let contract = resource.materialization_contract.capability_key();
             if !self
@@ -334,12 +339,21 @@ impl ConsumerDeclaration {
                 ));
             }
             let resource_key = resource.resource_key();
-            if let Some(existing) = formats.insert(
+            if let Some((existing_format, existing_contract)) = resources.insert(
                 resource_key.clone(),
-                resource.materialization_format.clone(),
-            ) && existing != resource.materialization_format
-            {
-                return Err(DeclarationError::IncompatibleResourceFormats(resource_key));
+                (
+                    resource.materialization_format.clone(),
+                    resource.materialization_contract.clone(),
+                ),
+            ) {
+                if existing_format != resource.materialization_format {
+                    return Err(DeclarationError::IncompatibleResourceFormats(resource_key));
+                }
+                if existing_contract != resource.materialization_contract {
+                    return Err(DeclarationError::IncompatibleResourceContracts(
+                        resource_key,
+                    ));
+                }
             }
         }
         Ok(())

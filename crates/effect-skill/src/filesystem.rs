@@ -4,25 +4,33 @@ use ora_effect::{
     EffectResourceId, ExactPlannedState, ExactPreviousState, FilesystemOperationPlan, Fingerprint,
     LocalTimestamp, ManagedIdentity, NativeResourceIdentity, OperationArtifact, PlannedMutation,
     PreparedOperation, ReconcileAttemptId, ResourceAdapter, ResourceAdapterError,
-    ResourceObservation, ResourceOperationPreparer, VerificationReceipt, VersionedAdapterPlan,
-    VersionedMaterializationInput, VersionedResourceDescriptor, VersionedResourceLocator,
+    ResourceObservation, VerificationReceipt, VersionedAdapterPlan, VersionedMaterializationInput,
+    VersionedResourceDescriptor, VersionedResourceLocator,
 };
-use ora_skill_package::{Limits, parse_manifest};
-use ora_utils::directory::{
-    DirectoryFingerprint, DirectoryTreeError, copy_directory, fingerprint_directory,
-};
+use ora_utils::directory::DirectoryTreeError;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::ffi::OsStr;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use thiserror::Error;
 
+mod operation;
+mod path;
+
+use operation::{
+    apply_receipt, expected_path, fingerprint, planned_path, read_marker, restore_backup, stage,
+    state_matches_expected, state_matches_planned,
+};
+use path::{
+    RootAccess, ensure_operation_paths_are_scoped, resolve_declared_root, resolve_resource_root,
+    resource_root,
+};
+
 pub const MARKER_FILE_NAME: &str = ".ora-managed.json";
-const OPERATIONS_DIR_NAME: &str = ".ora-effect-operations";
-const MARKER_SCHEMA_VERSION: u32 = 1;
+pub(super) const OPERATIONS_DIR_NAME: &str = ".ora-effect-operations";
+pub(super) const MARKER_SCHEMA_VERSION: u32 = 1;
 
 /// On-disk ownership claim that is useful only when matched with the Resource ledger.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -48,11 +56,6 @@ impl ManagedItemMarker {
 pub struct SkillDirectoryResourceAdapter;
 
 impl SkillDirectoryResourceAdapter {
-    /// Computes the exact content fingerprint used by immutable Skill definitions and observations.
-    pub fn package_fingerprint(path: &Path) -> Result<Fingerprint, SkillDirectoryError> {
-        fingerprint(path)
-    }
-
     /// Converts a pure mutation proposal into immutable adapter intent and artifact authority.
     pub fn prepare_operation(
         &self,
@@ -326,6 +329,27 @@ impl SkillDirectoryResourceAdapter {
 }
 
 impl ResourceAdapter for SkillDirectoryResourceAdapter {
+    fn prepare_operation(
+        &self,
+        resource: &EffectResource,
+        attempt: ReconcileAttemptId,
+        generation: ora_effect::Generation,
+        sequence: u32,
+        mutation: PlannedMutation,
+        prepared_at: LocalTimestamp,
+    ) -> Result<PreparedOperation, ResourceAdapterError> {
+        SkillDirectoryResourceAdapter::prepare_operation(
+            self,
+            resource,
+            attempt,
+            generation,
+            sequence,
+            mutation,
+            prepared_at,
+        )
+        .map_err(ResourceAdapterError::new)
+    }
+
     fn observe(
         &self,
         resource: &EffectResource,
@@ -357,390 +381,6 @@ impl ResourceAdapter for SkillDirectoryResourceAdapter {
         (*self)
             .cleanup_artifact(artifact)
             .map_err(ResourceAdapterError::new)
-    }
-}
-
-impl ResourceOperationPreparer for SkillDirectoryResourceAdapter {
-    fn prepare_operation(
-        &self,
-        resource: &EffectResource,
-        attempt: ReconcileAttemptId,
-        generation: ora_effect::Generation,
-        sequence: u32,
-        mutation: PlannedMutation,
-        prepared_at: LocalTimestamp,
-    ) -> Result<PreparedOperation, ResourceAdapterError> {
-        SkillDirectoryResourceAdapter::prepare_operation(
-            self,
-            resource,
-            attempt,
-            generation,
-            sequence,
-            mutation,
-            prepared_at,
-        )
-        .map_err(ResourceAdapterError::new)
-    }
-}
-
-/// Selects whether resolving a Resource path may create missing safe directories.
-#[derive(Clone, Copy)]
-enum RootAccess {
-    Observe,
-    Prepare,
-    Mutate,
-}
-
-/// Resolves the typed filesystem descriptor and checks the root stays inside its Workspace.
-fn resolve_resource_root(
-    resource: &EffectResource,
-    access: RootAccess,
-) -> Result<Option<PathBuf>, SkillDirectoryError> {
-    let VersionedResourceDescriptor::FilesystemDirectoryV1(descriptor) = &resource.descriptor;
-    resolve_declared_root(
-        &descriptor.workspace_root,
-        &descriptor.relative_path,
-        access,
-    )
-}
-
-/// Resolves a filesystem descriptor while refusing links and optionally creating safe segments.
-fn resolve_declared_root(
-    workspace_root: &Path,
-    relative_path: &ora_effect::ResourcePath,
-    access: RootAccess,
-) -> Result<Option<PathBuf>, SkillDirectoryError> {
-    let root_metadata = fs::symlink_metadata(workspace_root).map_err(|source| {
-        SkillDirectoryError::WorkspaceUnavailable {
-            path: workspace_root.to_path_buf(),
-            source,
-        }
-    })?;
-    if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
-        return Err(SkillDirectoryError::UnsafeResourcePath {
-            path: workspace_root.to_path_buf(),
-        });
-    }
-    let canonical_workspace = workspace_root.canonicalize().map_err(|source| {
-        SkillDirectoryError::WorkspaceUnavailable {
-            path: workspace_root.to_path_buf(),
-            source,
-        }
-    })?;
-    let mut current = canonical_workspace.clone();
-    let mut path_is_missing = false;
-    for component in relative_path.to_path_buf().components() {
-        let std::path::Component::Normal(segment) = component else {
-            return Err(SkillDirectoryError::UnsafeResourcePath { path: current });
-        };
-        current = current.join(segment);
-        if path_is_missing {
-            continue;
-        }
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                return Err(SkillDirectoryError::UnsafeResourcePath { path: current });
-            }
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => match access {
-                RootAccess::Observe => return Ok(None),
-                RootAccess::Prepare => path_is_missing = true,
-                RootAccess::Mutate => {
-                    fs::create_dir(&current).map_err(|source| SkillDirectoryError::Io {
-                        path: current.clone(),
-                        source,
-                    })?;
-                }
-            },
-            Err(source) => {
-                return Err(SkillDirectoryError::Io {
-                    path: current,
-                    source,
-                });
-            }
-        }
-        if path_is_missing {
-            continue;
-        }
-        let canonical = current
-            .canonicalize()
-            .map_err(|source| SkillDirectoryError::Io {
-                path: current.clone(),
-                source,
-            })?;
-        if !canonical.starts_with(&canonical_workspace) {
-            return Err(SkillDirectoryError::UnsafeResourcePath { path: current });
-        }
-        current = canonical;
-    }
-    Ok(Some(current))
-}
-
-/// Resolves the Resource root for intent preparation without creating it yet.
-fn resource_root(resource: &EffectResource) -> Result<PathBuf, SkillDirectoryError> {
-    let VersionedResourceDescriptor::FilesystemDirectoryV1(descriptor) = &resource.descriptor;
-    resolve_declared_root(
-        &descriptor.workspace_root,
-        &descriptor.relative_path,
-        RootAccess::Prepare,
-    )?
-    .ok_or(SkillDirectoryError::UnsafeOperationPath)
-}
-
-/// Prevents a journal payload from redirecting artifacts outside its Resource directory.
-fn ensure_operation_paths_are_scoped(
-    plan: &FilesystemOperationPlan,
-) -> Result<(), SkillDirectoryError> {
-    let Some(staging_parent) = plan.staging_path.parent() else {
-        return Err(SkillDirectoryError::UnsafeOperationPath);
-    };
-    if !staging_parent.starts_with(&plan.resource_root)
-        || !plan.backup_path.starts_with(staging_parent)
-    {
-        return Err(SkillDirectoryError::UnsafeOperationPath);
-    }
-    Ok(())
-}
-
-/// Stages and validates immutable source content before an atomic swap.
-fn stage(
-    operation: &EffectOperation,
-    plan: &FilesystemOperationPlan,
-) -> Result<(), SkillDirectoryError> {
-    let source_root = plan
-        .source_root
-        .as_ref()
-        .ok_or(SkillDirectoryError::MissingMaterializationInput)?;
-    if plan.staging_path.exists() {
-        if !state_matches_path(
-            operation.planned(),
-            &plan.staging_path,
-            operation.resource(),
-        )? {
-            return Err(SkillDirectoryError::StagingMismatch {
-                path: plan.staging_path.clone(),
-            });
-        }
-        return Ok(());
-    }
-    let operation_root = plan
-        .staging_path
-        .parent()
-        .ok_or(SkillDirectoryError::UnsafeOperationPath)?;
-    fs::create_dir_all(operation_root).map_err(|source| SkillDirectoryError::Io {
-        path: operation_root.to_path_buf(),
-        source,
-    })?;
-    copy_directory(
-        source_root,
-        &plan.staging_path,
-        &[OsStr::new(MARKER_FILE_NAME)],
-    )?;
-    validate_staged_skill(operation, &plan.staging_path)?;
-    let managed_identity = match operation.planned() {
-        ExactPlannedState::Present {
-            managed_identity, ..
-        } => managed_identity.clone(),
-        ExactPlannedState::Missing => return Err(SkillDirectoryError::MissingPlannedItem),
-    };
-    let marker = ManagedItemMarker::current(operation.resource().clone(), managed_identity);
-    let marker_bytes = serde_json::to_vec(&marker).map_err(SkillDirectoryError::MarkerJson)?;
-    let marker_path = plan.staging_path.join(MARKER_FILE_NAME);
-    fs::write(&marker_path, marker_bytes).map_err(|source| SkillDirectoryError::Io {
-        path: marker_path,
-        source,
-    })?;
-    if !state_matches_path(
-        operation.planned(),
-        &plan.staging_path,
-        operation.resource(),
-    )? {
-        return Err(SkillDirectoryError::StagingMismatch {
-            path: plan.staging_path.clone(),
-        });
-    }
-    Ok(())
-}
-
-/// Revalidates the staged Skill manifest and exact package fingerprint after copying.
-fn validate_staged_skill(
-    operation: &EffectOperation,
-    staging: &Path,
-) -> Result<(), SkillDirectoryError> {
-    let VersionedAdapterPlan::FilesystemDirectoryV1(plan) = operation.payload();
-    let source_root = plan
-        .source_root
-        .as_ref()
-        .ok_or(SkillDirectoryError::MissingMaterializationInput)?;
-    let source_manifest =
-        fs::read(source_root.join("SKILL.md")).map_err(|source| SkillDirectoryError::Io {
-            path: source_root.join("SKILL.md"),
-            source,
-        })?;
-    let staged_manifest =
-        fs::read(staging.join("SKILL.md")).map_err(|source| SkillDirectoryError::Io {
-            path: staging.join("SKILL.md"),
-            source,
-        })?;
-    let parsed = parse_manifest(&staged_manifest, Limits::default().max_manifest_bytes)
-        .map_err(|_| SkillDirectoryError::InvalidSkillManifest)?;
-    if source_manifest != staged_manifest {
-        return Err(SkillDirectoryError::SourceChanged);
-    }
-    let planned_name = match operation.planned() {
-        ExactPlannedState::Present {
-            native_identity, ..
-        } => native_identity,
-        ExactPlannedState::Missing => return Err(SkillDirectoryError::MissingPlannedItem),
-    };
-    if !parsed.name.eq_ignore_ascii_case(planned_name.as_str()) {
-        return Err(SkillDirectoryError::ManifestNameMismatch);
-    }
-    Ok(())
-}
-
-/// Tests the exact expected state at the locator implied by both operation states.
-fn state_matches_expected(
-    operation: &EffectOperation,
-    plan: &FilesystemOperationPlan,
-) -> Result<bool, SkillDirectoryError> {
-    match operation.expected() {
-        ExactPreviousState::Missing => {
-            let path = planned_path(operation, plan)?;
-            Ok(!path.exists())
-        }
-        ExactPreviousState::Present { .. } => state_matches_path(
-            operation.expected(),
-            &expected_path(operation, plan)?,
-            operation.resource(),
-        ),
-    }
-}
-
-/// Tests the exact planned state at the locator implied by both operation states.
-fn state_matches_planned(
-    operation: &EffectOperation,
-    plan: &FilesystemOperationPlan,
-) -> Result<bool, SkillDirectoryError> {
-    match operation.planned() {
-        ExactPlannedState::Missing => {
-            let path = expected_path(operation, plan)?;
-            Ok(!path.exists())
-        }
-        ExactPlannedState::Present { .. } => state_matches_path(
-            operation.planned(),
-            &planned_path(operation, plan)?,
-            operation.resource(),
-        ),
-    }
-}
-
-/// Compares fingerprint and marker proof for either exact present-state enum.
-fn state_matches_path(
-    state: &impl PresentState,
-    path: &Path,
-    resource: &EffectResourceId,
-) -> Result<bool, SkillDirectoryError> {
-    let Some((fingerprint_expected, managed_identity)) = state.present() else {
-        return Ok(!path.exists());
-    };
-    if !path.exists() || fingerprint(path)? != *fingerprint_expected {
-        return Ok(false);
-    }
-    Ok(read_marker(path).is_some_and(|marker| {
-        marker.schema_version == MARKER_SCHEMA_VERSION
-            && marker.resource == *resource
-            && marker.managed_identity == *managed_identity
-    }))
-}
-
-/// Supplies shared present-state access without collapsing the distinct expected/planned types.
-trait PresentState {
-    fn present(&self) -> Option<(&Fingerprint, &ManagedIdentity)>;
-}
-
-impl PresentState for ExactPreviousState {
-    fn present(&self) -> Option<(&Fingerprint, &ManagedIdentity)> {
-        match self {
-            Self::Missing => None,
-            Self::Present {
-                fingerprint,
-                managed_identity,
-                ..
-            } => Some((fingerprint, managed_identity)),
-        }
-    }
-}
-
-impl PresentState for ExactPlannedState {
-    fn present(&self) -> Option<(&Fingerprint, &ManagedIdentity)> {
-        match self {
-            Self::Missing => None,
-            Self::Present {
-                fingerprint,
-                managed_identity,
-                ..
-            } => Some((fingerprint, managed_identity)),
-        }
-    }
-}
-
-/// Resolves the expected native item path using a typed identity and Path::join.
-fn expected_path(
-    operation: &EffectOperation,
-    plan: &FilesystemOperationPlan,
-) -> Result<PathBuf, SkillDirectoryError> {
-    match operation.expected() {
-        ExactPreviousState::Present {
-            native_identity, ..
-        } => Ok(plan.resource_root.join(native_identity.as_str())),
-        ExactPreviousState::Missing => Err(SkillDirectoryError::MissingExpectedItem),
-    }
-}
-
-/// Resolves the planned native item path using a typed identity and Path::join.
-fn planned_path(
-    operation: &EffectOperation,
-    plan: &FilesystemOperationPlan,
-) -> Result<PathBuf, SkillDirectoryError> {
-    match operation.planned() {
-        ExactPlannedState::Present {
-            native_identity, ..
-        } => Ok(plan.resource_root.join(native_identity.as_str())),
-        ExactPlannedState::Missing => Err(SkillDirectoryError::MissingPlannedItem),
-    }
-}
-
-/// Reads a marker as untrusted evidence; malformed or absent markers establish no ownership.
-fn read_marker(path: &Path) -> Option<ManagedItemMarker> {
-    fs::read(path.join(MARKER_FILE_NAME))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-}
-
-/// Produces a versioned idempotence receipt without exposing filesystem paths.
-fn apply_receipt(operation: &EffectOperation) -> ApplyReceipt {
-    ApplyReceipt {
-        operation: operation.identity().clone(),
-        proof: AdapterReceipt {
-            version: 1,
-            payload: json!({ "state": "applied_or_already_planned" }),
-        },
-    }
-}
-
-/// Converts the generic directory fingerprint into Effect's distinct observed-state type.
-fn fingerprint(path: &Path) -> Result<Fingerprint, SkillDirectoryError> {
-    let fingerprint: DirectoryFingerprint =
-        fingerprint_directory(path, &[OsStr::new(MARKER_FILE_NAME)])?;
-    Fingerprint::parse(fingerprint.as_str().to_string())
-        .map_err(|_| SkillDirectoryError::InvalidDirectoryFingerprint)
-}
-
-/// Restores the previous tree when a swap cannot install its staging directory.
-fn restore_backup(backup: &Path, previous: &Path) {
-    if backup.exists() && !previous.exists() {
-        let _ = fs::rename(backup, previous);
     }
 }
 
@@ -785,8 +425,6 @@ pub enum SkillDirectoryError {
     VerificationFailed { operation: EffectOperationId },
     #[error("artifact {artifact} no longer matches its cleanup authority")]
     ArtifactFingerprintMismatch { artifact: ArtifactId },
-    #[error("invalid directory fingerprint")]
-    InvalidDirectoryFingerprint,
     #[error("Effect Resource filesystem operation failed: {path:?}")]
     Io {
         path: PathBuf,

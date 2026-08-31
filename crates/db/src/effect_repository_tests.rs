@@ -137,6 +137,14 @@ fn fixture() -> (TempDir, RepositoryPool, Workspace) {
     (directory, pool, workspace)
 }
 
+/// Computes the immutable package identity before repository publication.
+fn package_fingerprint(package_root: &std::path::Path) -> Fingerprint {
+    Fingerprint::from(
+        ora_utils::directory::fingerprint_directory(package_root, &[])
+            .unwrap_or_else(|error| panic!("fingerprint package: {error}")),
+    )
+}
+
 /// Builds one valid Agent Consumer declaration for a shared Skill directory Resource.
 fn declaration(stable_key: &str) -> ConsumerDeclaration {
     let materialization = MaterializationContract::skill_directory_v1();
@@ -286,8 +294,9 @@ fn source_publication_changes_each_complete_scope_generation_once() {
             &[PluginSkillProjection {
                 name: "review".to_string(),
                 description: "Reviews changes".to_string(),
+                package_fingerprint: package_fingerprint(&package_root),
                 package_root,
-                skill_md_digest: ora_effect::Digest::sha256(b"manifest").to_string(),
+                skill_md_digest: ora_effect::Digest::sha256(b"manifest"),
             }],
             10,
         )
@@ -317,8 +326,9 @@ fn reconciler_materializes_and_finalizes_one_complete_target_generation() {
             &[PluginSkillProjection {
                 name: "review".to_string(),
                 description: "Reviews changes".to_string(),
+                package_fingerprint: package_fingerprint(&package_root),
                 package_root,
-                skill_md_digest: Digest::sha256(manifest).to_string(),
+                skill_md_digest: Digest::sha256(manifest),
             }],
             10,
         )
@@ -344,15 +354,14 @@ fn reconciler_materializes_and_finalizes_one_complete_target_generation() {
         .remove(0);
     let planner = SkillPlanner;
     let filesystem = SkillDirectoryResourceAdapter;
-    let outcome =
-        EffectReconciler::new(&repository, &planner, &planner, &ReadyConsumer, &filesystem)
-            .reconcile(
-                &target,
-                &claim,
-                LocalTimestamp::from_millis(13),
-                LocalTimestamp::from_millis(100),
-            )
-            .unwrap_or_else(|error| panic!("reconcile Target: {error}"));
+    let outcome = EffectReconciler::new(&repository, &planner, &ReadyConsumer, &filesystem)
+        .reconcile(
+            &target,
+            &claim,
+            LocalTimestamp::from_millis(13),
+            LocalTimestamp::from_millis(100),
+        )
+        .unwrap_or_else(|error| panic!("reconcile Target: {error}"));
     let persisted = pool
         .with_connection(|connection| {
             connection
@@ -414,15 +423,14 @@ fn reconciler_materializes_and_finalizes_one_complete_target_generation() {
         )
         .unwrap_or_else(|error| panic!("reclaim Target: {error}"))
         .remove(0);
-    let replay =
-        EffectReconciler::new(&repository, &planner, &planner, &ReadyConsumer, &filesystem)
-            .reconcile(
-                &target,
-                &second_claim,
-                LocalTimestamp::from_millis(15),
-                LocalTimestamp::from_millis(110),
-            )
-            .unwrap_or_else(|error| panic!("reconcile current Target: {error}"));
+    let replay = EffectReconciler::new(&repository, &planner, &ReadyConsumer, &filesystem)
+        .reconcile(
+            &target,
+            &second_claim,
+            LocalTimestamp::from_millis(15),
+            LocalTimestamp::from_millis(110),
+        )
+        .unwrap_or_else(|error| panic!("reconcile current Target: {error}"));
     let operation_count = pool
         .with_connection(|connection| {
             connection
@@ -461,8 +469,9 @@ fn desired_replacement_uses_generation_cas_and_exact_no_op_semantics() {
             &[PluginSkillProjection {
                 name: "review".to_string(),
                 description: "Reviews changes".to_string(),
+                package_fingerprint: package_fingerprint(&package_root),
                 package_root,
-                skill_md_digest: ora_effect::Digest::sha256(b"manifest").to_string(),
+                skill_md_digest: ora_effect::Digest::sha256(b"manifest"),
             }],
             10,
         )

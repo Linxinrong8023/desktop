@@ -6,8 +6,9 @@ one complete `DesiredState` generation. Every runtime that consumes Effects decl
 Targets bind to independently observable and mutable `EffectResource` values, and several Targets
 may contribute to the same physical Resource.
 
-The normative model and invariants are in
-[`00000000-effect-system-foundation.md`](../specs/decisions/desktop/core/effect/00000000-effect-system-foundation.md).
+The current architectural decision and its rationale are recorded in
+[`00000000-effect-system-foundation.md`](../specs/decisions/desktop/core/effect/00000000-effect-system-foundation.md);
+the implementation and this state description are updated together when that decision changes.
 
 ## State and identity
 
@@ -18,6 +19,9 @@ The normative model and invariants are in
 - A `TargetProjection` is the complete deterministic view for one Target and exact Consumer
   Revision. A `ResourceProjection` merges the requirements of every active or retiring Target
   bound to that Resource.
+- A materialization contract flows unchanged from the Consumer Resource template into its Target
+  binding and projection requirement. Contributors declaring different contracts for one shared
+  Resource block planning instead of selecting one implicitly.
 - `ManagedItem` is durable mutation authority. `ObservedItem` is only an adapter claim, and an item
   without exact ledger and marker evidence remains `PreservedItem` even if its bytes match Desired.
 - Target watermarks satisfy `ready <= applied <= observed <= desired`. Resource status has no
@@ -72,6 +76,10 @@ SQLite migration `0006` stores Scopes, Sources/Revisions, complete Desired State
 Revisions, Targets, Resources/bindings, digest-addressed projections, ownership ledgers, independent
 statuses, Conditions, requests/claims, Attempts, Operations/Artifacts, readiness/coordination
 receipts, and append-only audit events.
+
+Catalog/package adapters compute immutable package fingerprints before publication. SQLite stores
+the validated digest and fingerprint but does not read package directories through the Effect
+Resource adapter.
 
 Plugin registration exposes `effectResources`. Agent Consumers implement `effect/coordinate`,
 `effect/reactivate`, and `effect/verifyReady`; those versioned payloads remain behind the

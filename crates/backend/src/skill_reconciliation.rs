@@ -67,13 +67,16 @@ pub(crate) fn reconcile_skill_storage(
                 .as_ref()
                 .is_ok_and(|parsed| parsed.name == skill.name)
             {
+                let package_root = skills_root.join(&skill.name);
                 repository
                     .update_skill_with_source(
                         skill.clone(),
-                        LocalSkillSourceRevision {
-                            skill_md_digest: Digest::sha256(&manifest),
-                            package_root: skills_root.join(&skill.name),
-                        },
+                        LocalSkillSourceRevision::from_package(
+                            Digest::sha256(&manifest),
+                            package_root.clone(),
+                            &package_root,
+                        )
+                        .map_err(operation_failed)?,
                     )
                     .map_err(operation_failed)?;
             } else {

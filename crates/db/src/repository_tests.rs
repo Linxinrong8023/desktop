@@ -48,7 +48,11 @@ fn plugin_skill_projection_round_trips_and_is_removed_with_its_plugin() {
                 name: "review".to_string(),
                 description: "Reviews changes".to_string(),
                 package_root: package_root.clone(),
-                skill_md_digest: format!("sha256:{}", "a".repeat(64)),
+                skill_md_digest: ora_effect::Digest::sha256(b"manifest"),
+                package_fingerprint: ora_effect::Fingerprint::from(
+                    ora_utils::directory::fingerprint_directory(&package_root, &[])
+                        .unwrap_or_else(|error| panic!("fingerprint package: {error}")),
+                ),
             }],
             10,
         )

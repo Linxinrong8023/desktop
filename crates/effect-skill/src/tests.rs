@@ -108,6 +108,7 @@ fn target_facts(
     let binding = TargetResourceBinding {
         target: target.identity.clone(),
         resource: resource.identity.clone(),
+        materialization_contract: MaterializationContract::skill_directory_v1(),
         accepts: CapabilityRequirement::default(),
         coordination: CoordinationRequirement::Uninterrupted,
     };
@@ -128,7 +129,7 @@ fn retiring_target_projects_no_desired_contribution_but_keeps_cleanup_binding() 
     let desired_state = DesiredState::normalized(scope(), Generation::new(4), [desired])
         .unwrap_or_else(|error| panic!("desired state: {error}"));
     let result = SkillPlanner
-        .project(TargetPlanningInput {
+        .project_target(TargetPlanningInput {
             desired: &desired_state,
             target: &target,
             consumer_revision: &consumer_revision,
@@ -142,12 +143,19 @@ fn retiring_target_projects_no_desired_contribution_but_keeps_cleanup_binding() 
     };
 
     assert_eq!(projection.desired_effects, BTreeSet::new());
+    let requirement = projection
+        .resource_requirements
+        .get(&resource.identity)
+        .unwrap_or_else(|| panic!("retiring Target must retain its Resource requirement"));
     assert_eq!(
-        projection
-            .resource_requirements
-            .get(&resource.identity)
-            .map(|requirement| requirement.desired_effects.clone()),
-        Some(BTreeSet::new())
+        (
+            requirement.desired_effects.clone(),
+            requirement.materialization_contract.clone(),
+        ),
+        (
+            BTreeSet::new(),
+            MaterializationContract::skill_directory_v1(),
+        )
     );
 }
 
@@ -170,7 +178,7 @@ fn unowned_observed_item_is_preserved_and_never_becomes_a_mutation() {
         fingerprint: fingerprint.clone(),
     };
     let result = SkillPlanner
-        .merge(ResourcePlanningInput {
+        .plan_resource(ResourcePlanningInput {
             resource: &resource,
             generation: Generation::new(2),
             requirements: &[],
@@ -222,7 +230,7 @@ fn shared_resource_merges_target_contributors_before_planning_one_create() {
         fingerprint: Fingerprint::sha256(&[]),
     };
     let result = SkillPlanner
-        .merge(ResourcePlanningInput {
+        .plan_resource(ResourcePlanningInput {
             resource: &resource,
             generation: Generation::new(1),
             requirements: &requirements,
@@ -245,6 +253,56 @@ fn shared_resource_merges_target_contributors_before_planning_one_create() {
     );
     assert_eq!(plan.projection.items.len(), 1);
     assert_eq!(plan.changes.len(), 1);
+}
+
+#[test]
+fn shared_resource_rejects_incompatible_materialization_contracts() {
+    let resource = resource();
+    let requirements = vec![
+        ResourceRequirement {
+            target: EffectTargetId::new("target-a"),
+            resource: resource.identity.clone(),
+            desired_effects: BTreeSet::new(),
+            materialization_contract: MaterializationContract::skill_directory_v1(),
+            digest: Digest::sha256(b"requirement-a"),
+        },
+        ResourceRequirement {
+            target: EffectTargetId::new("target-b"),
+            resource: resource.identity.clone(),
+            desired_effects: BTreeSet::new(),
+            materialization_contract: MaterializationContract {
+                kind: "ora/other-directory".to_string(),
+                version: 1,
+            },
+            digest: Digest::sha256(b"requirement-b"),
+        },
+    ];
+    let observation = ResourceObservation {
+        resource: resource.identity.clone(),
+        items: BTreeMap::new(),
+        fingerprint: Fingerprint::sha256(&[]),
+    };
+
+    let result = SkillPlanner
+        .plan_resource(ResourcePlanningInput {
+            resource: &resource,
+            generation: Generation::new(1),
+            requirements: &requirements,
+            desired_effects: &BTreeMap::new(),
+            revisions: &BTreeMap::new(),
+            managed: &[],
+            observed: &observation,
+        })
+        .unwrap_or_else(|error| panic!("resource projection: {error}"));
+    let PlanningResult::Blocked(conditions) = result else {
+        panic!("incompatible materialization contracts must block the shared Resource");
+    };
+
+    assert_eq!(conditions.len(), 1);
+    assert_eq!(
+        conditions[0].code.as_str(),
+        "materialization_contract_conflict"
+    );
 }
 
 #[test]

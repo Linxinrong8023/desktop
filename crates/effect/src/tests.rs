@@ -53,3 +53,10 @@ fn operation_intent_rejects_a_mutation_label_that_disagrees_with_exact_states() 
 
     assert_eq!(result, Err(OperationTransitionError::InvalidMutationStates));
 }
+
+#[test]
+fn static_condition_code_rejects_an_empty_literal_in_release_builds() {
+    let result = std::panic::catch_unwind(|| StableConditionCode::from_static("   "));
+
+    assert!(result.is_err());
+}

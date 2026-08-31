@@ -1,7 +1,8 @@
 use ora_application::{LocalSkillSourceRevision, RepositoryError, SkillRepository};
 use ora_domain::{AuditFields, Namespace, PluginId, Skill, SkillId};
-use ora_effect::{Digest, SkillName, SkillSourceKey, SkillSourceKind, SourceRevisionKey};
-use ora_effect_skill::SkillDirectoryResourceAdapter;
+use ora_effect::{
+    Digest, Fingerprint, SkillName, SkillSourceKey, SkillSourceKind, SourceRevisionKey,
+};
 use rusqlite::{OptionalExtension, Row, TransactionBehavior, params};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -20,7 +21,8 @@ pub struct PluginSkillProjection {
     pub name: String,
     pub description: String,
     pub package_root: PathBuf,
-    pub skill_md_digest: String,
+    pub skill_md_digest: Digest,
+    pub package_fingerprint: Fingerprint,
 }
 
 /// Persists reusable skill definitions in SQLite.
@@ -86,14 +88,22 @@ impl SqliteSkillRepository {
                         updated_at,
                     ],
                 )?;
-                publish_source(
+                let publication = PublishedSkillRevision {
+                    source: skill_source_key(
+                        SkillSourceKind::Plugin,
+                        Namespace::new(plugin_id.clone())?,
+                        &canonical_name,
+                    )?,
+                    revision_key: SourceRevisionKey::parse(plugin_version).map_err(|error| {
+                        crate::DatabaseError::CorruptEffectState(error.to_string())
+                    })?,
+                    skill_md_digest: skill.skill_md_digest.clone(),
+                    package_fingerprint: skill.package_fingerprint.clone(),
+                    package_root: skill.package_root.clone(),
+                };
+                publish_skill_revision(
                     &transaction,
-                    SkillSourceKind::Plugin,
-                    Namespace::new(plugin_id.clone())?,
-                    &canonical_name,
-                    plugin_version,
-                    &skill.skill_md_digest,
-                    &skill.package_root,
+                    &publication,
                     updated_at,
                     &mut changed_scopes,
                 )?;
@@ -394,17 +404,25 @@ fn upsert_local_source(
     source: &LocalSkillSourceRevision,
     changed_scopes: &mut BTreeSet<String>,
 ) -> Result<(), crate::DatabaseError> {
-    publish_source(
+    let publication = PublishedSkillRevision {
+        source: skill_source_key(
+            SkillSourceKind::Local,
+            Namespace::local(),
+            &skill.name.to_ascii_lowercase(),
+        )?,
+        revision_key: SourceRevisionKey::parse(skill.audit_fields.updated_at.to_string())
+            .map_err(|error| crate::DatabaseError::CorruptEffectState(error.to_string()))?,
+        skill_md_digest: source.skill_md_digest.clone(),
+        package_fingerprint: source.package_fingerprint.clone(),
+        package_root: source.package_root.clone(),
+    };
+    publish_skill_revision(
         connection,
-        SkillSourceKind::Local,
-        Namespace::local(),
-        &skill.name.to_ascii_lowercase(),
-        &skill.audit_fields.updated_at.to_string(),
-        source.skill_md_digest.as_str(),
-        &source.package_root,
+        &publication,
         skill.audit_fields.updated_at,
         changed_scopes,
     )
+    .map(|_| ())
 }
 
 /// Retires one Local source after the catalog row has been renamed or deleted.
@@ -416,34 +434,6 @@ fn retire_local_source(
 ) -> Result<(), crate::DatabaseError> {
     let source = skill_source_key(SkillSourceKind::Local, Namespace::local(), name)?;
     retire_skill_source(connection, &source, updated_at, changed_scopes)?;
-    Ok(())
-}
-
-/// Builds and publishes one validated immutable Skill revision at the catalog boundary.
-#[allow(clippy::too_many_arguments)]
-fn publish_source(
-    connection: &rusqlite::Connection,
-    source_kind: SkillSourceKind,
-    namespace: Namespace,
-    identifier: &str,
-    revision: &str,
-    skill_md_digest: &str,
-    package_root: &std::path::Path,
-    updated_at: i64,
-    changed_scopes: &mut BTreeSet<String>,
-) -> Result<(), crate::DatabaseError> {
-    let package_fingerprint = SkillDirectoryResourceAdapter::package_fingerprint(package_root)
-        .map_err(|error| crate::DatabaseError::CorruptEffectState(error.to_string()))?;
-    let publication = PublishedSkillRevision {
-        source: skill_source_key(source_kind, namespace, identifier)?,
-        revision_key: SourceRevisionKey::parse(revision)
-            .map_err(|error| crate::DatabaseError::CorruptEffectState(error.to_string()))?,
-        skill_md_digest: Digest::parse(skill_md_digest)
-            .map_err(|error| crate::DatabaseError::CorruptEffectState(error.to_string()))?,
-        package_fingerprint,
-        package_root: package_root.to_path_buf(),
-    };
-    publish_skill_revision(connection, &publication, updated_at, changed_scopes)?;
     Ok(())
 }
 

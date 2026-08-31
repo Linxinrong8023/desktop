@@ -425,6 +425,13 @@ impl Display for Fingerprint {
     }
 }
 
+impl From<ora_utils::directory::DirectoryFingerprint> for Fingerprint {
+    /// Converts a validated generic directory hash without reparsing the same representation.
+    fn from(value: ora_utils::directory::DirectoryFingerprint) -> Self {
+        Self(value.to_string())
+    }
+}
+
 /// Digest of a complete deterministic Target or Resource projection.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ProjectionDigest(Digest);

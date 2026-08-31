@@ -949,7 +949,17 @@ impl PluginApi {
                 name: skill.name.clone(),
                 description: skill.description.clone(),
                 package_root: skill.package_root.clone(),
-                skill_md_digest: Digest::sha256(&manifest).to_string(),
+                skill_md_digest: Digest::sha256(&manifest),
+                package_fingerprint: ora_effect::Fingerprint::from(
+                    ora_utils::directory::fingerprint_directory(&skill.package_root, &[]).map_err(
+                        |error| {
+                            BackendError::internal(
+                                "failed to fingerprint validated plugin Skill package",
+                                error,
+                            )
+                        },
+                    )?,
+                ),
             });
         }
         self.skill_repository

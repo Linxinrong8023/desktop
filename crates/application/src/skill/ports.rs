@@ -1,13 +1,39 @@
 use crate::RepositoryError;
 use ora_domain::{Namespace, Skill, SkillId};
-use ora_effect::Digest;
+use ora_effect::{Digest, Fingerprint};
+use ora_utils::directory::fingerprint_directory;
 use std::path::PathBuf;
 
 /// Exact validated Local source metadata committed with its catalog row.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalSkillSourceRevision {
     pub skill_md_digest: Digest,
+    pub package_fingerprint: Fingerprint,
     pub package_root: PathBuf,
+}
+
+impl LocalSkillSourceRevision {
+    /// Captures the final package fingerprint before persistence so repositories remain I/O-free.
+    pub fn from_package(
+        skill_md_digest: Digest,
+        package_root: PathBuf,
+        fingerprint_root: &std::path::Path,
+    ) -> Result<Self, crate::skill::SkillStorageError> {
+        let package_fingerprint =
+            fingerprint_directory(fingerprint_root, &[]).map_err(|error| {
+                crate::skill::SkillStorageError::OperationFailed {
+                    message: format!(
+                        "failed to fingerprint Skill package {}: {error}",
+                        fingerprint_root.display()
+                    ),
+                }
+            })?;
+        Ok(Self {
+            skill_md_digest,
+            package_fingerprint: Fingerprint::from(package_fingerprint),
+            package_root,
+        })
+    }
 }
 
 /// Defines catalog persistence required by skill CRUD and import sessions.
