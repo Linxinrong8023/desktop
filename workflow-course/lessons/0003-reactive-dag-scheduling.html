@@ -90,6 +90,16 @@
             <p>ready 为空且 in_flight 也为空，此时引擎汇总输出并完成 Run。</p>
           </article>
         </div>
+        <div class="callout">
+          <strong><code>current_nodes</code> 在哪里？</strong>
+          它不是 <code>workflow_runs</code> 的独立列，而是保存在
+          <code>workflow_runs.state</code> 文本列中的 JSON，例如
+          <code>{"current_nodes":["agent-a","agent-b"]}</code
+          >。数组保存的是图节点 <code>node_id</code>，不是
+          <code>workflow_node_runs.id</code>。真正计算
+          <code>completed / in_flight / ready</code> 时，引擎仍会读取 NodeRun
+          行重新计算；这个数组是由事务同步维护的运行锚点。
+        </div>
       </section>
 
       <section>
@@ -135,6 +145,16 @@
             并被成功落库。
           </li>
         </ul>
+        <div class="callout">
+          <strong>继续调度不等于重新执行。</strong>
+          普通的 <code>run_schedule</code> 只在同一个 Run 中根据现有 NodeRun
+          推进下一波；
+          <code>resume</code>
+          用于补上“节点完成已落库、后继尚未调度”这类崩溃间隙，也不会重跑已成功节点。
+          只有显式 <code>restart</code> 才会把旧 NodeRun 软删除、清空 Run
+          的状态与结果，并从 Start 重新执行；创建新 Run 则会产生新的
+          <code>run_id</code>，不要把这四件事混为一谈。
+        </div>
       </section>
 
       <section class="interview">
