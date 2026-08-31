@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ora 工作流数据库速查</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="eyebrow">Reference · Database</div>
+        <h1>四张表，一条证据链</h1>
+        <p class="lede">
+          从 run_id
+          出发：先确定哪次执行，再确定冻结版本，最后展开实际启动过的节点。
+        </p>
+      </header>
+
+      <section>
+        <div class="relationship">
+          workflows 1 ─── * workflow_snapshots │ │ │ └── 1 ─── * workflow_runs │
+          │ └──────────────────────────────────────┘ └── 1 ─── *
+          workflow_node_runs │ └── session_id? ─── sessions
+        </div>
+      </section>
+
+      <section>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>表</th>
+              <th>一行代表</th>
+              <th>关键关联</th>
+              <th>创建时机</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>workflows</td>
+              <td>一个稳定工作流身份</td>
+              <td>published_snapshot_id</td>
+              <td>创建工作流</td>
+            </tr>
+            <tr>
+              <td>workflow_snapshots</td>
+              <td>一份 Draft 或发布图</td>
+              <td>workflow_id</td>
+              <td>创建 Draft / 发布</td>
+            </tr>
+            <tr>
+              <td>workflow_runs</td>
+              <td>一次具体执行</td>
+              <td>workflow_id, snapshot_id, workspace_id</td>
+              <td>用户创建 Run</td>
+            </tr>
+            <tr>
+              <td>workflow_node_runs</td>
+              <td>一个真正开始过的节点执行</td>
+              <td>run_id, session_id?</td>
+              <td>节点被调度启动</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>状态整数</h2>
+        <div class="flow">
+          <article class="flow-step">
+            <small>0</small><b>Pending</b>
+            <p>未开始，或交互节点等待输入。</p>
+          </article>
+          <article class="flow-step">
+            <small>1</small><b>Running</b>
+            <p>正在执行。</p>
+          </article>
+          <article class="flow-step">
+            <small>2</small><b>Succeeded</b>
+            <p>成功终止。</p>
+          </article>
+          <article class="flow-step">
+            <small>3</small><b>Failed</b>
+            <p>失败终止。</p>
+          </article>
+          <article class="flow-step">
+            <small>4</small><b>Cancelled</b>
+            <p>取消终止。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="callout warning">
+        <strong>不要混淆：</strong><code>workflow_runs.run_status</code> 和
+        <code>workflow_node_runs.status</code>
+        使用相同整数映射，但描述的是不同层级的状态。Run
+        的公开状态还可能把“运行中且存在等待节点”投影为
+        <code>AwaitingInput</code>。
+      </section>
+
+      <section class="next">
+        <a href="../lessons/0002-reconstruct-a-run-from-four-tables.html"
+          >进入第 2 课</a
+        >
+        <a href="workflow-glossary.html">返回术语表</a>
+      </section>
+    </main>
+  </body>
+</html>

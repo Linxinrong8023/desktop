@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>第 2 课：从四张表重建一次失败运行</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+    <script src="../assets/quiz.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="eyebrow">Lesson 0002 · 数据库设计</div>
+        <h1>从四张表重建<br />一次失败运行</h1>
+        <p class="lede">
+          你拿到一个
+          run_id，不需要先读完整引擎。按固定顺序查询，就能回答：跑的是哪版图、在哪个
+          Workspace、哪些节点真正启动、失败发生在哪里。
+        </p>
+        <div class="win">本课胜利条件：能从 run_id 画出完整的持久化证据链</div>
+      </header>
+
+      <section>
+        <h2>先从事故现场出发</h2>
+        <div class="scenario">
+          <span class="label">Incident</span>
+          <p>
+            用户说：“PR 审查工作流失败了。”你看到编辑器里的 Draft
+            一切正常，但这句话还不能帮助排故。第一件事不是重跑，而是拿到失败的
+            <code>run_id</code>。
+          </p>
+          <p>
+            <strong>为什么？</strong>因为 run_id 同时连接了执行状态、冻结
+            snapshot、Workspace 和所有已经开始过的 NodeRun。
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2>核心三步，再按需深入</h2>
+        <div class="flow">
+          <article class="flow-step">
+            <small>01 · Run</small><b>确定执行实例</b>
+            <p>读取 snapshot_id、workspace_id、整体状态、输入和错误。</p>
+          </article>
+          <article class="flow-step">
+            <small>02 · Snapshot</small><b>确定冻结计划</b>
+            <p>读取 version 与 graph，证明当时准备执行什么。</p>
+          </article>
+          <article class="flow-step">
+            <small>03 · NodeRuns</small><b>确定实际进度</b>
+            <p>按 run_id 展开状态、错误、时间和 session_id。</p>
+          </article>
+          <article class="flow-step">
+            <small>04 · Session</small><b>还原 Agent 过程</b>
+            <p>仅对已经绑定 Session 的 Agent 节点继续深挖。</p>
+          </article>
+          <article class="flow-step">
+            <small>05 · Logs</small><b>补基础设施证据</b>
+            <p>Session 前失败或数据库信息不足时再查后端日志。</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>四张表为什么不能合并</h2>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>表</th>
+              <th>它稳定回答的问题</th>
+              <th>为什么独立</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>workflows</td>
+              <td>“这个流程是谁？”</td>
+              <td>名称和激活指针可变化，但稳定身份不能随版本或运行复制。</td>
+            </tr>
+            <tr>
+              <td>workflow_snapshots</td>
+              <td>“某一版图是什么？”</td>
+              <td>
+                一个 Workflow 有唯一 Draft 和多个发布版本；Run
+                必须钉住其中一个。
+              </td>
+            </tr>
+            <tr>
+              <td>workflow_runs</td>
+              <td>“哪一次执行怎么样？”</td>
+              <td>
+                同一 Snapshot 可执行多次，每次状态、输入、Workspace 和结果独立。
+              </td>
+            </tr>
+            <tr>
+              <td>workflow_node_runs</td>
+              <td>“哪些节点实际执行过？”</td>
+              <td>
+                并行、失败、取消和 HITL
+                都需要节点级状态；未开始节点不应制造假记录。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>直接可用的 SQLite 排故路径</h2>
+        <p><strong>第一步：</strong>从 Run 找冻结版本和执行位置。</p>
+        <div class="sql-block">
+          SELECT id, workflow_id, snapshot_id, workspace_id, run_status, input,
+          output, error, started_at, finished_at FROM workflow_runs WHERE id =
+          ?1 AND is_deleted = 0;
+        </div>
+
+        <p>
+          <strong>第二步：</strong>读取该 Run 真正钉住的图，不查询当前 Draft。
+        </p>
+        <div class="sql-block">
+          SELECT id, workflow_id, version, graph, created_at, updated_at FROM
+          workflow_snapshots WHERE id = ?1 AND is_deleted = 0;
+        </div>
+
+        <p><strong>第三步：</strong>展开真正开始过的节点。</p>
+        <div class="sql-block">
+          SELECT node_id, node_type, status, session_id, input, output, error,
+          started_at, finished_at FROM workflow_node_runs WHERE run_id = ?1 AND
+          is_deleted = 0 ORDER BY created_at, id;
+        </div>
+      </section>
+
+      <section>
+        <h2>三个容易被拷打的设计点</h2>
+        <ul class="invariant-list">
+          <li>
+            <code>workflow_runs</code> 同时保存 workflow_id 和
+            snapshot_id：前者回答业务归属和列表查询，后者精确钉住执行版本。
+          </li>
+          <li>
+            状态在 SQLite 中保存为整数：0 Pending、1 Running、2 Succeeded、3
+            Failed、4 Cancelled；Rust Domain 把它转换为强类型枚举。
+          </li>
+          <li>
+            软删除后的行不参与名称/版本唯一索引，因此名字可以复用；删除级联和活动
+            Run 保护由 Repository 事务执行。
+          </li>
+        </ul>
+        <div class="callout warning">
+          <strong>源码细节：</strong
+          ><code>workflows.published_snapshot_id</code> 在迁移 SQL 中只是
+          TEXT，并没有声明
+          REFERENCES；不能假装数据库外键替你保证这个指针正确。发布、激活和删除约束由应用与
+          Repository 的事务维护。
+        </div>
+      </section>
+
+      <section class="interview">
+        <div class="eyebrow">Interview pressure</div>
+        <h2>面试官会怎么追问</h2>
+        <details>
+          <summary>为什么 Run 不能只保存 workflow_id？</summary>
+          <p>
+            workflow_id 只能定位稳定身份，无法证明执行的是哪一版图。若随后 Draft
+            或激活版本改变，历史 Run 将无法复现。snapshot_id 才是执行版本证据。
+          </p>
+        </details>
+        <details>
+          <summary>为什么 graph 不拆成 node 表和 edge 表？</summary>
+          <p>
+            当前定义层需要原样保存 React Flow 作者文档与版本。把 graph
+            作为快照文本降低定义写入复杂度；运行引擎在启动时解析和验证
+            DAG。代价是数据库不擅长节点级查询。
+          </p>
+        </details>
+        <details>
+          <summary>软删除为什么配合部分唯一索引？</summary>
+          <p>
+            历史行仍保留审计价值，但只让 is_deleted = 0
+            的可见行参与名称与版本唯一性，从而允许删除后复用名称，同时避免物理删除立即破坏历史关联。
+          </p>
+        </details>
+      </section>
+
+      <section>
+        <h2>闭卷检索</h2>
+        <div class="quiz-grid">
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="a"
+            data-explanation="Run.snapshot_id 指向当次执行的冻结图。"
+          >
+            <h3>1. 失败 Run 当时的节点配置应查哪张表？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">快照数据表</button
+              ><button data-choice="b">工作流主表</button
+              ><button data-choice="c">节点运行表</button
+              ><button data-choice="d">会话历史表</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="c"
+            data-explanation="Run 是实体，run_status 才是该实体的生命周期状态。"
+          >
+            <h3>2. SQLite 中数值 3 表示什么？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">第三次运行</button
+              ><button data-choice="b">三个节点行</button
+              ><button data-choice="c">失败的状态</button
+              ><button data-choice="d">三个快照版</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="b"
+            data-explanation="workflow_node_runs 只记录真正开始过的节点。"
+          >
+            <h3>3. Snapshot 有四个节点但只有三个 NodeRun，说明什么？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">快照缺少行</button
+              ><button data-choice="b">一节点未启动</button
+              ><button data-choice="c">运行创建失败</button
+              ><button data-choice="d">工作流已删除</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+        </div>
+      </section>
+
+      <section class="source-box">
+        <h2>本课依据</h2>
+        <ul>
+          <li>
+            <a href="../../crates/db/src/migration/schema/schema_v0003.rs"
+              >仓库：workflow schema v0003</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/domain/src/workflow_run.rs"
+              >仓库：Run / NodeRun Domain Model</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/db/src/repository/workflow_run_engine.rs"
+              >仓库：Run Engine Repository</a
+            >
+          </li>
+          <li>
+            <a href="https://www.sqlite.org/partialindex.html"
+              >SQLite：Partial Indexes</a
+            >
+          </li>
+          <li>
+            <a href="https://www.sqlite.org/foreignkeys.html"
+              >SQLite：Foreign Keys</a
+            >
+          </li>
+        </ul>
+      </section>
+
+      <section class="next">
+        <p>
+          <strong>你的回合：</strong>给你一个 failed run_id，请不用 SQL
+          细节，只用三步说明怎样重建“预期执行内容”和“实际失败位置”。
+        </p>
+        <a href="../reference/database-map.html">打开数据库速查表</a>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>第 3 课：一轮一轮调度 DAG</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+    <script src="../assets/quiz.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="eyebrow">Lesson 0003 · 运行引擎</div>
+        <h1>一轮一轮调度 DAG</h1>
+        <p class="lede">
+          调度器不保存一份神秘的内存进度。每次 Start
+          或节点回调后，它都从冻结图与 NodeRun
+          记录重新计算：谁已完成、谁仍在运行、谁现在可以启动。
+        </p>
+        <div class="win">
+          本课胜利条件：看到任意一组 NodeRun 状态，能手算下一轮 ready set
+        </div>
+      </header>
+
+      <section>
+        <h2>先推演一张四节点图</h2>
+        <div class="relationship">
+          ┌── Agent A ──┐ Start ──────┤ ├── Output └── Agent B ──┘
+        </div>
+        <p>
+          点击 Start
+          后，并不是一次性给四个节点都建记录。引擎只启动当前满足条件的一批节点，这一批叫一个调度波次。
+        </p>
+      </section>
+
+      <section>
+        <h2>真实执行时间线</h2>
+        <div class="flow">
+          <article class="flow-step">
+            <small>Wave 0</small><b>Start 入库</b>
+            <p>Run 从 Pending 变 Running，同时创建 Start NodeRun。</p>
+          </article>
+          <article class="flow-step">
+            <small>Wave 1</small><b>Start 同步成功</b>
+            <p>Start 是控制节点，不创建 Agent Session。</p>
+          </article>
+          <article class="flow-step">
+            <small>Wave 2</small><b>A、B 同时 Ready</b>
+            <p>两条 NodeRun 在同一事务波次创建，然后分别派发 Session。</p>
+          </article>
+          <article class="flow-step">
+            <small>Wait</small><b>等待两边完成</b>
+            <p>A 先成功也不够；Output 的所有直接前驱都必须成功。</p>
+          </article>
+          <article class="flow-step">
+            <small>Wave 3</small><b>Output 与 Run 完成</b>
+            <p>Output 汇总前驱输出；图耗尽后 Run 才变 Succeeded。</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>每轮只计算三个集合</h2>
+        <div class="term-grid">
+          <article class="term-card">
+            <span class="status">completed</span>
+            <h3>已经成功</h3>
+            <p>
+              状态为 Succeeded 的 NodeRun 对应节点。只有成功节点才能解锁后继。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">in_flight</span>
+            <h3>仍未结束</h3>
+            <p>
+              状态为 Running 或 Pending 的 NodeRun。交互节点等待人工输入时也是
+              in-flight。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">ready</span>
+            <h3>现在可启动</h3>
+            <p>
+              自己尚未完成、所有直接前驱都在 completed，且自己不在 in_flight。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">drained</span>
+            <h3>图已耗尽</h3>
+            <p>ready 为空且 in_flight 也为空，此时引擎汇总输出并完成 Run。</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>Ready 规则不是“有一个前驱成功”</h2>
+        <div class="sql-block">
+          ready(node) = node 尚未成功 AND node 不在运行或等待输入 AND node
+          的每一个直接前驱都已成功
+        </div>
+        <div class="callout warning">
+          <strong>汇合点规则：</strong>在上面的图中，A 成功而 B
+          仍在运行时，Output 仍不
+          Ready。这不是调度丢失，而是在等待另一个直接前驱。
+        </div>
+      </section>
+
+      <section>
+        <h2>回调如何推动下一轮</h2>
+        <div class="relationship">
+          Start / Resume / 节点成功回调 │ ▼ 读取 Run + Frozen Graph + NodeRuns │
+          ▼ 计算 completed / in_flight / ready ┌──────┴─────────┐ ▼ ▼ ready 非空
+          ready 为空 批量创建 NodeRun ├─ 有 in_flight：等待回调 派发 Agent └─ 无
+          in_flight：完成 Run
+        </div>
+        <p>
+          Agent 节点异步执行，完成后调用
+          <code>complete_node</code>，再触发一次调度。节点失败调用
+          <code>fail_node</code>，Run 进入 Failed，不再继续调度后继。
+        </p>
+      </section>
+
+      <section>
+        <h2>为什么每轮从数据库重算</h2>
+        <ul class="invariant-list">
+          <li>
+            进程重启后不必依赖丢失的内存队列，<code>resume</code>
+            可以从持久化状态恢复计算。
+          </li>
+          <li>
+            重复 Start、重复完成回调和迟到回调可以通过状态条件变成幂等 no-op。
+          </li>
+          <li>
+            排障时数据库就是调度证据：缺少 NodeRun 通常表示它从未进入 ready
+            并被成功落库。
+          </li>
+        </ul>
+      </section>
+
+      <section class="interview">
+        <div class="eyebrow">Interview pressure</div>
+        <h2>面试官会怎么追问</h2>
+        <details>
+          <summary>为什么 Pending 也属于 in-flight？</summary>
+          <p>
+            交互 Agent 第一轮结束后会停在 Pending
+            等待用户输入，但它并没有完成；若不算作
+            in-flight，调度器可能重复派发它或错误解锁后继。
+          </p>
+        </details>
+        <details>
+          <summary>为什么 ready 节点要批量落库后再派发？</summary>
+          <p>
+            同一波并行节点及 Run 的 current_nodes
+            需要形成一致的持久化事实；否则派发成功但数据库未记录会制造不可恢复的幽灵执行。
+          </p>
+        </details>
+        <details>
+          <summary>为什么节点失败后不继续计算 ready set？</summary>
+          <p>
+            当前 v1 采用 fail-fast：fail_node 同时使 NodeRun 和 Run 失败，Run
+            已进入终态，因此不会再调度后继。
+          </p>
+        </details>
+      </section>
+
+      <section>
+        <h2>闭卷检索</h2>
+        <div class="quiz-grid">
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="c"
+            data-explanation="Output 的全部直接前驱都必须成功；B 仍在运行，因此 ready 为空。"
+          >
+            <h3>1. Start、A 已成功，B 正在运行。当前 ready set 是？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">A</button
+              ><button data-choice="b">Output</button
+              ><button data-choice="c">空集合</button
+              ><button data-choice="d">B 和 Output</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="b"
+            data-explanation="等待人工输入的交互节点尚未完成，Pending 仍属于 in-flight。"
+          >
+            <h3>2. 交互节点处于 Pending，调度器应如何理解？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">尚未启动</button
+              ><button data-choice="b">仍在途，阻塞后继</button
+              ><button data-choice="c">已经成功</button
+              ><button data-choice="d">应该重新派发</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="d"
+            data-explanation="ready 与 in-flight 都为空，说明图已经耗尽，可以完成 Run。"
+          >
+            <h3>3. ready 与 in_flight 都为空意味着什么？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">图一定有环</button
+              ><button data-choice="b">必须创建 Session</button
+              ><button data-choice="c">必须取消 Run</button
+              ><button data-choice="d">可以完成 Run</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+        </div>
+      </section>
+
+      <section class="source-box">
+        <h2>本课依据</h2>
+        <ul>
+          <li>
+            <a href="../../crates/application/src/workflow_run/engine/engine.rs"
+              >仓库：WorkflowRunEngine 调度循环</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/application/src/workflow_run/engine/graph.rs"
+              >仓库：DAG 查询与 ready_set</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/application/src/workflow_run/engine/ports.rs"
+              >仓库：调度持久化端口与状态约束</a
+            >
+          </li>
+        </ul>
+      </section>
+
+      <section class="next">
+        <p>
+          <strong>你的回合：</strong>Start 和 A 已成功，B 处于 Pending
+          等待人工输入，Output 尚无 NodeRun。请说出
+          completed、in_flight、ready，以及 Run 为什么不能结束。
+        </p>
+        <a href="../reference/workflow-glossary.html">打开术语速查表</a>
+      </section>
+    </main>
+  </body>
+</html>
