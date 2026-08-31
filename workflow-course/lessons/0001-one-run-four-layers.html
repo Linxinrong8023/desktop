@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>第 1 课：一条工作流的四层生命线</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+    <script src="../assets/quiz.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="eyebrow">Lesson 0001 · 心智模型</div>
+        <h1>一条工作流的四层生命线</h1>
+        <p class="lede">
+          先不钻代码。我们用“自动审查一次 PR”走完从画布、版本、数据库到 Agent
+          Session 的闭环。你会得到以后读代码和排故时最重要的一张地图。
+        </p>
+        <div class="win">
+          本课胜利条件：能用 90 秒讲清一次 Run 与一份 Workflow 的区别
+        </div>
+      </header>
+
+      <section>
+        <h2>先看一个具体故事</h2>
+        <div class="scenario">
+          <span class="label">Scenario</span>
+          <p>
+            你在编辑器画出
+            <strong>Start → Agent（审查代码）→ Output</strong>，保存草稿，发布为
+            <code>v1</code>，然后在项目的 Main Workspace
+            中启动一次运行。运行到一半，你又修改了草稿里的 Agent 提示词。
+          </p>
+          <p>
+            <strong>核心问题：</strong
+            >正在执行的那次运行会不会突然使用新提示词？答案是不会，因为 Run
+            钉住的是创建时选择的已发布 Snapshot，而不是持续变化的 Draft。
+          </p>
+        </div>
+
+        <div class="flow" aria-label="工作流生命周期">
+          <article class="flow-step">
+            <small>01 · Author</small><b>编辑 Draft</b>
+            <p>React Flow 产生 nodes、edges、viewport 的 JSON 文档。</p>
+          </article>
+          <article class="flow-step">
+            <small>02 · Publish</small><b>冻结 Snapshot</b>
+            <p>复制草稿图，生成不可变版本，并更新激活指针。</p>
+          </article>
+          <article class="flow-step">
+            <small>03 · Create</small><b>创建 Run</b>
+            <p>绑定已有 Workspace，并钉住一个发布快照。</p>
+          </article>
+          <article class="flow-step">
+            <small>04 · Schedule</small><b>解析 DAG</b>
+            <p>校验图，找 ready set，按前驱约束推进节点。</p>
+          </article>
+          <article class="flow-step">
+            <small>05 · Execute</small><b>驱动 Session</b>
+            <p>Agent 在 Ora Session 中工作，结果回写 NodeRun。</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>四层，不要混着讲</h2>
+        <div class="layer-grid">
+          <article class="layer">
+            <span class="label">Layer 1</span>
+            <h3>编辑与展示</h3>
+            <p>
+              编辑器负责画图、参数、草稿自动保存、发布和版本预览；Theater /
+              Overview 负责展示一次运行。画布位置是展示信息，不等于执行顺序。
+            </p>
+          </article>
+          <article class="layer">
+            <span class="label">Layer 2</span>
+            <h3>应用用例</h3>
+            <p>
+              <code>ora-application</code>
+              负责创建、更新草稿、发布、回滚、激活，以及 Run
+              的创建和控制。它通过 trait 依赖存储、时钟和执行器。
+            </p>
+          </article>
+          <article class="layer">
+            <span class="label">Layer 3</span>
+            <h3>SQLite 持久化</h3>
+            <p>
+              <code>ora-db</code> 保存定义、快照、Run 和 NodeRun。CRUD 对 graph
+              主要按不透明文本处理，不替 workflow-run 应用层验证图拓扑。
+            </p>
+          </article>
+          <article class="layer">
+            <span class="label">Layer 4</span>
+            <h3>调度与 Agent 执行</h3>
+            <p>
+              workflow-run 应用层在创建 Run
+              时解析结构，启动时重新解析并检查可执行性；随后引擎按 DAG
+              调度，<code>ora-backend</code> 把 Agent 节点接入真实 Session。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>四张表分别回答什么</h2>
+        <div class="table-grid">
+          <article class="db-table">
+            <h3><code>workflows</code></h3>
+            <p>“这套流程是谁？”稳定 id、名称、当前激活的发布快照指针。</p>
+          </article>
+          <article class="db-table">
+            <h3><code>workflow_snapshots</code></h3>
+            <p>“某一版本的图长什么样？”唯一 Draft 与多个不可变发布版本。</p>
+          </article>
+          <article class="db-table">
+            <h3><code>workflow_runs</code></h3>
+            <p>
+              “哪一次执行发生了什么？”Workspace、冻结快照、整体状态、输入输出和时间。
+            </p>
+          </article>
+          <article class="db-table">
+            <h3><code>workflow_node_runs</code></h3>
+            <p>
+              “那次执行中的某个节点怎么样？”节点状态、Session
+              关联、输入输出、错误和时间。
+            </p>
+          </article>
+        </div>
+        <div class="callout warning" style="margin-top: 16px">
+          <strong>排故口诀：</strong>先拿 run_id，再看 snapshot_id，最后按 node
+          run + session 追踪。不要一上来盯着当前草稿，因为失败的 Run
+          可能执行的是旧版本。
+        </div>
+      </section>
+
+      <section>
+        <h2>今天只记住五条不变量</h2>
+        <ul class="invariant-list">
+          <li>Workflow 是稳定身份；Snapshot 才承载版本化的图。</li>
+          <li>
+            每个 Workflow 恰好有一个可编辑 Draft；发布会复制图，不会把 Draft
+            本身改成发布版。
+          </li>
+          <li>
+            Run 钉住 Snapshot 和 Workspace；后续草稿修改不能改写这次执行。
+          </li>
+          <li>
+            图由 workflow-run 应用层解析为 DAG：创建 Run
+            时先做结构解析，启动时重新解析并检查 Start、受支持类型与节点可达性。
+          </li>
+          <li>NodeRun.output 不是完整对话；完整 Agent 历史属于 Session。</li>
+        </ul>
+      </section>
+
+      <section class="interview">
+        <div class="eyebrow">Interview pressure</div>
+        <h2>面试官会怎么追问</h2>
+        <details>
+          <summary>为什么不让 Run 直接读取最新 Draft？</summary>
+          <p>
+            因为 Draft
+            会持续变化。若执行途中重新读取，会破坏可复现性、审计和故障定位；同一个
+            run_id 甚至可能前后执行不同逻辑。钉住不可变
+            Snapshot，把“作者继续编辑”和“已有运行执行”隔离开。
+          </p>
+        </details>
+        <details>
+          <summary>
+            为什么数据库保存完整 React Flow JSON，而不是立刻拆成 nodes / edges
+            表？
+          </summary>
+          <p>
+            定义 CRUD
+            只需保存和版本化作者文档，保持图为不透明快照能降低写入模型复杂度并保留画布元数据；代价是数据库难以按节点查询，结构校验必须由启动阶段的图解析器承担。
+          </p>
+        </details>
+        <details>
+          <summary>
+            为什么还需要 WorkflowNodeRun，直接写 WorkflowRun.state 不行吗？
+          </summary>
+          <p>
+            节点级记录提供独立状态、时间、错误、Session
+            绑定和输出，是并行调度、局部排障与恢复的最小持久化单位。只用一个大
+            state blob 会让并发更新、查询和约束变得模糊。
+          </p>
+        </details>
+      </section>
+
+      <section>
+        <h2>闭卷检索：现在就测</h2>
+        <div class="quiz-grid">
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="b"
+            data-explanation="Run 读取创建时钉住的冻结快照。"
+          >
+            <h3>1. 发布后再改草稿，已有运行读取哪份图？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">当前草稿图</button
+              ><button data-choice="b">运行快照图</button
+              ><button data-choice="c">编辑缓存图</button
+              ><button data-choice="d">最新发布图</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="b"
+            data-explanation="未启动节点没有 WorkflowNodeRun 行，前端从图与已有记录的差集推导它。"
+          >
+            <h3>2. 一个节点从未被调度启动，数据库怎样表示？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">已创建空记录</button
+              ><button data-choice="b">不创建节点行</button
+              ><button data-choice="c">复用运行主行</button
+              ><button data-choice="d">写入快照表中</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="c"
+            data-explanation="定义 CRUD 把 graph 当不透明文本；workflow-run 应用层在创建与启动关口解析，启动引擎还会检查可执行性。"
+          >
+            <h3>3. 冻结图的 DAG 结构主要由哪一层验证？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">定义增删处理</button
+              ><button data-choice="b">数据库存储层</button
+              ><button data-choice="c">运行启动引擎</button
+              ><button data-choice="d">画布渲染器</button>
+            </div>
+            <p class="feedback" data-feedback aria-live="polite"></p>
+          </article>
+        </div>
+      </section>
+
+      <section class="source-box">
+        <h2>本课依据</h2>
+        <ul>
+          <li><a href="../../docs/workflow.md">仓库：Workflow 架构说明</a></li>
+          <li>
+            <a href="../../crates/db/src/migration/schema/schema_v0003.rs"
+              >仓库：schema_v0003.rs</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/application/src/workflow_run/engine/README.md"
+              >仓库：Workflow Run Engine</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://reactflow.dev/api-reference/types/react-flow-instance"
+              >React Flow：toObject()</a
+            >
+          </li>
+          <li>
+            <a
+              href="https://docs.rs/petgraph/latest/petgraph/algo/fn.toposort.html"
+              >petgraph：toposort</a
+            >
+          </li>
+        </ul>
+      </section>
+
+      <section class="next">
+        <p>
+          <strong>你的回合：</strong>不要看上文，用 5 句话向我解释
+          Draft、Snapshot、Run、NodeRun、Session
+          的关系。我会按面试标准追问并纠正。
+        </p>
+        <a href="../reference/workflow-glossary.html">打开术语速查表</a>
+      </section>
+    </main>
+  </body>
+</html>

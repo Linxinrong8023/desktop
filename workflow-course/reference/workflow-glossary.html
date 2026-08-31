@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ora 工作流术语速查</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="eyebrow">Reference · 持续更新</div>
+        <h1>Ora 工作流术语速查</h1>
+        <p class="lede">
+          先问“它属于定义、版本、运行还是节点执行”，再谈实现。这个分类能消灭大半术语混淆。
+        </p>
+      </header>
+
+      <section>
+        <div class="term-grid">
+          <article class="term-card">
+            <span class="status">定义</span>
+            <h3>Workflow</h3>
+            <p>
+              稳定身份与名称。数据库行还保存当前激活的发布快照指针，但不直接承载每次运行状态。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">版本</span>
+            <h3>Draft</h3>
+            <p>
+              每个工作流唯一的可编辑快照，版本字符串固定为
+              <code>draft</code>；保存时原地更新 graph。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">版本</span>
+            <h3>Published snapshot</h3>
+            <p>
+              从草稿复制出的不可变图。创建运行时会冻结引用它，后续草稿修改不会改变旧运行。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">运行</span>
+            <h3>WorkflowRun</h3>
+            <p>
+              一次具体执行，绑定一个 Workspace、一个 Workflow 和一个已发布
+              Snapshot，并维护整体状态与输入输出。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">节点</span>
+            <h3>WorkflowNodeRun</h3>
+            <p>
+              某个节点在某次 Run
+              中的执行记录。未启动的节点没有行；完整对话不存这里。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">执行</span>
+            <h3>DAG</h3>
+            <p>
+              有向无环图。边表达前置依赖；拓扑顺序保证前驱出现在后继之前，环会在解析时被拒绝。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">执行</span>
+            <h3>Ready set</h3>
+            <p>
+              尚未完成、且所有直接前驱都已完成的节点集合。它是并行调度的核心判断，不是画布从左到右的视觉顺序。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">Agent</span>
+            <h3>Session</h3>
+            <p>
+              Agent 节点的完整会话历史与交互载体。NodeRun
+              只保留供下游消费的最终标量输出和关联 session_id。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">边界</span>
+            <h3>Workspace</h3>
+            <p>
+              运行实际工作的文件系统/项目位置。Run 选择既有
+              Workspace，不会因为运行工作流再隐式创建一棵 worktree。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">策略</span>
+            <h3>Output policy</h3>
+            <p>
+              决定 Agent 的最终回复是否写入 NodeRun.output 并传给下游；完整
+              Session 历史始终是另一份数据。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="next">
+        <p>
+          <strong>复习提示：</strong>遇到任何字段，先把它放入“定义 / 版本 / 运行
+          / 节点 / Session”之一。
+        </p>
+        <a href="../lessons/0001-one-run-four-layers.html">返回第 1 课</a>
+      </section>
+    </main>
+  </body>
+</html>
