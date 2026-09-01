@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>第 7 课：从启动按钮追到 Agent 后台</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+    <script src="../assets/quiz.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="eyebrow">Lesson 0007 · 端到端调用链</div>
+        <h1>同一个“启动”，<br />跨过七层代码</h1>
+        <p class="lede">
+          UI 只表达用户意图，Contract 传递命令，Backend 串行化同一
+          Run，Application Engine 决定状态机，Database Adapter 原子落库，Agent
+          Executor 才负责真实 Session。沿这条链排查，才不会在错误的层翻日志。
+        </p>
+        <div class="win">
+          本课胜利条件：能从 handleStart 一路说到
+          tokio::spawn，并按症状指出最可能的故障层
+        </div>
+      </header>
+
+      <section>
+        <h2>先区分两个事故</h2>
+        <div class="term-grid">
+          <article class="term-card">
+            <span class="status">事故 A · 同步启动失败</span>
+            <h3>点击后立即弹 Toast</h3>
+            <p>
+              <code>mutateAsync()</code> 直接抛错，没有进入 Theater，也没有
+              Agent NodeRun。优先查传输、启动校验、Run 状态或启动事务。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">事故 B · 异步执行失败</span>
+            <h3>先 Running，稍后 Failed</h3>
+            <p>
+              启动命令已经成功返回，Agent NodeRun 也已落库；后台
+              warm、模型、Prompt 或 ACP 链随后失败。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>一条真实启动调用链</h2>
+        <div class="flow">
+          <article class="flow-step">
+            <small>01 · Presentation</small><b>handleStart()</b>
+            <p>
+              读取当前 run.id，调用 mutation；成功后进入 Theater，失败则显示
+              Toast。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>02 · State Hook</small><b>useStartWorkflowRun()</b>
+            <p>
+              调用 Contract Client；成功后失效 run detail 查询，让 UI
+              重新读取数据库状态。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>03 · Contract</small><b>startWorkflowRun</b>
+            <p>请求只携带 runId；生成 Client 不知道 DAG、SQLite 或 Session。</p>
+          </article>
+          <article class="flow-step">
+            <small>04 · Tauri Adapter</small><b>start_workflow_run</b>
+            <p>把 camelCase operation 映射到桌面命令，再转给共享 Backend。</p>
+          </article>
+          <article class="flow-step">
+            <small>05 · Backend</small><b>按 run_id 加锁</b>
+            <p>
+              串行化 start、cancel 与 callback，随后调用
+              WorkflowRunControlHandler。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>06 · Application</small><b>Engine.start()</b>
+            <p>解析冻结图、检查可执行性、启动 Run，并循环计算 ready wave。</p>
+          </article>
+          <article class="flow-step">
+            <small>07 · Adapters</small><b>DB + Agent</b>
+            <p>
+              SQLite 先创建 Running NodeRun；Agent Executor 再用 tokio::spawn
+              后台执行。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>每一层负责什么</h2>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>层</th>
+              <th>负责</th>
+              <th>不负责</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>UI</td>
+              <td>触发命令、Loading/Toast、进入 Theater</td>
+              <td>保证幂等、计算 Ready</td>
+            </tr>
+            <tr>
+              <td>Contract/Transport</td>
+              <td>稳定请求响应形状、operation 到命令映射</td>
+              <td>工作流业务规则</td>
+            </tr>
+            <tr>
+              <td>Backend</td>
+              <td>组合真实 Adapter、按 run_id 加锁</td>
+              <td>复制 DAG 状态机</td>
+            </tr>
+            <tr>
+              <td>Application Engine</td>
+              <td>图校验、状态迁移、Ready、回调后续调度</td>
+              <td>直接写 SQLite、直接驱动 ACP</td>
+            </tr>
+            <tr>
+              <td>DB Adapter</td>
+              <td>事务、条件更新、NodeRun 与 current_nodes</td>
+              <td>选择 Agent 模型、组装 Prompt</td>
+            </tr>
+            <tr>
+              <td>Agent Executor</td>
+              <td>warm/attach/config/prompt/ACP/callback</td>
+              <td>自行决定 DAG 后继</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>同步链在哪里结束</h2>
+        <pre><code>Engine.run_schedule()
+  → start_ready_nodes()       // Running NodeRuns 已提交
+  → NodeExecutor.dispatch()
+       → tokio::spawn(...)    // 异步分界点
+       → 立即返回
+  → 重新读取 NodeRuns
+  → 发现 Agent 仍在 in_flight
+  → startWorkflowRun 返回 Run = Running</code></pre>
+        <p>
+          <code>dispatch()</code> 返回类型是
+          <code>()</code>。它只把任务交给后台， 不等待 warm、Session、模型或
+          Agent 成功。因此“启动命令成功”只承诺当前执行 wave 已建立，不承诺
+          Workflow 最终成功。
+        </p>
+      </section>
+
+      <section>
+        <h2>按症状选检查入口</h2>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>症状</th>
+              <th>先看哪里</th>
+              <th>暂时别看哪里</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>点击立即 Toast，Run 仍 Pending</td>
+              <td>Contract/Tauri 错误、启动校验、DB start_run</td>
+              <td>Session 对话历史</td>
+            </tr>
+            <tr>
+              <td>Run Running，Agent NodeRun 不存在</td>
+              <td>DAG、前驱状态、run_schedule 与恢复</td>
+              <td>Agent 模型配置</td>
+            </tr>
+            <tr>
+              <td>Agent Running，session_id NULL</td>
+              <td>异步 Executor 的绑定前链路</td>
+              <td>下游节点</td>
+            </tr>
+            <tr>
+              <td>Agent Running，session_id 有值</td>
+              <td>Session/ACP/Agent CLI 与终态回调</td>
+              <td>Start 启动门禁</td>
+            </tr>
+            <tr>
+              <td>Agent Succeeded，后继没有 NodeRun</td>
+              <td>回调后的 run_schedule 与启动恢复</td>
+              <td>重新怀疑 Agent 是否执行</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="interview">
+        <div class="eyebrow">Interview pressure</div>
+        <h2>三句必须说准确</h2>
+        <details>
+          <summary>UI 为什么不能保证启动幂等？</summary>
+          <p>
+            UI
+            禁用按钮只能改善体验；网络重试、多窗口和直接调用仍可能重复。正确性由
+            Backend 的 per-run lock 与数据库条件事务共同保证。
+          </p>
+        </details>
+        <details>
+          <summary>Application Engine 为什么不直接调用 ACP？</summary>
+          <p>
+            Engine 只依赖 NodeExecutor 接口，保持 DAG 状态机可通过 fake executor
+            测试；生产 Backend 提供驱动真实 Session 的 Adapter。
+          </p>
+        </details>
+        <details>
+          <summary>启动成功后为什么仍可能很快 Failed？</summary>
+          <p>
+            启动链只保证当前 ready wave 持久化并派发。Agent 的
+            warm、模型选择、Prompt 和 ACP 都位于 tokio 后台任务中，错误稍后通过
+            fail callback 写回。
+          </p>
+        </details>
+      </section>
+
+      <section>
+        <h2>闭卷检索</h2>
+        <div class="quiz-grid">
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="c"
+            data-explanation="Theater 已进入且 Run 曾为 Running，说明同步启动链成功；模型错误发生在 tokio 后台 Executor 的绑定前阶段。"
+          >
+            <h3>1. 页面先进入 Running，随后报模型不存在，优先定位哪一层？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">前端展示逻辑</button>
+              <button data-choice="b">传输命令映射</button>
+              <button data-choice="c">后台节点执行</button>
+              <button data-choice="d">工作流草稿库</button>
+            </div>
+            <p class="quiz-result" aria-live="polite"></p>
+          </article>
+
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="b"
+            data-explanation="Running NodeRun 在数据库事务中先建立，Agent Executor 随后才接触 Session；这是外部执行可归属、可失败、可恢复的前提。"
+          >
+            <h3>2. 哪个事实必须发生在调用外部 Agent 之前？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">绑定会话标识</button>
+              <button data-choice="b">写入节点运行</button>
+              <button data-choice="c">收到停止原因</button>
+              <button data-choice="d">计算文件变化</button>
+            </div>
+            <p class="quiz-result" aria-live="polite"></p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>一手源码</h2>
+        <ul class="source-list">
+          <li>
+            <a
+              href="../../packages/app-shell/src/features/workflow-run/workflow-run-workspace.tsx"
+              >handleStart 与 Theater 切换</a
+            >
+          </li>
+          <li>
+            <a
+              href="../../packages/app-shell/src/state/hooks/use-workflow-runs.ts"
+              >useStartWorkflowRun 与缓存失效</a
+            >
+          </li>
+          <li>
+            <a href="../../apps/desktop/web/tauri-transport.ts"
+              >startWorkflowRun 到 Tauri 命令映射</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/backend/src/bootstrap.rs"
+              >Backend per-run lock 与控制入口</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/application/src/workflow_run/engine/engine.rs"
+              >Application Engine 启动与调度</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/backend/src/workflow/run/executor.rs"
+              >Agent Executor 的异步分界点</a
+            >
+          </li>
+        </ul>
+        <p class="followup">
+          如果某层职责仍混淆，请把具体症状或函数名交给老师，沿这一条链定位，不要横向扫完整仓库。
+        </p>
+      </section>
+
+      <nav class="lesson-nav" aria-label="课程导航">
+        <a href="0006-locate-agent-failure-by-durable-fact.html"
+          >← 第 6 课：故障证据</a
+        >
+        <a href="../reference/workflow-start-call-chain.html"
+          >启动调用链速查 →</a
+        >
+      </nav>
+    </main>
+  </body>
+</html>

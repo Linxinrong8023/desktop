@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workflow 启动调用链速查</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero compact">
+        <div class="eyebrow">Reference · Call Chain</div>
+        <h1>Workflow 启动调用链</h1>
+        <p class="lede">从 UI 命令到 Agent 后台任务，每层只承担自己的职责。</p>
+      </header>
+
+      <section>
+        <pre><code>WorkflowRunWorkspace.handleStart
+  → useStartWorkflowRun
+  → client.workflowRun.start
+  → executeOperation("startWorkflowRun")
+  → Tauri start_workflow_run
+  → Backend::start_workflow_run
+       → acquire_exclusive(run_id)
+  → WorkflowRunControlHandler::start
+  → WorkflowRunEngine::start
+       → parse graph / validate
+       → repository.start_run
+       → run_schedule
+  → repository.start_ready_nodes
+  → WorkflowRunNodeExecutor::dispatch
+       → tokio::spawn(drive_agent_node)
+  → 返回 Run = Running</code></pre>
+      </section>
+
+      <section>
+        <h2>两类失败</h2>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>现象</th>
+              <th>含义</th>
+              <th>优先层</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>立即 Toast，Run 未启动</td>
+              <td>同步启动命令失败</td>
+              <td>Transport / Backend / Engine / DB</td>
+            </tr>
+            <tr>
+              <td>先 Running，随后 Failed</td>
+              <td>异步节点执行失败</td>
+              <td>Agent Executor / Session / ACP</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>一句话职责</h2>
+        <pre><code>UI：表达意图
+Contract：传输命令
+Backend：组合并串行化
+Engine：决定状态机
+DB Adapter：原子落库
+Agent Executor：驱动 Session</code></pre>
+        <p class="followup">
+          回到<a href="../lessons/0007-trace-start-across-layers.html"
+            >第 7 课</a
+          >完成分层故障练习。
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
