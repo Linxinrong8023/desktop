@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>第 5 课：哪些节点真的能执行</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+    <script src="../assets/quiz.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="eyebrow">Lesson 0005 · 产品闭环</div>
+        <h1>编辑器里有名字，<br />不等于运行时能执行</h1>
+        <p class="lede">
+          Ora 当前只有 Start、Agent、Output
+          三种生产节点形成执行闭环。其他名字可能只存在于解析器、兼容代码或 mock
+          能力表中。定位“为什么工作流无法启动”时，必须先判断节点处于哪一层。
+        </p>
+        <div class="win">
+          本课胜利条件：看到一种节点，就能判断它是可执行、已识别但拒绝，还是仅有原型元数据
+        </div>
+      </header>
+
+      <section>
+        <h2>事故现场：Condition 已经发布，却无法启动</h2>
+        <div class="scenario">
+          <span class="label">Incident</span>
+          <p>
+            <code>Start → Condition → Agent → Output</code> 已保存为
+            Draft，也成功发布了 Snapshot。
+          </p>
+          <p>
+            创建 Run 时，后端能够把 <code>condition</code> 解析成已知
+            NodeType；但真正点击启动时，
+            <code>first_unsupported_node()</code> 会发现它不属于 v1
+            可执行集合，Run 在调度 Start 前被拒绝。
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2>当前生产节点：只有三个</h2>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>节点</th>
+              <th>有没有 Session</th>
+              <th>如何完成</th>
+              <th>主要数据</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Start</strong></td>
+              <td>没有</td>
+              <td>调度器同步完成</td>
+              <td>把 Run input 写成 Start NodeRun output</td>
+            </tr>
+            <tr>
+              <td><strong>Agent</strong></td>
+              <td>有</td>
+              <td>ACP Session 异步回调；可选 HITL</td>
+              <td>Role、Skill、Prompt、上下文、最终回复、文件变化</td>
+            </tr>
+            <tr>
+              <td><strong>Output</strong></td>
+              <td>没有</td>
+              <td>调度器同步完成</td>
+              <td>用两个换行拼接直接前驱的 NodeRun outputs</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Start 与 Output 都是控制节点：它们仍会创建 NodeRun，并经历
+          <code>Running → Succeeded</code>，只是没有外部
+          Session，也不等待异步回调。
+        </p>
+      </section>
+
+      <section>
+        <h2>三层能力矩阵</h2>
+        <div class="term-grid">
+          <article class="term-card">
+            <span class="status">生产可执行</span>
+            <h3>Start · Agent · Output</h3>
+            <p>
+              后端解析器认识，启动校验接受，调度器也有真实完成路径；当前节点栏只展示这三种。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">已识别但拒绝执行</span>
+            <h3>Prompt · Condition · Tool</h3>
+            <p>
+              Rust NodeType 能解析这些字符串，但 <code>supported()</code> 返回
+              false，启动 Run 时明确报错。
+            </p>
+          </article>
+          <article class="term-card">
+            <span class="status">mock / prototype 元数据</span>
+            <h3>Junction · Human · Loop · Subflow</h3>
+            <p>
+              前端 mock 中有名称、表单和测试，但当前节点栏隐藏；Rust
+              解析器也没有这些 NodeType。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>同一个“不能运行”，会在不同时间暴露</h2>
+        <div class="flow">
+          <article class="flow-step">
+            <small>01 · Draft</small><b>可以保存</b>
+            <p>
+              Definition CRUD 把 React Flow JSON
+              当作不透明文本，不判断节点执行闭环。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>02 · Publish</small><b>可以冻结</b>
+            <p>
+              发布复制 Draft 图成为
+              Snapshot，不因为节点只有原型元数据就自动实现它。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>03 · Create Run</small><b>先解析图</b>
+            <p>
+              完全未知的类型在这里就可能解析失败；已知但不支持的类型仍可进入
+              Run。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>04 · Start Run</small><b>检查可执行性</b>
+            <p>
+              缺少 Start、包含已知但不支持节点、存在不可达节点都会拒绝启动。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>为什么保留“认识但不执行”的类型？</h2>
+        <ul class="invariant-list">
+          <li>
+            解析器可以给出明确的
+            <code>unsupported node type condition</code>，而不是把节点静默跳过。
+          </li>
+          <li>旧数据或直接 API 输入不会因为前端节点栏隐藏就失去可诊断性。</li>
+          <li>
+            NodeType 注册不等于 NodeExecutor
+            已实现；显式门禁阻止半成品进入调度器后永久 Running。
+          </li>
+          <li>
+            前端还会把遗留的 <code>prompt</code> / <code>model</code> 节点升级成
+            Agent，但这属于兼容加载，不是独立 Prompt 节点执行器。
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>故障定位：先看失败发生在哪一层</h2>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>症状</th>
+              <th>优先判断</th>
+              <th>证据位置</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>节点栏根本没有 Condition</td>
+              <td>当前产品主动隐藏未闭环节点</td>
+              <td><code>AVAILABLE_NODE_KINDS</code></td>
+            </tr>
+            <tr>
+              <td>导入 Junction 后创建 Run 失败</td>
+              <td>Rust 解析器完全不认识该类型</td>
+              <td>Run 创建时的 GraphError</td>
+            </tr>
+            <tr>
+              <td>Condition 的 Run 已创建但启动失败</td>
+              <td>已知节点没有 v1 执行闭环</td>
+              <td>WorkflowValidationError</td>
+            </tr>
+            <tr>
+              <td>Start / Output 瞬间完成且没有 Session</td>
+              <td>正常同步控制节点行为</td>
+              <td>对应 NodeRun 状态与 output</td>
+            </tr>
+            <tr>
+              <td>Agent 长时间 Running</td>
+              <td>进入 Session 执行链后卡住</td>
+              <td>session_id、NodeRun.error、Session 历史</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="interview">
+        <div class="eyebrow">Interview pressure</div>
+        <h2>不要把“有代码”说成“有功能”</h2>
+        <details>
+          <summary>
+            前端有 Condition 表单和测试，为什么不能说 Condition 已实现？
+          </summary>
+          <p>
+            因为它们来自 mock/prototype 能力层。生产节点栏主动过滤
+            Condition，Rust
+            启动校验也明确拒绝它；没有从配置、调度、执行到持久化结果的闭环。
+          </p>
+        </details>
+        <details>
+          <summary>为什么不让不支持的节点进入调度器后再失败？</summary>
+          <p>
+            当前调度器只同步完成 Start/Output，只为 Agent
+            派发执行器。其他节点若进入 ready wave，会得到 Running
+            NodeRun，却没有任何完成者。启动前拒绝能避免永久悬挂。
+          </p>
+        </details>
+        <details>
+          <summary>Output 节点算不算 Agent 节点？</summary>
+          <p>
+            不算。它是无 Session 的同步控制节点，只拼接直接前驱
+            output；需要智能总结时，应在它之前放一个真正的汇总 Agent。
+          </p>
+        </details>
+      </section>
+
+      <section>
+        <h2>闭卷检索</h2>
+        <div class="quiz-grid">
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="d"
+            data-explanation="Condition 是 Rust 已知但 v1 不支持的类型；启动 Run 时 first_unsupported_node 会明确拒绝。"
+          >
+            <h3>1. 含 Condition 的冻结图最关键的拒绝点是？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">保存草稿时</button>
+              <button data-choice="b">发布快照时</button>
+              <button data-choice="c">创建运行时</button>
+              <button data-choice="d">启动运行时</button>
+            </div>
+            <p class="quiz-result" aria-live="polite"></p>
+          </article>
+
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="b"
+            data-explanation="前端 mock 中有表单，只能证明原型元数据存在；生产执行器是否闭环必须继续查后端启动门禁和执行路径。"
+          >
+            <h3>2. 看到 Tool 节点表单，最安全的结论是？</h3>
+            <div class="quiz-options">
+              <button data-choice="a">已经完整实现</button>
+              <button data-choice="b">只有原型证据</button>
+              <button data-choice="c">可以正常调度</button>
+              <button data-choice="d">必然生成会话</button>
+            </div>
+            <p class="quiz-result" aria-live="polite"></p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>一手源码</h2>
+        <ul class="source-list">
+          <li>
+            <a
+              href="../../crates/application/src/workflow_run/engine/node_type.rs"
+              >NodeType 与 v1 supported 门禁</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/application/src/workflow_run/engine/engine.rs"
+              >启动校验与三种生产执行路径</a
+            >
+          </li>
+          <li>
+            <a
+              href="../../packages/app-shell/src/features/workflow-editor/workflow-node-catalog.tsx"
+              >生产节点栏的 AVAILABLE_NODE_KINDS</a
+            >
+          </li>
+          <li>
+            <a href="../../packages/workflow-mock/src/capabilities.ts"
+              >mock/prototype 节点能力表</a
+            >
+          </li>
+        </ul>
+        <p class="followup">
+          看完后请直接向老师提问。任何一个“为什么有 UI
+          却不能运行”的疑问，都值得沿调用链继续追。
+        </p>
+      </section>
+
+      <nav class="lesson-nav" aria-label="课程导航">
+        <a href="0004-agent-node-session-lifecycle.html"
+          >← 第 4 课：Agent Session</a
+        >
+        <a href="../reference/node-capability-matrix.html">节点能力速查表 →</a>
+      </nav>
+    </main>
+  </body>
+</html>

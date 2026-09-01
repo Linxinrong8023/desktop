@@ -12,6 +12,8 @@
   Production Agent adapter. Use for: Session execution, prompt handoff, skills, outputs, file changes, and interactive-node behavior.
 - Repository source: `../desktop/packages/app-shell/src/features/workflow-editor/README.md` and `workflow-run/README.md`
   Frontend ownership notes. Use for: separating definition authoring from Theater/Overview and identifying documentation drift against live hooks.
+- Repository source: `../desktop/crates/application/src/workflow_run/engine/node_type.rs` and `../desktop/packages/app-shell/src/features/workflow-editor/workflow-node-catalog.tsx`
+  Current node capability boundary. Use for: distinguishing production-executable Start/Agent/Output nodes from known-but-rejected Rust variants and hidden mock/prototype metadata.
 - Repository source: `../desktop/packages/workflow-runtime/README.md` and `src/types.ts`
   Transport-neutral frontend model and memory adapter. Use for: understanding the mock/runtime seam without confusing it with Rust persistence.
 - [React Flow: `ReactFlowInstance`](https://reactflow.dev/api-reference/types/react-flow-instance)
