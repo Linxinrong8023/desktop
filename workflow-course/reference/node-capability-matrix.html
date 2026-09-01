@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ora Workflow 节点能力速查</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero compact">
+        <div class="eyebrow">Reference · Node capability</div>
+        <h1>节点能力速查</h1>
+        <p class="lede">
+          先看生产闭环，再看解析兼容，最后看 mock
+          元数据。不要反过来推断功能已经存在。
+        </p>
+      </header>
+
+      <section>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>节点</th>
+              <th>所在层</th>
+              <th>Run 行为</th>
+              <th>Session</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Start</td>
+              <td>生产可执行</td>
+              <td>同步完成，输出 Run input</td>
+              <td>无</td>
+            </tr>
+            <tr>
+              <td>Agent</td>
+              <td>生产可执行</td>
+              <td>异步 Session；支持 HITL</td>
+              <td>有</td>
+            </tr>
+            <tr>
+              <td>Output</td>
+              <td>生产可执行</td>
+              <td>同步拼接直接前驱 outputs</td>
+              <td>无</td>
+            </tr>
+            <tr>
+              <td>Prompt</td>
+              <td>已知但不支持</td>
+              <td>启动 Run 时拒绝；前端可升级为 Agent</td>
+              <td>无执行</td>
+            </tr>
+            <tr>
+              <td>Condition</td>
+              <td>已知但不支持</td>
+              <td>启动 Run 时拒绝</td>
+              <td>无执行</td>
+            </tr>
+            <tr>
+              <td>Tool</td>
+              <td>已知但不支持</td>
+              <td>启动 Run 时拒绝</td>
+              <td>无执行</td>
+            </tr>
+            <tr>
+              <td>Junction</td>
+              <td>mock/prototype</td>
+              <td>创建 Run 解析图时未知</td>
+              <td>无执行</td>
+            </tr>
+            <tr>
+              <td>Human</td>
+              <td>mock/prototype</td>
+              <td>创建 Run 解析图时未知</td>
+              <td>无执行</td>
+            </tr>
+            <tr>
+              <td>Loop</td>
+              <td>mock/prototype</td>
+              <td>创建 Run 解析图时未知</td>
+              <td>无执行</td>
+            </tr>
+            <tr>
+              <td>Subflow</td>
+              <td>mock/prototype</td>
+              <td>创建 Run 解析图时未知</td>
+              <td>无执行</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>快速判断顺序</h2>
+        <div class="relationship">
+          UI 有名称 / 表单<br />↓ 只能证明展示或原型存在<br /><br />
+          Rust NodeType 能解析<br />↓ 只能证明后端认识字符串<br /><br />
+          supported() 接受<br />↓ 证明可以进入 v1 调度<br /><br />
+          有同步完成者或 NodeExecutor<br />↓ 才形成生产执行闭环
+        </div>
+      </section>
+
+      <nav class="lesson-nav" aria-label="课程导航">
+        <a href="../lessons/0005-node-capability-matrix.html">← 返回第 5 课</a>
+        <a href="workflow-glossary.html">术语表 →</a>
+      </nav>
+    </main>
+  </body>
+</html>
