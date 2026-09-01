@@ -7,3 +7,4 @@
 - Use short retrieval questions and user teach-back; lesson coverage alone is not mastery.
 - When the user answers incorrectly, diagnose the mental-model gap before adding more material.
 - Revisit earlier concepts with spacing and interleave database, runtime, and frontend symptoms in later debugging exercises.
+- Avoid rote questions that merely map an error message to a layer. Prefer invariants, races, transaction boundaries, and ambiguous durable evidence.

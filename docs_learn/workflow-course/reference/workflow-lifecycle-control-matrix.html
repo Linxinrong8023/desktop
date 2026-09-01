@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workflow 生命周期控制矩阵</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero compact">
+        <div class="eyebrow">Reference · Lifecycle</div>
+        <h1>Cancel / Restart / Recovery</h1>
+        <p class="lede">用“目的、数据库动作、是否重新调度”区分三者。</p>
+      </header>
+
+      <section>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>操作</th>
+              <th>Run</th>
+              <th>NodeRuns</th>
+              <th>后续</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Cancel</td>
+              <td>Running → Cancelled</td>
+              <td>非终态 → Cancelled</td>
+              <td>清空 current_nodes，best-effort 停 Session</td>
+            </tr>
+            <tr>
+              <td>Restart</td>
+              <td>非 Running → Pending → Running</td>
+              <td>旧记录软删除，新建一轮记录</td>
+              <td>同 run_id 从 Start 执行</td>
+            </tr>
+            <tr>
+              <td>Recovery: Running NodeRun</td>
+              <td>→ Failed</td>
+              <td>非终态 → Failed</td>
+              <td>不重放未知外部执行</td>
+            </tr>
+            <tr>
+              <td>Recovery: 合法 HITL</td>
+              <td>保持 Running</td>
+              <td>Pending 保留</td>
+              <td>继续等用户</td>
+            </tr>
+            <tr>
+              <td>Recovery: 调度断档</td>
+              <td>保持 Running</td>
+              <td>保留已成功记录</td>
+              <td>重算 Ready，补调度后继</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>一句话记忆</h2>
+        <pre><code>Cancel  = 把正在发生的事情收口
+Restart = 清空本轮可见执行，从头重跑
+Recovery = 相信已提交事实，不猜外部执行结果</code></pre>
+        <p class="followup">
+          回到<a href="../lessons/0008-cancel-restart-and-boot-recovery.html"
+            >第 8 课</a
+          >完成竞态推演。
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
