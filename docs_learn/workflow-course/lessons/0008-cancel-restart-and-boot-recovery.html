@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>第 8 课：Cancel、Restart 与启动恢复</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="eyebrow">Lesson 0008 · 生命周期控制矩阵</div>
+        <h1>取消是收口，<br />重跑是清账，恢复是判案</h1>
+        <p class="lede">
+          三者都会碰 Run 和 NodeRun，但目的完全不同：Cancel
+          把仍在执行的事实收敛为终态；Restart
+          主动抹去本轮可见执行痕迹并从头跑；Boot Recovery
+          则只依据崩溃前已提交的事实，判断续跑、保留等待或失败关闭。
+        </p>
+        <div class="win">
+          本课胜利条件：面对任意中断时刻，能说清哪些记录会变、是否重新调度、为什么不会把未知执行误判为成功
+        </div>
+      </header>
+
+      <section>
+        <h2>先抓住三种意图</h2>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>操作</th>
+              <th>它在回答什么问题</th>
+              <th>最终语义</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Cancel</td>
+              <td>用户现在不想让这次 Run 继续了</td>
+              <td>同一 Run 进入 Cancelled，不再推进</td>
+            </tr>
+            <tr>
+              <td>Restart</td>
+              <td>用户要把这次 Run 当作一次全新的执行重跑</td>
+              <td>仍是同一个 run_id，从 Start 重新执行</td>
+            </tr>
+            <tr>
+              <td>Boot Recovery</td>
+              <td>进程意外退出后，数据库里的半成品到底该怎么办</td>
+              <td>按持久化事实选择 Fail / Preserve / Resume</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Cancel：先把数据库变成终态，再停 Session</h2>
+        <pre><code>持有 per-run lock
+  → DB 事务
+      Pending / Running NodeRuns → Cancelled
+      Run → Cancelled
+      current_nodes → []
+      COMMIT
+  → 释放锁
+  → best-effort stop 已绑定的 Sessions</code></pre>
+        <p>
+          顺序不能反过来。若先停外部
+          Session、随后数据库写失败，系统会留下“Session 已停，但 Run 仍是
+          Running”的矛盾事实。 现在先提交终态，因此即使停止 Session
+          失败，调度语义仍然明确：这次 Run 已取消。
+        </p>
+        <p>
+          迟到的完成回调也不能复活节点。回调尝试把 NodeRun 从 Running/Pending
+          改成 Succeeded 时，会发现它已经是 Cancelled，条件更新返回
+          NotRunning，Engine 将它当作幂等 no-op。
+        </p>
+      </section>
+
+      <section>
+        <h2>Restart：不是新建 Run，而是重置同一条 Run</h2>
+        <pre><code>仅拒绝当前 Running 的 Run
+  → DB 事务
+      旧的可见 NodeRuns → is_deleted = 1
+      Run → Pending
+      current_nodes → []
+      output / error / started_at / finished_at → NULL
+      COMMIT
+  → Engine.start(same run_id)
+      按同一 snapshot_id、workspace_id 从 Start 重跑</code></pre>
+        <p>
+          所以 Restart 后：<strong>run_id 不变</strong>，旧 NodeRun
+          仍作为软删除历史存在，新一轮会生成新的 NodeRun id。
+          如果业务需要保留两次彼此独立、同时可见的执行记录，应创建新的
+          WorkflowRun，而不是 Restart。
+        </p>
+        <aside class="callout">
+          当前实现只拒绝 Running，因此 Pending（包括尚未启动或可能处于 HITL 的
+          Run）也能进入
+          restart_run。这里要区分“当前代码允许什么”和“产品语义是否还应收紧”。
+        </aside>
+      </section>
+
+      <section>
+        <h2>Boot Recovery：对三种持久化现场作出不同判决</h2>
+        <div class="flow">
+          <article class="flow-step">
+            <small>现场 A · 外部结果未知</small><b>存在 Running NodeRun</b>
+            <p>
+              进程死时 Agent 可能已经产生副作用，不能安全重放。Run 与所有非终态
+              NodeRun 标记 Failed，error 为
+              <code>interrupted_by_restart</code>。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>现场 B · 只是调度断档</small
+            ><b>A 已 Succeeded，B 尚无 NodeRun</b>
+            <p>
+              A 的完成已提交，说明它不需要重跑。Engine 从冻结 DAG 与现有
+              NodeRuns 重新计算 Ready，创建并派发 B。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>现场 C · 正在等人</small><b>合法 Pending Agent NodeRun</b>
+            <p>
+              只有节点是 interactive Agent、已有
+              session_id，且冻结图也证明它是交互节点，才保留等待，不自动推进。
+            </p>
+          </article>
+        </div>
+        <p>
+          其他 Pending 记录属于无法证明其语义的持久化异常，系统选择 fail
+          closed：标记失败，而不是猜测它可以继续。
+        </p>
+      </section>
+
+      <section>
+        <h2>最容易在面试里说错的区别</h2>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>比较项</th>
+              <th>Restart</th>
+              <th>Resume / Boot Recovery</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>触发者</td>
+              <td>用户主动命令</td>
+              <td>进程启动时内部修复</td>
+            </tr>
+            <tr>
+              <td>成功节点</td>
+              <td>旧 NodeRuns 全部软删除，从头再跑</td>
+              <td>保留已成功节点，只补上未调度后继</td>
+            </tr>
+            <tr>
+              <td>Running 节点</td>
+              <td>当前 Running Run 不允许 Restart</td>
+              <td>因外部结果未知而判 Failed</td>
+            </tr>
+            <tr>
+              <td>run_id / snapshot</td>
+              <td>不变</td>
+              <td>不变</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="interview">
+        <div class="eyebrow">进入第 6 阶段 · Interview pressure</div>
+        <h2>真正有区分度的竞态题</h2>
+        <p>
+          Agent A 的完成回调与用户 Cancel
+          几乎同时到达。不要只回答“有锁所以安全”，请分别推演：完成回调先拿到
+          per-run lock，和 Cancel 先拿到锁。两条时间线中，A、可能出现的后继
+          B、Run 的最终状态分别是什么？为什么最终都不会继续推进？
+        </p>
+        <details>
+          <summary>答题时必须覆盖的四个关键词</summary>
+          <p>
+            条件状态迁移、回调后的 run_schedule、Cancel 事务、迟到回调 no-op。
+          </p>
+        </details>
+      </section>
+
+      <section>
+        <h2>一手源码</h2>
+        <ul class="source-list">
+          <li>
+            <a href="../../../crates/backend/src/bootstrap.rs"
+              >Backend Cancel 编排、Restart 入口与 boot sweep</a
+            >
+          </li>
+          <li>
+            <a
+              href="../../../crates/application/src/workflow_run/engine/engine.rs"
+              >Engine cancel、restart、resume 与回调后调度</a
+            >
+          </li>
+          <li>
+            <a href="../../../crates/db/src/repository/workflow_run_engine.rs"
+              >Cancel/Restart 事务与 interrupted_by_restart</a
+            >
+          </li>
+          <li>
+            <a href="../../../crates/backend/src/workflow/run/engine.rs"
+              >启动恢复对 Pending / Running 节点的判定</a
+            >
+          </li>
+        </ul>
+      </section>
+
+      <nav class="lesson-nav" aria-label="课程导航">
+        <a href="0007-trace-start-across-layers.html">← 第 7 课：启动调用链</a>
+        <a href="../reference/workflow-lifecycle-control-matrix.html"
+          >生命周期控制矩阵 →</a
+        >
+      </nav>
+    </main>
+  </body>
+</html>
