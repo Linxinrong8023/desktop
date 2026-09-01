@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>第 6 课：用最后一个落库事实定位 Agent 故障</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+    <script src="../assets/quiz.js" defer></script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="eyebrow">Lesson 0006 · 故障定位</div>
+        <h1>不要先猜日志，<br />先找最后一个落库事实</h1>
+        <p class="lede">
+          Agent 节点从进入 ready wave 到 ACP
+          回调结束，会留下几个不可逆的数据库检查点。
+          <code>NodeRun.status</code> 与 <code>session_id</code>
+          的组合，可以先把故障范围砍掉一半，再去读 Session 与日志。
+        </p>
+        <div class="win">
+          本课胜利条件：看到一条异常
+          NodeRun，就能说出执行链已经走过什么、还没证明什么
+        </div>
+      </header>
+
+      <section>
+        <h2>事故现场：Running，但没有 session_id</h2>
+        <div class="scenario">
+          <span class="label">Incident</span>
+          <p>
+            <code>Start → Agent A → Output</code> 已启动两分钟，界面一直显示 A
+            正在运行。
+          </p>
+          <pre><code>workflow_runs
+status = Running
+current_nodes = ["A"]
+
+workflow_node_runs
+node_id = A
+status = Running
+session_id = NULL
+error = NULL</code></pre>
+          <p>
+            这不表示“调度器还没调度 A”。A 的 Running NodeRun
+            已经证明调度事务完成；缺少 session_id 只说明 owning prompt
+            尚未成功越过绑定检查点，或者后续失败回调没有完成落库。
+          </p>
+        </div>
+      </section>
+
+      <section>
+        <h2>一条 Agent 节点的八个检查点</h2>
+        <div class="flow">
+          <article class="flow-step">
+            <small>01 · Ready</small><b>内存计算</b>
+            <p>
+              冻结 DAG 与已成功前驱算出 A Ready；这一步本身还没有 A 的 NodeRun。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>02 · Persist</small><b>先写 NodeRun</b>
+            <p>
+              <code>start_ready_nodes()</code> 创建 Running NodeRun，并把 A 写入
+              current_nodes。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>03 · Dispatch</small><b>后台派发</b>
+            <p>
+              <code>WorkflowRunNodeExecutor::dispatch()</code>
+              启动异步执行任务。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>04 · Prepare</small><b>warm 与 attach</b>
+            <p>
+              准备 provider Session、选择模型、解析 Role/Skill，并组装 owning
+              prompt。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>05 · Admit</small><b>提交 Prompt</b>
+            <p>
+              <code>prompt_session()</code> 接受 owning prompt，返回事件流。
+            </p>
+          </article>
+          <article class="flow-step">
+            <small>06 · Bind</small><b>发布 session_id</b>
+            <p>数据库仍确认 Run/NodeRun Running 后，才绑定并公开 Session。</p>
+          </article>
+          <article class="flow-step">
+            <small>07 · Stream</small><b>消费 ACP 事件</b>
+            <p>累计 Agent 回复，等待 stop reason；交互节点可能转为 Pending。</p>
+          </article>
+          <article class="flow-step">
+            <small>08 · Callback</small><b>完成或失败</b>
+            <p>
+              回调写入 output/error，移除 current_nodes，并继续调度或终止 Run。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>数据库证据阶梯</h2>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>持久化现象</th>
+              <th>已经能够证明</th>
+              <th>优先排查范围</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>没有 A NodeRun</td>
+              <td>A 尚未进入成功落库的 ready wave</td>
+              <td>前驱状态、DAG ready、启动校验、调度事务</td>
+            </tr>
+            <tr>
+              <td>Running + session_id NULL</td>
+              <td>A 已调度并落库，但 Session 尚未成功绑定</td>
+              <td>
+                Agent 配置、warm/attach、模型、Role/Skill、Prompt
+                admission、失败回调
+              </td>
+            </tr>
+            <tr>
+              <td>Running + session_id 有值</td>
+              <td>owning prompt 已被接受，绑定检查点已越过</td>
+              <td>
+                ACP 事件流、Agent CLI、stop reason、Session 停止与完成回调
+              </td>
+            </tr>
+            <tr>
+              <td>Pending + session_id 有值</td>
+              <td>若冻结配置 interactive=true，这是合法 HITL 等待</td>
+              <td>用户后续 Prompt 或“完成当前节点”动作</td>
+            </tr>
+            <tr>
+              <td>Failed + error 有值</td>
+              <td>失败回调已经完成持久化，Run 同时进入 Failed</td>
+              <td>先读 NodeRun.error，再根据 session_id 判断绑定前后</td>
+            </tr>
+            <tr>
+              <td>Succeeded，但后继无 NodeRun</td>
+              <td>本节点完成事实已落库，后续调度可能在提交后中断</td>
+              <td>ready 重算、回调后的 run_schedule、启动恢复 reconcile</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>为什么 session_id 要晚绑定？</h2>
+        <p>
+          warm/attach 期间可能已经存在内部 Session，但 Ora 故意不立即把它绑定到
+          NodeRun。只有 <code>prompt_session()</code> 接受该节点的 owning prompt
+          后， <code>bind_node_run_session()</code> 才在数据库确认 Run 与
+          NodeRun 仍是 Running。
+        </p>
+        <ul class="invariant-list">
+          <li>
+            取消操作如果先赢，迟到的绑定会被拒绝，Session 不会重新把节点“复活”。
+          </li>
+          <li>
+            界面一旦通过 NodeRun 找到 Session，就能假设 owning prompt
+            已经处于活动链路。
+          </li>
+          <li>
+            <code>session_id = NULL</code> 不等于从未 warm，也不等于从未
+            attach。
+          </li>
+          <li>
+            绑定前的准备失败会尽力停止并丢弃未公开 Session，然后通过 fail
+            callback 落库。
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>一条实用的排障顺序</h2>
+        <ol class="invariant-list">
+          <li>先用 run_id 查 WorkflowRun：状态、error、current_nodes。</li>
+          <li>
+            再查全部 NodeRuns：找最后一个已落库节点，以及它的
+            status/session_id/error。
+          </li>
+          <li>
+            没有 session_id 时，优先检查绑定前准备链；不要先翻 Session 历史。
+          </li>
+          <li>
+            有 session_id 时，沿 Session 历史、Agent CLI 与 ACP stop reason
+            继续查。
+          </li>
+          <li>
+            NodeRun 已 Succeeded 时，不再怀疑该节点没有执行；转查回调后的 DAG
+            推进。
+          </li>
+        </ol>
+        <div class="callout">
+          <strong>一句话方法：</strong
+          >先确定最后一个持久化检查点，再检查它与下一个检查点之间的代码和日志。
+        </div>
+      </section>
+
+      <section class="interview">
+        <div class="eyebrow">Interview pressure</div>
+        <h2>常见追问</h2>
+        <details>
+          <summary>
+            Running + session_id NULL，能否断言 session/new 没发生？
+          </summary>
+          <p>
+            不能。warm 可能已经创建 provider Session，attach 也可能已经完成；Ora
+            只在 owning prompt 被接受后才把 Session 绑定到 NodeRun。
+          </p>
+        </details>
+        <details>
+          <summary>NodeRun 为什么必须先于外部执行落库？</summary>
+          <p>
+            它先建立执行尝试和 current_nodes 锚点。若先调用外部 Agent
+            再写库，数据库失败会留下已经执行却无法归属和恢复的外部副作用。
+          </p>
+        </details>
+        <details>
+          <summary>Succeeded 但 output 为空，是否代表 Agent 没回答？</summary>
+          <p>
+            不代表。协议执行可能成功，但 <code>outputPolicy = none</code>
+            会有意不把最终回复暴露到 NodeRun.output；完整对话仍属于 Session。
+          </p>
+        </details>
+      </section>
+
+      <section>
+        <h2>闭卷检索</h2>
+        <div class="quiz-grid">
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="b"
+            data-explanation="Running NodeRun 已证明 ready wave 成功落库；session_id 为空把范围收缩到绑定前准备链或未完成的失败回调。"
+          >
+            <h3>
+              1. Agent NodeRun Running 且 session_id 为空，最准确的结论是？
+            </h3>
+            <div class="quiz-options">
+              <button data-choice="a">尚未进入调度</button>
+              <button data-choice="b">已调度未绑定</button>
+              <button data-choice="c">已暂停等人工</button>
+              <button data-choice="d">已成功并推进</button>
+            </div>
+            <p class="quiz-result" aria-live="polite"></p>
+          </article>
+
+          <article
+            class="quiz-card"
+            data-quiz
+            data-answer="b"
+            data-explanation="上游 Succeeded 已落库而后继没有 NodeRun，首先检查完成回调提交后的 run_schedule 或崩溃恢复，而不是重新怀疑上游 Session 创建。"
+          >
+            <h3>
+              2. A 已 Succeeded，但本应 Ready 的 B 没有 NodeRun，优先查什么？
+            </h3>
+            <div class="quiz-options">
+              <button data-choice="a">上游输出为空</button>
+              <button data-choice="b">调度续跑中断</button>
+              <button data-choice="c">会话创建失败</button>
+              <button data-choice="d">人工节点等待</button>
+            </div>
+            <p class="quiz-result" aria-live="polite"></p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>一手源码</h2>
+        <ul class="source-list">
+          <li>
+            <a href="../../crates/application/src/workflow_run/engine/engine.rs"
+              >run_schedule、complete_node 与 fail_node</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/backend/src/workflow/run/executor.rs"
+              >warm → attach → prompt → bind → callback</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/backend/src/workflow/run/engine.rs"
+              >回调串行化与启动恢复</a
+            >
+          </li>
+          <li>
+            <a href="../../crates/db/src/repository/workflow_run_engine.rs"
+              >NodeRun、session_id 与完成状态的事务写入</a
+            >
+          </li>
+        </ul>
+        <p class="followup">
+          遇到真实故障时，把 Run 与 NodeRun
+          的五个关键字段贴给老师：status、current_nodes、session_id、error、output。
+        </p>
+      </section>
+
+      <nav class="lesson-nav" aria-label="课程导航">
+        <a href="0005-node-capability-matrix.html">← 第 5 课：节点能力</a>
+        <a href="../reference/workflow-failure-ladder.html">故障证据阶梯 →</a>
+      </nav>
+    </main>
+  </body>
+</html>

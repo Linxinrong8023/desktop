@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workflow Agent 故障证据阶梯</title>
+    <link rel="stylesheet" href="../assets/course.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero compact">
+        <div class="eyebrow">Reference · Debugging</div>
+        <h1>Agent 故障证据阶梯</h1>
+        <p class="lede">
+          先找最后一个持久化检查点，再检查它与下一个检查点之间的链路。
+        </p>
+      </header>
+
+      <section>
+        <table class="schema">
+          <thead>
+            <tr>
+              <th>数据库现象</th>
+              <th>已经证明</th>
+              <th>下一步</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>无 NodeRun</td>
+              <td>没有成功进入持久化 ready wave</td>
+              <td>查前驱、DAG、启动门禁、调度事务</td>
+            </tr>
+            <tr>
+              <td>Running / session_id NULL</td>
+              <td>已调度，尚未成功绑定 Session</td>
+              <td>查配置、warm/attach、模型、Prompt admission、失败回调</td>
+            </tr>
+            <tr>
+              <td>Running / session_id 有值</td>
+              <td>owning prompt 已接受并完成绑定</td>
+              <td>查 ACP 流、Agent CLI、stop reason、完成回调</td>
+            </tr>
+            <tr>
+              <td>Pending / session_id 有值</td>
+              <td>可能是合法 interactive HITL</td>
+              <td>用冻结图确认 interactive，再查人工续聊或完成动作</td>
+            </tr>
+            <tr>
+              <td>Failed / error 有值</td>
+              <td>失败已经落库，Run 终止</td>
+              <td>先读 error，再用 session_id 区分绑定前后</td>
+            </tr>
+            <tr>
+              <td>Succeeded / 后继无 NodeRun</td>
+              <td>当前节点已完成，续调度尚未留下事实</td>
+              <td>查 run_schedule 与启动 reconcile</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Agent 节点检查点</h2>
+        <pre><code>Ready（内存）
+  → NodeRun Running（持久化）
+  → dispatch
+  → warm / attach
+  → prompt admitted
+  → session_id bound（持久化）
+  → ACP events
+  → Succeeded / Failed / Pending（持久化）
+  → run_schedule</code></pre>
+      </section>
+
+      <section>
+        <h2>五个必查字段</h2>
+        <pre><code>WorkflowRun.status
+WorkflowRun.state.current_nodes
+WorkflowNodeRun.status
+WorkflowNodeRun.session_id
+WorkflowNodeRun.error</code></pre>
+        <p class="followup">
+          回到<a
+            href="../lessons/0006-locate-agent-failure-by-durable-fact.html"
+            >第 6 课</a
+          >完成故障场景练习。
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
