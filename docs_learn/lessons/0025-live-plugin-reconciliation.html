@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第二十五课：Ora 运行中安装与卸载如何生效</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0025 · Live Reconciliation</p>
+  <h1>不重启 Ora，Agent 插件怎样加入和离开？</h1>
+  <p class="lead">动态插件系统不能只把文件写入磁盘，还必须让当前 Ora 进程里的 Lifecycle 快照与 Supervisor 集合同步变化。当前实现用显式 scan 与 <code>sync_plugin_agents()</code> 完成这次协调。</p>
+
+  <h2>安装：先进入 Lifecycle，再进入 Agent Runtime</h2>
+  <pre><code>Installer 写入并验证插件包
+  ↓
+Lifecycle scan 刷新 InstalledPlugin 快照
+  ↓
+Backend 调用 sync_plugin_agents()
+  ↓
+发现新的 AgentRef
+  ↓
+创建新的 ConnectionSupervisor
+  ↓
+Supervisor 尝试建立 Ready connection</code></pre>
+
+  <p>如果只完成落盘而没有后两步，设置页可能显示“已安装”，但当前 Agent Runtime 仍找不到它，用户必须重启 Ora。显式同步就是为了消除这段不一致。</p>
+
+  <h2>更新：身份不变，两种 generation 更新</h2>
+  <p>更新插件时，Lifecycle 会先停止正在使用旧代码的插件进程，再替换安装版本并重新扫描。AgentRef 和 PluginId 通常不变，所以 Supervisor 仍代表同一个 Agent；旧 connection 断开后，它会从新插件代码建立新的 Plugin process generation 与 Agent connection generation。</p>
+
+  <pre><code>同一个 AgentRef / PluginId
+旧版本：Plugin generation 5 → Connection generation 2
+更新并重连
+新版本：Plugin generation 6 → Connection generation 3</code></pre>
+
+  <h2>卸载：从安装集合和 Supervisor 集合同时移除</h2>
+  <pre><code>关闭插件拥有的 UI surface
+  ↓
+停止当前插件进程与受管子进程树
+  ↓
+暂存并移走 installed 代码
+  ↓ 可选删除或保留 data
+从 Lifecycle 已安装快照移除
+  ↓
+清理 Skill / Effect 投影
+  ↓
+sync_plugin_agents()
+  ↓
+从新请求可见的 Supervisor map 移除</code></pre>
+
+  <p>Session 数据不会因为插件卸载而删除，它仍保存原来的 AgentRef。之后再使用时会得到 <code>agent_runtime_unavailable</code>，重新安装相同 Agent provider 后才可能恢复。</p>
+
+  <div class="callout">
+    <strong>已有 actor clone 的细节：</strong>从 Supervisor map 移除不会仅凭一次 map 删除就粗暴销毁其他模块已经持有的 Supervisor handle；但卸载流程已经停止底层插件进程，所以这不代表旧会话还能继续正常对话。它只是让持有者通过既有对象观察 connection 丢失与 unavailable，而不是撞上悬空引用。
+  </div>
+
+  <h2>stop 不是 disable</h2>
+  <p>当前 API 有 <code>stop_plugin</code> 和 <code>activate_plugin</code>，但没有持久化的插件 enabled/disabled 状态。</p>
+
+  <pre><code>stop_plugin
+  → 当前 Plugin generation 停止
+  → 插件仍在 InstalledPlugin 集合
+  → Agent Supervisor 仍存在
+  → Supervisor 为维持 Agent connection，可能再次 ensure_running</code></pre>
+
+  <p>因此，对一个正在被 Supervisor 管理的 Agent 插件，<code>stop</code> 更接近一次暂时停止或手动重启触发点，不能承诺“以后都不要启动”。如果产品需要真正的禁用功能，必须增加持久化 enabled 状态，并让插件发现、Supervisor 同步和自动重试共同尊重它。</p>
+
+  <div class="callout warning">
+    <strong>当前实现边界：</strong>不要在面试中说“禁用后 Supervisor 静默重试”。当前没有正式 disable 操作；如果未来新增 disable，正确语义反而应该是 Supervisor 不再重试，而不是一边禁用一边重新启动。
+  </div>
+
+  <h2>谁负责哪一段？</h2>
+  <table>
+    <thead><tr><th>模块</th><th>负责的变化</th></tr></thead>
+    <tbody>
+      <tr><td>Installer / Manager</td><td>代码落盘、包结构验证、版本替换</td></tr>
+      <tr><td>Plugin Lifecycle</td><td>InstalledPlugin 快照、进程停止、scan、卸载事务</td></tr>
+      <tr><td>Backend Plugin API</td><td>清理 Skill/Effect 投影并编排同步顺序</td></tr>
+      <tr><td>ConnectionSupervisors</td><td>把已安装 Agent 集合协调成 Supervisor 集合</td></tr>
+      <tr><td>Session</td><td>保留 AgentRef 和历史，不因插件暂时缺失而损坏</td></tr>
+    </tbody>
+  </table>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>插件安装、更新、扫描和卸载完成后，Backend 都显式调用 <code>sync_plugin_agents</code>，把 Lifecycle 的 InstalledPlugin 快照协调成按 AgentRef 索引的 Supervisor 集合。安装会在当前进程创建新 Supervisor；更新保持身份但滚动进程和 connection generation；卸载先关闭 surface、停止进程树并移除包，再移除新请求可见的 Supervisor，而 Session 仍保留 AgentRef。当前只有临时 stop/activate，没有持久 disable；真正禁用必须进入 desired state 并阻止 Supervisor 自动重启。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="stop 只停止当前 generation；插件仍算已安装，Supervisor 仍有维持连接的职责，所以它不能表示持久禁用。">
+    <h2>只检查这一件事</h2>
+    <p>想让某个 Agent 插件以后不再被自动启动，当前只调用 <code>stop_plugin</code> 是否足够？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">足够永久禁用</button>
+      <button data-answer="correct">不足仍会重试</button>
+      <button data-answer="incorrect">等同完整卸载</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>为什么安装 Agent 插件后还要调用 <code>sync_plugin_agents()</code>？为什么当前的 <code>stop_plugin</code> 不能当成持久禁用？</p>
+  <p>如果“移除 Supervisor map 但 actor 仍有 clone”看起来矛盾，直接向我追问。</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/backend/src/bootstrap.rs">插件操作后的 Agent 同步</a>、<a href="../../crates/backend/src/agent_runtime/connection.rs">Supervisor 集合协调</a>、<a href="../../crates/plugin-lifecycle/src/scan.rs">Lifecycle scan</a>、<a href="../../crates/plugin-lifecycle/src/lib.rs">stop 与 uninstall</a>、<a href="../../crates/plugin-lifecycle/src/uninstall.rs">卸载暂存与数据策略</a>。</p>
+
+  <p class="next"><a href="0024-two-model-discovery-paths.html">← 回看第二十四课</a> · <a href="0026-define-agent-contract.html">进入第二十六课：插件作者与 SDK 的分工 →</a></p>
+</main>
+</body>
+</html>

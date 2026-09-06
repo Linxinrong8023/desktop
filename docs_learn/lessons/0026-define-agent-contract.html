@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第二十六课：defineAgent 与插件作者的分工</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0026 · Agent Plugin Author</p>
+  <h1><code>defineAgent</code> 帮你接好插座，但不会替你实现 Agent</h1>
+  <p class="lead">写 Agent 插件时，不需要手工拼出完整的 Plugin JSON-RPC 合同。插件作者把四个业务回调交给 <code>defineAgent</code>，SDK 负责把它们装配成 Ora 认识的标准接口。</p>
+
+  <h2>先看最小心智模型</h2>
+  <pre><code>插件作者提供四个回调
+  start       怎样启动并接通真实 Agent
+  stop        怎样停止真实 Agent
+  listModels  会话前能展示哪些模型
+  onAcp       怎样把 Ora 发来的 ACP 帧交给 Agent
+        ↓
+defineAgent 装配标准合同
+  agent/start
+  agent/stop
+  agent/listModels
+  agent/acp 双向 notification
+        ↓
+plugin.run()
+  发送 ora/register，然后开始处理消息</code></pre>
+
+  <div class="callout">
+    <strong>最容易混淆的时间点：</strong>调用 <code>defineAgent(...)</code> 时只是把回调登记到本地 Plugin 对象；调用 <code>plugin.run()</code> 才向 Ora 发送 <code>ora/register</code>；之后 Ora 调用 <code>agent/start</code>，插件才真正启动 Agent CLI。
+  </div>
+
+  <h2>SDK 自动完成什么？</h2>
+  <table>
+    <thead><tr><th>SDK 自动完成</th><th>意义</th></tr></thead>
+    <tbody>
+      <tr><td>一次性注册三个控制方法</td><td>避免插件漏写合同名称或漏注册方法</td></tr>
+      <tr><td>声明并接收 <code>agent/acp</code></td><td>建立 Ora 与插件之间统一的 ACP 外层通道</td></tr>
+      <tr><td>校验 <code>agent/start</code> 参数</td><td>插件实现只会收到合法的 <code>cwd</code> 与 <code>hostVersion</code></td></tr>
+      <tr><td>返回 <code>protocol = acp</code>、<code>acpVersion = 1</code></td><td>让所有标准 Agent 插件采用一致的启动响应</td></tr>
+      <tr><td>把模型结果包装成合同格式</td><td>补齐默认值并形成 <code>{ models: [...] }</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>插件作者仍然必须完成什么？</h2>
+  <p><code>defineAgent</code> 只统一“接口形状”，不了解 OpenCode、Claude Code 或其他 CLI 的具体行为。真正的适配仍由插件作者负责：</p>
+
+  <pre><code>start(context, send)
+  → 决定启动系统命令还是插件随包二进制
+  → 请求 Ora Host 创建 Agent CLI 进程
+  → 保存进程句柄
+  → 持续读取 CLI stdout 中的 ACP 帧
+  → 每读到一帧就调用 send(frame) 发回 Ora
+
+onAcp(frame)
+  → 把 Ora 发来的 ACP 帧写入 CLI stdin
+
+stop()
+  → 执行该 Agent 特有的优雅退出
+  → 必要时请求 Host kill
+  → 清理本地句柄，允许以后重新 start
+
+listModels()
+  → 返回无需创建 Session 就能展示的模型目录</code></pre>
+
+  <p>因此，Agent 插件的最小闭环不是“写出四个空函数”，而是同时完成<strong>真实 CLI 的生命周期</strong>和<strong>ACP 的双向管道</strong>。</p>
+
+  <h2>两条 ACP 方向不要写反</h2>
+  <div class="card">
+    <p><strong>Ora → Agent：</strong><code>agent/acp</code> 到达 SDK → SDK 调用 <code>onAcp(frame)</code> → 插件写入 CLI stdin。</p>
+    <p><strong>Agent → Ora：</strong>插件读取 CLI stdout → 插件调用 <code>send(frame)</code> → SDK 包装成 <code>agent/acp</code> notification。</p>
+  </div>
+
+  <div class="callout warning">
+    <strong>文档漂移提醒：</strong>旧说明可能写成“插件自己拥有 Agent 进程，Ora 不接触 stdio”。当前推荐实现是插件决定启动和停止策略，但通过 <code>createHostProcesses</code> 请求 Ora Host 创建并持有真实 OS 进程；插件拿到的是可读写的代理流。这与我们前面学过的“策略归插件、进程机制归 Host”一致。
+  </div>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong><code>defineAgent</code> 是 Agent 插件合同的装配器。插件作者提供 start、stop、listModels 和 onAcp 四个业务回调，SDK 统一注册三个控制方法和双向 <code>agent/acp</code> notification，并完成参数与返回结构的标准化。SDK 不会替插件理解具体 CLI；插件仍需通过 Host Processes 管理 CLI 生命周期，并在 CLI stdio 与 ACP frame 之间建立透明双向管道。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="defineAgent 只在本地 Plugin 对象中装配合同；plugin.run 才发送 ora/register，后续 agent/start 才真正启动 CLI。">
+    <h2>只检查一个时间点</h2>
+    <p><code>defineAgent(...)</code> 已调用，但 <code>plugin.run()</code> 还没调用，此时发生了什么？</p>
+    <div class="quiz-options">
+      <button data-answer="correct">本地装配合同</button>
+      <button data-answer="incorrect">已经启动进程</button>
+      <button data-answer="incorrect">已经创建会话</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>用了 <code>defineAgent</code> 以后，为什么插件作者仍然必须实现 <code>start</code>、<code>stop</code> 和 <code>onAcp</code>？请分别说出 SDK 替你做了什么，以及它没有替你做什么。</p>
+  <p>如果“登记回调、发送注册、启动 CLI”三个时间点仍然混在一起，直接向我追问。</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../packages/plugin-sdk/src/agent.ts"><code>defineAgent</code> 的合同装配</a>、<a href="../../packages/plugin-sdk/src/plugin.ts"><code>plugin.run()</code> 与 <code>ora/register</code></a>、<a href="../../packages/plugin-sdk/src/process.ts"><code>createHostProcesses</code> 与进程代理流</a>、<a href="../../packages/plugin-sdk/README.md">Plugin SDK Agent 示例</a>。</p>
+
+  <p class="next"><a href="0025-live-plugin-reconciliation.html">← 回看第二十五课</a> · <a href="../reference/agent-plugin-coverage-audit.html">查看 Agent 插件覆盖审计</a></p>
+</main>
+</body>
+</html>

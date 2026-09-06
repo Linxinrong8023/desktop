@@ -38,3 +38,20 @@
 - 2026-08-30：用户已通过第 16 课口述检查，能说出 Supervisor 负责请求连接、确认/维持连接状态和故障重试。需避免把 Lifecycle 缩窄成只负责启动；它拥有插件进程的完整生命周期。
 - 2026-08-30：用户主动识别一个 Agent connection 服务多个 Session 时存在路由隔离问题。第 17 课聚焦两个 Session ID、AcpPeer pending correlation、RouteRegistry、独立有界队列和 generation/token 防旧路由污染。
 - 2026-08-30：用户已掌握共享 connection 的两阶段 Session 路由，并指出“找到 Channel 即找到会话 actor”。教学时不要把概念等价的表述当成重大错误；先确认其模型足以解释系统，再将 `agent_session_id → SessionChannel` 与 `→ ora_session_id` 的源码差异标为实现补充。
+- 2026-08-30：完成 Agent 插件学习覆盖审计。核心 happy path、三层所有权、generation 与多 Session 路由已掌握；尚需优先补故障分类/熔断、安全与信任边界、完整 teardown、合同版本与 ACP capability negotiation。PluginId/AgentRef、三种 generation、两条模型发现路径需复述固定。Effect 热加载继续降级为开发旁支。
+- 2026-08-30：开始第 18 课“失败不是一种失败”。本课只建立三类故障决策：预期缺失静默持续重试，异常可恢复计入 crash circuit，确定性不兼容立即 Failing；等待用户口述后再记录掌握状态。
+- 2026-08-30：用户已掌握第 18 课三类故障决策。精度补充：限制不是总重试次数，而是一分钟滑动窗口内第四次真正故障熔断；合同错误需要修复/更新，重装同一错误版本无效。开始第 19 课安全边界，重点区分结构可信、协议可信、进程可回收与最小权限沙箱。
+- 2026-08-30：用户已掌握第 19 课安全边界，能说明 Host Processes 解决进程所有权与回收，不等于 Agent 插件已安全沙箱化。精度补充：Deno 未直接授予 allow-write，但 allow-run 与受管 CLI 仍产生接近宿主的实际风险。开始第 20 课对称 teardown。
+- 2026-08-30：第 20 课首次复述方向正确，但用户觉得 `agent/stop` 与 Host kill 的并存“很怪”。教学需先区分两种所有权：插件拥有 CLI 启停语义，Host 拥有 OS process handle、stdio 与最终回收责任；暂不判定本课掌握。
+- 2026-08-30：用户继续追问“CLI 退出不就是进程结束吗”，暴露出 exit、kill、reap 与双进程仍混在一起。已明确：CLI 正常退出后无需再 kill，但 Host 仍 wait/reap；Deno main.js 是另一个仍需 Lifecycle 停止的进程；强杀只处理超时后仍存活的进程。
+- 2026-08-30：用户的根本疑问进一步明确为“Agent 进程归 Ora 管，为何 agent/stop 还能操作”。需固定：agent/stop 是业务控制入口，不是第二套 OS 管理；插件 handler 最终通过 `ora/childprocess/*` 携带 generation-scoped processId 请求 PluginProcessHost，真实 close/kill/wait 始终由 Host 与 ora-process 执行。
+- 2026-08-30：用户已能正确复述 `Ora → agent/stop → plugin → Ora Host → kill`，并质疑为何不由 Ora 直接 kill。需强调该绕行是 policy/mechanism 分离：插件封装 CLI 专属优雅停止策略，Host 执行通用 OS 操作；Host 在两秒超时后仍会绕过插件直接强杀。等待用户用“避免重新内置每种 CLI 的退出差异”完成复述。
+- 2026-08-30：用户准确纠正教师口误：正式的 `ora/shutdown` 用于 Lifecycle/Plugin Runtime 停止 Deno 插件进程；具体 CLI 的私有退出指令属于 `agent/stop` handler 的实现。该纠正证明用户已开始稳定区分 Agent CLI 与插件进程两层 teardown。
+- 2026-08-30：用户用“每个 Agent 有自己的停止前置动作，插件需要告知 Ora 怎么做；之前误以为都是强制停止”完成第 20 课复述。对称 teardown 判定掌握。开始第 21 课，严格区分 `ora/register`、`agent/start` 和 ACP `initialize` 三层确认。
+- 2026-08-30：第 21 课首次复述已理解“声明可收发不等于真实 ACP initialize 成功”，但把 initialize response 猜成包含 MCP 清单。需固定：它返回 Agent ACP capabilities（如 session load/list/close/delete）；MCP 安装配置与会话前模型列表分别属于其他路径。
+- 2026-08-30：用户已用三句话完成第 21 课总验收。精度补充：`agent/start` 不重定义外层 Plugin RPC，而是确认 CLI 已拉起并声明内层 payload 的 ACP major version；initialize 返回 Agent ACP capabilities。四项 P0 均完成，开始第 22 课 PluginId/AgentRef。
+- 2026-08-30：用户通过追问识别出 Session 直接保存完整 PluginId 是可行替代设计，并已掌握第 22 课。关键区分：两个 ID 造成的是身份转换，Supervisor 并非转换层；请求 Lifecycle 启动插件只是其职责之一，它仍负责 Agent connection 的建立、确认、维持、重试与 generation。下一步学习三种 generation。
+- 2026-08-30：开始第 23 课“三种 generation”。本课只固定三只独立时钟：Lifecycle 的 Plugin process generation、Supervisor 的 Agent connection generation、Effect 系统的 Workspace desired-state generation；尤其纠正 `effect/restart` 参数不是 Plugin generation。
+- 2026-08-30：用户已掌握第 23 课，能从热加载场景推出只有 Effect generation 必然变化。开始第 24 课两条模型发现路径；必须说明当前 Chat/Workflow 主要依赖 Warm Session 的 ACP configOptions，不能把存在 `agent/listModels` 合同等同为前端当前唯一消费源。
+- 2026-08-30：第 24 课经追问已澄清：`agent/listModels` 是后于 Warm 引入的无 Session 预览合同，可能减少仅为展示目录而 Warm，但不能替代 agent_session_id、路由、配置生效与首 Prompt 预热；用户表示理解，留待后续穿插复述。开始第 25 课动态安装协调，并纠正审计中的“禁用”：当前只有 stop/activate，没有持久 disable；Agent Supervisor 可能在 stop 后重新拉起。
+- 2026-08-30：第 25 课已澄清落盘安装与内存同步，以及切换 Agent、停止进程、持久禁用和卸载四种动作。用户主动质疑 stop 后自动重启的产品语义，已确认当前实现缺少独立 desired enabled/disabled 状态；用户表示理解并要求继续，尚未单独口述验收，留待后续穿插复述。开始第 26 课，从插件作者视角区分 `defineAgent` 自动装配的标准合同与作者仍需实现的 CLI 生命周期和 ACP 双向管道。

@@ -58,5 +58,15 @@
 - [专题第 15 课：connection 与 ensure_running](./lessons/0015-connection-versus-ensure-running.html)
 - [专题第 16 课：为什么 Agent 需要 Runtime 与 Supervisor](./lessons/0016-runtime-and-supervisor.html)
 - [专题第 17 课：一个 Agent 如何准确服务多个 Session](./lessons/0017-shared-agent-session-routing.html)
+- [专题第 18 课：失败不是一种失败](./lessons/0018-failure-triage.html)
+- [专题第 19 课：Agent 插件到底安全吗](./lessons/0019-agent-plugin-security-boundary.html)
+- [专题第 20 课：启动与退出必须对称](./lessons/0020-symmetric-agent-teardown.html)
+- [专题第 21 课：Agent Ready 前的三次确认](./lessons/0021-three-stage-agent-handshake.html)
+- [专题第 22 课：PluginId 与 AgentRef](./lessons/0022-plugin-id-versus-agent-ref.html)
+- [专题第 23 课：三个 Generation 不是同一个计数器](./lessons/0023-three-generations.html)
+- [专题第 24 课：模型发现为什么有两条路径](./lessons/0024-two-model-discovery-paths.html)
+- [专题第 25 课：Ora 运行中安装与卸载如何生效](./lessons/0025-live-plugin-reconciliation.html)
+- [专题第 26 课：defineAgent 与插件作者的分工](./lessons/0026-define-agent-contract.html)
+- [Agent 插件学习覆盖审计：已掌握、待验收与遗漏](./reference/agent-plugin-coverage-audit.html)
 
-当前进度：Agent 插件从安装到 Prompt 渲染的全链路口述验收已通过；正在学习共享 Agent connection 如何通过 Agent Session ID、AcpPeer correlation 与 RouteRegistry 隔离多个 Session。
+当前进度：Agent 插件覆盖审计中的四项 P0 已全部通过口述检查；P1 的 PluginId/AgentRef 与三种 generation 已通过复述，两条模型发现路径与动态安装协调已澄清待穿插复习，开始从插件作者视角学习 <code>defineAgent</code> 最小合同。

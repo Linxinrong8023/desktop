@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第二十课：启动与退出必须对称</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0020 · Symmetric Teardown</p>
+  <h1>启动与退出必须对称</h1>
+  <p class="lead">启动 Agent 时依次建立插件进程、Agent CLI、协议连接和 Session 路由；退出时必须反方向拆掉这些资源。只发一句“请停止”远远不够。</p>
+
+  <h2>类比：关一家仍在生产的工厂</h2>
+  <div class="card">
+    <p><strong>先通知生产线停机：</strong>让它保存状态、关闭文件和管道。</p>
+    <p><strong>再关闭控制室：</strong>不再接收新命令，等待正在处理的工作收尾。</p>
+    <p><strong>最后由总闸兜底：</strong>如果有人拒绝退出，就切断并确认整座工厂已经无人运行。</p>
+  </div>
+
+  <p>Agent teardown 也是“先礼后兵”：先给插件自行清理的机会，最终仍由 Host 保证操作系统进程树真的消失。</p>
+
+  <h2>为什么不能只调用 agent/stop？</h2>
+  <p><code>agent/stop</code> 是 Ora 对 <code>main.js</code> 的控制调用。它表达的是：</p>
+
+  <pre><code>“请用你最了解的方式，优雅停止你启动的 Agent CLI。”</code></pre>
+
+  <p>插件最了解具体 CLI：可能要关闭 stdin、发送该 CLI 自己定义的退出指令（不是 <code>ora/shutdown</code>）、等待缓存落盘。但插件可能有 bug、已经卡死，或者 Agent CLI 根本不响应。因此它只能是<strong>优雅清理机会</strong>，不能是最终资源保证。</p>
+
+  <div class="callout">
+    <strong>当前边界：</strong><code>agent/stop</code> 最多等待 2 秒。超时或报错只记录警告，不阻止后续强制清理。
+  </div>
+
+  <h2>你觉得奇怪，是因为这里有两种“拥有”</h2>
+  <table>
+    <thead><tr><th>所有权</th><th>谁拥有</th><th>具体含义</th></tr></thead>
+    <tbody>
+      <tr><td>逻辑所有权</td><td>Agent 插件</td><td>决定启动哪个 CLI、传什么参数、怎样优雅退出、怎样转发 ACP</td></tr>
+      <tr><td>资源所有权</td><td>Ora Host</td><td>真正保存 OS process handle、stdio 和进程树记录，并保证最终 kill/reap</td></tr>
+    </tbody>
+  </table>
+
+  <p>因此，“插件启动 Agent”更准确地说是：插件<strong>提出启动方案</strong>，通过 <code>ora/childprocess/spawn</code> 请求 Host 执行；Host 真正在操作系统里创建进程，再给插件一个 <code>processId</code> 用来写 stdin、关闭或请求 kill。</p>
+
+  <pre><code>main.js：我要运行 opencode acp，并在停止时先关闭 stdin
+Host：我来真正 spawn，保存进程句柄，并保证整棵树最终消失</code></pre>
+
+  <p><code>agent/stop</code> 先询问逻辑所有者：“你知道怎样礼貌结束它，请先处理。”如果逻辑所有者失灵，资源所有者仍能说：“这个 processId 和它的后代归我登记，现在强制回收。”两者不是重复，而是<strong>专属语义</strong>与<strong>最终保证</strong>的分工。</p>
+
+  <h3>agent/stop 不是绕过 Host 的第二条进程管理通道</h3>
+  <pre><code>Ora Backend
+  ↓ Plugin RPC：调用 agent/stop
+main.js 的 stop() handler
+  ↓ Host request：ora/childprocess/closeStdin 或 kill
+PluginProcessHost
+  ↓ 根据当前 generation 的 processId 查找 OS handle
+ora-process
+  ↓ 真正执行 close / kill / wait
+Agent CLI</code></pre>
+
+  <p>也就是说，<code>agent/stop</code> 是一条<strong>业务控制命令</strong>：Ora 请适配器选择正确的停止动作。只要动作涉及受管 OS 进程，适配器仍要请求 Host 执行。它没有从 Host 手里拿走 process handle，也没有出现第二个进程管理员。</p>
+
+  <p>还可以把 <code>processId</code> 理解成 Host 发给插件的一张“取号凭证”：插件可以拿凭证请求写入、关闭 stdin 或 kill；Host 检查它属于当前 Plugin generation 后，才对自己持有的真实进程执行操作。</p>
+
+  <h3>为什么不让 Ora 一开始就直接杀？</h3>
+  <p><strong>Ora 当然可以直接杀，而且超时后确实会这样做。</strong>但直接 kill 是强制终止，Host 不知道每一种 Agent CLI 的优雅退出语义：</p>
+
+  <ul>
+    <li>有的 CLI 应该先关闭 stdin，让它自己完成收尾；</li>
+    <li>有的 CLI 需要收到自己的退出指令或信号；这属于 <code>agent/stop</code> 的实现，不是 <code>ora/shutdown</code>；</li>
+    <li>插件还可能需要清空自己的内存引用、停止输出泵或等待缓存落盘。</li>
+  </ul>
+
+  <p>这些差异正是 adapter 存在的原因。如果全部硬编码进 Ora，新增一种 Agent 就要修改主程序，重新退化为内置 Agent。</p>
+
+  <pre><code>第一选择：Ora → agent/stop → adapter 选择优雅方案 → Host 执行
+超时兜底：Ora → Host 直接 kill 仍存活的整棵进程树</code></pre>
+
+  <p>这次“绕一圈”换来的不是更多进程控制权，而是<strong>把 Agent 专属停止策略留在插件，把通用 OS 执行和最终兜底留在 Host</strong>。代价是一轮控制调用，收益是宿主不需要认识每一种 CLI。</p>
+
+  <h2>CLI 已经退出，还要杀什么？</h2>
+  <p><strong>如果 Agent CLI 已经成功退出，就不需要再杀一次。</strong>但还要区分三件事：</p>
+
+  <table>
+    <thead><tr><th>动作</th><th>含义</th><th>是否每次都发生</th></tr></thead>
+    <tbody>
+      <tr><td>exit</td><td>CLI 自己正常结束，或者收到 kill 后结束执行</td><td>最终必须发生</td></tr>
+      <tr><td>kill</td><td>向仍未退出的进程强制发送终止请求</td><td>只在需要时兜底</td></tr>
+      <tr><td>wait / reap</td><td>Host 确认进程已退出，收集退出状态并清除进程记录</td><td>无论怎样退出都要做</td></tr>
+    </tbody>
+  </table>
+
+  <p>另外，Agent CLI 退出只结束了<strong>第二个进程</strong>；执行 <code>main.js</code> 的 Deno 插件进程仍然存在。<code>agent/stop</code> 的 SDK 合同本来就是“停止 Agent，但暂时保留插件进程”。在整个 connection generation 结束时，Lifecycle 才继续用 <code>ora/shutdown</code> 停止 Deno 进程。</p>
+
+  <pre><code>agent/stop 成功
+  ├── Agent CLI：已经退出 → Host wait/reap，不再强杀
+  └── Deno main.js：仍在运行 → Lifecycle 随后停止它
+
+agent/stop 失败或卡死
+  ├── Agent CLI：可能仍在运行 → Host 最终 kill + wait/reap
+  └── Deno main.js：Lifecycle 发送 ora/shutdown，必要时强杀</code></pre>
+
+  <h2>完整退出链</h2>
+  <pre><code>Supervisor 判定 connection generation 结束
+  ↓ 使这一代 Session routes 失败
+agent/stop（最多 2 秒，best effort）
+  ↓ 插件有机会优雅停止 Agent CLI
+Lifecycle.stop(plugin_id)
+  ↓
+Plugin Runtime 发送 ora/shutdown
+  ↓ 等待 Deno main.js 正常退出
+超时仍未退出
+  ↓
+Host 检查 Deno 与受管子进程树
+  ↓ 只强杀仍存活者；等待并回收全部退出状态
+才允许新的 Plugin generation 启动</code></pre>
+
+  <p>这条链有两次“请你自己停”的机会：<code>agent/stop</code> 面向真实 Agent CLI，<code>ora/shutdown</code> 面向 Deno 插件进程。最终的 kill/reap 则是不相信第三方清理逻辑一定正确的 Host 兜底。</p>
+
+  <h2>每一层谁负责？</h2>
+  <table>
+    <thead><tr><th>负责人</th><th>退出职责</th><th>为什么归它</th></tr></thead>
+    <tbody>
+      <tr><td>Supervisor</td><td>判断 Agent connection generation 已结束，触发 teardown</td><td>它知道连接是否健康、是否需要替换</td></tr>
+      <tr><td>Agent 插件 main.js</td><td>处理 <code>agent/stop</code>，执行 CLI 专属优雅退出</td><td>只有适配器了解具体 Agent 的停止方式</td></tr>
+      <tr><td>Plugin Lifecycle</td><td>停止 Deno 插件进程并阻止 generation 重叠</td><td>它是插件进程唯一所有者</td></tr>
+      <tr><td>PluginProcessHost / ora-process</td><td>强杀、等待并回收完整 OS 进程树</td><td>只有 Host 能给出跨平台的最终清理保证</td></tr>
+    </tbody>
+  </table>
+
+  <h2>为什么必须等待旧树退出再重启？</h2>
+  <p>假设 Host 只发送停止请求，马上就启动 generation 2：</p>
+
+  <pre><code>generation 1：main.js A 仍卡住，Agent CLI A 仍占用管道
+generation 2：main.js B 已启动，Agent CLI B 也开始工作</code></pre>
+
+  <p>这时同一个插件身份下有两套真实进程。旧通知可能迟到，两个 CLI 可能同时修改 Workspace，甚至监听同一端口。generation 标签能帮助识别旧消息，却不能阻止旧进程继续产生副作用。</p>
+
+  <div class="callout warning">
+    <strong>关键区别：</strong>generation 标记解决“这条消息属于谁”；等待并回收进程树解决“旧的执行者是否真的不存在”。两者必须同时存在。
+  </div>
+
+  <h2>哪些情况都会走清理？</h2>
+  <ul>
+    <li>Agent connection 异常，需要重试新的 generation；</li>
+    <li>Ora 正常关闭 Backend；</li>
+    <li>插件被停止、更新或卸载；</li>
+    <li>Deno 插件自己意外退出——Host 仍会清理该 generation 启动的子进程。</li>
+  </ul>
+
+  <p>所以清理不是只服务“正常关机”，它更重要的价值是在第三方代码失控时仍能收口。</p>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Agent 的 teardown 是分层且有兜底的。Supervisor 先使旧 connection generation 和路由失效，再以短超时调用 <code>agent/stop</code>，给适配器优雅停止 CLI 的机会；随后 Lifecycle 停止 Deno 插件并发送 <code>ora/shutdown</code>。Host 最终会等待并回收整棵受管进程树，只对仍存活的进程强杀；确认旧 generation 已退出后才允许替代 generation 启动，从而同时避免旧消息串线和真实副作用重叠。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="agent/stop 只是短时、best-effort 的优雅清理机会；无论它是否响应，Lifecycle 和 Host 都必须继续停止插件并回收整棵进程树。">
+    <h2>只检查这一件事</h2>
+    <p>如果插件始终不响应 <code>agent/stop</code>，Ora 应该怎样处理？</p>
+    <div class="quiz-options">
+      <button data-answer="correct">继续关闭插件并回收进程树</button>
+      <button data-answer="incorrect">永远等待插件自行确认退出</button>
+      <button data-answer="incorrect">立即启动新代并保留旧进程</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>为什么 Ora 既需要 <code>agent/stop</code>，又需要 Host 的 kill/reap 兜底？请区分：CLI 已正常退出时 Host 做什么，CLI 卡死时 Host 又做什么。</p>
+  <p>如果 <code>agent/stop</code>、<code>ora/shutdown</code>、kill 和 reap 的区别还不清楚，直接向我追问。</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/backend/src/agent_runtime/plugin_agent/control.rs">agent/stop 两秒边界</a>、<a href="../../crates/backend/src/agent_runtime/connection.rs">AgentProcess teardown</a>、<a href="../../crates/plugin-runtime/README.md">shutdown_and_wait</a>、<a href="../../crates/plugin-lifecycle/README.md">generation 子进程回收</a>、<a href="../../crates/process/README.md">跨平台进程树终止</a>。</p>
+
+  <p class="next"><a href="0019-agent-plugin-security-boundary.html">← 回看第十九课</a> · <a href="0021-three-stage-agent-handshake.html">下一课：Agent Ready 前的三次确认 →</a></p>
+</main>
+</body>
+</html>

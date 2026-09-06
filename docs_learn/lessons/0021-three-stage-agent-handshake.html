@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第二十一课：Agent Ready 前的三次确认</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0021 · Contract & Capability Negotiation</p>
+  <h1>Agent Ready 前，为什么要确认三次？</h1>
+  <p class="lead"><code>ora/register</code>、<code>agent/start</code> 和 ACP <code>initialize</code> 不是重复握手。它们依次确认：插件适配器会什么、它启动了什么协议、真实 Agent 支持什么能力。</p>
+
+  <h2>先看三层对象</h2>
+  <pre><code>Ora Host
+  ↕ 外层 Plugin RPC
+Deno main.js（Agent adapter）
+  ↕ 内层 ACP
+真实 Agent CLI</code></pre>
+
+  <p>因为中间有两条协议、两个进程，仅仅确认 <code>main.js</code> 活着，不能证明真实 Agent CLI 已经启动，更不能证明它支持恢复 Session 等可选功能。</p>
+
+  <h2>第一次：ora/register 确认适配器合同</h2>
+  <p>Deno 插件进程启动后，通过外层 Plugin Runtime 发送一次 <code>ora/register</code>：</p>
+
+  <pre><code>{
+  methods: ["agent/start", "agent/stop", "agent/listModels"],
+  emits: ["agent/acp"],
+  effectSurfaces: [...]
+}</code></pre>
+
+  <p>它回答的问题是：</p>
+
+  <blockquote>“这个 main.js 声称 Ora 可以调用哪些方法，它又可能主动发出哪些 notification？”</blockquote>
+
+  <ul>
+    <li>注册在这一代插件进程中不可变，只允许发送一次；</li>
+    <li>Agent adapter 层会检查 start、stop、listModels 和 emitted agent/acp 是否完整；</li>
+    <li>合同不完整是确定性错误，直接 <code>Failing</code>，不重试。</li>
+  </ul>
+
+  <div class="callout">
+    <strong>它没有证明：</strong>Agent CLI 已经启动，也没有说明真实 Agent 支持 <code>session/load</code>、<code>session/list</code> 等 ACP 能力。
+  </div>
+
+  <h2>第二次：agent/start 确认 CLI 与传输协议</h2>
+  <p>合同完整后，Ora 调用外层 Plugin RPC 的 <code>agent/start</code>，传入工作目录和 Host 版本。插件此时才真正启动 Agent CLI，并返回：</p>
+
+  <pre><code>{
+  protocol: "acp",
+  acpVersion: 1
+}</code></pre>
+
+  <p>它回答的问题是：</p>
+
+  <blockquote>“我已经把底层 Agent 拉起来了；接下来的 agent/acp payload 应按哪种协议和 major version 理解？”</blockquote>
+
+  <ul>
+    <li>CLI 没安装时返回 <code>AGENT_NOT_INSTALLED</code>，Supervisor 保持 Unavailable 并静默重试；</li>
+    <li>当前 Host 只接受 protocol = ACP、major version = 1；</li>
+    <li>不支持的协议版本属于确定性不兼容，立即 Failing。</li>
+  </ul>
+
+  <div class="callout">
+    <strong>它仍没有证明：</strong>内层 ACP 请求真的可以往返。插件可能启动了错误程序，CLI 也可能已卡死。
+  </div>
+
+  <h2>第三次：ACP initialize 与真实 Agent 协商能力</h2>
+  <p>Supervisor 创建 <code>AcpPeer</code>，再通过 <code>agent/acp</code> 向真实 Agent CLI 发送内层 ACP <code>initialize</code>。Ora 在请求里介绍自己和客户端能力；Agent 在响应里返回它支持的能力。</p>
+
+  <pre><code>Ora → Agent：
+  ACP v1
+  clientInfo = ora
+  我能接收 Session config options
+
+Agent → Ora：
+  是否支持 session/load
+  是否支持 session/list
+  是否支持 session/close
+  是否支持 session/delete
+  其他 Agent capabilities</code></pre>
+
+  <div class="callout warning">
+    <strong>不是 MCP 清单：</strong>这里返回的是这个 Agent 在 ACP 协议中的能力，例如能否 load、list、close 或 delete Session。Ora 安装了哪些 MCP 插件属于另一套插件贡献与配置，不由 Agent 的 ACP <code>initialize</code> 枚举。会话前模型列表也由外层 <code>agent/listModels</code> 单独读取。
+  </div>
+
+  <p>它回答的问题是：</p>
+
+  <blockquote>“真实 Agent 的 ACP 通道是否真的可用？接下来的 Session 生命周期可以调用哪些可选能力？”</blockquote>
+
+  <p><code>initialize</code> 当前最多等待 15 秒。超时或普通协议错误属于真正的可恢复故障：回收旧 generation、计入 crash circuit，再按退避策略重试。</p>
+
+  <h2>三次确认放在一张表里</h2>
+  <table>
+    <thead><tr><th>阶段</th><th>协议层</th><th>谁对谁</th><th>确认什么</th></tr></thead>
+    <tbody>
+      <tr><td><code>ora/register</code></td><td>Plugin RPC</td><td>main.js → Ora</td><td>适配器的方法与 notification 合同</td></tr>
+      <tr><td><code>agent/start</code></td><td>Plugin RPC</td><td>Ora → main.js</td><td>CLI 已启动，以及 payload 的协议与版本</td></tr>
+      <tr><td>ACP <code>initialize</code></td><td>ACP</td><td>Ora AcpPeer ↔ Agent CLI</td><td>真实通道可用，以及 Agent 的可选能力</td></tr>
+    </tbody>
+  </table>
+
+  <h2>什么时候才发布 Ready？</h2>
+  <pre><code>Plugin Lifecycle Running
++ ora/register 合同完整
++ agent/start 成功且 ACP v1 兼容
++ agent/listModels 成功
++ ACP initialize 成功
+= Agent connection Ready</code></pre>
+
+  <p>所以 <code>Ready</code> 不是“一个进程存在”，而是 Host 已经拿到一条经过合同检查、版本检查和能力协商的可用 Agent connection。</p>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Agent Ready 前有三层确认。<code>ora/register</code> 固定 Deno adapter 的外层 Plugin RPC 合同；<code>agent/start</code> 让 adapter 拉起 CLI，并确认 <code>agent/acp</code> 中承载的协议及 major version；随后 AcpPeer 与真实 CLI 执行 ACP <code>initialize</code>，验证通道并协商 Session 可选能力。三者分别验证适配器接口、传输版本和真实 Agent 能力，任何一层都不能替代下一层。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="session/load 是真实 Agent 的 ACP 可选能力，由 ACP initialize response 返回；Manifest、ora/register 和 agent/start 都不能代替这次协商。">
+    <h2>只检查这一件事</h2>
+    <p>Ora 在哪个阶段知道真实 Agent 是否支持 <code>session/load</code>？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">读取插件清单类型字段之后</button>
+      <button data-answer="incorrect">检查运行注册方法列表之后</button>
+      <button data-answer="correct">收到ACP初始化能力响应之后</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p><code>ora/register</code> 已经声明插件会发送 <code>agent/acp</code>，为什么还必须执行 ACP <code>initialize</code>？</p>
+  <p>如果三次确认的对象或协议层仍然混淆，直接向我追问，不要把它们背成一串名词。</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-runtime/README.md">ora/register 与不可变合同</a>、<a href="../../crates/backend/src/agent_runtime/plugin_agent/control.rs">agent/start 与 ACP major version</a>、<a href="../../crates/backend/src/agent_runtime/connection.rs">ACP initialize 与 Ready</a>、<a href="../../crates/backend/src/agent_runtime/plugin_agent/README.md">Agent adapter 边界</a>。</p>
+
+  <p class="next"><a href="0020-symmetric-agent-teardown.html">← 回看第二十课</a> · <a href="0022-plugin-id-versus-agent-ref.html">下一课：PluginId 与 AgentRef →</a></p>
+</main>
+</body>
+</html>

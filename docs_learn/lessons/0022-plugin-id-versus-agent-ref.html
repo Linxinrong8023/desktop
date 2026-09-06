@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第二十二课：PluginId 与 AgentRef</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0022 · Two Identities</p>
+  <h1>同一个 Agent 插件，为什么有两个身份？</h1>
+  <p class="lead"><code>PluginId</code> 回答“Lifecycle 管理哪个安装包”，<code>AgentRef</code> 回答“Session 绑定哪个 Agent provider”。它们来自同一个 Manifest，但字符串不同，不能直接比较。</p>
+
+  <h2>从一份 Manifest 开始</h2>
+  <pre><code>namespace = "official"
+identifier = "ora-space.opencode"
+kind = "agent"</code></pre>
+
+  <p>Ora 会从中得到两个运行时身份：</p>
+
+  <table>
+    <thead><tr><th>身份</th><th>当前示例</th><th>回答的问题</th></tr></thead>
+    <tbody>
+      <tr><td><code>PluginId</code></td><td><code>official/ora-space.opencode</code></td><td>哪一个已安装插件包和进程？</td></tr>
+      <tr><td><code>AgentRef</code></td><td><code>ora-space.opencode</code></td><td>这个 Session 绑定哪一个 Agent provider？</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>注意分隔符：</strong><code>PluginId</code> 把 source namespace 与包名用 <code>/</code> 连接；<code>AgentRef</code> 直接使用 Manifest 的 <code>identifier</code>。这里 identifier 自己可以包含一个点，例如 <code>ora-space.opencode</code>。
+  </div>
+
+  <h2>PluginId 属于插件管理世界</h2>
+  <p>Plugin Manager 和 Lifecycle 需要知道完整安装地址：</p>
+
+  <pre><code>PluginId = official/ora-space.opencode
+
+installed/official/ora-space.opencode/&lt;version&gt;
+data/official/ora-space.opencode/
+Lifecycle.ensure_running(plugin_id)
+Lifecycle.stop(plugin_id)</code></pre>
+
+  <p>它用于安装、扫描、配置、启动、停止、卸载，以及绑定 Plugin process generation。因为这些操作针对的是一个具体插件包。</p>
+
+  <h2>AgentRef 属于会话与 Agent Runtime 世界</h2>
+  <p>Session 不关心包安装在什么目录，也不应该直接操作 Lifecycle。它只保存：</p>
+
+  <pre><code>session.agent_ref = "ora-space.opencode"</code></pre>
+
+  <p>Agent Runtime 以 <code>AgentRef</code> 为键寻找 application-scoped Supervisor：</p>
+
+  <pre><code>AgentRef
+  ↓ ConnectionSupervisors.for_agent(...)
+对应 ConnectionSupervisor
+  ↓ Supervisor 内部保存 AgentSource
+PluginId + package name</code></pre>
+
+  <p>Supervisor 正好位于两个世界的交界处：上层 Session 用 <code>AgentRef</code> 找它；Supervisor 启动时获得的 <code>AgentSource</code> 同时包含 <code>PluginId</code> 和包名，因此它能用完整 <code>PluginId</code> 请求 Lifecycle 管理插件进程。</p>
+
+  <div class="callout">
+    <strong>不是另一张独立映射表：</strong><code>ConnectionSupervisors</code> 的核心索引是 <code>AgentRef → ConnectionSupervisor</code>。发现插件时，Ora 从同一个 InstalledPlugin 取得 <code>plugin.id</code> 与 <code>plugin.name</code>，构造 <code>AgentSource</code> 后交给对应 Supervisor。二者的对应关系因此集中在 Supervisor 创建与同步过程，不需要每个 Session 自己推导。
+  </div>
+
+  <h2>Session 能不能直接保存完整 PluginId？</h2>
+  <p><strong>技术上完全可以。</strong>如果从零设计，并能接受 Session 与插件安装地址直接耦合，直接保存 <code>official/ora-space.opencode</code> 会省掉一次身份转换。当前 Ora 保留两种身份，主要是因为：</p>
+
+  <ul>
+    <li>Session 表达“绑定哪个 Agent provider”，Lifecycle 表达“管理哪个插件安装包”；</li>
+    <li>已有 Session、历史和协议一直持久化 package identifier，改为完整 PluginId 需要兼容迁移；</li>
+    <li>Session 可以比插件安装状态活得更久，未知 AgentRef 表示暂时未安装，而不是损坏数据。</li>
+  </ul>
+
+  <p>这是一个带成本的架构选择，而不是语法上的硬性要求：收益是领域语义和历史兼容，代价是必须集中维护两种身份的对应关系。</p>
+
+  <h2>改用 PluginId，能不能连 Supervisor 一起省掉？</h2>
+  <p>不能。两个 ID 只造成身份转换，Supervisor 并不是为转换 ID 而存在。即使 Session 直接保存 PluginId，仍需要 Supervisor 负责：</p>
+
+  <pre><code>请求 Lifecycle ensure_running
+→ 调用 agent/start
+→ 完成 ACP initialize
+→ 发布并维持 Ready connection
+→ 管理重试、generation、路由和 teardown</code></pre>
+
+  <p>因此，直接保存 PluginId 最多省掉 <code>AgentRef → AgentSource</code> 的身份查找，省不掉 Agent connection 的运行时监督。</p>
+
+  <h2>为什么不直接比较两个字符串？</h2>
+  <pre><code>"ora-space.opencode"
+!=
+"official/ora-space.opencode"</code></pre>
+
+  <p>如果拿 Session 的 <code>agent_ref</code> 直接去 Lifecycle 查插件，结果永远找不到。当前代码把转换集中在 <code>ConnectionSupervisors</code> 和 <code>AgentSource</code> 附近，避免每个调用方自己拼接 <code>official/</code>。</p>
+
+  <div class="callout warning">
+    <strong>不要手工补前缀：</strong>当前 resolver v1 只有 <code>official</code> namespace，也不代表业务代码应该写死它。正确做法是从验证后的 InstalledPlugin 建立 <code>AgentRef ↔ AgentSource</code> 关系。
+  </div>
+
+  <h2>插件卸载后，为什么 Session 还保留 AgentRef？</h2>
+  <p>AgentRef 是持久化的开放字符串，不是“当前安装列表”的外键。一个会话可以比提供它的插件活得更久：</p>
+
+  <pre><code>Session 仍记录 ora-space.opencode
+  ↓ 但 Supervisor 已不存在
+for_agent(agent_ref) 查找失败
+  ↓
+报告 agent_runtime_unavailable
+而不是把 Session 判成损坏数据</code></pre>
+
+  <p>这样重新安装提供相同 AgentRef 的插件后，会话仍知道自己原来绑定谁；系统不必因为插件暂时不可用而抹掉历史身份。</p>
+
+  <h2>同一个 AgentRef 被两个插件声称怎么办？</h2>
+  <p>Supervisor 集合按 AgentRef 建立。如果第二个插件声称已经被占用的 AgentRef，Ora 会忽略第二个，而不是让它悄悄接管用户原有会话。因为“让另一个包接管同一 Agent 身份”比拒绝重复来源更危险。</p>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Agent 插件同时跨越插件管理域和会话域，因此保留两个身份。<code>PluginId = namespace/name</code> 是 Lifecycle 的包与进程地址；<code>AgentRef = package identifier</code> 是 Session 持久绑定和 Supervisor 的查找键。发现插件时，Ora 从 InstalledPlugin 构造同时持有二者的 AgentSource，并以 AgentRef 索引 Supervisor；上层按 AgentRef 找共享连接，下层按 PluginId 管理插件 generation。这并非唯一可行设计：Session 直接保存 PluginId 可以省掉身份转换，但会改变现有持久化合同，而且仍然省不掉 Supervisor 的连接管理职责。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="Session 保存的是 AgentRef；Supervisor 再把它解析到包含 PluginId 的 AgentSource，Lifecycle 不直接消费 Session 的 agent_ref。">
+    <h2>只检查这一件事</h2>
+    <p>Session 持久化的 <code>agent_ref</code> 主要用于查找什么？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">查找插件安装版本目录位置</button>
+      <button data-answer="correct">查找对应代理连接监督对象</button>
+      <button data-answer="incorrect">查找当前进程系统编号位置</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>如果 Session 改为直接保存完整 <code>PluginId</code>，能够省掉什么，又为什么仍然不能省掉 Supervisor？</p>
+  <p>如果 package namespace、identifier 或 AgentRef 仍然混淆，直接向我追问。</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/domain/src/plugin_id.rs">PluginId</a>、<a href="../../crates/domain/src/agent_ref.rs">AgentRef</a>、<a href="../../crates/backend/src/agent_runtime/connection.rs">AgentSource 与 Supervisor 查找</a>、<a href="../../crates/plugin-manager/src/validation.rs">InstalledPlugin 身份构造</a>。</p>
+
+  <p class="next"><a href="0021-three-stage-agent-handshake.html">← 回看第二十一课</a> · <a href="../reference/agent-plugin-coverage-audit.html">查看 Agent 插件覆盖审计</a></p>
+</main>
+</body>
+</html>

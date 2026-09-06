@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第二十三课：三个 Generation 不是同一个计数器</title>
+  <link rel="stylesheet" href="../assets/course.css">
+  <script src="../assets/quiz.js" defer></script>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Lesson 0023 · Three Independent Clocks</p>
+  <h1>三个 Generation，是三只不同的时钟</h1>
+  <p class="lead"><code>generation</code> 都表示“第几代”，但必须先问：谁的第几代？Ora 里与 Agent 插件主线最容易混淆的是 Plugin process、Agent connection 和 Workspace Effect 三种 generation。</p>
+
+  <div class="callout">
+    <strong>先记一句：</strong>同样写着 <code>generation = 3</code>，也不代表三者属于同一件事；不同 owner 的计数器不能互相比较。
+  </div>
+
+  <h2>第一只时钟：Plugin process generation</h2>
+  <pre><code>owner：Plugin Lifecycle
+身份：PluginId + PluginGenerationKey
+推进：同一个插件进行新的进程启动尝试</code></pre>
+
+  <p>它描述某个 <code>main.js</code> 插件进程的具体一生。Lease、运行时注册、Plugin RPC、notification 和 Host 管理的子进程树都钉在这一代。旧进程结束后，旧 lease 不能自动跳到新进程。</p>
+
+  <h2>第二只时钟：Agent connection generation</h2>
+  <pre><code>owner：Connection Supervisor
+身份：AgentRef + connection generation
+推进：一条新的 Agent connection 完成启动和 ACP initialize</code></pre>
+
+  <p>它描述“第几条已经 Ready 的 Agent 连接”。Session 路由、Warm Session 和每代读取一次的模型列表都绑定这一代。旧连接失败时，Supervisor 使这一代路由失效；下一条成功 Ready 的连接才推进计数。</p>
+
+  <p>当前 Agent 故障恢复会结束其背后的插件进程，因此新 connection 通常也伴随新 Plugin process generation；但两个计数器由不同模块拥有，数值没有相等合同。例如某次插件启动没有完成 ACP initialize，Plugin generation 已经发生，connection generation 却不会因此成为 Ready 的新一代。</p>
+
+  <h2>第三只时钟：Workspace Effect generation</h2>
+  <pre><code>owner：Effect 系统
+身份：WorkspaceId + Effect Generation
+推进：完整的 Workspace Skill 期望状态被新版本替换</code></pre>
+
+  <p>它描述“这个 Workspace 想要哪一版 Skill 集合”，用于 compare-and-swap，以及区分 desired、observed、applied、ready 状态。它不是进程编号，也不是连接编号。</p>
+
+  <p>所以插件收到下面的调用时：</p>
+
+  <pre><code>effect/restart {
+  generation: 7
+}</code></pre>
+
+  <p>这里的 <code>7</code> 表示“完成重启后应当看到 Effect 期望状态第 7 版”，不是“重启 Plugin generation 7”。Effect 只是使用当前 live Plugin lease 协调消费者；参数属于 Effect 系统。</p>
+
+  <h2>放进同一张表</h2>
+  <table>
+    <thead><tr><th>Generation</th><th>谁拥有</th><th>什么变化时推进</th><th>阻止什么旧状态</th></tr></thead>
+    <tbody>
+      <tr><td>Plugin process</td><td>Plugin Lifecycle</td><td>Deno 插件进行新启动尝试</td><td>旧 lease、旧通知和旧进程树</td></tr>
+      <tr><td>Agent connection</td><td>Connection Supervisor</td><td>新 ACP connection 成功 Ready</td><td>旧路由、旧 Warm Session 和旧模型快照</td></tr>
+      <tr><td>Workspace Effect</td><td>Effect 系统</td><td>Workspace 的完整 Skill 期望状态更新</td><td>旧写入覆盖新期望、旧消费者误报 Ready</td></tr>
+    </tbody>
+  </table>
+
+  <h2>一个最小场景</h2>
+  <pre><code>Plugin process generation = 5
+Agent connection generation = 2
+Workspace Effect generation = 9
+
+用户启用一个新 Skill
+↓
+Workspace Effect generation = 10</code></pre>
+
+  <p>此时只保证 Effect generation 改变。如果 Agent 支持不中断热加载，Plugin process 仍可保持 5，Agent connection 也可保持 2。是否需要协调或重启取决于插件声明的 Effect 策略，不能把 Effect 更新直接等价成进程重启。</p>
+
+  <div class="interview">
+    <p><strong>面试表达：</strong>Ora 中的 generation 不是一个全局序号，而是不同 owner 的单调版本。Lifecycle 的 Plugin generation 隔离每次 main.js 进程生命；Supervisor 的 connection generation 隔离每条完成 ACP 初始化的 Ready 连接及其路由；Effect generation 版本化一个 Workspace 的完整 Skill 期望状态。三者可能因同一次故障联动变化，但数值不可比较，也不存在必须同步递增的合同。</p>
+  </div>
+
+  <section class="quiz" data-quiz data-explanation="只更新 Workspace 的 Skill 期望状态时，必然推进的是 Effect generation；进程和连接是否变化取决于消费者协调策略。">
+    <h2>只检查这一件事</h2>
+    <p>用户启用一个 Skill，Agent 支持不中断热加载。唯一必然推进的是哪一代？</p>
+    <div class="quiz-options">
+      <button data-answer="incorrect">插件进程代次</button>
+      <button data-answer="incorrect">代理连接代次</button>
+      <button data-answer="correct">技能期望代次</button>
+    </div>
+    <p class="quiz-feedback" data-feedback aria-live="polite"></p>
+  </section>
+
+  <h2>口述练习</h2>
+  <p>用户只在 Workspace 中启用了一个新 Skill。哪一种 generation 一定变化？另外两种为什么不一定变化？</p>
+  <p>如果“同一次故障为什么可能同时推进两只时钟”仍不清楚，直接向我追问。</p>
+
+  <p class="source-list"><strong>代码证据：</strong><a href="../../crates/plugin-lifecycle/src/connection.rs">PluginGenerationKey 与 Lease</a>、<a href="../../crates/backend/src/agent_runtime/connection.rs">Connection Supervisor generation</a>、<a href="../../crates/effect/src/identity.rs">Workspace Effect Generation</a>、<a href="../../crates/backend/src/agent_runtime/plugin_agent/effect.rs">effect/restart 参数</a>。</p>
+
+  <p class="next"><a href="0022-plugin-id-versus-agent-ref.html">← 回看第二十二课</a> · <a href="../reference/agent-plugin-coverage-audit.html">查看 Agent 插件覆盖审计</a></p>
+</main>
+</body>
+</html>

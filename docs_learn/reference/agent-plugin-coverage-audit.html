@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent 插件学习覆盖审计</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main>
+  <p class="eyebrow">Audit · Agent Plugin · 2026-08-30</p>
+  <h1>Agent 插件学习覆盖审计</h1>
+  <p class="lead">结论不是“Agent 插件已经全部学完”。核心运行链已经打通，但异常语义、安全边界和扩展者视角仍有明显缺口。面试前应先补这些，而不是继续钻 Effect 旁支。</p>
+
+  <div class="callout">
+    <strong>审计口径：</strong>“课程里出现过”不等于“已经掌握”。只有用户能够脱离页面，用自己的话解释设计动机、职责边界和失败结果，才记为已掌握。
+  </div>
+
+  <h2>一、先划清 Agent 插件的边界</h2>
+  <pre><code>Agent 插件本体
+  包、Manifest、main.js、运行时合同、CLI 启停、ACP 透明转发
+
+Agent Runtime（紧邻插件）
+  Supervisor、ACP initialize、连接恢复、模型发现、Session 路由
+
+Session Runtime（更上层）
+  warm/attach/load/prompt/cancel/stop/delete、history、切换 Agent</code></pre>
+  <p>面试时可以从 Agent 插件讲到相邻 Runtime，但要能指出层次。否则容易把 <code>main.js</code>、Supervisor 和 Session actor 说成同一个“大运行时”。</p>
+
+  <h2>二、已掌握：Agent 插件核心骨架</h2>
+  <table>
+    <thead><tr><th>主题</th><th>当前结论</th><th>掌握证据</th></tr></thead>
+    <tbody>
+      <tr><td>安装可信化</td><td>Manifest 校验声明，Manager 校验 kind 专属磁盘内容，形成 <code>InstalledPlugin</code> 与类型化 Contribution</td><td>能够完整复述两阶段验证及“可信”的有限范围</td></tr>
+      <tr><td>双进程模型</td><td>Deno <code>main.js</code> 是适配器；真实 Agent CLI 才处理 ACP 与用户任务</td><td>能够解释为什么不能把各 CLI 重新内置进 Backend</td></tr>
+      <tr><td>运行时合同</td><td><code>ora/register</code> 声明 <code>agent/start</code>、<code>agent/stop</code>、<code>agent/listModels</code> 与 emitted <code>agent/acp</code></td><td>能够区分 Manifest kind 与运行时能力声明</td></tr>
+      <tr><td>协议分层</td><td>控制方法走 Plugin RPC request/response；ACP 作为 <code>agent/acp</code> notification 的 payload 透明通过</td><td>能够解释为什么避免双重 ID、超时和取消</td></tr>
+      <tr><td>所有权边界</td><td>Lifecycle 管 Deno 插件进程；Supervisor 管 Agent connection；Session actor 管一个 Ora Session</td><td>已通过两句话职责口述</td></tr>
+      <tr><td>干净重试</td><td>失败后回收旧 Plugin generation，再从新 main.js、注册、CLI 和管道重建</td><td>能用 <code>agent/start</code> 部分成功解释为何不能原地无限重试</td></tr>
+      <tr><td>共享连接路由</td><td>多个 Session 共享 Agent connection，通过 pending correlation 与 <code>RouteRegistry</code> 准确分流</td><td>能解释两张概念映射，并推导 Agent 切换时 Channel 会替换</td></tr>
+    </tbody>
+  </table>
+
+  <h2>三、讲过但还不能算稳固掌握</h2>
+  <table>
+    <thead><tr><th>主题</th><th>已经接触的内容</th><th>还缺的面试能力</th><th>优先级</th></tr></thead>
+    <tbody>
+      <tr><td>故障分类与恢复策略</td><td><code>Unavailable</code>、<code>Failing</code>、250ms→30s 退避、一分钟第四次失败熔断、合同缺失立即终止</td><td>面对具体错误，判断是否重试、是否计入熔断、影响哪个 Agent/Session</td><td>P0</td></tr>
+      <tr><td>Ready 建立过程</td><td>Running 后还要合同校验、<code>agent/start</code>、模型读取、ACP <code>initialize</code></td><td>说清 <code>initialize</code> 不只是“测通”，还协商 load/list/close/delete 与 config options 能力</td><td>P0</td></tr>
+      <tr><td>进程退出顺序</td><td>旧 generation 必须回收，Host 拥有子进程树</td><td>完整说出 <code>agent/stop</code>（2s、best effort）→ <code>ora/shutdown</code> → 超时强杀并等待进程树退出</td><td>P0</td></tr>
+      <tr><td>两个身份</td><td>知道 Plugin ID 与 AgentRef 都存在</td><td>稳定区分 <code>PluginId = namespace/name</code>（Lifecycle 地址）和 <code>AgentRef = package name</code>（Session 持久绑定）</td><td>P1</td></tr>
+      <tr><td>三个 generation</td><td>分别见过 Plugin、connection、Effect generation</td><td>在同一张图中说明三者的 owner、变化条件和防止的旧状态污染</td><td>P1</td></tr>
+    </tbody>
+  </table>
+
+  <h2>四、确实遗漏：后续 Agent 主线必须补</h2>
+  <table>
+    <thead><tr><th>缺口</th><th>为什么面试会问</th><th>当前实现要点</th><th>优先级</th></tr></thead>
+    <tbody>
+      <tr><td>安全与信任边界</td><td>插件化的第一追问通常是“第三方代码安全吗”</td><td>Agent 插件当前拥有 <code>--allow-run</code>、全盘 read、env、net，权限接近宿主；这是明确记录的安全缺口。Host API 管理子进程树能改善清理和身份绑定，但不等于 Agent 插件已被严格沙箱化</td><td>P0</td></tr>
+      <tr><td>控制合同版本兼容</td><td>插件与宿主独立升级，必须回答不兼容如何失败</td><td><code>agent/start</code> 返回 protocol 与 ACP major version；当前只接受 ACP v1。不完整合同或不支持的版本属于确定性失败，直接 <code>Failing</code></td><td>P0</td></tr>
+      <tr><td>模型发现的两条路径</td><td>模型选择横跨插件合同与 ACP Session 能力</td><td><code>agent/listModels</code> 提供会话前模型，每个 connection generation 读取一次；另一类模型来自 <code>session/new/load</code> 返回的 config options，只在 Session 存在后可见</td><td>P1</td></tr>
+      <tr><td>安装、停止、卸载的运行期协调</td><td>动态插件系统不能要求重启 Ora</td><td>安装/扫描后同步 Supervisor；当前没有持久 disable，stop 后 Agent Supervisor 可能重新拉起；卸载会关闭 surface、停止 generation、移除新请求可见的 Supervisor，但 actor 已持有的 clone 不会因 map 删除本身变成悬空引用</td><td>P1</td></tr>
+      <tr><td>插件作者最小实现闭环</td><td>开发扩展时必须把设计转成可实现合同</td><td>使用 <code>defineAgent</code>，幂等管理 CLI，区分 bundled <code>packageCommand</code> 与系统 <code>command</code>，透明转发 ACP，正确返回 <code>AGENT_NOT_INSTALLED</code>，清理 stdout/stderr/stdin 与退出事件</td><td>P1</td></tr>
+      <tr><td>流控、超时与坏帧</td><td>长期流式连接不能只讲 happy path</td><td>插件控制调用有 timeout，ACP notification 无外层 timeout；单 Session 队列 256；未知响应/畸形帧使 connection 失败，单个不可消费 notification 只警告丢弃；Prompt payload 上限 16 MiB</td><td>P2</td></tr>
+      <tr><td>权限请求与工具调用策略</td><td>Agent 不只返回文本，还会请求执行工具</td><td>权限请求也按 Session 路由；当前活跃 Prompt 会自动选择可记忆的允许项，没有人工审批；孤儿请求会取消</td><td>P2</td></tr>
+    </tbody>
+  </table>
+
+  <h2>五、不要误判为 Agent 插件缺口</h2>
+  <div class="card">
+    <p><strong>Warm Session、attach/load、历史记录、切换 Agent、标题获取：</strong>它们属于 Session Runtime。面试可以作为上层使用者继续讲，但不是 <code>main.js</code> 的职责。</p>
+    <p><strong>Effect/Skill 热加载：</strong>它是 Agent 插件可选声明的消费面与协调策略。重要，但目前已经讨论过多，不应挤占安全、故障和退出语义的优先级。</p>
+    <p><strong>前端渲染细节：</strong>只需知道 actor 产出 Ora event，前端消费并渲染；无需为了讲 Agent 插件深入组件实现。</p>
+  </div>
+
+  <h2>六、推荐的补课顺序</h2>
+  <ol>
+    <li><strong>P0-1：失败不是一种失败</strong>——把错误分类、状态、退避、熔断和爆炸半径串成一张决策表。</li>
+    <li><strong>P0-2：Agent 插件到底安全吗</strong>——区分 Deno 权限、Host capability、进程清理与真正沙箱。</li>
+    <li><strong>P0-3：启动与退出是对称的</strong>——从 attach 一直讲到 stop、shutdown、kill、reap。</li>
+    <li><strong>P0-4：合同与能力协商</strong>——区分 ora/register、agent/start 的协议版本、ACP initialize 的能力。</li>
+    <li><strong>P1：站在插件作者视角实现一个 Agent adapter</strong>——把已有架构知识变成开发检查表。</li>
+  </ol>
+
+  <div class="interview">
+    <p><strong>现阶段面试结论：</strong>你已经能够回答“Agent 插件怎样从安装走到一次 Prompt，以及怎样复用给多个 Session”。但如果面试官追问“第三方插件失控怎么办、什么错误该重试、更新卸载时怎么保证不留两个进程、宿主与插件版本不兼容怎么办”，目前还没有形成稳定口述。这四项是下一阶段主线。</p>
+  </div>
+
+  <p class="source-list"><strong>审计依据：</strong><a href="../../crates/backend/src/agent_runtime/README.md">Agent Runtime README</a>、<a href="../../crates/backend/src/agent_runtime/plugin_agent/README.md">Agent Plugin Adapter README</a>、<a href="../../crates/plugin-lifecycle/README.md">Plugin Lifecycle README</a>、<a href="../../crates/plugin-runtime/README.md">Plugin Runtime README</a>、<a href="../../packages/plugin-sdk/README.md">Plugin SDK README</a>、<a href="../../crates/plugin-lifecycle/src/permissions.rs">Agent permissions</a> 与当前 17 节课程和学习记录。</p>
+</main>
+</body>
+</html>
