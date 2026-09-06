@@ -19,8 +19,6 @@ import {
   IconColumns2,
   IconFolderOpen,
   IconGitBranch,
-  IconLayoutSidebarRightCollapse,
-  IconLayoutSidebarRightExpand,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -43,7 +41,6 @@ import {
   animatePanelWidth,
   cancelPanelWidthAnimation,
 } from "../../lib/panel-motion";
-import { usePersistHydrated } from "../../state/hooks/use-persist-hydrated";
 import {
   buildReviewFilePersist,
   reviewContextKey,
@@ -141,12 +138,6 @@ export function WorkspaceReviewLayout({
   const [restoredForContextKey, setRestoredForContextKey] = useState<
     string | null
   >(null);
-  const reviewHydrated = usePersistHydrated(useReviewStore.persist);
-  const reviewHydratedRef = useRef(reviewHydrated);
-
-  useEffect(() => {
-    reviewHydratedRef.current = reviewHydrated;
-  }, [reviewHydrated]);
 
   // Keep the latest open-change listener for effect notifications.
   useEffect(() => {
@@ -198,7 +189,7 @@ export function WorkspaceReviewLayout({
   );
 
   const persistReviewLayout = useCallback(() => {
-    if (contextKind === "none" || !reviewHydratedRef.current) return;
+    if (contextKind === "none") return;
     if (restoredForContextKey !== contextKey) return;
     // A surface panel cannot be restored from disk (its native instance dies
     // with the process), so the snapshot keeps the last persistable panel.
@@ -232,9 +223,9 @@ export function WorkspaceReviewLayout({
     persistReviewLayout();
   }, [persistReviewLayout]);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- apply persisted review snapshot before paint so persist cannot clobber disk with the previous context's open state */
+  /* eslint-disable react-hooks/set-state-in-effect -- re-apply the in-memory review snapshot before paint so the previous scope's open state is never flashed */
   useLayoutEffect(() => {
-    if (!reviewHydrated || contextKind === "none") return;
+    if (contextKind === "none") return;
     // Restore is a one-shot per scope. Re-running would re-issue the stored file
     // request on every parent render and revert open/tab gestures the user made
     // after restore (layout effects observe the pre-commit store snapshot).
@@ -268,7 +259,6 @@ export function WorkspaceReviewLayout({
     contextKey,
     contextKind,
     restoredForContextKey,
-    reviewHydrated,
     setReviewOpen,
     workspaceId,
   ]);
@@ -610,27 +600,16 @@ export function WorkspaceReviewLayout({
           {panel === "changes" && (
             <Button
               size="icon-sm"
-              variant={fileTreeOpen ? "secondary" : "ghost"}
+              variant={expanded ? "secondary" : "ghost"}
               className="size-7"
-              aria-label={t("diff.toggleFileTree")}
-              onClick={() => setFileTreeOpen((value) => !value)}
-            >
-              {fileTreeOpen ? (
-                <IconLayoutSidebarRightCollapse />
-              ) : (
-                <IconLayoutSidebarRightExpand />
+              aria-label={t(
+                expanded ? "diff.restorePanel" : "diff.expandPanel",
               )}
+              onClick={toggleExpanded}
+            >
+              {expanded ? <IconArrowsMinimize /> : <IconArrowsMaximize />}
             </Button>
           )}
-          <Button
-            size="icon-sm"
-            variant={expanded ? "secondary" : "ghost"}
-            className="size-7"
-            aria-label={t(expanded ? "diff.restorePanel" : "diff.expandPanel")}
-            onClick={toggleExpanded}
-          >
-            {expanded ? <IconArrowsMinimize /> : <IconArrowsMaximize />}
-          </Button>
           <span className="mx-0.5 h-4 w-px bg-border/70" aria-hidden="true" />
         </>
       )}
@@ -741,10 +720,7 @@ export function WorkspaceReviewLayout({
               // Same gate as persistReviewLayout: before this scope has been
               // restored, upsertContext would seed a fresh entry from defaults
               // (open: false) for a panel the user currently has open.
-              if (
-                reviewHydratedRef.current &&
-                restoredForContextKey === contextKey
-              ) {
+              if (restoredForContextKey === contextKey) {
                 useReviewStore.getState().upsertContext(contextKey, {
                   width: size.inPixels,
                 });

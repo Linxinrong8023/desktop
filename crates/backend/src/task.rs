@@ -21,7 +21,6 @@ use ora_db::{
     SqliteWorktreeProvisioningLeaseRepository, SqliteWorktreeRepository,
 };
 use ora_domain::{Project, ProjectId, TaskId, WorkspaceId, WorkspaceLocation, WorktreeActivity};
-use ora_logging::ora_warn;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -72,7 +71,7 @@ impl TaskApi {
 
     /// Resolves the requested project and creates its task in the matching Git repository.
     ///
-    /// The task's Workspace needs the Effect surfaces every running consumer already declared, and
+    /// The task Workspace needs the Effect Targets every running Consumer already declared, and
     /// no declaration will fire again on its own. Waking here is a latency optimization only: the
     /// worker converges the same Workspace within one scan interval regardless, so a wake lost to a
     /// crash costs a scan interval rather than the materialization.
@@ -211,32 +210,6 @@ impl TaskApi {
 /// Converts project repository failures encountered during dynamic task routing.
 fn project_repository_error(error: RepositoryError) -> ApplicationError {
     ApplicationError::ProjectRepository { source: error }
-}
-
-/// Lists every visible task belonging to one project.
-///
-/// Read before a cascading project delete, which soft-deletes those rows and
-/// leaves this query with nothing to report afterwards. A failure here yields an
-/// empty list rather than an error: the caller uses it to clean up warm sessions
-/// the deleted project owned, and failing the user's delete over a cleanup query
-/// would be the larger harm.
-pub(crate) fn workspace_ids_in_project(
-    pool: &RepositoryPool,
-    project_id: &ProjectId,
-) -> Vec<WorkspaceId> {
-    match SqliteWorkspaceRepository::new(pool.clone()).list_workspaces(project_id) {
-        Ok(workspaces) => workspaces
-            .into_iter()
-            .map(|workspace| workspace.id)
-            .collect(),
-        Err(_) => {
-            ora_warn!(
-                project_id = %project_id,
-                "listing project workspaces for warm session cleanup failed",
-            );
-            Vec::new()
-        }
-    }
 }
 
 /// Resolves the task's authoritative execution directory from its linked worktree.
@@ -429,13 +402,13 @@ mod tests {
         let project_root = temp_dir.path().join("project-root");
         fs::create_dir_all(&project_root).expect("create project root");
         let database_path = temp_dir.path().join("ora.sqlite3");
-        let pool = DatabaseBootstrapper::system()
+        let pool = DatabaseBootstrapper::new(crate::test_clock::TestClock)
             .bootstrap_repository_pool(
                 &DatabaseLocation::path(&database_path),
                 &default_migration_catalog().expect("create migration catalog"),
             )
             .expect("bootstrap repository pool");
-        SqliteProjectRepository::new(pool.clone())
+        SqliteProjectRepository::with_clock(pool.clone(), crate::test_clock::TestClock)
             .create_project(
                 Project::new(
                     ProjectId::new("project-1"),

@@ -7,7 +7,7 @@ This module coordinates human interaction with workflow nodes that pause for inp
 - `session.rs` validates follow-up turns and moves an awaiting node between pending and running.
 - `completion.rs` claims a node, reconstructs its result and file changes, and prepares the durable
   engine transition.
-- `mod.rs` owns the transient completion gate shared by both paths.
+- `interactive.rs` owns the transient completion gate shared by both paths.
 
 ## Invariants
 

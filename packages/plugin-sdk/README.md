@@ -95,10 +95,19 @@ await acp.kill(); // best-effort tree-wide termination
 const { code, signal } = await acp.exited;
 ```
 
+A plugin can also run an executable its own package ships, by naming a
+package-relative `packageCommand` instead of a `command`; Ora joins it onto that
+plugin's install root, so the plugin never learns a host path and `cwd` stays
+free to be the workspace the child runs in. The two fields are mutually
+exclusive.
+
 `spawn` failures carry `kind` `invalid_command` (empty command),
 `program_not_found` (the OS could not resolve the executable — distinct from any
-other spawn failure, which is `io`), or `invalid_params`; `write`, `closeStdin`,
-and `kill` against an already-exited process's id fail with `not_found`.
+other spawn failure, which is `io`), `package_command_missing` (this package
+carries nothing at that path), `invalid_package_command` (it carries something
+there that cannot be run, or the path is not a portable package-relative one),
+or `invalid_params`; `write`, `closeStdin`, and `kill` against an already-exited
+process's id fail with `not_found`.
 
 ## UI plugins
 
@@ -134,7 +143,7 @@ current process. `ui.plugin` exposes the underlying `Plugin`.
 ## Agent plugins
 
 `defineAgent` builds a plugin that serves Ora's agent contract — `agent/start`,
-`agent/stop`, `agent/listModels`, and the `agent/acp` notification in both
+`agent/stop`, `agent/list_models`, and the `agent/acp` notification in both
 directions. Ora validates that whole contract when the handshake completes and
 refuses a plugin whose declaration is incomplete, so the helper registers all of
 it up front.
@@ -144,6 +153,7 @@ import {
   AGENT_NOT_INSTALLED,
   defineAgent,
   PluginMethodError,
+  SKILL_DIRECTORY_V1,
 } from "@ora-space/plugin-sdk";
 
 let send;
@@ -152,21 +162,30 @@ const plugin = defineAgent({
     send = sender; // spawn the agent CLI here and own its lifetime
   },
   stop: () => {/* terminate the CLI this plugin spawned */},
-  listModels: () => [{ id: "opus", displayName: "Opus", default: true }],
+  listModels: ({ cwd }) => [{ id: "opus", displayName: "Opus", default: true }],
   onAcp: (frame) => {/* forward the frame to the CLI */},
   effects: {
-    surfaces: [{
+    resources: [{
       workspaceRelativePath: ".agents/skills",
-      materializationFormat: "skill_directory.v1",
-      coordination: "wait_for_idle_and_restart",
+      materializationFormat: SKILL_DIRECTORY_V1,
+      coordination: "quiesce_before_mutation",
     }],
-    waitForIdle: async ({ surfaceKey, workspaceRoot, relativePath }) => {
-      // Return waiting_for_idle while any affected instance is serving a turn. Once ready is
-      // returned, keep new turns behind the surfaceKey barrier until restart.
-      return "ready";
+    coordinate: async ({ targetId, resourceIds }) => {
+      // Quiesce every instance that could consume this exact Resource set and retain the barrier.
+      return { targetId, resourceIds, state: "safe_to_mutate" };
     },
-    restart: async ({ surfaceKey, generation }) => {
-      // Restart every affected instance, then release the idempotent barrier for this generation.
+    reactivate: async ({ targetId, resourceIds }) => {
+      // Reinitialize affected instances after verification, then release the retained barrier.
+      return { targetId, resourceIds, state: "reactivated" };
+    },
+    verifyReady: async ({
+      targetId,
+      generation,
+      consumerRevisionId,
+      projectionDigest,
+    }) => {
+      // Confirm the Agent can consume this exact immutable Target projection.
+      return { targetId, generation, consumerRevisionId, projectionDigest };
     },
   },
 });
@@ -177,7 +196,48 @@ The plugin spawns and owns its agent process. Ora never touches that process's
 stdio; it only sees `agent/acp` frames, whose payloads it passes through without
 parsing. Throw `new PluginMethodError(AGENT_NOT_INSTALLED, ...)` from `start`
 when the CLI is absent — Ora treats that as expected local configuration and
-retries quietly instead of reporting a fault.
+retries quietly instead of reporting a fault. Throw `AGENT_UNUSABLE` instead
+when the CLI this package ships cannot run at all: that failure repeats on every
+attempt, so Ora reports it once and stops retrying that agent.
+
+### Model discovery
+
+`listModels` is called on demand — when a user opens a chat surface or a workflow
+inspector — never as part of bringing the agent up, and it receives the
+Workspace directory the models are being listed for. Ora keeps no copy of the
+answer: the plugin owns the catalog and decides when its own cache is stale.
+Returning an empty list is a valid answer for an agent that has no models to
+offer before a session exists; its models then arrive with the session's ACP
+`config_options` instead.
+
+Most agents only expose their models through ACP session configuration, which
+means discovery has to run one. Do that on a **separate, one-shot agent
+process**, and ask the host to start it:
+
+```ts
+listModels: async ({ cwd }) => {
+  const probe = await spawnAgentProcess(processes, {
+    packageCommand: "bin/opencode",
+    command: "opencode",
+  }, { args: ["acp", "--cwd", cwd], cwd });
+  // initialize → session/new(cwd) → read config_options → end the process
+}
+```
+
+Two constraints, both load-bearing:
+
+- **Not the connection you gave Ora.** `listModels` runs before Ora's own ACP
+  `initialize`, Ora's `initialize` is what declares the client capability that
+  decides whether the agent reports a model selector at all, and any request you
+  inject returns down the same pipe Ora is reading. A second process avoids all
+  three, and its probe session disappears with it — no `session/delete` needed.
+- **Not a process you spawn yourself.** Every plugin child process goes through
+  `ora/childprocess/spawn` (`createHostProcesses`), because the host owns the OS
+  handles, terminates process trees, and reclaims everything a plugin generation
+  left behind. Discovery is the likeliest thing to fail halfway — a missing CLI,
+  a timed-out handshake — and a failure outside that ownership leaves an orphan
+  agent process behind. A sandboxed plugin also cannot compute the host path of
+  its own bundled executable, which is why `packageCommand` exists.
 
 Effect locators are always Workspace-relative; Ora supplies and validates the
 absolute Workspace root when it coordinates a mutation. The canonical Plugin ID
@@ -185,3 +245,54 @@ becomes the persisted consumer identity, so plugin code cannot claim another
 consumer's state. Both coordination callbacks must be idempotent because Ora may
 retry after either side has completed but before the corresponding durable
 status update is visible.
+
+### Bundled CLI or the user's own
+
+An agent package is published one of two ways: with the CLI bundled (a
+`[[targets]]` release, one package per target triple) or without it, resolving
+whatever the user installed from PATH (a universal `url`/`sha256` release). The
+same plugin source serves both — it cannot know at build time which package it
+ended up in — so name both programs and let `spawnAgentProcess` resolve them:
+
+```ts
+import { spawnAgentProcess } from "@ora-space/plugin-sdk";
+
+const acp = await spawnAgentProcess(processes, {
+  packageCommand: Deno.build.os === "windows"
+    ? "bin/opencode.exe"
+    : "bin/opencode",
+  command: "opencode",
+}, { args: ["acp", "--cwd", cwd], cwd });
+```
+
+The bundled path is tried first. It falls through to the PATH lookup on exactly
+one condition — Ora answering that this package carries no such file — and
+raises `AGENT_UNUSABLE` for any other failure of a bundled executable, so a
+broken package is never masked by a PATH lookup that happens to succeed. A PATH
+lookup that finds nothing raises `AGENT_NOT_INSTALLED`.
+
+`command` also takes several spellings, tried in order, for a CLI whose
+installers disagree about what lands on PATH — a native `tool.exe` against the
+`tool.cmd` shim npm and bun write, which Ora's PATH lookup will not find from
+the bare name:
+
+```ts
+command: ["codeagent.exe", "codeagent.cmd", "codeagent"];
+```
+
+Only "not on PATH" moves to the next spelling; a candidate that started and then
+failed is raised as-is, so a real fault is never buried under the next attempt.
+
+A plugin whose CLI is only ever distributed on its own has no bundled form to
+discover, and says so by leaving `packageCommand` out entirely:
+
+```ts
+const acp = await spawnAgentProcess(processes, {
+  command: ["codeagent.exe", "codeagent.cmd", "codeagent"],
+}, { args: ["acp"], cwd });
+```
+
+That starts at the PATH lookup and asks the host nothing about the package.
+Naming a path the package is known not to carry would reach the same CLI, but it
+claims a bundled executable may exist there — and one that turns out to exist
+and not run fails the agent outright rather than falling back.

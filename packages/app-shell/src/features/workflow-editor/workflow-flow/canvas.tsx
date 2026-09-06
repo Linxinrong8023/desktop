@@ -200,6 +200,7 @@ function WorkflowCanvasInner({
   inspectorCollapsed,
   inspectorAvailable,
   onExpandInspector,
+  onConfigureGlobalVariables,
   versionHistory,
   previewedVersion,
   activeVersion,
@@ -639,6 +640,7 @@ function WorkflowCanvasInner({
           mode={interactionMode}
           readOnly={readOnly}
           onModeChange={setInteractionMode}
+          onConfigureGlobalVariables={onConfigureGlobalVariables}
           onAddAnnotation={addAnnotationAtViewportCenter}
           onOrganize={organizeAndFrameNodes}
         />

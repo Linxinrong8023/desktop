@@ -2,20 +2,14 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   buildReviewFilePersist,
   clampReviewWidth,
-  REVIEW_STORAGE_KEY,
   reviewContextKey,
   sanitizeReviewContextPersist,
   useReviewStore,
 } from "./review-store";
-import { flushDebouncedPersistStorage } from "./debounced-json-storage";
 import { DEFAULT_REVIEW_WIDTH } from "../../features/workspace/workspace-review-layout-utils";
 
 beforeEach(() => {
-  flushDebouncedPersistStorage();
-  window.localStorage.clear();
   useReviewStore.setState({ byContext: {} });
-  flushDebouncedPersistStorage();
-  window.localStorage.clear();
 });
 
 describe("review-store", () => {
@@ -97,66 +91,6 @@ describe("review-store", () => {
       panel: "changes",
       width: clampReviewWidth(99999),
       files: { files: { path: "src/keep.ts", line: 3 } },
-    });
-  });
-
-  it("round-trips one context through localStorage", async () => {
-    window.localStorage.setItem(
-      REVIEW_STORAGE_KEY,
-      JSON.stringify({
-        state: {
-          byContext: {
-            "task:t1": {
-              open: true,
-              panel: "changes",
-              width: 720,
-              files: { changes: { path: "src/main.ts", line: 12 } },
-            },
-          },
-        },
-        version: 0,
-      }),
-    );
-
-    await useReviewStore.persist.rehydrate();
-
-    expect(useReviewStore.getState().byContext["task:t1"]).toEqual({
-      open: true,
-      panel: "changes",
-      width: 720,
-      files: { changes: { path: "src/main.ts", line: 12 } },
-    });
-  });
-
-  it("keeps in-memory edits when async rehydrate finishes later", async () => {
-    window.localStorage.setItem(
-      REVIEW_STORAGE_KEY,
-      JSON.stringify({
-        state: {
-          byContext: {
-            "task:t1": {
-              open: false,
-              panel: "files",
-              width: DEFAULT_REVIEW_WIDTH,
-            },
-          },
-        },
-        version: 0,
-      }),
-    );
-    useReviewStore.getState().upsertContext("task:t1", {
-      open: true,
-      panel: "changes",
-      width: 640,
-    });
-
-    await useReviewStore.persist.rehydrate();
-
-    expect(useReviewStore.getState().byContext["task:t1"]).toEqual({
-      open: true,
-      panel: "changes",
-      width: 640,
-      files: {},
     });
   });
 

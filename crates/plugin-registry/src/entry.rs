@@ -1,4 +1,4 @@
-use ora_domain::PluginId;
+use ora_domain::{PluginId, PluginNamespace};
 use ora_plugin_manifest::{PluginManifest, PluginReleaseSource};
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -10,9 +10,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RegistryEntry {
     id: PluginId,
-    name: String,
+    /// The manifest identifier segment, serialized under the schema's `identifier` spelling.
+    ///
+    /// `name` remains an accepted alias so a cache written by an older desktop can still be
+    /// loaded and replaced by the next successful registry sync.
+    #[serde(rename = "identifier", alias = "name")]
+    identifier: String,
     /// Human-readable display title from the manifest. Old cached indexes predate this field, so
-    /// it defaults to empty and consumers fall back to `name` until the next resync.
+    /// it defaults to empty and consumers fall back to `identifier` until the next resync.
     #[serde(default)]
     title: String,
     /// The plugin kind (`agent`, `workbench`, `webview`, `skill`, `mcp`, or `hook`) surfaced for
@@ -20,6 +25,14 @@ pub struct RegistryEntry {
     #[serde(default)]
     kind: String,
     namespace: String,
+    /// Canonical URL of the marketplace source that published this entry.
+    ///
+    /// Two sources may publish the same `identifier`, and every display field on the card comes
+    /// from the entry manifest, which either source can copy verbatim. Attribution is therefore
+    /// the only thing that tells the two cards apart, and it must travel with the entry rather
+    /// than being reconstructed from the namespace, which is an opaque digest to a reader.
+    #[serde(default)]
+    source_url: String,
     version: Version,
     description: String,
     /// Trusted SVG source for the entry icon, absent when the entry ships none.
@@ -39,8 +52,14 @@ pub struct RegistryEntry {
 }
 
 impl RegistryEntry {
-    /// Builds one index record from a validated plugin manifest and its already-validated icon.
-    pub(crate) fn from_manifest(manifest: &PluginManifest, logo: Option<String>) -> Self {
+    /// Builds one index record from a validated plugin manifest, the identity of the source that
+    /// publishes it, and its already-validated icon.
+    pub(crate) fn from_manifest(
+        manifest: &PluginManifest,
+        namespace: &PluginNamespace,
+        source_url: &str,
+        logo: Option<String>,
+    ) -> Self {
         let release_targets = match manifest.release_source() {
             Some(PluginReleaseSource::Universal { .. }) => Some(Vec::new()),
             Some(PluginReleaseSource::Targets(targets)) => Some(
@@ -52,11 +71,12 @@ impl RegistryEntry {
             None => None,
         };
         Self {
-            id: entry_id(manifest),
-            name: manifest.name().as_str().to_owned(),
+            id: entry_id(manifest, namespace),
+            identifier: manifest.name().as_str().to_owned(),
             title: manifest.title().to_owned(),
             kind: manifest.kind().as_str().to_owned(),
-            namespace: manifest.namespace().as_str().to_owned(),
+            namespace: namespace.as_str().to_owned(),
+            source_url: source_url.to_owned(),
             version: manifest.version().clone(),
             description: manifest.description().to_owned(),
             logo,
@@ -64,14 +84,14 @@ impl RegistryEntry {
         }
     }
 
-    /// Returns the unique `namespace/name` identifier.
+    /// Returns the unique `namespace/identifier` identifier.
     pub fn id(&self) -> &PluginId {
         &self.id
     }
 
-    /// Returns the plugin name (the identifier segment).
-    pub fn name(&self) -> &str {
-        &self.name
+    /// Returns the plugin identifier segment.
+    pub fn identifier(&self) -> &str {
+        &self.identifier
     }
 
     /// Returns the human-readable display title, empty when an older cache indexed it without one.
@@ -84,9 +104,14 @@ impl RegistryEntry {
         &self.kind
     }
 
-    /// Returns the plugin source namespace.
+    /// Returns the namespace of the source that publishes this entry.
     pub fn namespace(&self) -> &str {
         &self.namespace
+    }
+
+    /// Returns the canonical URL of the source that publishes this entry.
+    pub fn source_url(&self) -> &str {
+        &self.source_url
     }
 
     /// Returns the published plugin version.
@@ -149,13 +174,16 @@ impl RegistryEntry {
     }
 }
 
-/// Derives the unique `namespace/name` identifier a manifest resolves to.
+/// Derives the unique `namespace/identifier` a manifest resolves to under `namespace`.
 ///
-/// Identifier construction is shared by index building and install-time lookup, so both agree on
-/// what a marketplace identifier means without the lookup path having to build a whole entry.
-pub(crate) fn entry_id(manifest: &PluginManifest) -> PluginId {
-    // The manifest grammar is a strict subset of what `PluginId` accepts, so this cannot fail for
-    // a manifest that already parsed; the fallback keeps the function total.
-    PluginId::new(manifest.namespace().as_str(), manifest.name().as_str())
+/// The namespace comes from the publishing source, never from the manifest, so the same
+/// `identifier` published by two repositories is two distinct entries rather than one entry that
+/// silently shadows the other. Identifier construction is shared by index building and
+/// install-time lookup so both agree on what a marketplace identifier means.
+pub(crate) fn entry_id(manifest: &PluginManifest, namespace: &PluginNamespace) -> PluginId {
+    // The manifest grammar is a strict subset of what `PluginId` accepts and the namespace is
+    // already a validated segment, so this cannot fail for a manifest that parsed; the fallback
+    // keeps the function total.
+    PluginId::new(namespace.clone(), manifest.name().as_str())
         .unwrap_or_else(|error| unreachable!("validated manifest name is a plugin id: {error}"))
 }

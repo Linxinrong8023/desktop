@@ -67,6 +67,10 @@ export type ContractError =
     | { "code": "session_busy"; "params": EmptyErrorParams }
     | { "code": "session_stopped"; "params": EmptyErrorParams }
     | { "code": "session_load_unsupported"; "params": EmptyErrorParams }
+    | {
+      "code": "session_mcp_setup_failed";
+      "params": SessionMcpSetupFailedParams;
+    }
     | { "code": "session_history_degraded"; "params": EmptyErrorParams }
     | { "code": "session_agent_unchanged"; "params": EmptyErrorParams }
     | { "code": "permission_request_not_pending"; "params": EmptyErrorParams }
@@ -76,7 +80,6 @@ export type ContractError =
     | { "code": "workspace_unavailable"; "params": EmptyErrorParams }
     | { "code": "task_worktree_unavailable"; "params": EmptyErrorParams }
     | { "code": "file_system_path_not_found"; "params": EmptyErrorParams }
-    | { "code": "spec_document_not_found"; "params": EmptyErrorParams }
     | { "code": "worktree_root_not_absolute"; "params": EmptyErrorParams }
     | { "code": "worktree_root_not_directory"; "params": EmptyErrorParams }
     | { "code": "open_location_failed"; "params": OpenLocationFailedParams }
@@ -241,6 +244,10 @@ export type PublicError =
   | { "code": "session_busy"; "params": EmptyErrorParams }
   | { "code": "session_stopped"; "params": EmptyErrorParams }
   | { "code": "session_load_unsupported"; "params": EmptyErrorParams }
+  | {
+    "code": "session_mcp_setup_failed";
+    "params": SessionMcpSetupFailedParams;
+  }
   | { "code": "session_history_degraded"; "params": EmptyErrorParams }
   | { "code": "session_agent_unchanged"; "params": EmptyErrorParams }
   | { "code": "permission_request_not_pending"; "params": EmptyErrorParams }
@@ -250,7 +257,6 @@ export type PublicError =
   | { "code": "workspace_unavailable"; "params": EmptyErrorParams }
   | { "code": "task_worktree_unavailable"; "params": EmptyErrorParams }
   | { "code": "file_system_path_not_found"; "params": EmptyErrorParams }
-  | { "code": "spec_document_not_found"; "params": EmptyErrorParams }
   | { "code": "worktree_root_not_absolute"; "params": EmptyErrorParams }
   | { "code": "worktree_root_not_directory"; "params": EmptyErrorParams }
   | { "code": "open_location_failed"; "params": OpenLocationFailedParams }
@@ -317,6 +323,19 @@ export type PublicError =
  * Identifies one Ora request across adapters, spans, responses, and completion events.
  */
 export type RequestId = string;
+
+/**
+ * Carries a secret-free Session MCP setup or refresh failure.
+ *
+ * `error_code` is the stable diagnostic. Optional Plugin ID, Setting ID, and transport name
+ * identify the failing member without carrying Setting values or ACP payloads.
+ */
+export type SessionMcpSetupFailedParams = {
+  errorCode: string;
+  pluginId: string | null;
+  settingId: string | null;
+  transport: string | null;
+};
 
 /**
  * Carries a validated skill name when its destination folder already exists.

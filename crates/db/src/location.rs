@@ -1,8 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use rusqlite::{Connection, OpenFlags};
-
-use crate::DatabaseError;
 
 /// Names the supported SQLite storage modes without relying on boolean configuration flags.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23,21 +21,13 @@ impl DatabaseLocation {
     }
 
     /// Opens a SQLite connection with flags that match the selected storage mode.
-    pub fn open(&self) -> Result<Connection, DatabaseError> {
+    pub(crate) fn open(&self) -> Result<Connection, rusqlite::Error> {
         match self {
             Self::Path(path) => Ok(Connection::open(path)?),
             Self::InMemory => Ok(Connection::open_with_flags(
                 ":memory:",
                 OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
             )?),
-        }
-    }
-
-    /// Returns the backing path required by file-based pooling entry points.
-    pub(crate) fn pooled_path(&self) -> Result<&Path, DatabaseError> {
-        match self {
-            Self::Path(path) => Ok(path.as_path()),
-            Self::InMemory => Err(DatabaseError::UnsupportedPooledLocation),
         }
     }
 }

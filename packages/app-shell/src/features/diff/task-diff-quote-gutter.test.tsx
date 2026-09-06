@@ -295,6 +295,7 @@ describe("useTaskDiffQuoteGutter", () => {
     expect(insertHosts).toHaveLength(2);
     expect(insertHosts[0]?.querySelector("[data-quote-button]")).not.toBeNull();
     expect(insertHosts[1]?.querySelector("[data-quote-button]")).toBeNull();
+    expect(insertHosts[1]).toHaveClass("ora-diff-quote-gutter--plain");
     expect(insertHosts[0]?.closest("td")).toBe(
       insertHosts[0]?.closest("tr")?.querySelector("td") ?? null,
     );

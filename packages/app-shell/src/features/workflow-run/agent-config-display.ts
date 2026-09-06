@@ -38,10 +38,17 @@ export function resolveTheaterActDetail(
 }
 
 /**
- * Theater instruction body: flat instruction, else agent prompt.
+ * Theater instruction body: Start input, then the flat node instruction, else Agent prompt.
+ *
+ * Start nodes read their kickoff text from `input`; every other node prefers the flat
+ * `instruction` (Human prompt, or a legacy Agent instruction retained on older saved graphs)
+ * and falls back to `agentConfig.prompt` for Agent nodes authored under the current model.
  * Empty / whitespace-only values collapse so the stage can show an em dash.
  */
 export function resolveTheaterActInstruction(data: WorkflowNodeData): string {
-  const text = data.instruction ?? data.agentConfig?.prompt ?? "";
+  const text =
+    data.kind === "start"
+      ? (data.input ?? "")
+      : (data.instruction ?? data.agentConfig?.prompt ?? "");
   return text.trim();
 }

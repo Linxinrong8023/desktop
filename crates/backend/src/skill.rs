@@ -1,8 +1,10 @@
 use crate::clock::SystemClock;
+use crate::effect_worker::EffectWorkerHandle;
 use ora_application::{
     ApplicationError, CreateSkillHandler, DeleteSkillHandler, FilesystemSkillStorage,
-    GetSkillHandler, ListSkillsHandler, NoopSkillImportProgressPublisher, SkillImportConfig,
-    SkillImportService, UpdateSkillHandler, UuidSkillIdGenerator, UuidSkillImportIdGenerator,
+    GetSkillHandler, ListSkillsHandler, SkillImportConfig, SkillImportProgressEvent,
+    SkillImportProgressPublisher, SkillImportService, UpdateSkillHandler, UuidSkillIdGenerator,
+    UuidSkillImportIdGenerator,
 };
 use ora_contracts::{
     CancelSkillImportRequest, CancelSkillImportResponse, CommitSkillImportRequest,
@@ -31,13 +33,31 @@ pub(crate) struct SkillApi {
         FilesystemSkillStorage,
         UuidSkillImportIdGenerator,
         SystemClock,
-        NoopSkillImportProgressPublisher,
+        SkillEffectNotifier,
     >,
+    effect_reconcile: EffectWorkerHandle,
+}
+
+/// Wakes Effect convergence after an asynchronous import has durably processed a candidate.
+#[derive(Clone, Debug)]
+struct SkillEffectNotifier {
+    effect_reconcile: EffectWorkerHandle,
+}
+
+impl SkillImportProgressPublisher for SkillEffectNotifier {
+    fn publish(&self, _event: SkillImportProgressEvent) {
+        self.effect_reconcile.notify();
+    }
 }
 
 impl SkillApi {
     /// Builds skill handlers from the shared repository pool and formal skills root.
-    pub(crate) fn new(pool: RepositoryPool, skills_root: PathBuf, clock: SystemClock) -> Self {
+    pub(crate) fn new(
+        pool: RepositoryPool,
+        skills_root: PathBuf,
+        clock: SystemClock,
+        effect_reconcile: EffectWorkerHandle,
+    ) -> Self {
         let repository = SqliteSkillRepository::new(pool);
         let storage = FilesystemSkillStorage::new(skills_root.clone());
 
@@ -57,9 +77,12 @@ impl SkillApi {
                 FilesystemSkillStorage::new(skills_root),
                 UuidSkillImportIdGenerator,
                 clock,
-                NoopSkillImportProgressPublisher,
+                SkillEffectNotifier {
+                    effect_reconcile: effect_reconcile.clone(),
+                },
                 SkillImportConfig::default(),
             ),
+            effect_reconcile,
         }
     }
 
@@ -68,7 +91,9 @@ impl SkillApi {
         &self,
         request: CreateSkillRequest,
     ) -> Result<CreateSkillResponse, ApplicationError> {
-        self.create.handle(request)
+        let response = self.create.handle(request)?;
+        self.effect_reconcile.notify();
+        Ok(response)
     }
 
     /// Executes one skill lookup through the application handler.
@@ -92,7 +117,9 @@ impl SkillApi {
         &self,
         request: UpdateSkillRequest,
     ) -> Result<UpdateSkillResponse, ApplicationError> {
-        self.update.handle(request)
+        let response = self.update.handle(request)?;
+        self.effect_reconcile.notify();
+        Ok(response)
     }
 
     /// Executes skill deletion through the application handler.
@@ -100,7 +127,9 @@ impl SkillApi {
         &self,
         request: DeleteSkillRequest,
     ) -> Result<DeleteSkillResponse, ApplicationError> {
-        self.delete.handle(request)
+        let response = self.delete.handle(request)?;
+        self.effect_reconcile.notify();
+        Ok(response)
     }
 
     /// Prepares one import source into a previewed session.
@@ -300,13 +329,14 @@ mod tests {
     fn stalled_package_promote_leaves_concurrent_catalog_writes_unblocked() {
         with_trace_logging(|| {
             let temp_dir = TempDir::new().unwrap();
-            let pool = DatabaseBootstrapper::system()
+            let pool = DatabaseBootstrapper::new(crate::test_clock::TestClock)
                 .bootstrap_repository_pool(
                     &DatabaseLocation::path(temp_dir.path().join("ora.sqlite3")),
                     &default_migration_catalog().unwrap(),
                 )
                 .unwrap();
-            let skill_repository = SqliteSkillRepository::new(pool.clone());
+            let skill_repository =
+                SqliteSkillRepository::with_clock(pool.clone(), crate::test_clock::TestClock);
             let agent_repository = SqliteAgentDefinitionRepository::new(pool);
             let promote = Arc::new(Barrier::new(2));
             let handler = CreateSkillHandler::new(

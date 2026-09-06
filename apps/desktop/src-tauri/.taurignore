@@ -1,0 +1,3 @@
+# Generated sidecars are build inputs, not Rust sources. Watching them causes a
+# delayed copy event to restart the freshly launched development application.
+binaries/

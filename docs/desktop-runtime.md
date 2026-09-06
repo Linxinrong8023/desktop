@@ -12,7 +12,7 @@ forwards ordered `data`, `error`, and `end` frames over a Tauri Channel. A priva
 
 The frontend injects `createTauriTransport()` into `createContractsClient`. The transport maps contract operation names to Tauri commands and forwards the original request DTO unchanged. Backend failures use the direct `{ code, params, requestId }` payload without a public message or outer envelope. Local Tauri invocation failures never invent a request id.
 
-Task workspace lookup and Spec review are part of that shared contract surface. `get_task_workspace` returns the authoritative task root with an optional branch, while `get_spec_catalog` and `read_spec` delegate unary work to the shared backend. `watch_specs` and `watchAppEvents` use the same channel framing, cancellation, and exactly-once completion lifecycle as other Desktop streams.
+Task workspace lookup is part of that shared contract surface. `get_task_workspace` returns the authoritative task root with an optional branch. `watchAppEvents` uses the same channel framing, cancellation, and exactly-once completion lifecycle as other Desktop streams.
 
 Developer preferences use four unary commands in a separate settings command module: `get_developer_mode`, `set_developer_mode`, `get_runtime_log_level`, and `set_runtime_log_level`. They use the same lifecycle and error projection as other Desktop commands; no HTTP endpoint is involved.
 
@@ -46,6 +46,25 @@ and leaves the `Ready` status in place, because the verified bytes are still on 
 therefore only reported when nothing was installable to begin with, and a failed installation
 restores `Ready` so the user can retry.
 
+## Plugin marketplace artifact retrieval
+
+Each configured plugin marketplace source independently selects how its `.orax` release artifacts
+are retrieved. `Direct HTTPS` fetches an absolute HTTPS locator without request signing. `S3 SigV4`
+accepts an object key, or a path-style HTTPS locator belonging to the configured endpoint and
+bucket, and signs the request with that source's region and static credential pair. An S3 source
+rejects foreign HTTPS locators instead of falling back to unsigned retrieval.
+
+The source editor exposes the modes as “HTTPS 直接获取” and “S3 签名获取”. S3 endpoint, bucket,
+region, Access Key ID, and Secret Access Key are one complete configuration; existing credentials
+are write-only and can be preserved or atomically replaced, but are never returned by the source
+query contract or rendered in debug output. The current implementation stores this pair in the
+local SQLite database as plaintext configuration. It does not yet provide OS-keychain encryption,
+temporary credentials, or a provider credential chain.
+
+Both modes keep the source's proxy selection and the common download pipeline. SigV4 authenticates
+the request but does not establish package integrity: every artifact must still pass the release
+manifest's SHA-256 before installation.
+
 The static manifest advertises an AppImage for Linux, which the updater can only install into an
 AppImage installation. A `deb` or `rpm` installation, or a build running as a bare executable, is
 reported as `ManualUpdate` with the reason instead, before any download is spent; the shell then
@@ -67,7 +86,7 @@ The configured root is only a creation target. Existing worktree locations are r
 
 ## Persistent Paths
 
-The Tauri identifier is `space.ora.desktop`. Tauri's system `app_data_dir` owns all default runtime state:
+The Tauri identifier is `space.ora.desktop`. Desktop keeps persistent state in two explicitly named roots:
 
 - SQLite: `app_data_dir/ora.sqlite3`
 - User configuration, including `worktree_root` and `network_proxy_settings`: `app_data_dir/ora.sqlite3`, table `user_config`
@@ -75,8 +94,9 @@ The Tauri identifier is `space.ora.desktop`. Tauri's system `app_data_dir` owns 
 - Default new-worktree root: `~/.ora/worktrees`
 - Session history: `app_data_dir/sessions`
 - Skill packages root: `app_data_dir/atoms/skills`
+- Plugins, registry data, and plugin storage: `~/.ora/plugins`
 
-On first launch, Desktop creates the app data directory and `~/.ora/worktrees`, then persists the selected worktree root in SQLite when initialization completes. Existing installations are migrated once: if `config.json` contains a valid version-1 `worktreeRoot`, that value is written to `user_config.worktree_root` and the legacy file is removed. An existing SQLite value takes precedence. Invalid legacy configuration is fatal and is kept intact for diagnosis.
+On first launch, Desktop creates the app data directory and `~/.ora/worktrees`. A worktree root already selected in SQLite takes precedence over that default.
 
 `ORA_DATA_DIR` controls Desktop's runtime data root. `task run:desktop` points it at the repo `.data` directory for local development. Relative project roots stored in that database are resolved against the data directory's parent (the repo root), not the Tauri process cwd — `tauri dev` starts in `apps/desktop/src-tauri`, which would otherwise miss paths such as `.data/rustun`. Without `ORA_DATA_DIR`, runtime data paths come from Tauri's `app_data_dir`; the first-run worktree root remains `~/.ora/worktrees`, and folder-picker selections are already absolute.
 
@@ -103,4 +123,4 @@ effect after Ora restarts. Daily log files continue to rotate at UTC boundaries.
 
 ## Verification
 
-The Tauri Rust crate shares the root `Cargo.lock`, dependency graph, and target directory with the reusable Rust crates. `task test:frontend` includes the Desktop TypeScript transport tests, while `task test:crates` includes `ora-desktop` alongside every other Rust workspace package. `task test` runs both groups.
+The Tauri Rust crate shares the root `Cargo.lock`, dependency graph, and target directory with the reusable Rust crates. `task test:frontend` includes the Desktop TypeScript transport tests, while `task test:crates`, `task test:tauri`, and `task test:e2e` separately cover reusable crates, the Tauri package, and Desktop E2E tests. `task test` runs all four groups; CI runs the groups independently.

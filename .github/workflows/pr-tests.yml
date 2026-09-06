@@ -30,6 +30,8 @@ jobs:
     outputs:
       frontend: ${{ steps.filter.outputs.frontend }}
       crates: ${{ steps.filter.outputs.crates }}
+      tauri: ${{ steps.filter.outputs.tauri }}
+      e2e: ${{ steps.filter.outputs.e2e }}
     steps:
       # On push to main every block runs regardless, so the filter only needs
       # to execute for pull_request events (where it diffs via the API and
@@ -45,8 +47,9 @@ jobs:
               - '.github/workflows/**'
               - 'scripts/**'
               - 'package.json'
-              - 'pnpm-lock.yaml'
-              - 'pnpm-workspace.yaml'
+              - 'deno.lock'
+              - 'deno.json'
+              - '.deno-version'
               - 'tsconfig*.json'
               - 'eslint.config.js'
               - 'Cargo.toml'
@@ -63,8 +66,15 @@ jobs:
               - 'apps/desktop/tsconfig*.json'
             crates:
               - *shared
-              - 'apps/desktop/src-tauri/**'
               - 'crates/**'
+            tauri:
+              - *shared
+              - 'crates/**'
+              - 'apps/desktop/src-tauri/**'
+            e2e:
+              - *shared
+              - 'crates/**'
+              - 'e2e/**'
 
   frontend:
     needs: changes
@@ -75,21 +85,17 @@ jobs:
       - uses: arduino/setup-task@v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: pnpm
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.9.5
+          deno-version-file: .deno-version
+          cache: true
       # test:frontend regenerates TS contracts via `cargo xtask export-contracts`
       # and also runs the Desktop frontend tests.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: pnpm install --frozen-lockfile
+      - run: deno install --frozen
       - run: task test:frontend
 
   crates:
@@ -104,17 +110,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.9.5
+          deno-version-file: .deno-version
       # The root workspace now contains both shared crates and Tauri packages.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # ora-fs spec tests spawn ripgrep by command name. Keep the downloaded
+      # zip's XZ support links Rust test binaries against liblzma.
+      - name: Install Rust system dependencies
+        run: sudo apt-get update && sudo apt-get install -y liblzma-dev
+      # ora-fs search tests spawn ripgrep by command name. Keep the downloaded
       # sidecar outside the repository and expose it through the job PATH.
       - name: Setup ripgrep
         run: |
-          node scripts/setup-binary.mjs rg
+          deno run -A scripts/setup-binary.ts rg
           mkdir -p "$RUNNER_TEMP/bin"
           mv apps/desktop/src-tauri/binaries/rg-x86_64-unknown-linux-gnu "$RUNNER_TEMP/bin/rg"
           chmod +x "$RUNNER_TEMP/bin/rg"
@@ -122,7 +131,23 @@ jobs:
           "$RUNNER_TEMP/bin/rg" --version
         env:
           RG_VERSION: 15.2.0
-      # System libraries required to compile Tauri 2 on ubuntu-latest (24.04).
+      - run: task test:crates
+
+  tauri:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.tauri == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: arduino/setup-task@v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # These libraries are only needed by the Tauri crate.
       - name: Install Tauri system dependencies
         timeout-minutes: 16
         env:
@@ -161,14 +186,33 @@ jobs:
             echo "::warning::Tauri system dependency installation failed with exit code ${status}; retrying in 10 seconds"
             sleep 10
           done
-      - run: task test:crates
+      - run: task test:tauri
+
+  e2e:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: arduino/setup-task@v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version-file: .deno-version
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: task test:e2e
 
   # Aggregate gate: the single check to mark as "required" in branch
   # protection. Skipped blocks count as success; failures and cancellations
   # propagate. Without this, a required-but-path-skipped job would leave the
   # PR pending forever.
   ci-ok:
-    needs: [changes, frontend, crates]
+    needs: [changes, frontend, crates, tauri, e2e]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -178,6 +222,8 @@ jobs:
             changes=${{ needs.changes.result }}
             frontend=${{ needs.frontend.result }}
             crates=${{ needs.crates.result }}
+            tauri=${{ needs.tauri.result }}
+            e2e=${{ needs.e2e.result }}
         run: |
           echo "$RESULTS"
           for entry in $RESULTS; do

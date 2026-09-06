@@ -35,9 +35,9 @@ fn digest(bytes: &[u8]) -> String {
     sha256_reader(Cursor::new(bytes)).expect("in-memory hashing succeeds")
 }
 
-/// Returns the root of the versioned Desktop update store.
-fn store_root(home: &Path) -> PathBuf {
-    home.join(".ora")
+/// Returns the root of the versioned Desktop update store below the Ora home.
+fn store_root(home_directory: &Path) -> PathBuf {
+    home_directory
         .join("cache")
         .join("desktop-updates")
         .join("v2")
@@ -226,29 +226,21 @@ async fn successful_replacement_prunes_the_previous_entry() {
     );
 }
 
-/// Confirms startup clears interrupted staging directories and the abandoned fixed-slot schema.
+/// Confirms startup clears interrupted writes from the current versioned store.
 #[test]
-fn open_cleans_interrupted_and_legacy_files() {
+fn open_cleans_interrupted_writes() {
     let home = TempDir::new().expect("temp home");
-    let cache = home.path().join(".ora").join("cache");
     let interrupted = store_root(home.path()).join("staging").join("download-old");
     std::fs::create_dir_all(&interrupted).expect("staging fixture");
     std::fs::write(interrupted.join("payload.AppImage"), b"partial").expect("partial payload");
-    std::fs::create_dir_all(&cache).expect("cache fixture");
-    std::fs::write(cache.join("ora-update.json"), b"{}").expect("legacy metadata");
-    std::fs::write(cache.join("ora-update.AppImage"), b"legacy").expect("legacy payload");
 
     let _store = open_store(home.path());
 
     assert_eq!(
-        (
-            std::fs::read_dir(store_root(home.path()).join("staging"))
-                .expect("staging is readable")
-                .count(),
-            cache.join("ora-update.json").exists(),
-            cache.join("ora-update.AppImage").exists(),
-        ),
-        (0, false, false)
+        std::fs::read_dir(store_root(home.path()).join("staging"))
+            .expect("staging is readable")
+            .count(),
+        0
     );
 }
 

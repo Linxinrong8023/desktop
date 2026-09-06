@@ -23,74 +23,42 @@ impl TimestampSource for FixedTimestampSource {
     }
 }
 
-/// Verifies the current schema includes the linear Effect persistence migration.
+/// Verifies separate checkouts retain one anonymous in-memory database for the pool's lifetime.
 #[test]
-fn bootstraps_the_current_workspace_schema() {
-    let catalog = default_migration_catalog().expect("build migration catalog");
-    assert_eq!(
-        catalog.target_versions(),
-        ["0001", "0002", "0003", "0004", "0005", "0006"]
-    );
-
-    let database = with_trace_logging(|| {
-        DatabaseBootstrapper::new(FixedTimestampSource {
-            now: 1_700_000_000_000,
-        })
-        .bootstrap(&DatabaseLocation::in_memory(), &catalog)
-        .expect("bootstrap database")
+fn in_memory_repository_pool_preserves_data_across_checkouts() {
+    let catalog = MigrationCatalog::new(vec![table_migration("0001", "checkout_records")])
+        .expect("build migration catalog");
+    let pool = with_trace_logging(|| {
+        DatabaseBootstrapper::new(FixedTimestampSource { now: 1 })
+            .bootstrap_repository_pool(&DatabaseLocation::in_memory(), &catalog)
+            .expect("bootstrap database")
     });
 
+    pool.with_connection(|connection| {
+        connection.execute("INSERT INTO checkout_records (id) VALUES (7)", [])?;
+        Ok(())
+    })
+    .expect("insert record through first checkout");
+
     assert_eq!(
-        load_table_names(database.connection()),
-        vec![
-            "agents",
-            "effect_audit_events",
-            "effect_conditions",
-            "effect_consumer_status",
-            "effect_managed_items",
-            "effect_operation_artifacts",
-            "effect_operations",
-            "effect_propagation_requests",
-            "effect_reconcile_requests",
-            "effect_source_heads",
-            "effect_source_revisions",
-            "effect_sources",
-            "effect_surface_consumers",
-            "effect_surface_status",
-            "effect_surfaces",
-            "git_cleanup_jobs",
-            "migrations",
-            "plugin_marketplace_source",
-            "projects",
-            "sessions",
-            "skills",
-            "tasks",
-            "user_config",
-            "workflow_node_runs",
-            "workflow_runs",
-            "workflow_snapshots",
-            "workflows",
-            "workspace_effect_desired_items",
-            "workspace_effects",
-            "workspace_locations",
-            "workspace_provisioning",
-            "workspaces",
-            "worktree_provisioning_leases",
-            "worktrees",
-        ],
-    );
-    assert_eq!(
-        load_applied_migrations(database.connection()),
-        expected_applied_migrations(&catalog, 1_700_000_000_000),
+        pool.with_connection(|connection| {
+            connection
+                .query_row("SELECT id FROM checkout_records", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .map_err(Into::into)
+        })
+        .expect("read record through second checkout"),
+        7,
     );
 }
 
 /// Verifies runtime ownership columns point directly at workspaces and no longer encode task-run variants.
 #[test]
 fn runtime_tables_use_direct_workspace_ownership() {
-    let database = with_trace_logging(|| {
+    let pool = with_trace_logging(|| {
         DatabaseBootstrapper::new(FixedTimestampSource { now: 1 })
-            .bootstrap(
+            .bootstrap_repository_pool(
                 &DatabaseLocation::in_memory(),
                 &default_migration_catalog().expect("build migration catalog"),
             )
@@ -98,7 +66,8 @@ fn runtime_tables_use_direct_workspace_ownership() {
     });
 
     assert_eq!(
-        load_table_column_names(database.connection(), "sessions"),
+        pool.with_connection(|connection| Ok(load_table_column_names(connection, "sessions")))
+            .expect("load session columns"),
         vec![
             "id",
             "workspace_id",
@@ -113,7 +82,10 @@ fn runtime_tables_use_direct_workspace_ownership() {
         ],
     );
     assert_eq!(
-        load_table_column_names(database.connection(), "workflow_runs"),
+        pool.with_connection(|connection| {
+            Ok(load_table_column_names(connection, "workflow_runs"))
+        })
+        .expect("load workflow run columns"),
         vec![
             "id",
             "workspace_id",
@@ -134,7 +106,8 @@ fn runtime_tables_use_direct_workspace_ownership() {
         ],
     );
     assert_eq!(
-        load_table_column_names(database.connection(), "tasks"),
+        pool.with_connection(|connection| Ok(load_table_column_names(connection, "tasks")))
+            .expect("load task columns"),
         vec![
             "id",
             "workspace_id",
@@ -145,7 +118,8 @@ fn runtime_tables_use_direct_workspace_ownership() {
         ],
     );
     assert_eq!(
-        load_table_column_names(database.connection(), "worktrees"),
+        pool.with_connection(|connection| Ok(load_table_column_names(connection, "worktrees")))
+            .expect("load worktree columns"),
         vec![
             "workspace_id",
             "branch_name",
@@ -156,16 +130,154 @@ fn runtime_tables_use_direct_workspace_ownership() {
         ],
     );
     assert_eq!(
-        database
-            .connection()
-            .query_row(
-                "SELECT pk FROM pragma_table_info('worktrees') WHERE name = 'workspace_id'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .expect("load worktree workspace primary-key position"),
+        pool.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT pk FROM pragma_table_info('worktrees') WHERE name = 'workspace_id'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(Into::into)
+        })
+        .expect("load worktree workspace primary-key position"),
         1,
     );
+}
+
+/// Existing marketplace rows receive Direct HTTPS while future tagged variants remain extensible.
+#[test]
+fn marketplace_artifact_retrieval_migration_has_a_safe_default() {
+    let pool = with_trace_logging(|| {
+        DatabaseBootstrapper::new(FixedTimestampSource { now: 1 })
+            .bootstrap_repository_pool(
+                &DatabaseLocation::in_memory(),
+                &default_migration_catalog().expect("build migration catalog"),
+            )
+            .expect("bootstrap database")
+    });
+
+    pool.with_connection(|connection| {
+        connection.execute(
+            "INSERT INTO plugin_marketplace_source (
+                url, branch, use_proxy, enabled, position, created_at, updated_at
+             ) VALUES ('https://example.com/marketplace', 'main', 0, 1, 0, 1, 1)",
+            [],
+        )?;
+        Ok(())
+    })
+    .expect("insert source using migration default");
+
+    assert_eq!(
+        pool.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT artifact_retrieval FROM plugin_marketplace_source",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(Into::into)
+        })
+        .expect("read retrieval default"),
+        r#"{"type":"direct_https"}"#,
+    );
+    pool.with_connection(|connection| {
+        connection.execute(
+            "UPDATE plugin_marketplace_source
+             SET artifact_retrieval = '{\"type\":\"future_retrieval\"}'",
+            [],
+        )?;
+        Ok(())
+    })
+    .expect("accept future tagged retrieval variant");
+    assert!(
+        pool.with_connection(|connection| {
+            connection.execute(
+                "UPDATE plugin_marketplace_source SET artifact_retrieval = '{}'",
+                [],
+            )?;
+            Ok(())
+        })
+        .is_err()
+    );
+}
+
+/// First-install SQL runs after a new database reaches the requested migration target.
+#[test]
+fn first_install_sql_runs_after_new_database_migrations() {
+    let temp_dir = TempDir::new().expect("create temporary directory");
+    let database_path = temp_dir.path().join("first-install.sqlite3");
+    let catalog = MigrationCatalog::new(vec![table_migration("0001", "alpha")])
+        .expect("build migration catalog")
+        .with_first_install_sql(&["INSERT INTO alpha (id) VALUES (7);"]);
+
+    bootstrap_file_database(&database_path, &catalog, 100)
+        .expect("bootstrap database with first-install data");
+
+    let connection = Connection::open(database_path).expect("open database");
+    assert_eq!(
+        connection
+            .query_row("SELECT id FROM alpha", [], |row| row.get::<_, i64>(0))
+            .expect("read first-install row"),
+        7,
+    );
+}
+
+/// Adding distribution defaults later must not mutate an already initialized database.
+#[test]
+fn existing_database_does_not_run_first_install_sql() {
+    let temp_dir = TempDir::new().expect("create temporary directory");
+    let database_path = temp_dir.path().join("existing.sqlite3");
+    let schema_only = MigrationCatalog::new(vec![table_migration("0001", "alpha")])
+        .expect("build schema-only catalog");
+    let with_defaults = MigrationCatalog::new(vec![table_migration("0001", "alpha")])
+        .expect("build distribution catalog")
+        .with_first_install_sql(&["INSERT INTO alpha (id) VALUES (7);"]);
+
+    bootstrap_file_database(&database_path, &schema_only, 100)
+        .expect("bootstrap existing database");
+    bootstrap_file_database(&database_path, &with_defaults, 200)
+        .expect("reopen with distribution defaults");
+
+    let connection = Connection::open(database_path).expect("open database");
+    assert_eq!(
+        connection
+            .query_row("SELECT COUNT(*) FROM alpha", [], |row| row.get::<_, i64>(0))
+            .expect("count first-install rows"),
+        0,
+    );
+}
+
+/// Explicit reconciliation applies first-install SQL for a database with no migration history.
+#[test]
+fn explicit_reconciliation_runs_first_install_sql_for_new_database() {
+    let temp_dir = TempDir::new().expect("create temporary directory");
+    let database_path = temp_dir.path().join("explicit-first-install.sqlite3");
+    let catalog = MigrationCatalog::new(vec![table_migration("0001", "alpha")])
+        .expect("build migration catalog")
+        .with_first_install_sql(&["INSERT INTO alpha (id) VALUES (7);"]);
+
+    reconcile_file_database(&database_path, &catalog, 100)
+        .expect("reconcile new database with first-install data");
+
+    let connection = Connection::open(database_path).expect("open database");
+    assert_eq!(
+        connection
+            .query_row("SELECT id FROM alpha", [], |row| row.get::<_, i64>(0))
+            .expect("read first-install row"),
+        7,
+    );
+}
+
+/// Catalog diagnostics expose only the first-install statement count, never their contents.
+#[test]
+fn migration_catalog_debug_redacts_first_install_sql() {
+    let catalog = MigrationCatalog::new(vec![table_migration("0001", "alpha")])
+        .expect("build migration catalog")
+        .with_first_install_sql(&["INSERT INTO alpha (id) VALUES (8675309);"]);
+
+    let rendered = format!("{catalog:?}");
+    assert!(rendered.contains("first_install_statement_count: 1"));
+    assert!(!rendered.contains("8675309"));
 }
 
 /// Verifies a database with a shorter valid prefix receives and snapshots only the missing tail.
@@ -192,6 +304,53 @@ fn applies_missing_migrations_in_order() {
     );
 }
 
+/// Verifies application bootstrap rolls back versions introduced by a newer application.
+#[test]
+fn bootstrap_rolls_back_migrations_newer_than_the_catalog_in_reverse_order() {
+    let temp_dir = TempDir::new().expect("create temporary directory");
+    let database_path = temp_dir.path().join("newer-than-catalog.sqlite3");
+    let migrations = vec![
+        sql_migration(
+            "0001",
+            "CREATE TABLE alpha (id INTEGER PRIMARY KEY); CREATE TABLE rollback_order (version TEXT NOT NULL);",
+            "DROP TABLE rollback_order; DROP TABLE alpha;",
+        ),
+        sql_migration(
+            "0002",
+            "CREATE TABLE beta (id INTEGER PRIMARY KEY);",
+            "INSERT INTO rollback_order (version) VALUES ('0002'); DROP TABLE beta;",
+        ),
+        sql_migration(
+            "0003",
+            "CREATE TABLE gamma (id INTEGER PRIMARY KEY);",
+            "INSERT INTO rollback_order (version) VALUES ('0003'); DROP TABLE gamma;",
+        ),
+    ];
+    let older_catalog =
+        MigrationCatalog::new(vec![migrations[0].clone()]).expect("build older catalog");
+    let newer_catalog = MigrationCatalog::new(migrations).expect("build newer catalog");
+
+    bootstrap_file_database(&database_path, &newer_catalog, 100).expect("apply newer catalog");
+    bootstrap_file_database(&database_path, &older_catalog, 200)
+        .expect("roll back versions absent from the older catalog");
+
+    let connection = Connection::open(&database_path).expect("open database");
+    assert_eq!(table_exists(&connection, "alpha"), true);
+    assert_eq!(table_exists(&connection, "beta"), false);
+    assert_eq!(table_exists(&connection, "gamma"), false);
+    assert_eq!(
+        load_text_column(
+            &connection,
+            "SELECT version FROM rollback_order ORDER BY rowid"
+        ),
+        vec!["0003".to_string(), "0002".to_string()]
+    );
+    assert_eq!(
+        load_applied_migrations(&connection),
+        vec![applied_from(&newer_catalog, "0001", 100)]
+    );
+}
+
 /// Verifies matching SQL snapshots make reconciliation a no-op regardless of the new clock value.
 #[test]
 fn unchanged_migration_content_is_a_no_op() {
@@ -201,7 +360,7 @@ fn unchanged_migration_content_is_a_no_op() {
         MigrationCatalog::new(vec![table_migration("0001", "alpha")]).expect("build catalog");
 
     bootstrap_file_database(&database_path, &catalog, 100).expect("apply catalog");
-    bootstrap_file_database(&database_path, &catalog, 200).expect("reconcile unchanged catalog");
+    reconcile_file_database(&database_path, &catalog, 200).expect("reconcile unchanged catalog");
 
     let connection = Connection::open(&database_path).expect("open database");
     assert_eq!(
@@ -227,12 +386,35 @@ fn differing_execution_time_does_not_rebuild_schema() {
         )
         .expect("change timestamp metadata");
     drop(connection);
-    bootstrap_file_database(&database_path, &catalog, 200).expect("reconcile catalog");
+    reconcile_file_database(&database_path, &catalog, 200).expect("reconcile catalog");
 
     let connection = Connection::open(&database_path).expect("open database");
     assert_eq!(
         load_applied_migrations(&connection),
         vec![applied_from(&catalog, "0001", 777)]
+    );
+}
+
+/// Verifies application bootstrap never rebuilds an applied migration whose SQL snapshot changed.
+#[test]
+fn bootstrap_ignores_changed_migration_sql() {
+    let temp_dir = TempDir::new().expect("create temporary directory");
+    let database_path = temp_dir.path().join("bootstrap-drift.sqlite3");
+    let old_catalog = MigrationCatalog::new(vec![table_migration("0001", "old_alpha")])
+        .expect("build old catalog");
+    let rewritten_catalog = MigrationCatalog::new(vec![table_migration("0001", "new_alpha")])
+        .expect("build rewritten catalog");
+
+    bootstrap_file_database(&database_path, &old_catalog, 100).expect("apply old catalog");
+    bootstrap_file_database(&database_path, &rewritten_catalog, 200)
+        .expect("bootstrap without drift reconciliation");
+
+    let connection = Connection::open(&database_path).expect("open database");
+    assert_eq!(table_exists(&connection, "old_alpha"), true);
+    assert_eq!(table_exists(&connection, "new_alpha"), false);
+    assert_eq!(
+        load_applied_migrations(&connection),
+        vec![applied_from(&old_catalog, "0001", 100)]
     );
 }
 
@@ -255,7 +437,7 @@ fn changed_down_sql_rebuilds_the_migration() {
     .expect("build rewritten catalog");
 
     bootstrap_file_database(&database_path, &old_catalog, 100).expect("apply old catalog");
-    bootstrap_file_database(&database_path, &rewritten_catalog, 200)
+    reconcile_file_database(&database_path, &rewritten_catalog, 200)
         .expect("rebuild changed rollback");
 
     let connection = Connection::open(&database_path).expect("open database");
@@ -291,7 +473,7 @@ fn rebuilds_changed_latest_migration_with_persisted_down_sql() {
     .expect("build rewritten catalog");
 
     bootstrap_file_database(&database_path, &old_catalog, 100).expect("apply old catalog");
-    bootstrap_file_database(&database_path, &rewritten_catalog, 200)
+    reconcile_file_database(&database_path, &rewritten_catalog, 200)
         .expect("rebuild latest migration");
 
     let connection = Connection::open(&database_path).expect("open database");
@@ -325,7 +507,7 @@ fn rebuilds_the_entire_suffix_after_earlier_sql_changes() {
     .expect("build rewritten catalog");
 
     bootstrap_file_database(&database_path, &old_catalog, 100).expect("apply old catalog");
-    bootstrap_file_database(&database_path, &rewritten_catalog, 200).expect("rebuild suffix");
+    reconcile_file_database(&database_path, &rewritten_catalog, 200).expect("rebuild suffix");
 
     let connection = Connection::open(&database_path).expect("open database");
     assert_eq!(table_exists(&connection, "old_beta"), false);
@@ -360,7 +542,7 @@ fn failed_down_transaction_preserves_the_applied_migration() {
 
     bootstrap_file_database(&database_path, &full, 100).expect("apply full catalog");
     let error =
-        bootstrap_file_database(&database_path, &prefix, 200).expect_err("rollback must fail");
+        reconcile_file_database(&database_path, &prefix, 200).expect_err("rollback must fail");
 
     assert_migration_step_failed(&error, "0002", MigrationDirection::Down);
     let connection = Connection::open(&database_path).expect("open database");
@@ -389,7 +571,7 @@ fn failed_rebuild_up_stays_at_the_rolled_back_state() {
     .expect("build rewritten catalog");
 
     bootstrap_file_database(&database_path, &old_catalog, 100).expect("apply old catalog");
-    let error = bootstrap_file_database(&database_path, &rewritten_catalog, 200)
+    let error = reconcile_file_database(&database_path, &rewritten_catalog, 200)
         .expect_err("rewritten up must fail");
 
     assert_migration_step_failed(&error, "0002", MigrationDirection::Up);
@@ -413,7 +595,7 @@ fn shorter_target_rolls_back_the_applied_tail() {
         .expect("build prefix catalog");
 
     bootstrap_file_database(&database_path, &full, 100).expect("apply full catalog");
-    bootstrap_file_database(&database_path, &prefix, 200).expect("roll back tail");
+    reconcile_file_database(&database_path, &prefix, 200).expect("roll back tail");
 
     let connection = Connection::open(&database_path).expect("open database");
     assert_eq!(table_exists(&connection, "alpha"), true);
@@ -425,7 +607,7 @@ fn shorter_target_rolls_back_the_applied_tail() {
     );
 }
 
-/// Verifies known versions in an illegal position and versions absent from the catalog stay errors.
+/// Verifies reordered or unknown versions inside the shared target prefix stay errors.
 #[test]
 fn rejects_reordered_and_unknown_applied_versions() {
     let temp_dir = TempDir::new().expect("create temporary directory");
@@ -453,7 +635,14 @@ fn rejects_reordered_and_unknown_applied_versions() {
     );
 
     let unknown_path = temp_dir.path().join("unknown.sqlite3");
-    bootstrap_file_database(&unknown_path, &expected, 100).expect("apply expected catalog");
+    let first_version = MigrationCatalog::new(vec![
+        expected
+            .migration("0001")
+            .expect("find first migration")
+            .clone(),
+    ])
+    .expect("build first-version catalog");
+    bootstrap_file_database(&unknown_path, &first_version, 100).expect("apply first migration");
     let connection = Connection::open(&unknown_path).expect("open database");
     connection
         .execute(
@@ -514,7 +703,7 @@ fn rebuilds_multiple_changed_migrations_in_directional_order() {
     .expect("build rewritten catalog");
 
     bootstrap_file_database(&database_path, &old_catalog, 100).expect("apply old catalog");
-    bootstrap_file_database(&database_path, &rewritten_catalog, 200)
+    reconcile_file_database(&database_path, &rewritten_catalog, 200)
         .expect("rebuild changed suffix");
 
     let connection = Connection::open(&database_path).expect("open database");
@@ -522,18 +711,6 @@ fn rebuilds_multiple_changed_migrations_in_directional_order() {
         load_text_column(&connection, "SELECT name FROM events ORDER BY sequence"),
         vec!["down-3", "down-2", "up-2-new", "up-3-new"]
     );
-}
-
-/// Reads table names in the same deterministic order used by the schema assertion.
-fn load_table_names(connection: &Connection) -> Vec<String> {
-    let mut statement = connection
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-        .expect("prepare table query");
-    statement
-        .query_map([], |row| row.get(0))
-        .expect("query table names")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("read table names")
 }
 
 /// Reads a table's declared columns without coupling the test to SQLite's SQL text formatting.
@@ -567,18 +744,6 @@ fn load_applied_migrations(connection: &Connection) -> Vec<AppliedMigration> {
         .expect("read migrations")
 }
 
-/// Builds the exact rows expected when every target migration is applied at one timestamp.
-fn expected_applied_migrations(
-    catalog: &MigrationCatalog,
-    executed_at: i64,
-) -> Vec<AppliedMigration> {
-    catalog
-        .target_versions()
-        .iter()
-        .map(|version| applied_from(catalog, version, executed_at))
-        .collect()
-}
-
 /// Builds an expected applied row from the current catalog SQL snapshot.
 fn applied_from(catalog: &MigrationCatalog, version: &str, executed_at: i64) -> AppliedMigration {
     let migration = catalog.migration(version).expect("find migration");
@@ -598,8 +763,24 @@ fn bootstrap_file_database(
 ) -> Result<(), DatabaseError> {
     with_trace_logging(|| {
         DatabaseBootstrapper::new(FixedTimestampSource { now })
-            .bootstrap(&DatabaseLocation::path(path), catalog)
+            .bootstrap_repository_pool(&DatabaseLocation::path(path), catalog)
             .map(|_| ())
+    })
+}
+
+/// Runs explicit migration drift reconciliation with a deterministic timestamp.
+fn reconcile_file_database(
+    path: &Path,
+    catalog: &MigrationCatalog,
+    now: i64,
+) -> Result<(), DatabaseError> {
+    with_trace_logging(|| {
+        let mut connection = Connection::open(path)?;
+        crate::migration::reconcile_database(
+            &mut connection,
+            catalog,
+            &FixedTimestampSource { now },
+        )
     })
 }
 

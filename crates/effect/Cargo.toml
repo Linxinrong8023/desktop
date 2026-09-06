@@ -12,15 +12,12 @@ workspace = true
 
 [dependencies]
 ora-domain = { workspace = true }
-ora-skill-package = { workspace = true }
 ora-utils = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
-tempfile = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
-tempfile = { workspace = true }

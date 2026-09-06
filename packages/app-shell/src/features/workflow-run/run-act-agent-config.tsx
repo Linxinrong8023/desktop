@@ -66,6 +66,27 @@ export function RunActAgentConfig({ config }: RunActAgentConfigProps) {
 
       <div className="space-y-1">
         <p className="text-[11px] text-muted-foreground">
+          {t("settings.workflow.field.prompt")}
+        </p>
+        {shouldPreviewBrief(prompt) ? (
+          <RunBriefPopover
+            title={t("settings.workflow.field.prompt")}
+            body={prompt}
+            openLabel={t("workflowRun.inspector.textOpen", {
+              field: t("settings.workflow.field.prompt"),
+            })}
+          >
+            <span className="line-clamp-4 whitespace-pre-wrap text-xs leading-5">
+              {prompt}
+            </span>
+          </RunBriefPopover>
+        ) : (
+          <StaticValue value={prompt} multiline />
+        )}
+      </div>
+
+      <div className="space-y-1">
+        <p className="text-[11px] text-muted-foreground">
           {t("settings.workflow.field.role")}
         </p>
         <RunBriefPopover
@@ -143,27 +164,6 @@ export function RunActAgentConfig({ config }: RunActAgentConfigProps) {
           </ul>
         </div>
       )}
-
-      <div className="space-y-1">
-        <p className="text-[11px] text-muted-foreground">
-          {t("settings.workflow.field.prompt")}
-        </p>
-        {shouldPreviewBrief(prompt) ? (
-          <RunBriefPopover
-            title={t("settings.workflow.field.prompt")}
-            body={prompt}
-            openLabel={t("workflowRun.inspector.textOpen", {
-              field: t("settings.workflow.field.prompt"),
-            })}
-          >
-            <span className="line-clamp-4 whitespace-pre-wrap text-xs leading-5">
-              {prompt}
-            </span>
-          </RunBriefPopover>
-        ) : (
-          <StaticValue value={prompt} multiline />
-        )}
-      </div>
     </>
   );
 }

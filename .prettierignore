@@ -8,4 +8,4 @@ packages/contracts
 # The Deno SDK uses deno fmt as its canonical formatter.
 packages/plugin-sdk
 *.tsbuildinfo
-pnpm-lock.yaml
+deno.lock

@@ -1,4 +1,3 @@
-use crate::legacy_config::LegacyConfigError;
 use crate::state::BinaryResolutionError;
 use ora_backend::{BackendBootstrapError, BackendError, RequestLifecycle, UuidRequestIdGenerator};
 use ora_contracts::ContractError;
@@ -10,8 +9,8 @@ use thiserror::Error;
 pub enum DesktopBootstrapError {
     #[error("failed to resolve the system application data directory")]
     AppDataDirectory(#[source] tauri::Error),
-    #[error(transparent)]
-    LegacyConfig(#[from] LegacyConfigError),
+    #[error("failed to resolve the Ora home directory")]
+    OraHomeDirectory(#[source] tauri::Error),
     #[error("invalid ORA_LOG_LEVEL value {value}")]
     InvalidLogLevel { value: String },
     #[error(transparent)]

@@ -9,6 +9,7 @@ members = [
     "crates/db",
     "crates/domain",
     "crates/effect",
+    "crates/effect-skill",
     "crates/fs",
     "crates/gitlancer",
     "crates/history",
@@ -17,6 +18,7 @@ members = [
     "crates/plugin-manifest",
     "crates/plugin-lifecycle",
     "crates/plugin-manager",
+    "crates/plugin-protocol",
     "crates/plugin-runtime",
     "crates/plugin-registry",
     "crates/process",
@@ -28,6 +30,7 @@ members = [
     "crates/test-support",
     "crates/utils",
     "crates/user-config",
+    "e2e",
     "xtask",
 ]
 default-members = [
@@ -39,6 +42,7 @@ default-members = [
     "crates/db",
     "crates/domain",
     "crates/effect",
+    "crates/effect-skill",
     "crates/fs",
     "crates/gitlancer",
     "crates/history",
@@ -57,6 +61,7 @@ default-members = [
     "crates/test-support",
     "crates/utils",
     "crates/user-config",
+    "e2e",
     "xtask",
 ]
 resolver = "2"
@@ -82,6 +87,7 @@ ora-contracts = { path = "crates/contracts" }
 ora-db = { path = "crates/db" }
 ora-domain = { path = "crates/domain" }
 ora-effect = { path = "crates/effect" }
+ora-effect-skill = { path = "crates/effect-skill" }
 ora-fs = { path = "crates/fs" }
 gitlancer = { path = "crates/gitlancer" }
 ora-history = { path = "crates/history" }
@@ -90,6 +96,7 @@ ora-plugin-config = { path = "crates/plugin-config" }
 ora-plugin-manifest = { path = "crates/plugin-manifest" }
 ora-plugin-lifecycle = { path = "crates/plugin-lifecycle" }
 ora-plugin-manager = { path = "crates/plugin-manager" }
+ora-plugin-protocol = { path = "crates/plugin-protocol" }
 ora-plugin-registry = { path = "crates/plugin-registry" }
 ora-plugin-runtime = { path = "crates/plugin-runtime" }
 ora-process = { path = "crates/process" }
@@ -110,6 +117,7 @@ cron = "0.12"
 derive_more = "2"
 futures = "0.3"
 flate2 = "1"
+hmac = "0.12"
 futures-util = { version = "0.3", features = ["sink"] }
 gray_matter = { version = "0.3", default-features = false, features = ["yaml"] }
 libc = "0.2"
@@ -119,8 +127,11 @@ petgraph = "0.7"
 portable-pty = "0.9"
 pretty_assertions = "1"
 r2d2 = "0.8"
+rcgen = "0.14"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "stream"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-platform-verifier = "0.7"
 semver = "1"
 quick-xml = "0.41"
 sha2 = "0.10"
@@ -138,6 +149,7 @@ thiserror = "2"
 time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
 tokio = "1"
 tokio-util = "0.7"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 toml = "1"
 tracing = "0.1"
 tracing-appender = "0.2"

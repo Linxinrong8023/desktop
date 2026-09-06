@@ -17,8 +17,10 @@ ora-effect = { workspace = true }
 ora-logging = { workspace = true }
 ora-skill-package = { workspace = true }
 ora-user-config = { workspace = true }
+ora-utils = { workspace = true }
 r2d2 = { workspace = true }
 rusqlite = { workspace = true, features = ["bundled"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -26,6 +28,7 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 ora-contracts = { workspace = true }
+ora-effect-skill = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }

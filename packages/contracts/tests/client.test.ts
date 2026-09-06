@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createContractsClient } from "../src/client.js";
-import { endpoints } from "../src/endpoints.js";
+import { createContractsClient } from "../src/client.ts";
+import { endpoints } from "../src/endpoints.ts";
 import type {
   ContractCallOptions,
   ContractTransport,
   ContractTransportRequest,
-} from "../src/transport.js";
+} from "../src/transport.ts";
 
 /** Builds a transport double that records requests and returns a fixed response. */
 function recordingTransport<TResponse>(

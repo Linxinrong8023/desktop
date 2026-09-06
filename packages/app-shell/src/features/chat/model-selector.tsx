@@ -14,28 +14,35 @@ import {
 import {
   IconCheck,
   IconChevronDown,
+  IconChevronRight,
   IconLoader2,
+  IconPlug,
   IconRobot,
   IconSearch,
 } from "@tabler/icons-react";
 import { useChatStore } from "../../chat-store-context";
 import { useSettingsStore } from "../../state/stores/settings-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
+import { useUiStore } from "../../state/stores/ui-store";
 import { useSessions } from "../../state/hooks/use-sessions";
 import { useSetSessionConfig } from "../../state/hooks/use-session-config";
 import {
-  useWarmSession,
-  warmTargetKey,
-} from "../../state/hooks/use-warm-session";
-import { useTargetAgentCli } from "../../state/hooks/use-target-agent-cli";
+  chatSurfaceTargetKey,
+  useTargetAgentCli,
+} from "../../state/hooks/use-target-agent-cli";
 import { useAvailableAgents } from "../../state/hooks/use-available-agents";
+import { useInstalledPlugins } from "../../state/hooks/use-installed-plugins";
 import {
   usePendingAgentStore,
+  pendingModelKey,
   usePendingSwitch,
 } from "../../state/stores/pending-agent-store";
-import { useAgentModelStore } from "../../state/stores/agent-model-store";
+import { useAgentModelPreferenceStore } from "../../state/stores/agent-model-preference-store";
 import { currentValueName, findModelOption, selectableValues } from "@ora/chat";
 import { PluginLogoMark } from "../settings/plugin-logo";
+import { useAgentModels } from "../../state/hooks/use-agent-models";
+import { useTasks } from "../../state/hooks/use-tasks";
+import { useWorkspaces } from "../../state/hooks/use-workspaces";
 
 /**
  * The composer's agent and model picker.
@@ -46,13 +53,19 @@ import { PluginLogoMark } from "../settings/plugin-logo";
  * states rather than two — still arriving, genuinely offering no choice, or a real
  * set to pick from.
  *
+ * A chat that has not started yet opens on the model the user last picked for
+ * the agent it is pointed at, so the choice does not have to be repeated for
+ * every new chat. That memory belongs to unstarted chats alone: an ongoing
+ * conversation follows the configuration its own agent reports and is untouched
+ * by picks made anywhere else.
+ *
  * With a session selected, choosing a different agent moves that conversation onto
  * it rather than only changing the default for the next one. Ora owns the
  * transcript, so the thread survives the move: the backend hands it to the new
  * agent with the user's next message. The move is *recorded* here and performed
  * by that message — clicking cannot rebind immediately without tearing down an
- * agent that may still be mid-reply. What the click does start is warming the
- * incoming CLI, which is how the models below can be replaced by its own before
+ * agent that may still be mid-reply. Model discovery for the incoming CLI runs
+ * independently, so the models below can be replaced by its own before
  * anything is committed. Choosing a CLI therefore leaves the menu open: picking
  * one of those models is the other half of the same decision.
  */
@@ -80,14 +93,14 @@ export function ModelSelector({
     sessionId === undefined ? selection : { ...selection, sessionId };
 
   // Having a binding is what makes a session persisted, and only a persisted one
-  // can be rebound; a warm session has no row to move. The bound CLI is also what
+  // can be rebound. The bound CLI is also what
   // a candidate has to be compared against to decide whether picking it is a move
   // at all — the resolved agent below cannot answer that, since it already
   // reports whatever move is pending.
   const boundSession = sessions.find(
     (session) => session.id === modelSelection.sessionId,
   );
-  const targetKey = warmTargetKey(modelSelection);
+  const targetKey = chatSurfaceTargetKey(modelSelection);
   const setPickedForTarget = usePendingAgentStore(
     (state) => state.setPendingAgent,
   );
@@ -98,14 +111,30 @@ export function ModelSelector({
     (state) => state.clearPendingSwitch,
   );
   const pendingSwitch = usePendingSwitch(modelSelection.sessionId);
-  // Resolved centrally so this and the composer cannot disagree: they share one
-  // warm-session query key, and the CLI is part of that key.
+  // Resolved centrally so this and the composer cannot disagree about the target agent.
   const agentCli = useTargetAgentCli(modelSelection);
   // Which agents the runtime actually reports reaching here. An agent whose
   // plugin package was uninstalled, or whose own agent process is missing,
   // drops out of the list rather than being offered and then failing on the
   // first message.
   const availableAgents = useAvailableAgents();
+  // Whether this installation has *any* agent plugin installed at all. This is
+  // broader than availability: an installed agent can still be unreachable (a
+  // disabled package, a missing runtime) and must not read as "install one" —
+  // the user already has it. Distinguishing "no agent plugin ever installed"
+  // from "installed but unavailable" is what lets the picker offer the install
+  // hint only to a truly empty installation.
+  const { data: installedPlugins, isPending: pluginsPending } =
+    useInstalledPlugins();
+  const noAgentPackageInstalled =
+    installedPlugins !== undefined &&
+    installedPlugins.every((plugin) => plugin.kind !== "agent");
+  // Opening the marketplace is a one-shot intent; the loading gate keeps the hint
+  // from flashing "go install one" while the installed snapshot is still in flight.
+  const openPluginMarketplace = () => {
+    if (pluginsPending || !noAgentPackageInstalled) return;
+    useUiStore.getState().openSettingsAt("plugins");
+  };
   // Preserve the internal preference across temporary unavailability without
   // presenting that unavailable runtime as the active picker identity.
   const displayedAgent = availableAgents.find(
@@ -113,18 +142,26 @@ export function ModelSelector({
   );
   const agentIsAvailable = displayedAgent !== undefined;
 
-  // Shares the workspace's warm-session query key, so this is a cache read
-  // rather than a second provider session.
-  const warmSession = useWarmSession(modelSelection, agentCli);
-  // A warm session, when there is one, always describes the CLI on screen —
-  // including the one a pending move is heading for, whose models and model
-  // choice live on it rather than on the session being moved. While that
-  // handshake is still running there is nothing to read: naming the bound
-  // session here instead would advertise the outgoing agent's model as the
-  // incoming agent's.
-  const activeSessionId =
-    warmSession.sessionId ??
-    (pendingSwitch === undefined ? modelSelection.sessionId : null);
+  const { data: tasks = [] } = useTasks();
+  const { data: workspaces = [] } = useWorkspaces();
+  const workspaceId =
+    tasks.find((task) => task.id === modelSelection.taskId)?.workspaceId ??
+    workspaces.find(
+      (workspace) =>
+        workspace.projectId === modelSelection.projectId &&
+        workspace.kind === "main",
+    )?.id ??
+    null;
+  const usesPersistedOptions =
+    sessionId !== undefined ||
+    (boundSession !== undefined && pendingSwitch === undefined);
+  const discovered = useAgentModels(
+    usesPersistedOptions ? null : agentCli,
+    usesPersistedOptions ? null : workspaceId,
+  );
+  const activeSessionId = usesPersistedOptions
+    ? modelSelection.sessionId
+    : null;
   // Selected narrowly rather than as one conversation object, so a streaming
   // turn does not re-render the picker on every token.
   const liveOptions = useStore(chatStore, (state) =>
@@ -137,13 +174,6 @@ export function ModelSelector({
       ? false
       : state.conversations[activeSessionId]?.isLoading === true,
   );
-  // What this CLI reported the last time any surface handshook it. Standing in
-  // for an answer that has not arrived is the whole point: the list barely
-  // changes between sessions, and waiting for `session/new` to say so again is
-  // what made opening a chat feel slow.
-  const cachedOptions = useAgentModelStore((state) =>
-    agentCli === null ? undefined : state.known[agentCli],
-  );
   // A session can retain the last options reported before its plugin stopped.
   // They are no longer actionable once runtime availability drops, so do not
   // let that session-local snapshot outlive the agent row that owned it.
@@ -152,54 +182,92 @@ export function ModelSelector({
   // showing the model captured by that conversation even when no workspace
   // Agent preference can be resolved for it.
   const configOptions =
-    sessionId !== undefined
-      ? liveOptions
-      : agentIsAvailable
-        ? (liveOptions ?? cachedOptions)
-        : undefined;
+    sessionId !== undefined || agentIsAvailable ? liveOptions : undefined;
   const modelOption = configOptions ? findModelOption(configOptions) : null;
-
-  // An agent only reports its models as part of the handshake — warming this
-  // surface's session, or replaying a selected one — so until that lands the
-  // list is unknown rather than empty. Saying "no models" here would answer a
-  // question that has not been asked yet, and a handshake can take a second.
-  // Replay is its own case: it seeds the conversation with empty options first,
-  // which would otherwise read as a settled answer while the stream is still
-  // running. A surface that never started warming, or whose handshake failed,
-  // is not loading and still reports empty. A pending move reads as loading for
-  // the same reason: it has no session to name until the incoming CLI answers.
-  const isSettling =
-    agentIsAvailable &&
-    (activeSessionId === null
-      ? warmSession.isOpening || pendingSwitch !== undefined
-      : liveOptions === undefined || isReplayingHistory);
-  // Having a list to offer is what ends the wait, not having received this
-  // surface's own answer: a cached list is a real answer to "what can I pick",
-  // and showing it beats spinning while the handshake confirms it. Gating on the
-  // resolved option rather than on the options array is deliberate — a replaying
-  // session is seeded with an empty one, which is a placeholder rather than a
-  // list, and must keep reading as "still arriving".
-  const isLoadingModels = isSettling && modelOption === null;
-
-  // A cached list describes the CLI, not a session, so there is nothing to write
-  // a choice from it to until the handshake produces one. The values are shown
-  // but not selectable for that window rather than hidden, because what the user
-  // is waiting to learn — which models this agent has — is already answered.
-  const canSelectModel = agentIsAvailable && activeSessionId !== null;
-
-  // The disabled cached list on its own reads as settled, not provisional — the
-  // handshake could still replace it with a different set. This names that
-  // in-between case so the dropdown can say so, distinct from isLoadingModels
-  // (nothing to show yet) even though both are the same underlying wait.
-  const isUpdatingModels = isSettling && modelOption !== null;
-
-  const activeLabel = modelOption
-    ? currentValueName(modelOption)
-    : t(
-        isLoadingModels
-          ? "chat.modelSelector.loading"
-          : "chat.modelSelector.placeholder",
-      );
+  // Discovery answers for one agent ref and stays cached after that agent drops
+  // out of the runtime. Withholding it here mirrors `configOptions` above: a
+  // catalog belonging to an unreachable agent must not outlive its row.
+  const discoveredModels = agentIsAvailable ? discovered.models : [];
+  const intentKey =
+    agentCli === null ? null : pendingModelKey(modelSelection, agentCli);
+  const pendingModel = usePendingAgentStore((state) =>
+    intentKey === null ? undefined : state.models[intentKey],
+  );
+  const setPendingModel = usePendingAgentStore(
+    (state) => state.setPendingModel,
+  );
+  // Only a chat with no session behind it opens on a remembered preference. A
+  // session that exists — including one carrying a recorded agent move — is
+  // authoritative about the model it runs on, so it neither reads this nor
+  // writes to it, and a pick made on some other surface can never move it.
+  const isUnstartedChat = sessionId === undefined && boundSession === undefined;
+  const rememberedModel = useAgentModelPreferenceStore((state) =>
+    agentCli === null ? undefined : state.models[agentCli],
+  );
+  const rememberModel = useAgentModelPreferenceStore(
+    (state) => state.rememberModel,
+  );
+  const modelValues = usesPersistedOptions
+    ? modelOption
+      ? selectableValues(modelOption).map((value) => ({
+          value: value.value,
+          name: value.name,
+        }))
+      : []
+    : discoveredModels.map((model) => ({
+        value: model.id,
+        name: model.displayName,
+      }));
+  // A persisted session is authoritative about the model it is running on. A
+  // chat that has not started yet has only what the user recorded here, falling
+  // back to whatever the agent nominates as its own default so the picker names
+  // the model the first send will actually ask for.
+  const discoveredDefault =
+    discoveredModels.find((model) => model.default)?.id ??
+    discoveredModels[0]?.id;
+  // A remembered preference is only honoured while the agent still offers that
+  // model: catalogs move with plugin versions, and naming a model this agent no
+  // longer has would both mislabel the trigger and be dropped by the backend,
+  // which applies a model intent only when the new session reports that exact
+  // value. Falling through to the agent's own default keeps the label and the
+  // first send agreeing.
+  const preferredModel =
+    isUnstartedChat &&
+    discoveredModels.some((model) => model.id === rememberedModel)
+      ? rememberedModel
+      : undefined;
+  const selectedValue = usesPersistedOptions
+    ? modelOption?.type === "select"
+      ? modelOption.currentValue
+      : undefined
+    : (pendingModel ?? preferredModel ?? discoveredDefault);
+  // Three states rather than two, because "not answered yet" must not read as
+  // "this agent offers no models". A persisted session has said nothing until
+  // its conversation is loaded — and replay seeds empty options first, which is
+  // a placeholder and not a list — while a not-yet-started chat is waiting on
+  // discovery instead.
+  const isSettling = usesPersistedOptions
+    ? liveOptions === undefined || isReplayingHistory
+    : discovered.isLoading;
+  const isLoadingModels = isSettling && modelValues.length === 0;
+  // A list already on screen being refreshed is its own case: the menu says so
+  // rather than blanking what the user is reading.
+  const isUpdatingModels = discovered.isFetching && discoveredModels.length > 0;
+  const activeLabel =
+    usesPersistedOptions && modelOption
+      ? currentValueName(modelOption)
+      : (modelValues.find((value) => value.value === selectedValue)?.name ??
+        t(
+          isLoadingModels
+            ? "chat.modelSelector.loading"
+            : "chat.modelSelector.placeholder",
+        ));
+  // Applying a choice needs somewhere to put it: a persisted session needs the
+  // option the agent reported, and a not-yet-started chat needs a target key to
+  // record the intent against.
+  const canSelectModel = usesPersistedOptions
+    ? agentIsAvailable && activeSessionId !== null && modelOption !== null
+    : agentIsAvailable && intentKey !== null;
 
   /**
    * A persisted session records a move onto the chosen CLI, to be performed by
@@ -234,15 +302,23 @@ export function ModelSelector({
   };
 
   const selectModel = (value: string) => {
-    if (activeSessionId === null || modelOption === null) return;
-    setSessionConfig.mutate({
-      sessionId: activeSessionId,
-      configId: modelOption.id,
-      value,
-    });
+    if (!usesPersistedOptions) {
+      if (intentKey !== null) setPendingModel(intentKey, value);
+      // Recorded alongside the surface-local intent rather than instead of it:
+      // the intent is consumed by this chat's first send, while the preference
+      // outlives it so the *next* new chat on this agent opens here too.
+      if (isUnstartedChat && agentCli !== null) rememberModel(agentCli, value);
+      return;
+    }
+    if (activeSessionId !== null && modelOption !== null) {
+      setSessionConfig.mutate({
+        sessionId: activeSessionId,
+        configId: modelOption.id,
+        value,
+      });
+    }
   };
 
-  const modelValues = modelOption ? selectableValues(modelOption) : [];
   const needle = modelQuery.trim().toLowerCase();
   const visibleModelValues = needle
     ? modelValues.filter((value) => value.name.toLowerCase().includes(needle))
@@ -294,98 +370,119 @@ export function ModelSelector({
         side="top"
         className="w-56 max-h-[min(24rem,var(--available-height))]"
       >
-        <DropdownMenuGroup className="p-1">
-          <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
-            {t("chat.modelSelector.agent")}
-          </DropdownMenuLabel>
-          {availableAgents.map((candidate) => (
+        {noAgentPackageInstalled ? (
+          <DropdownMenuGroup className="p-1">
+            <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
+              {t("chat.modelSelector.agent")}
+            </DropdownMenuLabel>
             <DropdownMenuItem
-              key={candidate.agentRef}
-              className="gap-1.5 rounded-sm px-2 py-1.5 text-xs"
-              // Choosing an agent is only half the choice: its models replace the
-              // group below and the user still has to pick one from them.
-              closeOnClick={false}
-              onClick={() => selectAgent(candidate.agentRef)}
+              className="flex items-center gap-1.5 rounded-sm px-2 py-2 text-xs"
+              // Navigating to the marketplace closes the menu so the settings
+              // surface is not fighting a still-open popover.
+              onClick={openPluginMarketplace}
             >
-              <PluginLogoMark
-                logo={candidate.logo}
-                fallback={IconRobot}
-                className="size-3.5 object-contain"
-              />
-              {candidate.label}
-              {candidate.agentRef === agentCli && (
-                <IconCheck className="ml-auto size-4" />
-              )}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuGroup>
-        <DropdownMenuGroup className="p-1">
-          <DropdownMenuLabel className="flex items-center gap-1 px-2 py-1.5 text-xs font-normal text-muted-foreground">
-            {t("chat.modelSelector.model")}
-            {isUpdatingModels && (
-              <span className="inline-flex items-center gap-1 text-muted-foreground/70">
-                <IconLoader2
-                  className="size-3 animate-spin"
-                  aria-hidden="true"
-                />
-                {t("chat.modelSelector.updating")}
+              <IconPlug className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 text-left text-muted-foreground">
+                {t("chat.modelSelector.noAgentPackage")}
               </span>
-            )}
-          </DropdownMenuLabel>
-          {/* Kept out of the agent group above: the agent list is short and
-              unsearched, and a query here should never be mistaken for
-              filtering which CLI is offered. */}
-          {modelValues.length > 0 && (
-            <div className="relative px-0.5 pb-1">
-              <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={modelQuery}
-                onChange={(event) => setModelQuery(event.target.value)}
-                placeholder={t("chat.modelSelector.search")}
-                aria-label={t("chat.modelSelector.search")}
-                className="h-7 border-transparent bg-muted/50 pl-8 text-xs shadow-none focus-visible:ring-1 focus-visible:ring-ring/50"
-                // Excluded from the tab order so the menu's own focus manager,
-                // which moves focus to the popup's first tabbable descendant
-                // on open, does not land here — opening the menu should not
-                // steal focus into the search box. A click still focuses it.
-                tabIndex={-1}
-                // The dropdown's own typeahead and arrow-key navigation listen
-                // on the popup element, so unfiltered keystrokes here would be
-                // swallowed as menu navigation instead of reaching the input.
-                onKeyDown={(event) => event.stopPropagation()}
-                onClick={(event) => event.stopPropagation()}
-              />
-            </div>
-          )}
-          {modelOption === null ? (
-            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-              {t(
-                isLoadingModels
-                  ? "chat.modelSelector.loading"
-                  : "chat.modelSelector.empty",
-              )}
-            </p>
-          ) : visibleModelValues.length === 0 ? (
-            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-              {t("chat.modelSelector.noResults")}
-            </p>
-          ) : (
-            visibleModelValues.map((value) => (
-              <DropdownMenuItem
-                key={value.value}
-                className="gap-1.5 rounded-sm px-2 py-1.5 text-xs"
-                disabled={!canSelectModel}
-                onClick={() => selectModel(value.value)}
-              >
-                {value.name}
-                {modelOption.type === "select" &&
-                  value.value === modelOption.currentValue && (
+              <IconChevronRight className="size-3.5 shrink-0 opacity-50" />
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        ) : (
+          <>
+            <DropdownMenuGroup className="p-1">
+              <DropdownMenuLabel className="px-2 py-1.5 text-xs font-normal text-muted-foreground">
+                {t("chat.modelSelector.agent")}
+              </DropdownMenuLabel>
+              {availableAgents.map((candidate) => (
+                <DropdownMenuItem
+                  key={candidate.agentRef}
+                  className="gap-1.5 rounded-sm px-2 py-1.5 text-xs"
+                  // Choosing an agent is only half the choice: its models replace the
+                  // group below and the user still has to pick one from them.
+                  closeOnClick={false}
+                  onClick={() => selectAgent(candidate.agentRef)}
+                >
+                  <PluginLogoMark
+                    logo={candidate.logo}
+                    fallback={IconRobot}
+                    className="size-3.5 object-contain"
+                  />
+                  {candidate.label}
+                  {candidate.agentRef === agentCli && (
                     <IconCheck className="ml-auto size-4" />
                   )}
-              </DropdownMenuItem>
-            ))
-          )}
-        </DropdownMenuGroup>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+            <DropdownMenuGroup className="p-1">
+              <DropdownMenuLabel className="flex items-center gap-1 px-2 py-1.5 text-xs font-normal text-muted-foreground">
+                {t("chat.modelSelector.model")}
+                {isUpdatingModels && (
+                  <span className="inline-flex items-center gap-1 text-muted-foreground/70">
+                    <IconLoader2
+                      className="size-3 animate-spin"
+                      aria-hidden="true"
+                    />
+                    {t("chat.modelSelector.updating")}
+                  </span>
+                )}
+              </DropdownMenuLabel>
+              {/* Kept out of the agent group above: the agent list is short and
+                  unsearched, and a query here should never be mistaken for
+                  filtering which CLI is offered. */}
+              {modelValues.length > 0 && (
+                <div className="relative px-0.5 pb-1">
+                  <IconSearch className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={modelQuery}
+                    onChange={(event) => setModelQuery(event.target.value)}
+                    placeholder={t("chat.modelSelector.search")}
+                    aria-label={t("chat.modelSelector.search")}
+                    className="h-7 border-transparent bg-muted/50 pl-8 text-xs shadow-none focus-visible:ring-1 focus-visible:ring-ring/50"
+                    // Excluded from the tab order so the menu's own focus manager,
+                    // which moves focus to the popup's first tabbable descendant
+                    // on open, does not land here — opening the menu should not
+                    // steal focus into the search box. A click still focuses it.
+                    tabIndex={-1}
+                    // The dropdown's own typeahead and arrow-key navigation listen
+                    // on the popup element, so unfiltered keystrokes here would be
+                    // swallowed as menu navigation instead of reaching the input.
+                    onKeyDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                </div>
+              )}
+              {modelValues.length === 0 ? (
+                <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+                  {t(
+                    isLoadingModels
+                      ? "chat.modelSelector.loading"
+                      : "chat.modelSelector.empty",
+                  )}
+                </p>
+              ) : visibleModelValues.length === 0 ? (
+                <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+                  {t("chat.modelSelector.noResults")}
+                </p>
+              ) : (
+                visibleModelValues.map((value) => (
+                  <DropdownMenuItem
+                    key={value.value}
+                    className="gap-1.5 rounded-sm px-2 py-1.5 text-xs"
+                    disabled={!canSelectModel}
+                    onClick={() => selectModel(value.value)}
+                  >
+                    {value.name}
+                    {value.value === selectedValue && (
+                      <IconCheck className="ml-auto size-4" />
+                    )}
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuGroup>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

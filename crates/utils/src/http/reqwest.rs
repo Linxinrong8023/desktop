@@ -10,6 +10,7 @@ use std::error::Error as StdError;
 use std::fs::File;
 use std::future::Future;
 use std::io::Write;
+use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
 
@@ -35,6 +36,7 @@ const FNV_OFFSET: u64 = 0xcbf29ce484222325;
 pub struct ReqwestDownloader {
     proxy_config: ProxyConfig,
     user_agent: String,
+    tls_extra_roots: Vec<rustls::pki_types::CertificateDer<'static>>,
 }
 
 impl ReqwestDownloader {
@@ -43,7 +45,18 @@ impl ReqwestDownloader {
         Self {
             proxy_config,
             user_agent: DEFAULT_USER_AGENT.to_owned(),
+            tls_extra_roots: Vec::new(),
         }
+    }
+
+    /// Adds a private CA root to explicit test trust for deterministic HTTPS regression tests.
+    #[cfg(test)]
+    pub(crate) fn with_extra_tls_root(
+        mut self,
+        root: rustls::pki_types::CertificateDer<'static>,
+    ) -> Self {
+        self.tls_extra_roots.push(root);
+        self
     }
 
     /// Builds a downloader with an explicit User-Agent, useful for gateway/CDN identification.
@@ -57,6 +70,24 @@ impl ReqwestDownloader {
         &self,
         request: DownloadRequest,
     ) -> Result<DownloadOutcome, DownloadError> {
+        self.download_signed(request, &[]).await
+    }
+
+    /// Runs one download with extra request headers, used by SigV4-signed S3 GETs.
+    pub(crate) async fn download_with_headers(
+        &self,
+        request: DownloadRequest,
+        extra_headers: &[(String, String)],
+    ) -> Result<DownloadOutcome, DownloadError> {
+        self.download_signed(request, extra_headers).await
+    }
+
+    /// Resolves the URL and drives retries, attaching `extra_headers` to every attempt.
+    async fn download_signed(
+        &self,
+        request: DownloadRequest,
+        extra_headers: &[(String, String)],
+    ) -> Result<DownloadOutcome, DownloadError> {
         let url = match &request.source {
             DownloadSource::Url(url) => url.clone(),
             DownloadSource::Local(_) => {
@@ -64,9 +95,18 @@ impl ReqwestDownloader {
                     "local sources require the local downloader".to_owned(),
                 ));
             }
+            DownloadSource::S3 { .. } => {
+                return Err(DownloadError::InvalidSource(
+                    "S3 object-key sources require the S3-aware downloader".to_owned(),
+                ));
+            }
         };
 
-        let operation = async { self.attempt_with_retries(&request, &url).await };
+        let extra_headers = extra_headers.to_vec();
+        let operation = async {
+            self.attempt_with_retries(&request, &url, &extra_headers)
+                .await
+        };
         match request.options.total_timeout {
             Some(total) => tokio::time::timeout(total, operation).await.map_err(|_| {
                 DownloadError::Timeout {
@@ -82,6 +122,7 @@ impl ReqwestDownloader {
         &self,
         request: &DownloadRequest,
         url: &Url,
+        extra_headers: &[(String, String)],
     ) -> Result<DownloadOutcome, DownloadError> {
         let mut attempts: u32 = 0;
         loop {
@@ -93,7 +134,7 @@ impl ReqwestDownloader {
                 ))
                 .await;
             }
-            match self.single_attempt(request, url).await {
+            match self.single_attempt(request, url, extra_headers).await {
                 Ok(outcome) => return Ok(outcome),
                 Err(error) if is_retryable(&error) && attempts < request.options.max_retries => {
                     attempts += 1;
@@ -108,6 +149,7 @@ impl ReqwestDownloader {
         &self,
         request: &DownloadRequest,
         url: &Url,
+        extra_headers: &[(String, String)],
     ) -> Result<DownloadOutcome, DownloadError> {
         let client = self.build_client(&request.options, url)?;
         let temporary = temporary_sibling(&request.destination);
@@ -116,7 +158,11 @@ impl ReqwestDownloader {
                 .map_err(|error| io_error(&request.destination, error))?;
         }
 
-        let mut response = client.get(url.clone()).send().await.map_err(|error| {
+        let mut builder = client.get(url.clone());
+        for (name, value) in extra_headers {
+            builder = builder.header(name.as_str(), value.as_str());
+        }
+        let mut response = builder.send().await.map_err(|error| {
             remove_temporary(&temporary);
             network_error(url, error)
         })?;
@@ -200,13 +246,51 @@ impl ReqwestDownloader {
         })
     }
 
+    /// Issues one GET against `url` and returns the HTTP status when a response arrives.
+    ///
+    /// The body is discarded: a connectivity probe only needs to know that the proxy path reached
+    /// a host. Any HTTP status, including 4xx and 5xx, is therefore a successful probe.
+    pub async fn probe(&self, url: Url, timeout: Duration) -> Result<u16, DownloadError> {
+        let options = DownloadOptions {
+            connect_timeout: Some(timeout),
+            per_attempt_timeout: Some(timeout),
+            total_timeout: Some(timeout),
+            max_retries: 0,
+            ..DownloadOptions::default()
+        };
+        let operation = async {
+            let client = self.build_client(&options, &url)?;
+            let response = client
+                .get(url.clone())
+                .send()
+                .await
+                .map_err(|error| network_error(&url, error))?;
+            Ok(response.status().as_u16())
+        };
+        match tokio::time::timeout(timeout, operation).await {
+            Ok(result) => result,
+            Err(_) => Err(DownloadError::Timeout {
+                phase: TimeoutPhase::Total,
+            }),
+        }
+    }
+
     /// Builds a per-request client with the resolved proxy and the requested timeouts.
     fn build_client(
         &self,
         options: &DownloadOptions,
         url: &Url,
     ) -> Result<reqwest::Client, DownloadError> {
-        let mut builder = reqwest::Client::builder().user_agent(&self.user_agent);
+        let tls_config =
+            platform_tls_config(&self.tls_extra_roots).map_err(|error| DownloadError::Network {
+                url: url.clone(),
+                source: std::io::Error::other(format!(
+                    "failed to initialize platform TLS verification: {error}"
+                )),
+            })?;
+        let mut builder = reqwest::Client::builder()
+            .use_preconfigured_tls(tls_config)
+            .user_agent(&self.user_agent);
         if let Some(connect) = options.connect_timeout {
             builder = builder.connect_timeout(connect);
         }
@@ -218,6 +302,40 @@ impl ReqwestDownloader {
         }
         builder.build().map_err(|error| network_error(url, error))
     }
+}
+
+/// Builds a Rustls client with certificate verification adapted to the host platform.
+///
+/// Copying native roots into a WebPKI store is insufficient on Windows because it bypasses the
+/// CryptoAPI chain engine, including enterprise policy and intermediate discovery. The explicit
+/// roots branch is test-only so HTTPS behavior can be exercised without modifying machine trust.
+fn platform_tls_config(
+    extra_roots: &[rustls::pki_types::CertificateDer<'static>],
+) -> Result<rustls::ClientConfig, String> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let verifier: Arc<dyn rustls::client::danger::ServerCertVerifier> = if extra_roots.is_empty() {
+        Arc::new(
+            rustls_platform_verifier::Verifier::new(Arc::clone(&provider))
+                .map_err(|error| error.to_string())?,
+        )
+    } else {
+        let mut roots = rustls::RootCertStore::empty();
+        for root in extra_roots.iter().cloned() {
+            roots.add(root).map_err(|error| error.to_string())?;
+        }
+        rustls::client::WebPkiServerVerifier::builder_with_provider(
+            Arc::new(roots),
+            Arc::clone(&provider),
+        )
+        .build()
+        .map_err(|error| error.to_string())?
+    };
+    Ok(rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|error| error.to_string())?
+        .dangerous()
+        .with_custom_certificate_verifier(verifier)
+        .with_no_client_auth())
 }
 
 impl HttpDownload for ReqwestDownloader {

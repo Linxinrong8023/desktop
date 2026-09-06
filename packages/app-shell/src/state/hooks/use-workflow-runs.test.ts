@@ -84,6 +84,8 @@ describe("buildDisplayRun", () => {
     },
     name: "审查流程 1",
     projectId: "p1",
+    variables: [],
+    conditionDecisions: {},
     nodes: [
       {
         nodeId: "explore",
@@ -150,7 +152,48 @@ describe("buildDisplayRun", () => {
     const startNode = display.definitionSnapshot.nodes.find(
       (node) => node.id === "start",
     );
-    expect(startNode?.data.instruction).toBe("只审查 README");
+    expect(startNode?.data.input).toBe("只审查 README");
+  });
+
+  it("projects assigned and unassigned typed variables onto the Start node", () => {
+    const graph = JSON.stringify({
+      ...JSON.parse(GRAPH),
+      nodes: [
+        {
+          id: "start",
+          type: "workflow",
+          position: { x: 0, y: 0 },
+          data: {
+            kind: "start",
+            title: "开始",
+            description: "",
+            inputVariables: [
+              { name: "count", valueType: "integer", value: 1 },
+              { name: "tags", valueType: "array", value: ["draft"] },
+            ],
+          },
+        },
+        JSON.parse(GRAPH).nodes[1],
+      ],
+    });
+    const display = buildDisplayRun(
+      {
+        ...detail,
+        variables: [
+          { selector: ["start", "count"], value: 3 },
+          { selector: ["start", "tags"] },
+        ],
+      },
+      graph,
+    );
+    const startNode = display.definitionSnapshot.nodes.find(
+      (node) => node.id === "start",
+    );
+
+    expect(startNode?.data.inputVariables).toEqual([
+      { name: "count", valueType: "integer", value: 3 },
+      { name: "tags", valueType: "array", value: undefined },
+    ]);
   });
 
   it("projects node file changes from the run payload", () => {
@@ -221,6 +264,47 @@ describe("buildDisplayRun", () => {
     ]);
   });
 
+  it("keeps Output JSON as output instead of projecting an Agent conversation", () => {
+    const outputGraph = JSON.stringify({
+      nodes: [
+        ...JSON.parse(GRAPH).nodes,
+        {
+          id: "output-1",
+          type: "workflow",
+          position: { x: 400, y: 0 },
+          data: { kind: "output", title: "输出", description: "" },
+        },
+      ],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    });
+    const output = '[{"role":"assistant","text":"这也是合法的业务结果"}]';
+    const display = buildDisplayRun(
+      {
+        ...detail,
+        nodes: [
+          {
+            nodeId: "output-1",
+            status: "succeeded",
+            startedAt: 10n,
+            finishedAt: 20n,
+            error: null,
+            output,
+            payload: null,
+          },
+        ],
+      },
+      outputGraph,
+    );
+
+    expect(display.nodeStates["output-1"]).toEqual({
+      status: "succeeded",
+      startedAt: new Date(10).toISOString(),
+      finishedAt: new Date(20).toISOString(),
+      output: { summary: output },
+    });
+  });
+
   it("derives awaiting_input node state from a pending node-run", () => {
     const pendingDetail = {
       ...detail,
@@ -238,6 +322,74 @@ describe("buildDisplayRun", () => {
     };
     const display = buildDisplayRun(pendingDetail, GRAPH);
     expect(display.nodeStates.explore.status).toBe("awaiting_input");
+  });
+
+  it("marks nodes behind a lost condition branch inactive from the run variable pool", () => {
+    const branching = JSON.stringify({
+      nodes: [
+        {
+          id: "start",
+          type: "workflow",
+          position: { x: 0, y: 0 },
+          data: { kind: "start", title: "", description: "" },
+        },
+        {
+          id: "c",
+          type: "workflow",
+          position: { x: 100, y: 0 },
+          data: { kind: "condition", title: "", description: "" },
+        },
+        {
+          id: "ok",
+          type: "workflow",
+          position: { x: 200, y: 0 },
+          data: { kind: "agent", title: "", description: "" },
+        },
+        {
+          id: "no",
+          type: "workflow",
+          position: { x: 200, y: 100 },
+          data: { kind: "agent", title: "", description: "" },
+        },
+      ],
+      edges: [
+        { id: "e1", source: "start", target: "c" },
+        { id: "e2", source: "c", sourceHandle: "approved", target: "ok" },
+        { id: "e3", source: "c", sourceHandle: "else", target: "no" },
+      ],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    });
+    const branchingDetail = {
+      ...detail,
+      run: {
+        ...detail.run,
+        status: "succeeded",
+      },
+      conditionDecisions: { c: "approved" },
+      nodes: [
+        {
+          nodeId: "start",
+          status: "succeeded",
+          startedAt: 1n,
+          finishedAt: 2n,
+          error: null,
+          output: null,
+          payload: null,
+        },
+        {
+          nodeId: "c",
+          status: "succeeded",
+          startedAt: 1n,
+          finishedAt: 2n,
+          error: null,
+          output: null,
+          payload: null,
+        },
+      ],
+    };
+    const display = buildDisplayRun(branchingDetail, branching);
+    expect(display.nodeStates.ok.status).toBe("idle");
+    expect(display.nodeStates.no.status).toBe("inactive");
   });
 });
 

@@ -2,7 +2,9 @@ use crate::app_event::AppEventPublisher;
 use crate::clock::SystemClock;
 use crate::effect_worker::EffectWorkerHandle;
 use crate::error::{BackendError, ErrorClassification};
-use crate::marketplace_sources::{MarketplaceSourceStore, MarketplaceSourceStoreError};
+use crate::marketplace_sources::{
+    ConfiguredMarketplaceSource, MarketplaceSourceStore, MarketplaceSourceStoreError,
+};
 use crate::proxy;
 use crate::user_config::UserConfigApi;
 use gitlancer::{CliGitRunner, Git};
@@ -13,19 +15,20 @@ use ora_contracts::{
     EmptyErrorParams, ImportPluginRequest, ImportPluginResponse, InstallOutcome,
     InstallPluginRequest, InstallPluginResponse, ListAvailablePluginsRequest,
     ListAvailablePluginsResponse, ListInstalledPluginsRequest, ListInstalledPluginsResponse,
-    ListMarketplaceSourcesRequest, ListMarketplaceSourcesResponse, PluginHostCompatibility,
-    PublicError, ReadPluginReadmeRequest, ReadPluginReadmeResponse, ScanPluginsRequest,
-    ScanPluginsResponse, StopPluginRequest, StopPluginResponse, SyncAvailablePluginsRequest,
-    SyncAvailablePluginsResponse, UninstallPluginRequest, UninstallPluginResponse,
-    UpdateMarketplaceSourceRequest, UpdateMarketplaceSourceResponse, UpdatePluginRequest,
-    UpdatePluginResponse,
+    ListMarketplaceSourcesRequest, ListMarketplaceSourcesResponse, MarketplaceArtifactRetrieval,
+    PluginHostCompatibility, PublicError, ReadPluginReadmeRequest, ReadPluginReadmeResponse,
+    ScanPluginsRequest, ScanPluginsResponse, StopPluginRequest, StopPluginResponse,
+    SyncAvailablePluginsRequest, SyncAvailablePluginsResponse, UninstallPluginRequest,
+    UninstallPluginResponse, UpdateMarketplaceSourceRequest, UpdateMarketplaceSourceResponse,
+    UpdatePluginRequest, UpdatePluginResponse,
 };
 use ora_db::{
     PluginSkillProjection, RepositoryPool, SqliteEffectRepository,
-    SqlitePluginMarketplaceSourceRepository, SqliteSkillRepository, SqliteWorkspaceRepository,
+    SqlitePluginMarketplaceSourceRepository, SqlitePluginSourceNamespaceRepository,
+    SqliteSkillRepository, SqliteWorkspaceRepository,
 };
-use ora_domain::{PluginId, WorkspaceLocation};
-use ora_effect::{Digest, FilesystemSkillSurface, SurfaceDescriptorSet};
+use ora_domain::{PluginId, PluginNamespace};
+use ora_effect::{ConsumerDeclaration, ConsumerIdentity, ConsumerKind, Digest};
 use ora_logging::{ora_debug, ora_info, ora_warn};
 use ora_plugin_config::ConfigurationService;
 use ora_plugin_lifecycle::{
@@ -39,8 +42,11 @@ use ora_plugin_manager::{
 };
 use ora_plugin_manifest::PluginManifest;
 use ora_plugin_registry::{RegistryEntry, RegistryError, RegistryIndex, RegistrySync};
-use ora_utils::http::{ProgressCallback, ProxyConfig, ReqwestDownloader};
-use std::collections::BTreeMap;
+use ora_utils::http::{
+    ProgressCallback, ProxyConfig, ReqwestDownloader, S3AwareDownloader, S3Config,
+};
+use ora_utils::url::canonical_repository_url;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
@@ -164,19 +170,21 @@ pub(crate) struct PluginApi {
     marketplace_sources: MarketplaceSourceStore,
     user_config: Arc<UserConfigApi>,
     registry_index_path: PathBuf,
-    data_directory: PathBuf,
+    home_directory: PathBuf,
     installer: Installer<ReqwestDownloader>,
     notifications: BroadcastNotificationSink,
     pub(crate) configuration: ConfigurationService,
     skill_repository: SqliteSkillRepository,
-    effect_repository: SqliteEffectRepository,
+    pub(crate) effect_repository: SqliteEffectRepository,
     workspace_repository: SqliteWorkspaceRepository,
-    agent_effect_surfaces: Mutex<BTreeMap<PluginId, Vec<FilesystemSkillSurface>>>,
+    agent_effect_declarations: Mutex<BTreeMap<PluginId, ConsumerDeclaration>>,
     /// Set once the Effect worker exists, which is after this API the worker itself borrows.
     ///
     /// Its absence only costs latency: a declaration change is already durable before the wake
     /// would fire, so the worker's periodic scan still converges the surface.
     effect_reconcile: OnceLock<EffectWorkerHandle>,
+    /// Secret-free wakeup that asks live Sessions to re-read Desired MCP.
+    mcp_wakeup: OnceLock<Arc<dyn Fn() + Send + Sync>>,
     clock: SystemClock,
 }
 
@@ -184,16 +192,17 @@ impl PluginApi {
     /// Opens plugin lifecycle state with the concrete backend adapters.
     pub(crate) fn open(
         pool: RepositoryPool,
-        data_directory: PathBuf,
+        home_directory: PathBuf,
         deno_path: PathBuf,
         clock: SystemClock,
         publisher: AppEventPublisher,
         user_config: Arc<UserConfigApi>,
     ) -> Result<Self, BackendError> {
-        let plugins_directory = data_directory.join("plugins");
+        let plugins_directory = home_directory.join("plugins");
         let marketplace_sources = MarketplaceSourceStore::open(
             SqlitePluginMarketplaceSourceRepository::new(pool.clone()),
-            &data_directory,
+            SqlitePluginSourceNamespaceRepository::new(pool.clone()),
+            &home_directory,
             clock.now_timestamp_millis(),
         )
         .map_err(|error| {
@@ -205,10 +214,10 @@ impl PluginApi {
         let registry_index_path = plugins_directory.join("cache").join("registry_index.json");
         let installer = Installer::new(ReqwestDownloader::new(ProxyConfig::default()));
         let notifications = BroadcastNotificationSink::new();
-        let configuration = ConfigurationService::new(data_directory.clone());
+        let configuration = ConfigurationService::new(home_directory.clone());
         let lifecycle = PluginLifecycle::open(
             PluginLifecycleConfig {
-                data_directory: data_directory.clone(),
+                data_directory: home_directory.clone(),
                 deno_path,
             },
             DenoPluginRuntimeLauncher::new(PluginRuntimeTimeouts::default()),
@@ -222,15 +231,16 @@ impl PluginApi {
             marketplace_sources,
             user_config,
             registry_index_path,
-            data_directory,
+            home_directory,
             installer,
             notifications,
             configuration,
             skill_repository: SqliteSkillRepository::new(pool.clone()),
             effect_repository: SqliteEffectRepository::new(pool.clone()),
             workspace_repository: SqliteWorkspaceRepository::new(pool),
-            agent_effect_surfaces: Mutex::new(BTreeMap::new()),
+            agent_effect_declarations: Mutex::new(BTreeMap::new()),
             effect_reconcile: OnceLock::new(),
+            mcp_wakeup: OnceLock::new(),
             clock,
         })
     }
@@ -243,9 +253,33 @@ impl PluginApi {
         let _ = self.effect_reconcile.set(handle);
     }
 
+    /// Wakes the shared worker after an already-durable source or declaration transition.
+    pub(crate) fn notify_effect_reconcile(&self) {
+        if let Some(reconcile) = self.effect_reconcile.get() {
+            reconcile.notify();
+        }
+    }
+
+    /// Connects the Session runtime wakeup once the agent runtime exists.
+    pub(crate) fn set_mcp_wakeup(&self, wakeup: Arc<dyn Fn() + Send + Sync>) {
+        let _ = self.mcp_wakeup.set(wakeup);
+    }
+
+    /// Asks every Live Session to re-read Desired MCP without carrying Setting values.
+    pub(crate) fn notify_mcp_desired_changed(&self) {
+        if let Some(wakeup) = self.mcp_wakeup.get() {
+            wakeup();
+        }
+    }
+
+    /// Returns the plugin data root used to rediscover installed packages.
+    pub(crate) fn home_directory(&self) -> &Path {
+        &self.home_directory
+    }
+
     /// Rebuilds catalog projections for every Skill plugin already installed on disk.
     pub(crate) fn sync_installed_skills(&self) -> Result<(), BackendError> {
-        let manager = PluginManager::discover(&self.data_directory);
+        let manager = PluginManager::discover(&self.home_directory);
         for plugin in manager.installed_plugins() {
             if matches!(plugin.contributes, PluginContribution::Skill(_)) {
                 self.persist_discovered_plugin_skills(plugin)?;
@@ -253,24 +287,39 @@ impl PluginApi {
         }
         Ok(())
     }
-    /// Returns the cached marketplace registry index, or an empty catalog when absent.
+
+    /// Returns the cached marketplace registry index, excluding listings from disabled sources.
     pub(crate) fn list_available_plugins(
         &self,
         _request: ListAvailablePluginsRequest,
-    ) -> Result<ListAvailablePluginsResponse, RegistryError> {
-        match RegistryIndex::load(&self.registry_index_path) {
-            Ok(index) => Ok(ListAvailablePluginsResponse {
+    ) -> Result<ListAvailablePluginsResponse, BackendError> {
+        let mut response = match RegistryIndex::load(&self.registry_index_path) {
+            Ok(index) => ListAvailablePluginsResponse {
                 updated_at: index.updated_at(),
                 plugins: index.plugins().iter().map(available_plugin).collect(),
-            }),
+            },
             Err(RegistryError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(ListAvailablePluginsResponse {
+                ListAvailablePluginsResponse {
                     updated_at: 0,
                     plugins: Vec::new(),
-                })
+                }
             }
-            Err(error) => Err(error),
-        }
+            Err(error) => {
+                return Err(BackendError::internal(
+                    "failed to load plugin registry index",
+                    error,
+                ));
+            }
+        };
+        let enabled_urls: HashSet<String> = self
+            .enabled_marketplace_sources()?
+            .into_iter()
+            .map(|source| canonical_repository_url(&source.source().url))
+            .collect();
+        response
+            .plugins
+            .retain(|plugin| enabled_urls.contains(&canonical_repository_url(&plugin.source_url)));
+        Ok(response)
     }
 
     /// Returns the user-configured marketplace source repositories in precedence order.
@@ -298,6 +347,8 @@ impl PluginApi {
                     url: request.url,
                     branch: request.branch,
                     use_proxy: request.use_proxy,
+                    enabled: true,
+                    artifact_retrieval: MarketplaceArtifactRetrieval::DirectHttps,
                 },
                 self.clock.now_timestamp_millis(),
             )
@@ -317,18 +368,14 @@ impl PluginApi {
         Ok(DeleteMarketplaceSourceResponse { sources })
     }
 
-    /// Changes only one marketplace source\u2019s proxy policy and returns the authoritative list.
+    /// Replaces the editable fields of one marketplace source and returns the authoritative list.
     pub(crate) fn update_marketplace_source(
         &self,
         request: UpdateMarketplaceSourceRequest,
     ) -> Result<UpdateMarketplaceSourceResponse, BackendError> {
         let sources = self
             .marketplace_sources
-            .set_use_proxy(
-                &request.url,
-                request.use_proxy,
-                self.clock.now_timestamp_millis(),
-            )
+            .update(request, self.clock.now_timestamp_millis())
             .map_err(map_marketplace_source_error)?;
         Ok(UpdateMarketplaceSourceResponse { sources })
     }
@@ -341,17 +388,16 @@ impl PluginApi {
     ) -> Result<SyncAvailablePluginsResponse, BackendError> {
         let git = Git::new(CliGitRunner);
         let registry_sources = self.prepared_registry_sources()?;
-        let mut registry_dirs: Vec<PathBuf> = Vec::with_capacity(registry_sources.len());
-        for (source, _) in &registry_sources {
-            let checkout_directory = RegistrySync::sync(&git, source)
+        for (source, _, _) in &registry_sources {
+            RegistrySync::sync(&git, source)
                 .map_err(|error| BackendError::internal("failed to sync plugin registry", error))?;
-            registry_dirs.push(checkout_directory.join("registry"));
         }
-        let registry_dir_refs: Vec<&Path> = registry_dirs.iter().map(PathBuf::as_path).collect();
-        let build = RegistryIndex::build_all(
-            &registry_dir_refs,
-            ora_logging::clock::now_local().unix_timestamp(),
-        );
+        let synced: Vec<&ora_plugin_registry::RegistrySource> = registry_sources
+            .iter()
+            .map(|(source, _use_proxy, _s3_config)| source)
+            .collect();
+        let build =
+            RegistryIndex::build_all(&synced, ora_logging::clock::now_local().unix_timestamp());
         if let Some(cache_directory) = self.registry_index_path.parent() {
             std::fs::create_dir_all(cache_directory).map_err(|error| {
                 BackendError::internal("failed to create registry cache directory", error)
@@ -394,8 +440,7 @@ impl PluginApi {
         let registry_sources = self.registry_sources()?;
         let mut known = false;
         for source in &registry_sources {
-            let registry_dir = source.checkout_dir().join("registry");
-            if let Some(readme) = RegistryIndex::resolve_readme(&registry_dir, &plugin_id)
+            if let Some(readme) = RegistryIndex::resolve_readme(source, &plugin_id)
                 .map_err(|error| BackendError::internal("failed to read plugin README", error))?
             {
                 return Ok(ReadPluginReadmeResponse {
@@ -404,7 +449,7 @@ impl PluginApi {
             }
             // A source may host the listing without a README; remember it so the response can
             // distinguish "no documentation published" from an unknown identifier.
-            if RegistryIndex::resolve_manifest(&registry_dir, &plugin_id)
+            if RegistryIndex::resolve_manifest(source, &plugin_id)
                 .map_err(|error| {
                     BackendError::internal("failed to resolve plugin README listing", error)
                 })?
@@ -423,38 +468,47 @@ impl PluginApi {
         ))
     }
 
-    /// Binds every configured marketplace source to its checkout without network or proxy work.
+    /// Returns configured marketplace sources that currently participate in listing and sync.
+    fn enabled_marketplace_sources(
+        &self,
+    ) -> Result<Vec<ConfiguredMarketplaceSource>, BackendError> {
+        Ok(self
+            .marketplace_sources
+            .configured_sources()
+            .map_err(map_marketplace_source_error)?
+            .into_iter()
+            .filter(|source| source.source().enabled)
+            .collect())
+    }
+
+    /// Binds every enabled marketplace source to its checkout without network or proxy work.
     ///
     /// Reads resolve listings from the local checkouts, so they can skip the proxy validation
     /// that only matters when a source is fetched or its release is downloaded.
     fn registry_sources(&self) -> Result<Vec<ora_plugin_registry::RegistrySource>, BackendError> {
-        let configured = self
-            .marketplace_sources
-            .list()
-            .map_err(map_marketplace_source_error)?;
+        let configured = self.enabled_marketplace_sources()?;
+        let now_ms = self.clock.now_timestamp_millis();
         configured
             .iter()
             .map(|source| {
                 self.marketplace_sources
-                    .registry_source(source)
+                    .registry_source(source.source(), now_ms)
                     .map_err(map_marketplace_source_error)
             })
             .collect()
     }
 
-    /// Binds every configured marketplace source to a registry checkout, applying proxy policy.
+    /// Binds every enabled marketplace source to a registry checkout, applying proxy policy.
     fn prepared_registry_sources(
         &self,
-    ) -> Result<Vec<(ora_plugin_registry::RegistrySource, bool)>, BackendError> {
-        let configured = self
-            .marketplace_sources
-            .list()
-            .map_err(map_marketplace_source_error)?;
+    ) -> Result<Vec<(ora_plugin_registry::RegistrySource, bool, Option<S3Config>)>, BackendError>
+    {
+        let configured = self.enabled_marketplace_sources()?;
         let proxy_settings = self.user_config.network_proxy_settings()?;
         let mut registry_sources = Vec::with_capacity(configured.len());
 
         for (source, mut registry_source) in configured.iter().zip(self.registry_sources()?) {
-            if source.use_proxy {
+            if source.source().use_proxy {
                 let git_env = proxy::git_proxy_env(proxy_settings.as_ref())?.ok_or_else(|| {
                     BackendError::invalid_proxy_settings(
                         "a marketplace source uses the proxy but no proxy is configured",
@@ -462,7 +516,11 @@ impl PluginApi {
                 })?;
                 registry_source = registry_source.with_git_env(git_env);
             }
-            registry_sources.push((registry_source, source.use_proxy));
+            registry_sources.push((
+                registry_source,
+                source.source().use_proxy,
+                source.s3_config(),
+            ));
         }
 
         Ok(registry_sources)
@@ -490,8 +548,14 @@ impl PluginApi {
     pub(crate) async fn scan(
         &self,
         request: ScanPluginsRequest,
-    ) -> Result<ScanPluginsResponse, PluginLifecycleError> {
-        self.lifecycle.scan_plugins(request).await
+    ) -> Result<ScanPluginsResponse, BackendError> {
+        let response = self
+            .lifecycle
+            .scan_plugins(request)
+            .await
+            .map_err(BackendError::from)?;
+        self.notify_mcp_desired_changed();
+        Ok(response)
     }
 
     /// Starts one installed plugin and returns its immediate starting state.
@@ -525,45 +589,45 @@ impl PluginApi {
         })
     }
 
-    /// Replaces one Agent plugin's declarations and persists the merged consumer snapshot.
-    ///
-    /// Registration is process-scoped, while Effect surfaces are Workspace-scoped. Keeping the
-    /// latest declaration per canonical Plugin ID lets independent Agent generations converge on
-    /// one complete snapshot without one plugin accidentally retiring a sibling's surface.
-    pub(crate) fn replace_agent_effect_surfaces(
+    /// Replaces one Agent plugin's complete Consumer declaration across existing Workspaces.
+    pub(crate) fn replace_agent_effect_declaration(
         &self,
         plugin_id: PluginId,
-        surfaces: Vec<FilesystemSkillSurface>,
+        declaration: Option<ConsumerDeclaration>,
     ) -> Result<(), BackendError> {
-        let descriptors = {
+        {
             let mut registered = self
-                .agent_effect_surfaces
+                .agent_effect_declarations
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            if surfaces.is_empty() {
-                registered.remove(&plugin_id);
+            if let Some(declaration) = &declaration {
+                registered.insert(plugin_id.clone(), declaration.clone());
             } else {
-                registered.insert(plugin_id, surfaces);
+                registered.remove(&plugin_id);
             }
-            registered.values().flatten().cloned().collect::<Vec<_>>()
-        };
-        let timestamp = self.clock.now_timestamp_millis();
-        let workspaces = self
-            .workspace_repository
-            .list_all_workspaces()
-            .map_err(|error| BackendError::internal("failed to list Effect Workspaces", error))?;
-        for workspace in workspaces {
-            let WorkspaceLocation::LocalFilesystem { path } = &workspace.location else {
-                // The first adapter is deliberately filesystem-only. Remote Workspaces need a
-                // provider-owned adapter instead of treating an opaque locator as a host path.
-                continue;
-            };
-            let merged = SurfaceDescriptorSet::merge(&workspace.id, descriptors.clone())
-                .map_err(|error| BackendError::internal("invalid Agent Effect surface", error))?;
-            self.effect_repository
-                .replace_surfaces(&workspace.id, Path::new(path), &merged, timestamp)
+        }
+        if let Some(declaration) = declaration {
+            let workspaces = self
+                .workspace_repository
+                .list_all_workspaces()
                 .map_err(|error| {
-                    BackendError::internal("failed to persist Agent Effect surfaces", error)
+                    BackendError::internal("failed to list Effect Workspaces", error)
+                })?;
+            self.effect_repository
+                .declare_consumer(&declaration, &workspaces)
+                .map_err(|error| {
+                    BackendError::internal("failed to persist Agent Effect declaration", error)
+                })?;
+        } else {
+            let consumer =
+                ConsumerIdentity::new(ConsumerKind::agent_plugin(), plugin_id.canonical())
+                    .map_err(|error| {
+                        BackendError::internal("invalid Agent Effect identity", error)
+                    })?;
+            self.effect_repository
+                .retire_consumer(&consumer)
+                .map_err(|error| {
+                    BackendError::internal("failed to retire Agent Effect Consumer", error)
                 })?;
         }
         // Waking after the commit, never before it: the request the worker will read is already
@@ -574,17 +638,12 @@ impl PluginApi {
         Ok(())
     }
 
-    /// Returns the merged Effect surface declarations of every currently registered Agent plugin.
-    ///
-    /// This snapshot is the single source convergence reads. It is process-local on purpose: a
-    /// plugin that is not running declares nothing, and a Workspace therefore owes it no surface
-    /// until its next start republishes the declaration.
-    pub(crate) fn agent_effect_surface_declarations(&self) -> Vec<FilesystemSkillSurface> {
-        self.agent_effect_surfaces
+    /// Returns the complete declarations used to pair newly created Workspaces with Consumers.
+    pub(crate) fn agent_effect_declarations(&self) -> Vec<ConsumerDeclaration> {
+        self.agent_effect_declarations
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .values()
-            .flatten()
             .cloned()
             .collect()
     }
@@ -609,7 +668,8 @@ impl PluginApi {
         self.skill_repository
             .remove_plugin_skills(&plugin_id, self.clock.now_timestamp_millis())
             .map_err(|error| BackendError::internal("failed to remove plugin Skills", error))?;
-        self.replace_agent_effect_surfaces(plugin_id, Vec::new())?;
+        self.replace_agent_effect_declaration(plugin_id, None)?;
+        self.notify_mcp_desired_changed();
         Ok(response)
     }
     /// Installs a marketplace plugin by resolving its release manifest from the synced sources and
@@ -640,7 +700,8 @@ impl PluginApi {
         request: InstallPluginRequest,
         progress: Option<ProgressCallback>,
     ) -> Result<InstallPluginResponse, BackendError> {
-        let (manifest, use_proxy) = self.resolve_marketplace_release(&request.plugin_id)?;
+        let (manifest, namespace, use_proxy, s3_config) =
+            self.resolve_marketplace_release(&request.plugin_id)?;
         let release_source = self.select_marketplace_release(&manifest)?;
         match release_source.download() {
             ora_utils::http::DownloadSource::Url(url) => {
@@ -649,23 +710,26 @@ impl PluginApi {
             ora_utils::http::DownloadSource::Local(path) => {
                 ora_info!(plugin_id = %request.plugin_id, path = %path.display(), "installing marketplace plugin from local source");
             }
+            ora_utils::http::DownloadSource::S3 { key } => {
+                ora_info!(plugin_id = %request.plugin_id, key = %key, "installing marketplace plugin from object store");
+            }
         }
-        let download_proxy = self.download_proxy_for(use_proxy)?;
-        let installer = Installer::new(ReqwestDownloader::new(download_proxy));
+        let installer = self.marketplace_installer(use_proxy, s3_config)?;
         match progress {
             Some(progress) => {
                 installer
                     .install_with_progress(
                         &manifest,
+                        &namespace,
                         release_source,
-                        &self.data_directory,
+                        &self.home_directory,
                         progress,
                     )
                     .await
             }
             None => {
                 installer
-                    .install(&manifest, release_source, &self.data_directory)
+                    .install(&manifest, &namespace, release_source, &self.home_directory)
                     .await
             }
         }
@@ -688,7 +752,8 @@ impl PluginApi {
         &self,
         request: UpdatePluginRequest,
     ) -> Result<UpdatePluginResponse, BackendError> {
-        let (manifest, use_proxy) = self.resolve_marketplace_release(&request.plugin_id)?;
+        let (manifest, namespace, use_proxy, s3_config) =
+            self.resolve_marketplace_release(&request.plugin_id)?;
         let release_source = self.select_marketplace_release(&manifest)?;
         match release_source.download() {
             ora_utils::http::DownloadSource::Url(url) => {
@@ -696,6 +761,9 @@ impl PluginApi {
             }
             ora_utils::http::DownloadSource::Local(path) => {
                 ora_info!(plugin_id = %request.plugin_id, path = %path.display(), "updating marketplace plugin from local source");
+            }
+            ora_utils::http::DownloadSource::S3 { key } => {
+                ora_info!(plugin_id = %request.plugin_id, key = %key, "updating marketplace plugin from object store");
             }
         }
         // The package directory is replaced while the plugin may be running, so the process is
@@ -706,9 +774,8 @@ impl PluginApi {
             })
             .await
             .map_err(BackendError::from)?;
-        let download_proxy = self.download_proxy_for(use_proxy)?;
-        Installer::new(ReqwestDownloader::new(download_proxy))
-            .update(&manifest, release_source, &self.data_directory)
+        self.marketplace_installer(use_proxy, s3_config)?
+            .update(&manifest, &namespace, release_source, &self.home_directory)
             .await
             .map_err(|error| self.map_update_error("failed to update plugin", error))?;
         self.finalize_new_install(&request.plugin_id).await?;
@@ -720,12 +787,14 @@ impl PluginApi {
 
     /// Resolves the release manifest for one marketplace identifier across the configured sources.
     ///
-    /// Sources are consulted in precedence order, and the returned flag is the winning source's
-    /// proxy policy so installs and updates honor the same per-source setting as the git sync.
+    /// The id names the namespace of the source that published it, so only that source can
+    /// answer: the returned namespace and proxy policy always belong to the entry's own
+    /// repository, and an install or update can never be redirected by reordering the source list
+    /// or by another source publishing the same `identifier`.
     fn resolve_marketplace_release(
         &self,
         plugin_id: &str,
-    ) -> Result<(PluginManifest, bool), BackendError> {
+    ) -> Result<(PluginManifest, PluginNamespace, bool, Option<S3Config>), BackendError> {
         let registry_sources = self.prepared_registry_sources()?;
         // A malformed identifier can never name a registry entry, so it is reported the same way
         // as an unknown one instead of leaking the id grammar as a separate error class.
@@ -736,14 +805,18 @@ impl PluginApi {
                 "marketplace plugin id is not a valid `<namespace>/<name>`",
             )
         })?;
-        for (source, use_proxy) in &registry_sources {
-            let registry_dir = source.checkout_dir().join("registry");
-            if let Some(manifest) = RegistryIndex::resolve_manifest(&registry_dir, &plugin_id)
-                .map_err(|error| {
+        for (source, use_proxy, s3_config) in &registry_sources {
+            if let Some(manifest) =
+                RegistryIndex::resolve_manifest(source, &plugin_id).map_err(|error| {
                     BackendError::internal("failed to resolve plugin release manifest", error)
                 })?
             {
-                return Ok((manifest, *use_proxy));
+                return Ok((
+                    manifest,
+                    source.namespace().clone(),
+                    *use_proxy,
+                    s3_config.clone(),
+                ));
             }
         }
         Err(BackendError::new(
@@ -803,6 +876,19 @@ impl PluginApi {
         })
     }
 
+    /// Builds a source-scoped downloader that signs only the configured S3 endpoint and bucket.
+    fn marketplace_installer(
+        &self,
+        use_proxy: bool,
+        s3_config: Option<S3Config>,
+    ) -> Result<Installer<S3AwareDownloader>, BackendError> {
+        let download_proxy = self.download_proxy_for(use_proxy)?;
+        Ok(Installer::new(S3AwareDownloader::new(
+            ReqwestDownloader::new(download_proxy),
+            s3_config,
+        )))
+    }
+
     /// Imports a local `.orax` release archive: verifies and extracts it, refreshes the installed
     /// snapshot so the plugin is immediately usable without a restart.
     pub(crate) async fn import(
@@ -815,12 +901,12 @@ impl PluginApi {
         // pool instead of a tokio worker thread; the downloader is cloned only for the task
         // and is needed because `install_local` is an `Installer` method.
         let installer = self.installer.clone();
-        let data_directory = self.data_directory.clone();
+        let home_directory = self.home_directory.clone();
         let host_target = ora_plugin_registry::current_host_target();
         let package = tokio::task::spawn_blocking(move || {
             installer.install_local(
                 &archive_path,
-                &data_directory,
+                &home_directory,
                 ora_plugin_manager::HostTarget::from_option(host_target.as_ref()),
             )
         })
@@ -837,12 +923,10 @@ impl PluginApi {
             ),
             error => BackendError::internal("failed to import plugin archive", error),
         })?;
-        let outcome = self.finalize_new_install(&package.id).await?;
-        ora_info!(plugin_id = %package.id, outcome = ?outcome, "imported plugin release from local archive");
-        Ok(ImportPluginResponse {
-            plugin_id: package.id,
-            outcome,
-        })
+        let plugin_id = package.id.canonical();
+        let outcome = self.finalize_new_install(&plugin_id).await?;
+        ora_info!(plugin_id = %plugin_id, outcome = ?outcome, "imported plugin release from local archive");
+        Ok(ImportPluginResponse { plugin_id, outcome })
     }
 
     /// Refreshes the installed-plugin snapshot after a new package lands and reports the typed
@@ -855,6 +939,7 @@ impl PluginApi {
         if let Err(error) = self.lifecycle.scan_plugins(ScanPluginsRequest {}).await {
             ora_warn!(plugin_id = %plugin_id, %error, "installed the package but failed to refresh the installed-plugin snapshot");
         }
+        self.notify_mcp_desired_changed();
         // A second Hook with the same bare command still makes PATH resolution ambiguous, so the
         // typed outcome carries the colliding identity instead of looking like an ordinary success.
         if let Some(conflict) = self.detect_hook_command_conflict(plugin_id) {
@@ -876,7 +961,7 @@ impl PluginApi {
     /// The new Hook itself is excluded so a re-install of the same package does not conflict
     /// with its own contribution.
     fn detect_hook_command_conflict(&self, plugin_id: &str) -> Option<String> {
-        let manager = PluginManager::discover(&self.data_directory);
+        let manager = PluginManager::discover(&self.home_directory);
         let installed = manager.installed_plugins();
         let new_hook = installed
             .iter()
@@ -906,7 +991,7 @@ impl PluginApi {
 
     /// Projects validated static Skill metadata into the shared catalog and Effect source tables.
     fn sync_plugin_skills(&self, plugin_id: &str) -> Result<(), BackendError> {
-        let manager = PluginManager::discover(&self.data_directory);
+        let manager = PluginManager::discover(&self.home_directory);
         let plugin = manager
             .installed_plugins()
             .iter()
@@ -949,7 +1034,17 @@ impl PluginApi {
                 name: skill.name.clone(),
                 description: skill.description.clone(),
                 package_root: skill.package_root.clone(),
-                skill_md_digest: Digest::sha256(&manifest).to_string(),
+                skill_md_digest: Digest::sha256(&manifest),
+                package_fingerprint: ora_effect::Fingerprint::from(
+                    ora_utils::directory::fingerprint_directory(&skill.package_root, &[]).map_err(
+                        |error| {
+                            BackendError::internal(
+                                "failed to fingerprint validated plugin Skill package",
+                                error,
+                            )
+                        },
+                    )?,
+                ),
             });
         }
         self.skill_repository
@@ -981,6 +1076,11 @@ fn map_marketplace_source_error(error: MarketplaceSourceStoreError) -> BackendEr
             PublicError::InvalidRequest(EmptyErrorParams {}),
             format!("plugin marketplace source was not found: {url}"),
         ),
+        MarketplaceSourceStoreError::ArtifactRetrieval(error) => BackendError::new(
+            ErrorClassification::InvalidRequest,
+            PublicError::InvalidRequest(EmptyErrorParams {}),
+            format!("invalid marketplace artifact retrieval: {error}"),
+        ),
         error => BackendError::internal(
             "failed to persist configured plugin marketplace sources",
             error,
@@ -992,10 +1092,11 @@ fn map_marketplace_source_error(error: MarketplaceSourceStoreError) -> BackendEr
 fn available_plugin(entry: &RegistryEntry) -> ora_contracts::AvailablePlugin {
     ora_contracts::AvailablePlugin {
         id: entry.id().canonical(),
-        name: entry.name().to_owned(),
+        name: entry.identifier().to_owned(),
         title: entry.title().to_owned(),
         kind: entry.kind().to_owned(),
         namespace: entry.namespace().to_owned(),
+        source_url: entry.source_url().to_owned(),
         version: entry.version().to_string(),
         description: entry.description().to_owned(),
         logo: entry.logo().map(str::to_owned),
@@ -1009,7 +1110,7 @@ fn available_plugin(entry: &RegistryEntry) -> ora_contracts::AvailablePlugin {
 #[cfg(test)]
 mod tests {
     use super::BroadcastNotificationSink;
-    use ora_domain::PluginId;
+    use ora_domain::{PluginId, PluginNamespace};
     use ora_plugin_lifecycle::{InboundNotification, PluginGenerationKey, PluginNotificationSink};
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -1120,12 +1221,17 @@ mod tests {
             .join("rtk-ai.rtk");
         std::fs::create_dir_all(&registry_dir).expect("create listing dir");
         let listing = format!(
-            "resolver = 1\ntitle = \"RTK\"\nidentifier = \"rtk-ai.rtk\"\nnamespace = \"official\"\nkind = \"hook\"\nversion = \"0.1.0\"\ndescription = \"RTK command rewrite hook\"\nhomepage = \"https://github.com/rtk-ai/rtk\"\nlicense = \"Apache-2.0\"\n\n[[targets]]\ntarget = \"x86_64-pc-windows-msvc\"\nurl = \"{release_url}\"\nsha256 = \"{sha256_hex}\"\n"
+            "resolver = 1\ntitle = \"RTK\"\nidentifier = \"rtk-ai.rtk\"\nkind = \"hook\"\nversion = \"0.1.0\"\ndescription = \"RTK command rewrite hook\"\nhomepage = \"https://github.com/rtk-ai/rtk\"\nlicense = \"Apache-2.0\"\n\n[[targets]]\ntarget = \"x86_64-pc-windows-msvc\"\nurl = \"{release_url}\"\nsha256 = \"{sha256_hex}\"\n"
         );
         std::fs::write(registry_dir.join("orax.toml"), &listing).expect("write listing");
-        let registry_dir = marketplace_root.path().join("registry");
+        let marketplace_source = ora_plugin_registry::RegistrySource::new(
+            "https://github.com/ora-space/marketplace",
+            PluginNamespace::official(),
+            gitlancer::BranchName::new("main"),
+            marketplace_root.path(),
+        );
         let build =
-            ora_plugin_registry::RegistryIndex::build_all(&[registry_dir.as_path()], 1_776_244_428);
+            ora_plugin_registry::RegistryIndex::build_all(&[&marketplace_source], 1_776_244_428);
         assert_eq!(build.skipped().len(), 0);
         let rtk_entry = build
             .index()
@@ -1160,7 +1266,12 @@ mod tests {
             host,
         );
         let package_dir = installer
-            .install(&parsed, source, data_dir.path())
+            .install(
+                &parsed,
+                marketplace_source.namespace(),
+                source,
+                data_dir.path(),
+            )
             .await
             .expect("install the RTK Hook Plugin");
         assert!(

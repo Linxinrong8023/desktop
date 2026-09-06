@@ -18,16 +18,21 @@ that any other crate can consume without introducing dependency cycles.
   fingerprints cover portable paths, file bytes, entry kinds, and executable permissions while
   allowing callers to exclude their own metadata files.
 - `hash` (Cargo feature `validation`): streaming SHA-256 digests over a reader or file without
-  buffering the whole input.
+  buffering the whole input, plus `sha256_hex` for a short in-memory value.
+- `url` (Cargo feature `validation`): canonicalizing a repository URL so two spellings of one
+  remote compare equal (lowercase, no userinfo, no default port, no trailing slash, no `.git`
+  suffix), and taking its last path segment. Callers that key durable state on a remote need one
+  value per repository across every spelling, version, and platform.
 - `http` (Cargo feature `http`): the transport-agnostic `HttpDownload` contract plus an offline
   `LocalFileDownloader` that copies a local file or `file://` URL to a destination, enforcing an
   optional byte limit and SHA-256 checksum with an atomic replace.
 - `http-reqwest` (Cargo feature `http-reqwest`, implies `http`): the `reqwest`-backed
   `ReqwestDownloader` that streams remote HTTP(S) responses with timeouts, retries, progress,
   cancellation, and proxy resolution driven by explicit config and `*_PROXY`/`NO_PROXY` variables.
-  It trusts the operating system native certificate store (alongside the bundled webpki roots) so
-  downloads succeed behind corporate MITM proxies whose root CA is installed in the OS trust
-  store, and it preserves the full reqwest cause chain in network errors for diagnosability.
+  It uses Rustls with a platform-aware certificate verifier. On Windows, chain verification runs
+  through CryptoAPI, so enterprise roots and platform chain policy match Schannel-backed system
+  Git on the same machine. It also preserves the full reqwest cause chain in network errors for
+  diagnosability.
 - `html` (Cargo feature `validation`): conservative validation rejecting README text that embeds
   scriptable HTML (forbidden tags, `on*` event handlers, `javascript:`/`data:` URIs).
 - `svg` (Cargo feature `validation`): security validation for SVG icons — accepts well-formed

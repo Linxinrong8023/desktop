@@ -4,7 +4,7 @@ import {
   encodeFrame,
   type JsonValue,
   type PluginTransport,
-} from "../src/protocol.ts";
+} from "../src/protocol/index.ts";
 
 /** Compares JSON-compatible values without a Node compatibility dependency. */
 function assertEquals(actual: unknown, expected: unknown): void {

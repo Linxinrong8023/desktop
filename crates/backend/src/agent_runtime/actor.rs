@@ -10,6 +10,8 @@ use super::scheduling::{ActiveInput, ActiveInputState};
 use super::session_followers::SessionFollowers;
 use super::title_acquisition::PollAttempt;
 use super::*;
+#[path = "actor_mcp.rs"]
+mod actor_mcp;
 #[path = "title_polling.rs"]
 mod title_polling;
 use agent_client_protocol_schema::v1::AGENT_METHOD_NAMES;
@@ -117,11 +119,17 @@ impl RuntimeActor {
                 } => {
                     if self.channel.is_none() {
                         let _ = accepted.send(Err(session_stopped()));
+                    } else if let Err(error) = self.ensure_current_mcp().await {
+                        let _ = accepted.send(Err(error));
                     } else {
                         let _ = accepted.send(Ok(()));
                         self.run_prompt(operation_id, prompt, record_prompt, events)
                             .await;
+                        self.refresh_idle_mcp_if_owed().await;
                     }
+                }
+                RuntimeCommand::McpDesiredMaybeChanged => {
+                    self.on_idle_mcp_desired_changed().await;
                 }
                 RuntimeCommand::AgentProcessReplaced { agent } => {
                     self.detach_replaced_agent(&agent);
@@ -204,7 +212,15 @@ impl RuntimeActor {
             self.mark_stopped();
             return;
         }
-        self.run_load_on_channel(operation_id, events, channel)
+        let snapshot = match self.resolve_load_mcp_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                let _ = events.try_send(Err(error));
+                self.mark_stopped();
+                return;
+            }
+        };
+        self.run_load_on_channel(operation_id, events, channel, snapshot)
             .await;
     }
 
@@ -219,12 +235,14 @@ impl RuntimeActor {
         operation_id: u64,
         events: mpsc::Sender<Result<LoadSessionEvent, BackendError>>,
         mut channel: SessionChannel,
+        snapshot: crate::session_setup::SessionMcpSnapshot,
     ) {
         let client = channel.connection.client.clone();
         let request = AcpLoadSessionRequest::new(
             AcpSessionId::new(self.session.agent_session_id.clone()),
             &self.cwd,
-        );
+        )
+        .mcp_servers(snapshot.servers().to_vec());
         ora_debug!(session_id = %self.session.id, "session/load sent");
         let pending = match client
             .start_session_request::<_, LoadSessionResponse>(
@@ -317,6 +335,7 @@ impl RuntimeActor {
                                         .await
                                         .is_ok() =>
                                 {
+                                    self.record_loaded_mcp(&snapshot);
                                     self.channel = Some(channel);
                                 }
                                 // A replay that did not finish leaves the client without the
@@ -371,6 +390,9 @@ impl RuntimeActor {
                     return;
                 }
                 ActiveInput::Command(RuntimeCommand::CancelActivePrompt) => {}
+                ActiveInput::Command(RuntimeCommand::McpDesiredMaybeChanged) => {
+                    self.note_desired_mcp();
+                }
                 // The Effect barrier is what makes this unreachable while an operation is in
                 // flight: a consumer is only restarted after its plugin reported every turn
                 // finished. A replacement that still raced in leaves this request unanswered, and
@@ -742,6 +764,9 @@ impl RuntimeActor {
                 }
                 ActiveInput::Command(RuntimeCommand::Cancel { .. }) => {}
                 ActiveInput::Command(RuntimeCommand::CancelActivePrompt) => {}
+                ActiveInput::Command(RuntimeCommand::McpDesiredMaybeChanged) => {
+                    self.note_desired_mcp();
+                }
                 // The Effect barrier is what makes this unreachable while an operation is in
                 // flight: a consumer is only restarted after its plugin reported every turn
                 // finished. A replacement that still raced in leaves this request unanswered, and
@@ -947,6 +972,7 @@ impl RuntimeActor {
     fn mark_stopped(&mut self) {
         self.channel = None;
         self.title_acquisition.close();
+        self.live_mcp = LiveMcpState::Inactive;
         self.persist_session_status(SessionStatus::Stopped);
         ora_debug!(session_id = %self.session.id, "session marked stopped");
     }
@@ -996,13 +1022,13 @@ impl Drop for RuntimeActor {
 
 #[cfg(test)]
 mod tests {
-    use super::super::connection::AgentSource;
     use super::*;
     use crate::agent_runtime::connection::ConnectionSupervisor;
     use crate::agent_runtime::title_acquisition::TitleAcquisition;
     use crate::app_event::AppEventHub;
     use crate::clock::SystemClock;
     use crate::plugin::PluginApi;
+    use crate::session_setup::{AgentSessionBarriers, SessionMcpHost};
     use crate::user_config::UserConfigApi;
     use ora_db::{
         DatabaseBootstrapper, DatabaseLocation, RepositoryPool, default_migration_catalog,
@@ -1020,7 +1046,7 @@ mod tests {
 
     /// Opens one migrated pool for the plugin host's database-backed collaborators.
     fn test_repository_pool(root: &Path) -> RepositoryPool {
-        DatabaseBootstrapper::system()
+        DatabaseBootstrapper::new(crate::test_clock::TestClock)
             .bootstrap_repository_pool(
                 &DatabaseLocation::path(root.join("test.sqlite")),
                 &default_migration_catalog().expect("build migration catalog"),
@@ -1044,13 +1070,13 @@ mod tests {
     }
 
     /// Names one installed agent package the supervisor fixtures bind their sessions to.
-    fn test_agent_source() -> (AgentRef, AgentSource) {
+    ///
+    /// The agent identity is the package's whole canonical plugin id, which is exactly what a
+    /// session persists in `agent_cli`.
+    fn test_agent_source() -> (AgentRef, PluginId) {
         (
-            AgentRef::parse("ora-space.codex").expect("agent identity"),
-            AgentSource {
-                plugin_id: PluginId::new("official", "ora-space.codex").expect("plugin id"),
-                package_name: "ora-space.codex".to_string(),
-            },
+            AgentRef::parse("official/ora-space.codex").expect("agent identity"),
+            PluginId::new("official", "ora-space.codex").expect("plugin id"),
         )
     }
 
@@ -1061,10 +1087,11 @@ mod tests {
         let pool = test_repository_pool(temporary.path());
         let scheduler = Scheduler::new(chrono_tz::UTC);
         let (agent_ref, agent_source) = test_agent_source();
+        let plugin_host = test_plugin_host(&pool, temporary.path());
         let connection = ConnectionSupervisor::start(
             agent_ref.clone(),
             agent_source,
-            test_plugin_host(&pool, temporary.path()),
+            plugin_host.clone(),
             pool.clone(),
             temporary.path().to_path_buf(),
             SystemClock,
@@ -1103,6 +1130,9 @@ mod tests {
             app_events: AppEventHub::new().publisher(),
             title_acquisition: TitleAcquisition::disabled(),
             command_sender,
+            session_mcp: SessionMcpHost::from_plugin_api(plugin_host),
+            barriers: Arc::new(AgentSessionBarriers::new()),
+            live_mcp: LiveMcpState::Inactive,
             exit_probe: Some(exit_sender),
         };
         let actor_task = tokio::spawn(actor.run());
@@ -1123,10 +1153,11 @@ mod tests {
         let pool = test_repository_pool(temporary.path());
         let scheduler = Scheduler::new(chrono_tz::UTC);
         let (agent_ref, agent_source) = test_agent_source();
+        let plugin_host = test_plugin_host(&pool, temporary.path());
         let connection = ConnectionSupervisor::start(
             agent_ref.clone(),
             agent_source,
-            test_plugin_host(&pool, temporary.path()),
+            plugin_host.clone(),
             pool.clone(),
             temporary.path().to_path_buf(),
             SystemClock,
@@ -1164,6 +1195,9 @@ mod tests {
             app_events: AppEventHub::new().publisher(),
             title_acquisition: TitleAcquisition::awaiting_first_prompt(true),
             command_sender,
+            session_mcp: SessionMcpHost::from_plugin_api(plugin_host),
+            barriers: Arc::new(AgentSessionBarriers::new()),
+            live_mcp: LiveMcpState::Inactive,
             exit_probe: None,
         };
         let user_title = SessionTitle::parse("User title").expect("valid user title");

@@ -43,6 +43,7 @@ ora-logging = { path = "../../../crates/logging" }
 ora-plugin-lifecycle = { path = "../../../crates/plugin-lifecycle" }
 ora-plugin-manager = { path = "../../../crates/plugin-manager" }
 ora-plugin-manifest = { path = "../../../crates/plugin-manifest" }
+ora-plugin-protocol = { path = "../../../crates/plugin-protocol" }
 ora-process = { path = "../../../crates/process" }
 ora-runtime-settings = { path = "../../../crates/runtime-settings" }
 ora-scheduler = { path = "../../../crates/scheduler" }

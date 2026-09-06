@@ -2,7 +2,10 @@
 
 use crate::discovery::installed_root;
 use crate::limits::package_extract_limits;
-use ora_plugin_manifest::{HookTarget, PluginKind, PluginManifest, PluginReleaseSource};
+use ora_domain::{PluginId, PluginNamespace};
+use ora_plugin_manifest::{
+    HookTarget, PluginKind, PluginManifest, PluginReleaseSource, ReleaseLocator,
+};
 use ora_utils::archive::{ArchiveFormat, extract_archive};
 use ora_utils::hash;
 use ora_utils::http::{
@@ -177,12 +180,9 @@ pub fn select_release(
     host_target: HostTarget<'_>,
 ) -> Result<ResolvedReleaseSource, InstallError> {
     match manifest.release_source() {
-        Some(PluginReleaseSource::Universal { url, sha256 }) => {
-            Ok(ResolvedReleaseSource::universal(
-                DownloadSource::Url(url.as_url().clone()),
-                *sha256.as_bytes(),
-            ))
-        }
+        Some(PluginReleaseSource::Universal { url, sha256 }) => Ok(
+            ResolvedReleaseSource::universal(download_source(url), *sha256.as_bytes()),
+        ),
         Some(PluginReleaseSource::Targets(targets)) => {
             let HostTarget::Triple(host_target) = host_target else {
                 return Err(InstallError::UnsupportedHost);
@@ -194,12 +194,22 @@ pub fn select_release(
                     target: host_target.to_string(),
                 })?;
             Ok(ResolvedReleaseSource::targeted(
-                DownloadSource::Url(entry.url().as_url().clone()),
+                download_source(entry.url()),
                 *entry.sha256().as_bytes(),
                 entry.target().clone(),
             ))
         }
         None => Err(InstallError::MissingRelease),
+    }
+}
+
+/// Maps a marketplace locator onto the download source the installer injects.
+fn download_source(locator: &ReleaseLocator) -> DownloadSource {
+    match locator {
+        ReleaseLocator::Https(url) => DownloadSource::Url(url.as_url().clone()),
+        ReleaseLocator::ObjectKey(key) => DownloadSource::S3 {
+            key: key.as_str().to_owned(),
+        },
     }
 }
 
@@ -234,13 +244,14 @@ pub enum UpdateError {
     },
 }
 
-/// Describes one package materialized from a local release archive.
+/// Describes one package materialized from a release archive.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledPackage {
     /// The package directory below `<data-dir>/plugins/installed/<namespace>/<name>/<version>`.
     pub package_dir: PathBuf,
-    /// The plugin identifier (`namespace/name`) derived from the in-archive manifest.
-    pub id: String,
+    /// The installed plugin's identity: the name segment comes from the in-package manifest, the
+    /// namespace from the installing source. The manifest never names its own namespace.
+    pub id: PluginId,
 }
 
 /// Orchestrates one plugin installation and stays backend-agnostic.
@@ -265,6 +276,12 @@ where
     /// `<data-dir>/plugins/installed/<namespace>/<name>/<version>`, returning that package
     /// directory.
     ///
+    /// `namespace` is the identity of the marketplace source the release was resolved from, and
+    /// the caller is the only party that knows it: a package author cannot know which source a
+    /// user installed their plugin through, so the manifest does not declare it. Writing it as
+    /// the first directory level is what makes the installed tree, and nothing else, the record
+    /// of where a plugin came from.
+    ///
     /// For a universal release, `source` carries the download URL and the manifest's `sha256`
     /// verifies the bytes. For a targeted release, `source` is the resolved target-specific
     /// artifact (selected by the caller against `host_target`) and the matching target digest
@@ -273,22 +290,26 @@ where
     pub async fn install(
         &self,
         manifest: &PluginManifest,
+        namespace: &PluginNamespace,
         source: ResolvedReleaseSource,
         data_dir: &Path,
     ) -> Result<PathBuf, InstallError> {
-        self.install_package(manifest, source, data_dir, /*progress*/ None)
-            .await
+        self.install_package(
+            manifest, namespace, source, data_dir, /*progress*/ None,
+        )
+        .await
     }
 
     /// Installs a release while forwarding byte-level network download progress to the caller.
     pub async fn install_with_progress(
         &self,
         manifest: &PluginManifest,
+        namespace: &PluginNamespace,
         source: ResolvedReleaseSource,
         data_dir: &Path,
         progress: ProgressCallback,
     ) -> Result<PathBuf, InstallError> {
-        self.install_package(manifest, source, data_dir, Some(progress))
+        self.install_package(manifest, namespace, source, data_dir, Some(progress))
             .await
     }
 
@@ -296,6 +317,7 @@ where
     async fn install_package(
         &self,
         manifest: &PluginManifest,
+        namespace: &PluginNamespace,
         source: ResolvedReleaseSource,
         data_dir: &Path,
         progress: Option<ProgressCallback>,
@@ -303,7 +325,6 @@ where
         let archive_path = self
             .download_package(manifest, source.clone(), data_dir, progress)
             .await?;
-        let namespace = manifest.namespace();
         let name = manifest.name();
         let version = manifest.version().to_string();
         let package_parent = installed_root(data_dir)
@@ -336,7 +357,7 @@ where
             path: staging.path().to_path_buf(),
             source,
         })?;
-        crate::validation::validate(staging.path(), manifest, /*logo*/ None)
+        crate::validation::validate(staging.path(), manifest, namespace, /*logo*/ None)
             .map_err(InstallError::invalid_package)?;
         // A targeted archive must self-declare its target in an in-package `[artifact]` section.
         // Missing the installed manifest or the section fails closed so a wrong-architecture
@@ -384,12 +405,12 @@ where
     pub async fn update(
         &self,
         manifest: &PluginManifest,
+        namespace: &PluginNamespace,
         source: ResolvedReleaseSource,
         data_dir: &Path,
     ) -> Result<InstalledPackage, UpdateError> {
-        let namespace = manifest.namespace();
         let name = manifest.name();
-        let id = format!("{}/{}", namespace.as_str(), name.as_str());
+        let id = installed_id(namespace, name.as_str());
         let plugin_root = installed_root(data_dir)
             .join(namespace.as_str())
             .join(name.as_str());
@@ -400,39 +421,42 @@ where
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(source) => {
                 return Err(UpdateError::Retire {
-                    id: id.clone(),
+                    id: id.canonical(),
                     path: plugin_root.clone(),
                     source,
                 });
             }
         };
         let Some(latest_installed) = latest_installed else {
-            return Err(UpdateError::NotFound { id });
+            return Err(UpdateError::NotFound { id: id.canonical() });
         };
         if manifest.version() == &latest_installed {
             return Err(UpdateError::AlreadyUpToDate {
-                id,
+                id: id.canonical(),
                 version: latest_installed.to_string(),
             });
         }
         if manifest.version() < &latest_installed {
             return Err(UpdateError::Downgrade {
-                id,
+                id: id.canonical(),
                 installed: latest_installed.to_string(),
                 available: manifest.version().to_string(),
             });
         }
-        let package_dir = self.install(manifest, source, data_dir).await?;
-        retire_stale_versions(&id, &plugin_root, &package_dir)?;
+        let package_dir = self.install(manifest, namespace, source, data_dir).await?;
+        retire_stale_versions(&id.canonical(), &plugin_root, &package_dir)?;
         Ok(InstalledPackage { package_dir, id })
     }
 
     /// Imports an already-downloaded release archive from `archive_path` into the installed tree.
     ///
+    /// A locally imported package has no marketplace source, so there is no URL to derive an
+    /// identity from and it is installed under the reserved `local` namespace.
+    ///
     /// Unlike a marketplace install, the manifest lives inside the archive, so this extracts into
     /// a disposable staging directory first, reads and validates the in-archive `orax.toml`, and
     /// only then moves the verified tree into
-    /// `<data-dir>/plugins/installed/<namespace>/<name>/<version>`. A `sha256` declared by the
+    /// `<data-dir>/plugins/installed/local/<name>/<version>`. A `sha256` declared by the
     /// in-archive manifest is checked against the archive before anything is committed. A Hook
     /// archive must self-declare `[artifact]` and that target must match `host_target`; other
     /// kinds ignore the host. [`HostTarget::Unsupported`] refuses Hook imports and leaves
@@ -491,7 +515,7 @@ where
             }
         }
 
-        let namespace = manifest.namespace();
+        let namespace = PluginNamespace::local();
         let name = manifest.name();
         let version = manifest.version().to_string();
         let destination = installed_root(data_dir)
@@ -506,7 +530,7 @@ where
                 version,
             });
         }
-        crate::validation::validate(staging.path(), &manifest, /*logo*/ None)
+        crate::validation::validate(staging.path(), &manifest, &namespace, /*logo*/ None)
             .map_err(InstallError::invalid_package)?;
         // Any package that self-declares a target must match the host it is imported onto, and an
         // unverifiable host fails closed rather than skipping the match. Requiring the declaration
@@ -540,7 +564,7 @@ where
 
         Ok(InstalledPackage {
             package_dir: destination,
-            id: format!("{}/{}", namespace.as_str(), name.as_str()),
+            id: installed_id(&namespace, name.as_str()),
         })
     }
 
@@ -576,6 +600,16 @@ where
         self.downloader.download(request).await?;
         Ok(archive_path)
     }
+}
+
+/// Pairs a host-supplied namespace with a manifest-validated name into one installed identity.
+///
+/// Both halves already satisfy the id grammar — the namespace is a validated segment and the
+/// manifest name is a strict subset of it — so the fallback only keeps the function total.
+fn installed_id(namespace: &PluginNamespace, name: &str) -> PluginId {
+    PluginId::new(namespace.clone(), name).unwrap_or_else(|error| {
+        unreachable!("validated package segments form a plugin id: {error}")
+    })
 }
 
 /// Returns the highest valid SemVer version directory below `plugin_root`, if any.
@@ -632,8 +666,10 @@ fn retire_stale_versions(id: &str, plugin_root: &Path, retain: &Path) -> Result<
 mod tests {
     use super::{
         HostTarget, InstallError, InstalledPackage, Installer, ResolvedReleaseSource, UpdateError,
+        installed_id,
     };
     use futures::executor::block_on;
+    use ora_domain::PluginNamespace;
     use ora_plugin_manifest::{HookTarget, PluginManifest};
     use ora_utils::http::{DownloadSource, LocalFileDownloader};
     use pretty_assertions::assert_eq;
@@ -692,7 +728,7 @@ mod tests {
         digest: [u8; 32],
     ) -> String {
         format!(
-            "resolver = 1\nidentifier = \"{name}\"\nnamespace = \"official\"\nkind = \"{kind}\"\nversion = \"{version}\"\ndescription = \"A test plugin\"\nurl = \"https://example.com/{name}.orax\"\nsha256 = \"{}\"\n",
+            "resolver = 1\nidentifier = \"{name}\"\nkind = \"{kind}\"\nversion = \"{version}\"\ndescription = \"A test plugin\"\nurl = \"https://example.com/{name}.orax\"\nsha256 = \"{}\"\n",
             hex(digest)
         )
     }
@@ -724,6 +760,7 @@ mod tests {
         let digest = sha256_file(&release_path);
         let package_dir = block_on(installer.install(
             &manifest,
+            &PluginNamespace::official(),
             ResolvedReleaseSource::universal(DownloadSource::Local(release_path), digest),
             temp_dir.path(),
         ))
@@ -779,6 +816,7 @@ mod tests {
         let digest = sha256_file(&release_path);
         let package_dir = block_on(Installer::new(LocalFileDownloader).install(
             &manifest,
+            &PluginNamespace::official(),
             ResolvedReleaseSource::universal(DownloadSource::Local(release_path), digest),
             temp_dir.path(),
         ))
@@ -806,6 +844,7 @@ mod tests {
         let installer = Installer::new(LocalFileDownloader);
         let error = block_on(installer.install(
             &manifest,
+            &PluginNamespace::official(),
             ResolvedReleaseSource::universal(DownloadSource::Local(release_path), [0_u8; 32]),
             temp_dir.path(),
         ))
@@ -861,14 +900,17 @@ mod tests {
             .install_local(&release_path, temp_dir.path(), HostTarget::Unsupported)
             .expect("import static Skill archive");
 
-        assert_eq!(package.id, "official/ora.skill-pack");
+        assert_eq!(
+            package.id,
+            installed_id(&PluginNamespace::local(), "ora.skill-pack"),
+        );
         assert_eq!(
             package.package_dir,
             temp_dir
                 .path()
                 .join("plugins")
                 .join("installed")
-                .join("official")
+                .join("local")
                 .join("ora.skill-pack")
                 .join("0.1.1")
         );
@@ -918,7 +960,7 @@ mod tests {
                 .path()
                 .join("plugins")
                 .join("installed")
-                .join("official")
+                .join("local")
                 .join("ora.skill-pack")
                 .join("0.1.1")
                 .exists()
@@ -954,10 +996,10 @@ mod tests {
                     .path()
                     .join("plugins")
                     .join("installed")
-                    .join("official")
+                    .join("local")
                     .join("ora-space.opencode")
                     .join("0.1.2"),
-                id: "official/ora-space.opencode".to_owned(),
+                id: installed_id(&PluginNamespace::local(), "ora-space.opencode"),
             }
         );
         assert!(package.package_dir.join("main.js").exists());
@@ -999,6 +1041,7 @@ mod tests {
         );
         let package_dir = block_on(Installer::new(LocalFileDownloader).install(
             &manifest,
+            &PluginNamespace::official(),
             source,
             temp_dir.path(),
         ))
@@ -1044,6 +1087,7 @@ mod tests {
         );
         let error = block_on(Installer::new(LocalFileDownloader).install(
             &manifest,
+            &PluginNamespace::official(),
             source,
             temp_dir.path(),
         ))
@@ -1244,6 +1288,7 @@ mod tests {
         );
         let error = block_on(Installer::new(LocalFileDownloader).install(
             &manifest,
+            &PluginNamespace::official(),
             source,
             temp_dir.path(),
         ))
@@ -1278,6 +1323,42 @@ mod tests {
         .unwrap();
         super::select_release(&manifest, HostTarget::Unsupported)
             .expect("universal release does not need a host");
+    }
+
+    /// A universal object-key listing resolves to an S3 download source rather than an HTTPS URL.
+    #[test]
+    fn select_release_maps_an_object_key_to_s3() {
+        let digest = format!("{}{}", "ab".repeat(31), "ab");
+        let manifest = PluginManifest::parse(&format!(
+            "resolver = 1\nidentifier = \"weather\"\nkind = \"agent\"\nversion = \"1.0.0\"\ndescription = \"Weather\"\nurl = \"ora-space.opencode-v0.1.3.orax\"\nsha256 = \"{digest}\"\n"
+        ))
+        .unwrap();
+        let source = super::select_release(&manifest, HostTarget::Unsupported)
+            .expect("object-key universal release");
+        assert_eq!(
+            source.download(),
+            &DownloadSource::S3 {
+                key: "ora-space.opencode-v0.1.3.orax".to_owned(),
+            }
+        );
+    }
+
+    /// An HTTPS listing still resolves to a URL download source.
+    #[test]
+    fn select_release_maps_https_to_a_url() {
+        let digest = format!("{}{}", "ab".repeat(31), "ab");
+        let manifest = PluginManifest::parse(&format!(
+            "resolver = 1\nidentifier = \"weather\"\nkind = \"agent\"\nversion = \"1.0.0\"\ndescription = \"Weather\"\nurl = \"https://example.com/weather.orax\"\nsha256 = \"{digest}\"\n"
+        ))
+        .unwrap();
+        let source = super::select_release(&manifest, HostTarget::Unsupported)
+            .expect("https universal release");
+        match source.download() {
+            DownloadSource::Url(url) => {
+                assert_eq!(url.as_str(), "https://example.com/weather.orax");
+            }
+            other => panic!("expected a URL source, got {other:?}"),
+        }
     }
 
     /// A targeted release cannot be selected when the compiled host is not a plugin target.
@@ -1360,6 +1441,7 @@ mod tests {
 
         let package = block_on(Installer::new(LocalFileDownloader).update(
             &manifest,
+            &PluginNamespace::official(),
             ResolvedReleaseSource::universal(DownloadSource::Local(release_path), digest),
             temp_dir.path(),
         ))
@@ -1376,7 +1458,7 @@ mod tests {
             package,
             InstalledPackage {
                 package_dir: new_package.clone(),
-                id: "official/weather".to_owned(),
+                id: installed_id(&PluginNamespace::official(), "weather"),
             }
         );
         assert!(new_package.join("main.js").is_file());
@@ -1411,6 +1493,7 @@ mod tests {
 
         let error = block_on(Installer::new(LocalFileDownloader).update(
             &manifest,
+            &PluginNamespace::official(),
             ResolvedReleaseSource::universal(DownloadSource::Local(release_path), digest),
             temp_dir.path(),
         ))
@@ -1452,6 +1535,7 @@ mod tests {
 
         let error = block_on(Installer::new(LocalFileDownloader).update(
             &manifest,
+            &PluginNamespace::official(),
             ResolvedReleaseSource::universal(DownloadSource::Local(release_path), digest),
             temp_dir.path(),
         ))
@@ -1491,6 +1575,7 @@ mod tests {
 
         let error = block_on(Installer::new(LocalFileDownloader).update(
             &manifest,
+            &PluginNamespace::official(),
             ResolvedReleaseSource::universal(DownloadSource::Local(release_path), digest),
             temp_dir.path(),
         ))

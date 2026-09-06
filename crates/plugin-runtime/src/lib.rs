@@ -1,6 +1,5 @@
 //! Owns the lifecycle and bidirectional stdio protocol of one sandboxed Ora plugin process.
 
-mod codec;
 mod host_requests;
 mod protocol;
 mod state;
@@ -12,9 +11,8 @@ mod tests;
 pub use host_requests::{
     HostRequestError, HostRequestHandler, METHOD_NOT_FOUND_CODE, NoHostRequests,
 };
-pub use protocol::{
-    PluginEffectCoordination, PluginEffectSurface, PluginNotification, PluginRegistration,
-};
+pub use ora_plugin_protocol::{PluginEffectCoordination, PluginEffectResource, PluginRegistration};
+pub use protocol::PluginNotification;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,8 +26,8 @@ use thiserror::Error;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot, watch};
 use tokio::time::timeout;
 
-use crate::protocol::{JSON_RPC_VERSION, SHUTDOWN_METHOD};
 use crate::state::{PendingRequests, RuntimeInner, RuntimeStatus, SupervisorCommand};
+use ora_plugin_protocol::{JSON_RPC_VERSION, SHUTDOWN_METHOD};
 
 /// Describes one eagerly started Deno plugin process and its lifecycle timeouts.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,6 +237,21 @@ impl PluginRuntime {
 
     /// Invokes one registered method and returns its JSON result.
     pub async fn invoke(&self, method: &str, params: Value) -> Result<Value, PluginRuntimeError> {
+        self.invoke_with_timeout(method, params, self.inner.call_timeout)
+            .await
+    }
+
+    /// Invokes one registered method with a budget chosen for that operation.
+    ///
+    /// Heavy control operations such as model discovery may need to start a child process, so
+    /// forcing them through the short-call budget would either make discovery unreliable or
+    /// weaken the timeout applied to every ordinary control call.
+    pub async fn invoke_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        call_timeout: Duration,
+    ) -> Result<Value, PluginRuntimeError> {
         self.ensure_ready()?;
         if !self
             .inner
@@ -269,7 +282,7 @@ impl PluginRuntime {
             return Err(PluginRuntimeError::RequestChannelClosed);
         }
 
-        match timeout(self.inner.call_timeout, result_rx).await {
+        match timeout(call_timeout, result_rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(PluginRuntimeError::Unavailable(
                 "plugin stopped before responding".to_string(),

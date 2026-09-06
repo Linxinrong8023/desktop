@@ -1,14 +1,23 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import {
   DEFAULT_REVIEW_WIDTH,
   MAX_REVIEW_WIDTH,
   MIN_REVIEW_WIDTH,
 } from "../../features/workspace/workspace-review-layout-utils";
 import { pathsMatchForWorkspace } from "../../lib/workspace-path";
-import { createDebouncedJSONStorage } from "./debounced-json-storage";
 
-export const REVIEW_STORAGE_KEY = "ora.review.v1";
+// The review rail no longer survives a restart (every launch opens it closed).
+// Wipe the key older versions wrote so a stale snapshot never lingers unread.
+const LEGACY_REVIEW_STORAGE_KEY = "ora.review.v1";
+if (typeof window !== "undefined") {
+  // Storage can throw (blocked/disabled); a wipe failure must never block the
+  // module loading and take the store down with it on startup.
+  try {
+    window.localStorage.removeItem(LEGACY_REVIEW_STORAGE_KEY);
+  } catch {
+    // Ignore: the stale key simply stays until a later run wipes it.
+  }
+}
 
 export type ReviewPanelKind = "changes" | "files";
 
@@ -41,7 +50,7 @@ export interface ReviewContextPersist {
 interface ReviewState {
   byContext: Record<string, ReviewContextPersist>;
   /**
-   * Merges one checkout-scoped review snapshot onto disk. `files` is merged
+   * Merges one checkout-scoped review snapshot into memory. `files` is merged
    * per panel, so writing the Changes preview never disturbs the Files one.
    */
   upsertContext: (
@@ -50,7 +59,7 @@ interface ReviewState {
   ) => void;
   /**
    * Drops scopes whose project or task no longer exists so deleted rows do not
-   * accumulate on disk (mirrors `pruneTreeExpansion` in the UI store).
+   * accumulate for the rest of the run (mirrors `pruneTreeExpansion` in the UI store).
    */
   pruneContexts: (
     projectIds: readonly string[],
@@ -152,20 +161,6 @@ export function sanitizeReviewContextPersist(
   };
 }
 
-function sanitizeByContext(
-  value: unknown,
-): Record<string, ReviewContextPersist> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return {};
-  }
-  const next: Record<string, ReviewContextPersist> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof key !== "string" || key.length === 0) continue;
-    next[key] = sanitizeReviewContextPersist(entry);
-  }
-  return next;
-}
-
 /** Stable key for one project checkout or task worktree review scope. */
 export function reviewContextKey(context: {
   kind: "none" | "project" | "task";
@@ -231,80 +226,61 @@ export function buildReviewFilePersist(input: {
 }
 
 /**
- * Persists the right review rail per checkout scope: open/tab/width and, when
- * the panel was open, the last previewed file path.
+ * Remembers the right review rail per checkout scope for the rest of the app
+ * run: open/tab/width and, when the panel was open, the last previewed file
+ * path. Nothing is written to disk, so a restart always opens the rail closed
+ * while switching between scopes in-session still re-applies each scope's state.
  */
-export const useReviewStore = create<ReviewState>()(
-  persist(
-    (set) => ({
-      byContext: {},
-      upsertContext: (contextKey, patch) =>
-        set((state) => {
-          const hasCurrent = contextKey in state.byContext;
-          const current =
-            state.byContext[contextKey] ??
-            sanitizeReviewContextPersist(undefined);
-          const next: ReviewContextPersist = {
-            open: patch.open ?? current.open,
-            panel:
-              patch.panel !== undefined
-                ? sanitizePanel(patch.panel)
-                : current.panel,
-            width:
-              patch.width !== undefined
-                ? clampReviewWidth(patch.width)
-                : current.width,
-            // Sanitize here too: `upsertContext` is the single write door, so
-            // everything in `byContext` stays sanitized by construction rather
-            // than by convention at each call site.
-            files:
-              patch.files !== undefined
-                ? { ...current.files, ...sanitizeFiles(patch.files) }
-                : current.files,
-          };
-          if (
-            hasCurrent &&
-            current.open === next.open &&
-            current.panel === next.panel &&
-            current.width === next.width &&
-            reviewFilesEqual(current.files, next.files)
-          ) {
-            return state;
-          }
-          return {
-            byContext: { ...state.byContext, [contextKey]: next },
-          };
-        }),
-      pruneContexts: (projectIds, taskIds) =>
-        set((state) => {
-          const live = new Set([
-            ...projectIds.map((id) => `project:${id}`),
-            ...taskIds.map((id) => `task:${id}`),
-          ]);
-          const entries = Object.entries(state.byContext).filter(([key]) =>
-            live.has(key),
-          );
-          if (entries.length === Object.keys(state.byContext).length) {
-            return state;
-          }
-          return { byContext: Object.fromEntries(entries) };
-        }),
+export const useReviewStore = create<ReviewState>()((set) => ({
+  byContext: {},
+  upsertContext: (contextKey, patch) =>
+    set((state) => {
+      const hasCurrent = contextKey in state.byContext;
+      const current =
+        state.byContext[contextKey] ?? sanitizeReviewContextPersist(undefined);
+      const next: ReviewContextPersist = {
+        open: patch.open ?? current.open,
+        panel:
+          patch.panel !== undefined
+            ? sanitizePanel(patch.panel)
+            : current.panel,
+        width:
+          patch.width !== undefined
+            ? clampReviewWidth(patch.width)
+            : current.width,
+        // Sanitize here too: `upsertContext` is the single write door, so
+        // everything in `byContext` stays sanitized by construction rather
+        // than by convention at each call site.
+        files:
+          patch.files !== undefined
+            ? { ...current.files, ...sanitizeFiles(patch.files) }
+            : current.files,
+      };
+      if (
+        hasCurrent &&
+        current.open === next.open &&
+        current.panel === next.panel &&
+        current.width === next.width &&
+        reviewFilesEqual(current.files, next.files)
+      ) {
+        return state;
+      }
+      return {
+        byContext: { ...state.byContext, [contextKey]: next },
+      };
     }),
-    {
-      name: REVIEW_STORAGE_KEY,
-      storage: createDebouncedJSONStorage(),
-      partialize: (state) => ({ byContext: state.byContext }),
-      merge: (persisted, current) => {
-        const slice =
-          typeof persisted === "object" && persisted !== null
-            ? (persisted as { byContext?: unknown })
-            : undefined;
-        const disk = sanitizeByContext(slice?.byContext);
-        return {
-          ...current,
-          byContext: { ...disk, ...current.byContext },
-        };
-      },
-    },
-  ),
-);
+  pruneContexts: (projectIds, taskIds) =>
+    set((state) => {
+      const live = new Set([
+        ...projectIds.map((id) => `project:${id}`),
+        ...taskIds.map((id) => `task:${id}`),
+      ]);
+      const entries = Object.entries(state.byContext).filter(([key]) =>
+        live.has(key),
+      );
+      if (entries.length === Object.keys(state.byContext).length) {
+        return state;
+      }
+      return { byContext: Object.fromEntries(entries) };
+    }),
+}));

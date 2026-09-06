@@ -15,21 +15,33 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let mut arguments = std::env::args().skip(1);
     let Some(command) = arguments.next() else {
-        return Err("usage: cargo xtask export-contracts".to_string());
+        return Err(
+            "usage: cargo xtask <export-contracts|reconcile-migrations DATA_DIRECTORY>".to_string(),
+        );
     };
-
-    if command != "export-contracts" {
-        return Err(format!("unknown xtask command `{command}`"));
-    }
-
-    if let Some(unexpected) = arguments.next() {
-        return Err(format!("unexpected argument `{unexpected}`"));
-    }
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .ok_or_else(|| "failed to determine workspace root".to_string())?;
 
-    xtask::run_export_contracts(workspace_root)
-        .map_err(|error| format!("failed to export contracts: {error}"))
+    match command.as_str() {
+        "export-contracts" => {
+            if let Some(unexpected) = arguments.next() {
+                return Err(format!("unexpected argument `{unexpected}`"));
+            }
+            xtask::run_export_contracts(workspace_root)
+                .map_err(|error| format!("failed to export contracts: {error}"))
+        }
+        "reconcile-migrations" => {
+            let data_directory = arguments.next().ok_or_else(|| {
+                "usage: cargo xtask reconcile-migrations DATA_DIRECTORY".to_string()
+            })?;
+            if let Some(unexpected) = arguments.next() {
+                return Err(format!("unexpected argument `{unexpected}`"));
+            }
+            xtask::run_reconcile_migrations(std::path::Path::new(&data_directory))
+                .map_err(|error| format!("failed to reconcile migrations: {error}"))
+        }
+        _ => Err(format!("unknown xtask command `{command}`")),
+    }
 }

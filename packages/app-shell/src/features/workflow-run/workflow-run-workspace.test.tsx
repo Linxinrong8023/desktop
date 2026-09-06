@@ -46,8 +46,34 @@ const GRAPH = JSON.stringify({
   description: "",
 });
 
+const GRAPH_WITH_START_INPUT = JSON.stringify({
+  nodes: [
+    {
+      id: "start",
+      type: "workflow",
+      position: { x: 0, y: 0 },
+      data: {
+        kind: "start",
+        title: "开始",
+        description: "",
+        inputVariables: [
+          {
+            name: "topic",
+            displayName: "输入主题",
+            valueType: "string",
+            maxLength: 40,
+          },
+        ],
+      },
+    },
+  ],
+  edges: [],
+  viewport: { x: 32, y: 32, zoom: 1 },
+  description: "",
+});
+
 /** Seeds project + workflow + Workspace-owned run so the workspace can load its actions. */
-function seedRun() {
+function seedRun(graph = GRAPH) {
   const state = createMockClientState();
   state.projects = [{ id: "p1", name: "Demo" }];
   state.workflows = [
@@ -64,7 +90,7 @@ function seedRun() {
         id: "draft-1",
         workflowId: "workflow-a",
         version: "draft",
-        graph: GRAPH,
+        graph,
         createdAt: 1n,
         updatedAt: 1n,
       },
@@ -73,7 +99,7 @@ function seedRun() {
           id: "snap-1",
           workflowId: "workflow-a",
           version: "v1",
-          graph: GRAPH,
+          graph,
           createdAt: 1n,
           updatedAt: null,
         },
@@ -146,6 +172,78 @@ describe("WorkflowRunWorkspace", () => {
       screen.getByRole("region", { name: "Files panel" }),
     ).toBeInTheDocument();
 
+    runtime.dispose();
+  });
+
+  it("opens the deployed Start input form before execution", async () => {
+    const state = seedRun(GRAPH_WITH_START_INPUT);
+    const client = createMockClient(state);
+    const runtime = createMemoryWorkflowRuntime();
+    const Wrapper = createHookWrapper(
+      client,
+      createTestQueryClient(),
+      createChatStore(client.session),
+      runtime,
+    );
+    const user = userEvent.setup();
+
+    render(
+      <PlatformProvider adapter={createStubPlatform()}>
+        <Wrapper>
+          <WorkflowRunWorkspace runId="run-1" />
+        </Wrapper>
+      </PlatformProvider>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /启动|Start/ }));
+    expect(
+      screen.getByRole("heading", { name: "审查流程 1" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("输入主题")).toHaveAttribute(
+      "maxlength",
+      "40",
+    );
+
+    runtime.dispose();
+  });
+
+  it("reopens the Start input form when running a terminal run again", async () => {
+    const state = seedRun(GRAPH_WITH_START_INPUT);
+    state.workflowRuns[0].status = "cancelled";
+    const client = createMockClient(state);
+    const runtime = createMemoryWorkflowRuntime();
+    const Wrapper = createHookWrapper(
+      client,
+      createTestQueryClient(),
+      createChatStore(client.session),
+      runtime,
+    );
+    const user = userEvent.setup();
+
+    render(
+      <PlatformProvider adapter={createStubPlatform()}>
+        <Wrapper>
+          <WorkflowRunWorkspace runId="run-1" />
+        </Wrapper>
+      </PlatformProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("审查流程 1")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /再次运行|Run again/ }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "审查流程 1" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("输入主题")).toHaveAttribute(
+      "maxlength",
+      "40",
+    );
+
+    await user.click(screen.getByRole("button", { name: /取消|Cancel/ }));
     runtime.dispose();
   });
 
@@ -231,8 +329,14 @@ describe("WorkflowRunWorkspace", () => {
       screen.getByRole("button", { name: /再次运行|Run again/ }),
     );
 
+    // "Run again" reuses the Start dialog so start parameters can be edited first.
+    expect(
+      await screen.findByRole("heading", { name: "审查流程 1" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /启动|Start/ }));
+
     // Regression: the display run stubs projectId as "", and re-selecting with it
-    // would poison the workspace selection, making the next warm target an empty
+    // would poison the workspace selection, making the next chat surface target an empty
     // project root. Restart must keep the real project id.
     await waitFor(() => {
       expect(useWorkspaceSelectionStore.getState().selection.projectId).toBe(

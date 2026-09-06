@@ -1,16 +1,21 @@
 export {
   type AcpSender,
   AGENT_NOT_INSTALLED,
+  AGENT_UNUSABLE,
   type AgentDefinition,
-  type AgentEffectContext,
+  type AgentEffectCoordinationContext,
   type AgentEffectDefinition,
-  type AgentEffectIdleState,
-  type AgentEffectRestartContext,
+  type AgentEffectReadinessContext,
   type AgentModel,
   type AgentStartContext,
   defineAgent,
 } from "./agent.ts";
-export type { EffectSurfaceDeclaration } from "./plugin.ts";
+export {
+  type AgentInvocation,
+  type AgentProgram,
+  spawnAgentProcess,
+} from "./agent_process.ts";
+export type { EffectResourceDeclaration } from "./plugin.ts";
 export {
   createHostProcesses,
   type HostChildProcess,
@@ -27,8 +32,22 @@ export {
   type NotificationHandler,
   Plugin,
   PluginMethodError,
+  CLAUDE_MCP_CONFIG_V1,
+  OPENCODE_MCP_CONFIG_V1,
+  SKILL_DIRECTORY_V1,
 } from "./plugin.ts";
-export type { JsonValue } from "./protocol.ts";
+export {
+  AGENT_METHODS,
+  CHILD_PROCESS_METHODS,
+  CHILD_PROCESS_NOTIFICATIONS,
+  EFFECT_METHODS,
+  INTERNAL_ERROR,
+  INVALID_PARAMS,
+  type JsonValue,
+  METHOD_NOT_FOUND,
+  PLUGIN_METHODS,
+  STORAGE_METHODS,
+} from "./protocol/index.ts";
 export {
   createStorage,
   type PluginStorage,

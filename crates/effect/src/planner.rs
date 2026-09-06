@@ -1,360 +1,107 @@
 use crate::{
-    AppliedFingerprint, Condition, ConditionReason, ConditionSubject, DesiredSkillState,
-    Generation, ManagedIdentity, ManagedIdentityGenerator, ManagedSkill, SkillSelectionKey,
-    SurfaceKey, SurfaceLifecycle,
+    ConditionProposal, DesiredEffect, DesiredEffectIdentity, DesiredState, EffectMutation,
+    EffectResource, EffectResourceId, EffectRevision, ExactPlannedState, ExactPreviousState,
+    Generation, ManagedIdentity, ManagedItem, PreservedItem, ResourceObservation,
+    ResourceProjection, ResourceRequirement, TargetDeclaration, TargetProjection,
+    VersionedMaterializationInput,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+use thiserror::Error;
 
-/// Live disk state at one adapter-resolved target locator.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TargetObservation {
-    Missing,
-    Preserved,
-    Managed {
-        marker_identity: ManagedIdentity,
-        fingerprint: AppliedFingerprint,
-    },
-    Invalid {
-        message: String,
-    },
+/// Input snapshot for deterministic projection of one complete Target.
+pub struct TargetPlanningInput<'a> {
+    pub desired: &'a DesiredState,
+    pub target: &'a crate::EffectTarget,
+    pub consumer_revision: &'a crate::ConsumerRevision,
+    pub declaration: &'a TargetDeclaration,
+    pub resources: &'a BTreeMap<EffectResourceId, EffectResource>,
+    pub revisions: &'a BTreeMap<crate::EffectRevisionId, EffectRevision>,
 }
 
-/// A safe per-locator transition selected by the pure planner.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PlanOperationKind {
-    Create {
-        desired: DesiredSkillState,
-        managed_identity: ManagedIdentity,
-    },
-    Update {
-        previous: ManagedSkill,
-        desired: DesiredSkillState,
-    },
-    AdvanceGeneration {
-        previous: ManagedSkill,
-    },
-    Replace {
-        previous: ManagedSkill,
-        desired: DesiredSkillState,
-        managed_identity: ManagedIdentity,
-    },
-    Delete {
-        previous: ManagedSkill,
-    },
-}
-
-/// One planned transition plus whether it needs a consumer-visible filesystem mutation.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PlanOperation {
-    pub locator: String,
-    pub kind: PlanOperationKind,
-    pub requires_filesystem_mutation: bool,
-}
-
-/// Complete plan for a surface scan; conflicts block only their own locators.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReconcilePlan {
+/// Input snapshot for merging every active Target contribution to one Resource.
+pub struct ResourcePlanningInput<'a> {
+    pub resource: &'a EffectResource,
     pub generation: Generation,
-    pub operations: Vec<PlanOperation>,
-    pub conditions: Vec<Condition>,
+    pub requirements: &'a [ResourceRequirement],
+    pub desired_effects: &'a BTreeMap<DesiredEffectIdentity, DesiredEffect>,
+    pub revisions: &'a BTreeMap<crate::EffectRevisionId, EffectRevision>,
+    pub managed: &'a [ManagedItem],
+    pub observed: &'a ResourceObservation,
 }
 
-impl ReconcilePlan {
-    /// Returns whether consumer quiescence is warranted by at least one safe disk mutation.
-    pub fn has_filesystem_mutations(&self) -> bool {
-        self.operations
-            .iter()
-            .any(|operation| operation.requires_filesystem_mutation)
-    }
-
-    /// Returns whether the complete desired generation is already represented on disk.
-    pub fn is_current(&self) -> bool {
-        self.operations.is_empty() && self.conditions.is_empty()
-    }
+/// Planner result distinguishes a usable complete projection from a structured blocked state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PlanningResult<T> {
+    Projected(T),
+    Blocked(Vec<ConditionProposal>),
 }
 
-/// Pure diff planner for one Workspace and physical Skill surface.
-pub struct Planner<'a, IdentityGenerator> {
-    identity_generator: &'a IdentityGenerator,
+/// One exact external mutation proposed for durable journaling.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlannedMutation {
+    pub managed_identity: ManagedIdentity,
+    pub desired_effect: Option<DesiredEffectIdentity>,
+    pub mutation: EffectMutation,
+    pub expected: ExactPreviousState,
+    pub planned: ExactPlannedState,
+    pub input: Option<VersionedMaterializationInput>,
 }
 
-/// Groups one immutable surface snapshot so planner calls stay self-documenting.
-pub struct PlannerInput<'a> {
-    pub surface_key: &'a SurfaceKey,
-    pub lifecycle: SurfaceLifecycle,
-    pub generation: Generation,
-    pub desired: &'a BTreeMap<SkillSelectionKey, DesiredSkillState>,
-    pub managed: &'a [ManagedSkill],
-    pub observed: &'a BTreeMap<String, TargetObservation>,
-    pub occurred_at: i64,
+/// Ledger-only cleanup is separate from mutation so absence never creates a fake Operation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PlannedResourceChange {
+    Mutate(Box<PlannedMutation>),
+    ForgetMissing(ManagedIdentity),
 }
 
-impl<'a, IdentityGenerator> Planner<'a, IdentityGenerator>
-where
-    IdentityGenerator: ManagedIdentityGenerator,
-{
-    pub fn new(identity_generator: &'a IdentityGenerator) -> Self {
-        Self { identity_generator }
-    }
-
-    /// Computes the full diff before any mutation and preserves safe work beside conflicts.
-    pub fn plan(&self, input: PlannerInput<'_>) -> ReconcilePlan {
-        let PlannerInput {
-            surface_key,
-            lifecycle,
-            generation,
-            desired,
-            managed,
-            observed,
-            occurred_at,
-        } = input;
-        let mut desired_by_locator: BTreeMap<
-            String,
-            Vec<(&SkillSelectionKey, &DesiredSkillState)>,
-        > = BTreeMap::new();
-        if lifecycle == SurfaceLifecycle::Active {
-            for (selection, state) in desired {
-                desired_by_locator
-                    .entry(state.state().name.canonical().to_string())
-                    .or_default()
-                    .push((selection, state));
-            }
-        }
-        let mut managed_by_locator: BTreeMap<String, Vec<&ManagedSkill>> = BTreeMap::new();
-        for ledger in managed {
-            managed_by_locator
-                .entry(ledger.locator.clone())
-                .or_default()
-                .push(ledger);
-        }
-        let locators = desired_by_locator
-            .keys()
-            .chain(managed_by_locator.keys())
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let mut operations = Vec::new();
-        let mut conditions = Vec::new();
-
-        for locator in locators {
-            let desired_here = desired_by_locator
-                .get(&locator)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]);
-            let managed_here = managed_by_locator
-                .get(&locator)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]);
-            let observation = observed
-                .get(&locator)
-                .cloned()
-                .unwrap_or(TargetObservation::Missing);
-
-            if desired_here.len() > 1 {
-                for (selection_key, _) in desired_here {
-                    conditions.push(Condition::new(
-                        ConditionSubject::DesiredSkill {
-                            selection_key: (*selection_key).clone(),
-                        },
-                        ConditionReason::DesiredCollision,
-                        "multiple desired Skills resolve to the same surface locator",
-                        occurred_at,
-                        generation,
-                    ));
-                }
-                continue;
-            }
-            if managed_here.len() > 1 {
-                conditions.push(Condition::new(
-                    ConditionSubject::Surface {
-                        surface_key: surface_key.clone(),
-                    },
-                    ConditionReason::OwnershipConflict,
-                    "multiple ownership ledgers claim one surface locator",
-                    occurred_at,
-                    generation,
-                ));
-                continue;
-            }
-
-            match (desired_here.first(), managed_here.first()) {
-                (Some((selection_key, desired)), None) => match observation {
-                    TargetObservation::Missing => operations.push(PlanOperation {
-                        locator,
-                        kind: PlanOperationKind::Create {
-                            desired: (*desired).clone(),
-                            managed_identity: self.identity_generator.generate_managed_identity(),
-                        },
-                        requires_filesystem_mutation: true,
-                    }),
-                    TargetObservation::Preserved => conditions.push(Condition::new(
-                        ConditionSubject::DesiredSkill {
-                            selection_key: (*selection_key).clone(),
-                        },
-                        ConditionReason::PreservedConflict,
-                        "an unowned Skill already occupies the target locator",
-                        occurred_at,
-                        generation,
-                    )),
-                    TargetObservation::Managed { .. } => conditions.push(Condition::new(
-                        ConditionSubject::DesiredSkill {
-                            selection_key: (*selection_key).clone(),
-                        },
-                        ConditionReason::OwnershipConflict,
-                        "a marker without a matching ledger cannot grant ownership",
-                        occurred_at,
-                        generation,
-                    )),
-                    TargetObservation::Invalid { message } => conditions.push(Condition::new(
-                        ConditionSubject::DesiredSkill {
-                            selection_key: (*selection_key).clone(),
-                        },
-                        ConditionReason::PreservedConflict,
-                        message,
-                        occurred_at,
-                        generation,
-                    )),
-                },
-                (None, Some(previous)) => {
-                    if let Some(requires_filesystem_mutation) = validate_owned_observation(
-                        previous,
-                        &observation,
-                        generation,
-                        occurred_at,
-                        &mut conditions,
-                    ) {
-                        operations.push(PlanOperation {
-                            locator,
-                            kind: PlanOperationKind::Delete {
-                                previous: (*previous).clone(),
-                            },
-                            requires_filesystem_mutation,
-                        });
-                    }
-                }
-                (Some((selection_key, desired)), Some(previous)) => {
-                    if let Some(requires_filesystem_mutation) = validate_owned_observation(
-                        previous,
-                        &observation,
-                        generation,
-                        occurred_at,
-                        &mut conditions,
-                    ) {
-                        if &previous.selection_key == *selection_key {
-                            if previous.state == **desired
-                                && !matches!(observation, TargetObservation::Missing)
-                            {
-                                if previous.applied_generation == generation {
-                                    continue;
-                                }
-                                operations.push(PlanOperation {
-                                    locator,
-                                    kind: PlanOperationKind::AdvanceGeneration {
-                                        previous: (*previous).clone(),
-                                    },
-                                    requires_filesystem_mutation: false,
-                                });
-                                continue;
-                            }
-                            operations.push(PlanOperation {
-                                locator,
-                                kind: PlanOperationKind::Update {
-                                    previous: (*previous).clone(),
-                                    desired: (*desired).clone(),
-                                },
-                                // A missing directory must be rebuilt even if state is unchanged.
-                                requires_filesystem_mutation: true,
-                            });
-                        } else {
-                            operations.push(PlanOperation {
-                                locator,
-                                kind: PlanOperationKind::Replace {
-                                    previous: (*previous).clone(),
-                                    desired: (*desired).clone(),
-                                    managed_identity: self
-                                        .identity_generator
-                                        .generate_managed_identity(),
-                                },
-                                requires_filesystem_mutation: true,
-                            });
-                        }
-                        let _ = requires_filesystem_mutation;
-                    }
-                }
-                (None, None) => {}
-            }
-        }
-
-        ReconcilePlan {
-            generation,
-            operations,
-            conditions,
-        }
-    }
+/// Complete Resource projection plus all changes required to reach it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourcePlan {
+    pub projection: ResourceProjection,
+    pub preserved: Vec<PreservedItem>,
+    pub changes: Vec<PlannedResourceChange>,
 }
 
-/// Proves the database ledger still owns its target and returns whether a delete needs disk I/O.
-fn validate_owned_observation(
-    managed: &ManagedSkill,
-    observation: &TargetObservation,
-    generation: Generation,
-    occurred_at: i64,
-    conditions: &mut Vec<Condition>,
-) -> Option<bool> {
-    match observation {
-        TargetObservation::Missing => Some(false),
-        TargetObservation::Managed {
-            marker_identity,
-            fingerprint,
-        } if marker_identity != &managed.managed_identity => {
-            conditions.push(Condition::new(
-                ConditionSubject::ManagedSkill {
-                    managed_identity: managed.managed_identity.clone(),
-                },
-                ConditionReason::OwnershipConflict,
-                "the ownership marker does not match the database ledger",
-                occurred_at,
-                generation,
-            ));
-            None
-        }
-        TargetObservation::Managed { fingerprint, .. }
-            if fingerprint != &managed.applied_fingerprint =>
-        {
-            conditions.push(Condition::new(
-                ConditionSubject::ManagedSkill {
-                    managed_identity: managed.managed_identity.clone(),
-                },
-                ConditionReason::DriftConflict,
-                "managed content differs from the last applied fingerprint",
-                occurred_at,
-                generation,
-            ));
-            None
-        }
-        TargetObservation::Managed { .. } => Some(true),
-        TargetObservation::Preserved => {
-            conditions.push(Condition::new(
-                ConditionSubject::ManagedSkill {
-                    managed_identity: managed.managed_identity.clone(),
-                },
-                ConditionReason::OwnershipConflict,
-                "the managed locator no longer has a valid ownership marker",
-                occurred_at,
-                generation,
-            ));
-            None
-        }
-        TargetObservation::Invalid { message } => {
-            conditions.push(Condition::new(
-                ConditionSubject::ManagedSkill {
-                    managed_identity: managed.managed_identity.clone(),
-                },
-                ConditionReason::OwnershipConflict,
-                message.clone(),
-                occurred_at,
-                generation,
-            ));
-            None
-        }
-    }
+/// Plans one complete Target and every independently mutable Resource it references.
+///
+/// Implementations must be deterministic pure logic and report unsupported or invalid input as
+/// structured Conditions rather than silently dropping it. Target and Resource planning share one
+/// interface because the current built-in planner owns both halves of the same materialization
+/// contract; callers must not assemble mismatched planners.
+pub trait EffectPlanner {
+    /// Produces the complete Target snapshot for one Desired generation and Consumer Revision.
+    fn project_target(
+        &self,
+        input: TargetPlanningInput<'_>,
+    ) -> Result<PlanningResult<TargetProjection>, PlannerError>;
+
+    /// Produces the unique Resource projection and exact mutation plan for a generation.
+    ///
+    /// Implementations must preserve external items without exact ledger evidence and may only
+    /// plan updates or deletes for matching Managed Items.
+    fn plan_resource(
+        &self,
+        input: ResourcePlanningInput<'_>,
+    ) -> Result<PlanningResult<ResourcePlan>, PlannerError>;
+}
+
+/// Reports contradictory snapshots or serialization failure before any mutation is authorized.
+#[derive(Debug, Error)]
+pub enum PlannerError {
+    #[error("Target and Desired State belong to different Effect Scopes")]
+    ScopeMismatch,
+    #[error("Target and Consumer Revision refer to different Consumers")]
+    ConsumerMismatch,
+    #[error("Target declaration does not match the exact Consumer Revision")]
+    ConsumerRevisionMismatch,
+    #[error("Resource observation belongs to a different Resource")]
+    ObservationResourceMismatch,
+    #[error("Target requirement belongs to a different Resource")]
+    RequirementResourceMismatch,
+    #[error("Desired Effect {0} is missing from the complete Desired State")]
+    DesiredEffectMissing(DesiredEffectIdentity),
+    #[error("failed to serialize deterministic planner state")]
+    Serialize(#[source] serde_json::Error),
+    #[error(transparent)]
+    Identity(#[from] crate::IdentityError),
 }

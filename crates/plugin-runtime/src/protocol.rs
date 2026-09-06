@@ -1,47 +1,13 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
+use ora_plugin_protocol::{JSON_RPC_VERSION, REGISTER_METHOD, parse_registration};
 use serde_json::Value;
+
+pub(crate) use ora_plugin_protocol::PluginRegistration;
 
 use crate::PluginRuntimeError;
 use crate::host_requests::{HostRequestHandler, serve_request};
 use crate::state::{ResponseRequest, RuntimeInner, RuntimeStatus};
-
-pub(crate) const JSON_RPC_VERSION: &str = "2.0";
-pub(crate) const REGISTER_METHOD: &str = "ora/register";
-pub(crate) const SHUTDOWN_METHOD: &str = "ora/shutdown";
-
-/// Holds the immutable capability declaration one plugin publishes during its handshake.
-///
-/// The two sets are deliberately separate because they describe opposite directions: `methods`
-/// is what the host may invoke, `emits` is what the plugin may send unprompted. A method missing
-/// from the matching set is a protocol violation rather than a silently ignored message, so a
-/// plugin whose behaviour exceeds its declaration is rejected at the earliest possible moment.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PluginRegistration {
-    pub methods: HashSet<String>,
-    pub emits: HashSet<String>,
-    /// Workspace-relative Effect surfaces this runtime consumes.
-    pub effect_surfaces: Vec<PluginEffectSurface>,
-}
-
-/// Declares one filesystem Skill surface consumed by a plugin runtime.
-///
-/// The host supplies the Workspace root at materialization time. Plugins only declare a safe,
-/// portable relative locator so a registration can be reused for every Workspace.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PluginEffectSurface {
-    pub workspace_relative_path: String,
-    pub materialization_format: String,
-    pub coordination: PluginEffectCoordination,
-}
-
-/// Selects the runtime boundary required before Ora mutates one declared surface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PluginEffectCoordination {
-    Uninterrupted,
-    WaitForIdleAndRestart,
-}
 
 /// Carries one plugin-originated notification that passed the `emits` whitelist.
 ///
@@ -147,13 +113,7 @@ async fn handle_plugin_originated<H: HostRequestHandler>(
         if !matches!(*inner.status_tx.borrow(), RuntimeStatus::Starting) {
             return Err("plugin registered methods more than once".to_string());
         }
-        let params = object.get("params");
-        let registration = PluginRegistration {
-            methods: parse_method_list(params, "methods")?
-                .ok_or_else(|| "plugin registration is missing a methods array".to_string())?,
-            emits: parse_method_list(params, "emits")?.unwrap_or_default(),
-            effect_surfaces: parse_effect_surfaces(params)?,
-        };
+        let registration = parse_registration(object.get("params"))?;
         *inner.registration.write().await = registration;
         inner.status_tx.send_replace(RuntimeStatus::Ready);
         return Ok(());
@@ -173,72 +133,4 @@ async fn handle_plugin_originated<H: HostRequestHandler>(
         });
     }
     Ok(())
-}
-
-/// Parses Effect descriptors as a strict registration contract rather than accepting opaque JSON.
-fn parse_effect_surfaces(params: Option<&Value>) -> Result<Vec<PluginEffectSurface>, String> {
-    let Some(value) = params.and_then(|params| params.get("effectSurfaces")) else {
-        return Ok(Vec::new());
-    };
-    let entries = value
-        .as_array()
-        .ok_or_else(|| "plugin registration field effectSurfaces must be an array".to_string())?;
-    entries
-        .iter()
-        .map(|entry| {
-            let object = entry.as_object().ok_or_else(|| {
-                "plugin registration effectSurfaces entry must be an object".to_string()
-            })?;
-            let required_string = |field: &str| {
-                object
-                    .get(field)
-                    .and_then(Value::as_str)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_string)
-                    .ok_or_else(|| {
-                        format!("plugin registration effectSurfaces entry has invalid {field}")
-                    })
-            };
-            let coordination = match required_string("coordination")?.as_str() {
-                "uninterrupted" => PluginEffectCoordination::Uninterrupted,
-                "wait_for_idle_and_restart" => PluginEffectCoordination::WaitForIdleAndRestart,
-                value => {
-                    return Err(format!(
-                        "plugin registration effectSurfaces entry has unknown coordination {value}"
-                    ));
-                }
-            };
-            Ok(PluginEffectSurface {
-                workspace_relative_path: required_string("workspaceRelativePath")?,
-                materialization_format: required_string("materializationFormat")?,
-                coordination,
-            })
-        })
-        .collect()
-}
-
-/// Reads one optional registration array into a duplicate-free method set.
-fn parse_method_list(
-    params: Option<&Value>,
-    field: &str,
-) -> Result<Option<HashSet<String>>, String> {
-    let Some(value) = params.and_then(|params| params.get(field)) else {
-        return Ok(None);
-    };
-    let entries = value
-        .as_array()
-        .ok_or_else(|| format!("plugin registration field {field} must be an array"))?;
-    let mut parsed = HashSet::with_capacity(entries.len());
-    for entry in entries {
-        let entry = entry
-            .as_str()
-            .filter(|entry| !entry.is_empty())
-            .ok_or_else(|| {
-                format!("plugin registration field {field} contains an invalid entry")
-            })?;
-        if !parsed.insert(entry.to_string()) {
-            return Err(format!("plugin registered duplicate {field} entry {entry}"));
-        }
-    }
-    Ok(Some(parsed))
 }

@@ -20,6 +20,7 @@ import type {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@ora/ui";
 import { AppI18nProvider } from "../../i18n/i18n";
+import { appI18n } from "../../i18n/i18n-instance";
 import { ContractsClientContext } from "../../contracts-client-context";
 import { ChatStoreContext } from "../../chat-store-context";
 import { createChatStore } from "@ora/chat";
@@ -47,6 +48,8 @@ import {
 } from "../../state/session-drafts";
 import { FILE_MENTION_DEBOUNCE_MS } from "./use-composer-file-mentions";
 
+void appI18n;
+
 function composerText(element: HTMLElement): string {
   return element.dataset.composerText ?? "";
 }
@@ -70,6 +73,9 @@ async function flushComposerEffects(): Promise<void> {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // A test that set fake timers and was aborted by its own timeout would
+  // otherwise strand every later userEvent await on a clock nobody advances.
+  vi.useRealTimers();
   resetComposerSendAdoptionsForTests();
   useDraftSessionsStore.getState().clear();
   useComposerInputStore.getState().reset();
@@ -259,6 +265,16 @@ describe("Tool calls", () => {
 });
 
 describe("Composer", () => {
+  it("does not offer the retired Spec mode toggle in the footer", () => {
+    renderWithI18n(<Composer onSend={vi.fn()} isResponding={false} />);
+
+    expect(
+      screen.queryByRole("button", { name: /Spec 模式|Spec mode/ }),
+    ).toBeNull();
+    expect(screen.queryByText("Spec 模式")).toBeNull();
+    expect(screen.queryByText("Spec mode")).toBeNull();
+  });
+
   it("sends trimmed text with Enter and clears the textarea", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();
@@ -884,7 +900,9 @@ describe("Composer", () => {
 
   it("restores composer text when onSend rejects on the same surface", async () => {
     const user = userEvent.setup();
-    const onSend = vi.fn(() => Promise.reject(new Error("warm failed")));
+    const onSend = vi.fn(() =>
+      Promise.reject(new Error("session start failed")),
+    );
     useComposerInputStore.getState().reset();
     useDraftSessionsStore.getState().clear();
     const draftId = useDraftSessionsStore.getState().ensureEmptyDraft({
@@ -1331,7 +1349,7 @@ describe("Composer", () => {
 
     // Second send still owns the surface and can restore its own text.
     await act(async () => {
-      rejectors[1]!(new Error("warm failed"));
+      rejectors[1]!(new Error("session start failed"));
       await sendPromises[1]!.then(
         () => undefined,
         () => undefined,
@@ -1366,8 +1384,8 @@ describe("Composer", () => {
     await user.type(textarea, "lost elsewhere{Enter}");
     expect(onSend).toHaveBeenCalledOnce();
 
-    // First-send adopted a warm session, then the user opened a third chat.
-    noteComposerSendAdoptedSession(`draft:${draftId}`, "warm-adopted");
+    // First-send adopted the session it created, then the user opened a third chat.
+    noteComposerSendAdoptedSession(`draft:${draftId}`, "adopted-session");
     await act(() => {
       useWorkspaceSelectionStore
         .getState()
@@ -1390,7 +1408,7 @@ describe("Composer", () => {
     ).toBeUndefined();
   });
 
-  it("restores a hard failure onto the warm session the draft adopted", async () => {
+  it("restores a hard failure onto the session the draft adopted", async () => {
     const user = userEvent.setup();
     let rejectSend!: (error: Error) => void;
     let sendPromise!: Promise<void>;
@@ -1412,13 +1430,13 @@ describe("Composer", () => {
 
     renderWithI18n(<Composer onSend={onSend} isResponding={false} />);
     const textarea = screen.getByRole("textbox");
-    await user.type(textarea, "keep on warm{Enter}");
+    await user.type(textarea, "keep on session{Enter}");
 
-    noteComposerSendAdoptedSession(`draft:${draftId}`, "warm-adopted");
+    noteComposerSendAdoptedSession(`draft:${draftId}`, "adopted-session");
     await act(() => {
       useWorkspaceSelectionStore
         .getState()
-        .selectSession("warm-adopted", "task-1", "project-1");
+        .selectSession("adopted-session", "task-1", "project-1");
     });
     await flushComposerEffects();
     await waitFor(() => expect(composerText(textarea)).toBe(""));
@@ -1431,7 +1449,7 @@ describe("Composer", () => {
       );
       await Promise.resolve();
     });
-    expect(composerText(textarea)).toBe("keep on warm");
+    expect(composerText(textarea)).toBe("keep on session");
   });
 
   it("mentions a workspace file with @ and inserts a path chip", async () => {
@@ -1779,6 +1797,208 @@ describe("Composer", () => {
   });
 });
 
+describe("Composer send gating", () => {
+  const SEND_HINT = /请先选择一个可用的Agent模型|Pick an available agent/;
+  const sendButton = () =>
+    screen.getByRole("button", { name: /发送消息|Send message/ });
+
+  it("keeps typing and attachments available while the send button is gated", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    renderWithI18n(
+      <TooltipProvider>
+        <Composer
+          onSend={onSend}
+          isResponding={false}
+          sendDisabledHint="hint"
+        />
+      </TooltipProvider>,
+    );
+
+    // Dimmed via aria-disabled rather than disabled, so the control stays in
+    // the tab order and keyboard users can reach the explanation.
+    expect(sendButton()).toHaveAttribute("aria-disabled", "true");
+    expect(sendButton()).toBeEnabled();
+    const textarea = screen.getByRole("textbox");
+    await user.type(textarea, "hello");
+
+    expect(composerText(textarea)).toBe("hello");
+    // The gated control is focusable, so a direct click reaches submit and has
+    // to be absorbed by the canSend guard rather than by the disabled state.
+    await user.click(sendButton());
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not send on Enter while gated and parks the typed text", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    renderWithI18n(
+      <TooltipProvider>
+        <Composer
+          onSend={onSend}
+          isResponding={false}
+          sendDisabledHint="hint"
+        />
+      </TooltipProvider>,
+    );
+
+    const textarea = screen.getByRole("textbox");
+    await user.type(textarea, "hello{Enter}");
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(composerText(textarea)).toBe("hello");
+  });
+
+  it("explains the gate on hover over the gated send button", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    renderWithI18n(
+      <TooltipProvider>
+        <Composer
+          onSend={onSend}
+          isResponding={false}
+          sendDisabledHint="请先选择一个可用的Agent模型"
+        />
+      </TooltipProvider>,
+    );
+
+    await user.hover(sendButton());
+    expect(await screen.findByText(SEND_HINT)).toBeVisible();
+  });
+
+  it("explains the gate on keyboard focus of the gated send button", async () => {
+    const onSend = vi.fn();
+    renderWithI18n(
+      <TooltipProvider>
+        <Composer
+          onSend={onSend}
+          isResponding={false}
+          sendDisabledHint="请先选择一个可用的Agent模型"
+        />
+      </TooltipProvider>,
+    );
+
+    // Hover is unavailable to a keyboard-only user; tabbing to the dimmed
+    // button is what surfaces the hint there. The gated control keeps its tab
+    // stop precisely so this path exists.
+    act(() => sendButton().focus());
+    expect(await screen.findByText(SEND_HINT)).toBeVisible();
+  });
+
+  it("pins the hint open when a gated Enter refuses to send, then fades it", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    renderWithI18n(
+      <TooltipProvider>
+        <Composer
+          onSend={onSend}
+          isResponding={false}
+          sendDisabledHint="请先选择一个可用的Agent模型"
+        />
+      </TooltipProvider>,
+    );
+
+    await user.type(screen.getByRole("textbox"), "hello{Enter}");
+
+    expect(onSend).not.toHaveBeenCalled();
+    // The refusal is announced at the button, not swallowed silently — the
+    // keyboard send gets the same feedback a hover on the button would give.
+    expect(await screen.findByText(SEND_HINT)).toBeVisible();
+    // The pin is transient: the bubble retires itself after the pin window.
+    await waitFor(() => expect(screen.queryByText(SEND_HINT)).toBeNull(), {
+      timeout: 4_000,
+    });
+  });
+
+  it("retires a pinned hint the moment the gate lifts", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const view = renderWithI18n(
+      <TooltipProvider>
+        <Composer
+          onSend={onSend}
+          isResponding={false}
+          sendDisabledHint="请先选择一个可用的Agent模型"
+        />
+      </TooltipProvider>,
+    );
+
+    await user.type(screen.getByRole("textbox"), "hello{Enter}");
+    expect(await screen.findByText(SEND_HINT)).toBeVisible();
+
+    // A stale hint must never linger over a send button that works again, so
+    // the pin dies with the gate instead of outliving it to the pin timeout.
+    view.rerender(
+      <TooltipProvider>
+        <Composer onSend={onSend} isResponding={false} />
+      </TooltipProvider>,
+    );
+    await waitFor(() => expect(screen.queryByText(SEND_HINT)).toBeNull());
+  });
+
+  it("never attaches the hint to the stop control of a live turn", async () => {
+    const user = userEvent.setup();
+    const onStop = vi.fn();
+    renderWithI18n(
+      <TooltipProvider>
+        <Composer
+          onSend={vi.fn()}
+          isResponding
+          onStop={onStop}
+          sendDisabledHint="hint"
+        />
+      </TooltipProvider>,
+    );
+
+    const stopButton = screen.getByRole("button", {
+      name: /正在启动|Starting/,
+    });
+    expect(stopButton).toBeEnabled();
+    await user.hover(stopButton);
+    expect(screen.queryByText(SEND_HINT)).toBeNull();
+
+    await user.click(stopButton);
+    expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it("lifts the gate on rerender so a later send is not blocked", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const view = renderWithI18n(
+      <TooltipProvider>
+        <Composer
+          onSend={onSend}
+          isResponding={false}
+          sendDisabledHint="hint"
+        />
+      </TooltipProvider>,
+    );
+
+    const textarea = screen.getByRole("textbox");
+    await user.type(textarea, "hello");
+    expect(sendButton()).toHaveAttribute("aria-disabled", "true");
+
+    view.rerender(
+      <TooltipProvider>
+        <Composer onSend={onSend} isResponding={false} />
+      </TooltipProvider>,
+    );
+    expect(sendButton()).toBeEnabled();
+    await user.type(textarea, "{Enter}");
+    expect(onSend).toHaveBeenCalledWith("hello");
+  });
+
+  it("does not send an empty composer on Enter now that submit checks canSend", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    renderWithI18n(<Composer onSend={onSend} isResponding={false} />);
+
+    await user.type(screen.getByRole("textbox"), "{Enter}");
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+});
+
 describe("Structured ACP content", () => {
   it("renders structured resources and previews images with wheel zoom", async () => {
     const user = userEvent.setup();
@@ -1918,6 +2138,26 @@ describe("ChatView", () => {
     expect(screen.getAllByRole("button")).toEqual(
       expect.arrayContaining([expect.objectContaining({ disabled: true })]),
     );
+  });
+
+  it("suppresses the OS context menu across the conversation area", () => {
+    renderWithI18n(
+      <ChatView
+        turns={[]}
+        userName="Eric"
+        isResponding={false}
+        error={null}
+        onSend={() => {}}
+      />,
+    );
+
+    const pane = screen.getByRole("main");
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(pane, event);
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it("keeps the disabled hint shut when the pointer never left the enabled composer", async () => {

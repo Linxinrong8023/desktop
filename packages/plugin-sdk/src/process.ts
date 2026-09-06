@@ -1,14 +1,12 @@
 import type { Plugin } from "./plugin.ts";
-import type { JsonValue } from "./protocol.ts";
+import {
+  CHILD_PROCESS_METHODS,
+  CHILD_PROCESS_NOTIFICATIONS,
+  type ChildProcessExit,
+  type ChildProcessSpawnResult,
+  type JsonValue,
+} from "./protocol/index.ts";
 import { decodeBase64, encodeBase64 } from "./storage.ts";
-
-const CHILDPROCESS_SPAWN_METHOD = "ora/childprocess/spawn";
-const CHILDPROCESS_WRITE_METHOD = "ora/childprocess/write";
-const CHILDPROCESS_CLOSE_STDIN_METHOD = "ora/childprocess/closeStdin";
-const CHILDPROCESS_KILL_METHOD = "ora/childprocess/kill";
-const CHILDPROCESS_STDOUT_METHOD = "ora/childprocess/stdout";
-const CHILDPROCESS_STDERR_METHOD = "ora/childprocess/stderr";
-const CHILDPROCESS_EXIT_METHOD = "ora/childprocess/exit";
 
 /** Everything a spawn request carries apart from the program to run. */
 interface HostChildProcessInvocation {
@@ -86,13 +84,13 @@ interface TrackedProcess {
 export function createHostProcesses(plugin: Plugin): HostProcesses {
   const processes = new Map<string, TrackedProcess>();
 
-  plugin.onNotification(CHILDPROCESS_STDOUT_METHOD, (params) => {
+  plugin.onNotification(CHILD_PROCESS_NOTIFICATIONS.stdout, (params) => {
     forwardChunk(processes, params, "stdoutController");
   });
-  plugin.onNotification(CHILDPROCESS_STDERR_METHOD, (params) => {
+  plugin.onNotification(CHILD_PROCESS_NOTIFICATIONS.stderr, (params) => {
     forwardChunk(processes, params, "stderrController");
   });
-  plugin.onNotification(CHILDPROCESS_EXIT_METHOD, (params) => {
+  plugin.onNotification(CHILD_PROCESS_NOTIFICATIONS.exit, (params) => {
     const exit = parseExitNotification(params);
     if (exit === undefined) {
       return;
@@ -115,7 +113,7 @@ export function createHostProcesses(plugin: Plugin): HostProcesses {
         options.packageCommand === undefined
           ? { command: options.command }
           : { packageCommand: options.packageCommand };
-      const result = await plugin.request(CHILDPROCESS_SPAWN_METHOD, {
+      const result = await plugin.request(CHILD_PROCESS_METHODS.spawn, {
         ...program,
         args: options.args ?? [],
         cwd: options.cwd ?? null,
@@ -153,19 +151,19 @@ export function createHostProcesses(plugin: Plugin): HostProcesses {
         stderr,
         exited,
         write: (bytes) =>
-          discardResult(plugin.request(CHILDPROCESS_WRITE_METHOD, {
+          discardResult(plugin.request(CHILD_PROCESS_METHODS.write, {
             processId: spawned.processId,
             bytesBase64: encodeBase64(bytes),
           })),
         closeStdin: () =>
           discardResult(
-            plugin.request(CHILDPROCESS_CLOSE_STDIN_METHOD, {
+            plugin.request(CHILD_PROCESS_METHODS.closeStdin, {
               processId: spawned.processId,
             }),
           ),
         kill: () =>
           discardResult(
-            plugin.request(CHILDPROCESS_KILL_METHOD, {
+            plugin.request(CHILD_PROCESS_METHODS.kill, {
               processId: spawned.processId,
             }),
           ),
@@ -197,7 +195,7 @@ function forwardChunk(
 function parseExitNotification(
   params: JsonValue,
 ):
-  | { processId: string; code: number | null; signal: number | null }
+  | ChildProcessExit
   | undefined {
   if (
     !isRecord(params) || typeof params.processId !== "string" ||
@@ -217,12 +215,14 @@ function parseExitNotification(
 /** Validates the wire shape of a `spawn` result. */
 function parseSpawnResult(
   result: JsonValue,
-): { processId: string; pid: number | null } {
+): ChildProcessSpawnResult {
   if (
     !isRecord(result) || typeof result.processId !== "string" ||
     (typeof result.pid !== "number" && result.pid !== null)
   ) {
-    throw new Error(`${CHILDPROCESS_SPAWN_METHOD} returned an invalid result`);
+    throw new Error(
+      `${CHILD_PROCESS_METHODS.spawn} returned an invalid result`,
+    );
   }
   return { processId: result.processId, pid: result.pid as number | null };
 }

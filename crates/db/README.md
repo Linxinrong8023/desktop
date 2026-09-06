@@ -11,7 +11,11 @@ and `ora-effect`.
 
 ## Bootstrap and boundaries
 
-`DatabaseBootstrapper` opens either a path-backed database or a shared in-memory database, configures connection behavior, reconciles the schema, and returns a `RepositoryPool`. File-backed parent directories must already be prepared by the composition root.
+`DatabaseBootstrapper` opens either a path-backed database or a shared in-memory database, configures connection behavior, aligns the applied migration versions with the application catalog, and returns a `RepositoryPool`. Missing versions are applied in order. A database created by a newer application is rolled back to the current catalog in reverse order using its persisted `down_sql`. Bootstrap does not compare the SQL content of versions shared by the database and catalog. File-backed parent directories must already be prepared by the composition root.
+
+`reconcile_migration_history` is the explicit tooling interface for SQL snapshot drift and target
+shortening. Development startup invokes it through `cargo xtask reconcile-migrations`; production
+application code does not call it.
 
 The crate stores domain values and implements application ports; it does not own use-case policy, contract mapping, transport errors, Git cleanup, or provider history. Timestamps are supplied through `TimestampSource`, with production time coming from Ora's local logging clock.
 

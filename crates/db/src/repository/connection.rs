@@ -14,11 +14,17 @@ pub struct RepositoryPool {
 }
 
 impl RepositoryPool {
-    /// Builds a repository pool for a file-backed SQLite database location.
+    /// Builds a repository pool for the selected SQLite storage mode.
     pub fn new(location: &DatabaseLocation) -> Result<Self, DatabaseError> {
-        let path = location.pooled_path()?.to_path_buf();
-        let manager = SqliteConnectionManager::new(path);
-        let inner = Pool::builder().build(manager)?;
+        let manager = SqliteConnectionManager::new(location.clone());
+        let builder = Pool::builder();
+        // SQLite's anonymous in-memory databases belong to one connection. A single pooled
+        // connection preserves the schema and data while still exercising the repository pool.
+        let inner = if matches!(location, DatabaseLocation::InMemory) {
+            builder.max_size(1).build(manager)?
+        } else {
+            builder.build(manager)?
+        };
 
         Ok(Self { inner })
     }
@@ -50,13 +56,13 @@ impl RepositoryPool {
 /// Opens and validates SQLite connections for the repository pool.
 #[derive(Clone, Debug)]
 struct SqliteConnectionManager {
-    path: std::path::PathBuf,
+    location: DatabaseLocation,
 }
 
 impl SqliteConnectionManager {
-    /// Captures the file-backed database path used for pooled connections.
-    fn new(path: std::path::PathBuf) -> Self {
-        Self { path }
+    /// Captures the SQLite location used for pooled connections.
+    fn new(location: DatabaseLocation) -> Self {
+        Self { location }
     }
 }
 
@@ -66,7 +72,7 @@ impl ManageConnection for SqliteConnectionManager {
 
     /// Opens a SQLite connection and applies the shared repository PRAGMAs.
     fn connect(&self) -> Result<Self::Connection, Self::Error> {
-        let connection = Connection::open(&self.path)?;
+        let connection = self.location.open()?;
 
         configure_repository_connection(&connection)?;
 

@@ -1,10 +1,9 @@
 import type { Plugin } from "./plugin.ts";
-import type { JsonValue } from "./protocol.ts";
-
-const STORAGE_LIST = "ora/storage/list";
-const STORAGE_READ = "ora/storage/read";
-const STORAGE_WRITE = "ora/storage/write";
-const STORAGE_REMOVE = "ora/storage/remove";
+import {
+  type JsonValue,
+  STORAGE_METHODS,
+  type StorageListEntry,
+} from "./protocol/index.ts";
 
 /** One entry returned by `storage.list`. */
 export interface StorageEntry {
@@ -36,24 +35,24 @@ export interface PluginStorage {
 export function createStorage(plugin: Plugin): PluginStorage {
   return {
     async list(path) {
-      const result = await plugin.request(STORAGE_LIST, { path });
+      const result = await plugin.request(STORAGE_METHODS.list, { path });
       return parseEntries(result);
     },
     async read(path) {
-      const result = await plugin.request(STORAGE_READ, { path });
+      const result = await plugin.request(STORAGE_METHODS.read, { path });
       if (!isRecord(result) || typeof result.bytes_base64 !== "string") {
-        throw new Error(`${STORAGE_READ} returned an invalid result`);
+        throw new Error(`${STORAGE_METHODS.read} returned an invalid result`);
       }
       return decodeBase64(result.bytes_base64);
     },
     async write(path, bytes) {
-      await plugin.request(STORAGE_WRITE, {
+      await plugin.request(STORAGE_METHODS.write, {
         path,
         bytes_base64: encodeBase64(bytes),
       });
     },
     async remove(path) {
-      await plugin.request(STORAGE_REMOVE, { path });
+      await plugin.request(STORAGE_METHODS.remove, { path });
     },
   };
 }
@@ -61,7 +60,7 @@ export function createStorage(plugin: Plugin): PluginStorage {
 /** Validates the wire shape of a list result and maps it to camelCase entries. */
 function parseEntries(result: JsonValue): StorageEntry[] {
   if (!isRecord(result) || !Array.isArray(result.entries)) {
-    throw new Error(`${STORAGE_LIST} returned an invalid result`);
+    throw new Error(`${STORAGE_METHODS.list} returned an invalid result`);
   }
   return result.entries.map((entry) => {
     if (
@@ -69,9 +68,14 @@ function parseEntries(result: JsonValue): StorageEntry[] {
       (entry.kind !== "file" && entry.kind !== "directory") ||
       typeof entry.size_bytes !== "number"
     ) {
-      throw new Error(`${STORAGE_LIST} returned an invalid entry`);
+      throw new Error(`${STORAGE_METHODS.list} returned an invalid entry`);
     }
-    return { name: entry.name, kind: entry.kind, sizeBytes: entry.size_bytes };
+    const wireEntry: StorageListEntry = entry as StorageListEntry;
+    return {
+      name: wireEntry.name,
+      kind: wireEntry.kind,
+      sizeBytes: wireEntry.size_bytes,
+    };
   });
 }
 

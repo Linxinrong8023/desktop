@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  computeInactiveNodes,
   parseWorkflowGraph,
   projectNodeStatus,
   projectRunStatus,
   type GraphWorkflowNodeState,
+  type GraphWorkflowNodeStatus,
   type GraphWorkflowRun,
   type WorkflowDefinition,
   type WorkflowNodeConversationItem,
@@ -155,10 +157,17 @@ export function useUpdateWorkflowRunInput() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { runId: string; input: string }) =>
+    mutationFn: (input: {
+      runId: string;
+      input: string;
+      variables?: Record<string, unknown>;
+    }) =>
       client.workflowRun.updateInput({
         runId: input.runId,
         input: input.input,
+        ...(input.variables === undefined
+          ? {}
+          : { variables: input.variables }),
       }),
     onSuccess: (_result, variables) => {
       void queryClient.invalidateQueries({
@@ -287,6 +296,8 @@ export function buildDisplayRun(
     };
     name: string;
     projectId: string;
+    variables: Array<{ selector: string[]; value?: unknown }>;
+    conditionDecisions: Record<string, string>;
     nodes: Array<{
       nodeId: string;
       status: string;
@@ -302,18 +313,40 @@ export function buildDisplayRun(
 ): GraphWorkflowRun {
   const envelope = parseWorkflowGraph(graph);
   const currentNodes = parseCurrentNodes(detail.run.state);
-  // The start node's instruction is the run's kickoff input. Editing it on a pending run stores
+  // The start node's input is the run's kickoff input. Editing it on a pending run stores
   // the value on the run, not on the frozen snapshot, so overlay the committed run input on the
-  // start node (falling back to the snapshot instruction until an input has been saved).
+  // start node (falling back to the snapshot input until an input has been saved).
   const kickoffInput = detail.run.input;
-  const nodes =
+  const variableValues = new Map(
+    detail.variables.map((variable) => [
+      variable.selector.join("."),
+      variable.value,
+    ]),
+  );
+  const nodesWithRunInput =
     kickoffInput != null
       ? envelope.nodes.map((node) =>
           node.data.kind === "start"
-            ? { ...node, data: { ...node.data, instruction: kickoffInput } }
+            ? { ...node, data: { ...node.data, input: kickoffInput } }
             : node,
         )
       : envelope.nodes;
+  const nodes = nodesWithRunInput.map((node) =>
+    node.data.kind === "start"
+      ? {
+          ...node,
+          data: {
+            ...node.data,
+            inputVariables: (node.data.inputVariables ?? []).map((variable) => {
+              const selector = `${node.id}.${variable.name}`;
+              return variableValues.has(selector)
+                ? { ...variable, value: variableValues.get(selector) }
+                : { ...variable, value: undefined };
+            }),
+          },
+        }
+      : node,
+  );
   const definitionSnapshot: WorkflowDefinition = {
     id: detail.run.workflowId,
     name: detail.name,
@@ -332,7 +365,7 @@ export function buildDisplayRun(
     const payload =
       nodeRun?.payload != null ? parseNodePayload(nodeRun.payload) : null;
     const conversation =
-      nodeRun?.output != null
+      node.data.kind === "agent" && nodeRun?.output != null
         ? conversationFromNodeOutput(
             nodeRun.output,
             detail.run.id,
@@ -370,6 +403,20 @@ export function buildDisplayRun(
         ? { conversation }
         : {}),
     };
+  }
+  // A node behind a lost condition branch has no node-run and never will; mark it inactive so the
+  // overview distinguishes it from a node still waiting on the active path.
+  const conditionDecisions = detail.conditionDecisions;
+  const nodeStatuses: Record<string, GraphWorkflowNodeStatus> = {};
+  for (const [nodeId, state] of Object.entries(nodeStates)) {
+    nodeStatuses[nodeId] = state.status;
+  }
+  for (const nodeId of computeInactiveNodes(
+    definitionSnapshot,
+    nodeStatuses,
+    conditionDecisions,
+  )) {
+    nodeStates[nodeId] = { ...nodeStates[nodeId], status: "inactive" };
   }
   return {
     id: detail.run.id,

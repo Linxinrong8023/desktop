@@ -19,6 +19,7 @@ import {
   createMockClientState,
 } from "../../test/mock-client";
 import { RunTheaterActCard } from "./run-theater-act-card";
+import { AGENT_REF } from "../../test/agent-identity";
 
 const NODE_DATA: WorkflowNodeData = {
   kind: "agent",
@@ -118,6 +119,57 @@ function renderSessionCard(onToggleInspector = vi.fn()) {
 }
 
 describe("RunTheaterActCard conversation", () => {
+  it("renders Output results without exposing an Agent session dock", () => {
+    render(
+      <RunTheaterActCard
+        data={{
+          kind: "output",
+          title: "Output",
+          description: "Return changed files",
+          outputs: [
+            {
+              name: "files",
+              variableSelector: ["agent-5", "structured_output", "files"],
+            },
+          ],
+        }}
+        state={{
+          status: "succeeded",
+          output: {
+            summary: JSON.stringify({
+              files: [
+                {
+                  file_path: "src/vs/base/common/numbers.ts",
+                  lines: [
+                    {
+                      symbol: "formatTokenCount",
+                      start_line: 15,
+                      end_line: 26,
+                    },
+                  ],
+                },
+              ],
+            }),
+          },
+        }}
+        live={false}
+        conversationOpen
+        onConversationOpenChange={vi.fn()}
+      />,
+      { wrapper: createSessionWrapper() },
+    );
+
+    expect(
+      screen.queryByText(/Agent (正在处理|is working)/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /查看节点会话|View node session/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/src\/vs\/base\/common\/numbers\.ts/),
+    ).toHaveTextContent('"start_line": 15');
+  });
+
   it("marks automatic and interactive Agent nodes beside the title", () => {
     const automaticAgent = {
       schemaVersion: 3 as const,
@@ -176,7 +228,7 @@ describe("RunTheaterActCard conversation", () => {
           agentConfig: {
             schemaVersion: 3,
             executor: {
-              agentCli: "ora-space.opencode",
+              agentCli: AGENT_REF.opencode,
               modelId: "deepseek/deepseek-v4-flash",
             },
             roleId: "researcher",

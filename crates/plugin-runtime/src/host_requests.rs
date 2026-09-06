@@ -12,10 +12,9 @@ use std::sync::Arc;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 
-use crate::protocol::JSON_RPC_VERSION;
+use ora_plugin_protocol::JSON_RPC_VERSION;
 
-/// JSON-RPC code for a method the host does not serve.
-pub const METHOD_NOT_FOUND_CODE: i64 = -32601;
+pub use ora_plugin_protocol::METHOD_NOT_FOUND_CODE;
 
 /// One failed host request, rendered as a JSON-RPC error object on the wire.
 ///

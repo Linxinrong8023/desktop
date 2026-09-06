@@ -4,7 +4,8 @@ import { createChatStore } from "@ora/chat";
 import type {
   ContractsClient,
   SwitchSessionAgentRequest,
-  WarmSessionResponse,
+  ListAgentModelsResponse,
+  StartSessionRequest,
 } from "@ora/contracts";
 import { TooltipProvider } from "@ora/ui";
 import { PlatformProvider } from "../../platform";
@@ -21,18 +22,19 @@ import {
   createMockClientState,
 } from "../../test/mock-client";
 import { usePendingAgentStore } from "../../state/stores/pending-agent-store";
+import { useAgentModelPreferenceStore } from "../../state/stores/agent-model-preference-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
 import { useDraftSessionsStore } from "../../state/stores/draft-sessions-store";
 import { useComposerInputStore } from "../../state/stores/composer-input-store";
 import { useUiStore } from "../../state/stores/ui-store";
 import { startSessionDraft } from "../../state/session-drafts";
-import { useAgentModelStore } from "../../state/stores/agent-model-store";
 import {
   DEFAULT_SETTINGS,
   useSettingsStore,
 } from "../../state/stores/settings-store";
 import { WorkspaceView } from "./workspace-view";
 import { directChatTitle } from "./workspace-view-utils";
+import { AGENT_REF } from "../../test/agent-identity";
 
 function composerText(element: HTMLElement): string {
   return element.dataset.composerText ?? "";
@@ -54,12 +56,14 @@ beforeEach(() => {
   // Outlives a render on purpose — remembering one CLI's models across chat
   // surfaces is the point of the store — so each test has to start from a CLI
   // nothing has handshaken, or an earlier test's list would answer for it.
-  useAgentModelStore.setState({ known: {} });
   // Agent picks outlive a render, so a test that leaves one recorded would hand
   // the next one a surface already pointing somewhere it never chose.
-  usePendingAgentStore.setState({ selections: {}, switches: {} });
+  usePendingAgentStore.setState({ selections: {}, switches: {}, models: {} });
+  // Remembered per agent and persisted, so a preference one test records would
+  // otherwise decide which model the next test's first send starts on.
+  useAgentModelPreferenceStore.setState({ models: {} });
   useSettingsStore.setState({
-    settings: { ...DEFAULT_SETTINGS, agentCli: "ora-space.opencode" },
+    settings: { ...DEFAULT_SETTINGS, agentCli: AGENT_REF.opencode },
   });
 });
 
@@ -79,7 +83,7 @@ describe("WorkspaceView", () => {
       {
         id: "s1",
         workspaceId: "workspace-t1",
-        agentRef: "ora-space.opencode",
+        agentRef: AGENT_REF.opencode,
         status: "running",
         title: null,
         historyState: { type: "writable" },
@@ -203,7 +207,7 @@ describe("WorkspaceView", () => {
       {
         id: "s1",
         workspaceId: "workspace-t1",
-        agentRef: "ora-space.opencode",
+        agentRef: AGENT_REF.opencode,
         status: "running",
         title: null,
         historyState: { type: "writable" },
@@ -260,7 +264,7 @@ describe("WorkspaceView", () => {
       {
         id: "s1",
         workspaceId: "workspace-p1",
-        agentRef: "ora-space.opencode",
+        agentRef: AGENT_REF.opencode,
         status: "running",
         title: null,
         historyState: { type: "writable" },
@@ -361,8 +365,61 @@ describe("WorkspaceView", () => {
 
     await waitFor(() => expect(textbox).toBeEnabled());
     expect(useSettingsStore.getState().settings.agentCli).toBe(
-      "ora-space.opencode",
+      AGENT_REF.opencode,
     );
+  });
+
+  it("gates only the send button while the chosen agent is unreachable", async () => {
+    const user = userEvent.setup();
+    const state = createMockClientState();
+    state.projects = [{ id: "p1", name: "Ora" }];
+    const entry = state.agentRuntimeStatuses.find(
+      (candidate) => candidate.agentRef === AGENT_REF.opencode,
+    );
+    entry!.status = "unavailable";
+    const client = createMockClient(state);
+    const Wrapper = createHookWrapper(
+      client,
+      createTestQueryClient(),
+      createChatStore(client.session),
+    );
+    useWorkspaceSelectionStore.getState().selectProject("p1");
+
+    render(
+      <Wrapper>
+        <AppI18nProvider>
+          <PlatformProvider adapter={createStubPlatform()}>
+            <TooltipProvider>
+              <WorkspaceView userName="Eric" />
+            </TooltipProvider>
+          </PlatformProvider>
+        </AppI18nProvider>
+      </Wrapper>,
+    );
+
+    const textbox = await screen.findByRole("textbox");
+    await user.type(textbox, "hello");
+    // With text typed the only reason left to refuse a send is the agent, so
+    // the gate — not the empty composer — is what dims the button here.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /发送消息|Send message/ }),
+      ).toHaveAttribute("aria-disabled", "true"),
+    );
+    expect(composerText(textbox)).toBe("hello");
+    // The state is fixable from the picker, so it must stay actionable.
+    expect(
+      screen.getByRole("button", { name: /选择模型|Select model/ }),
+    ).toBeEnabled();
+
+    await user.hover(
+      screen.getByRole("button", { name: /发送消息|Send message/ }),
+    );
+    expect(
+      await screen.findByText(
+        /请先选择一个可用的Agent模型|Pick an available agent/,
+      ),
+    ).toBeVisible();
   });
 
   it("does not repeat the default direct-chat mode in the composer context", async () => {
@@ -399,6 +456,10 @@ describe("WorkspaceView", () => {
       screen.queryByRole("button", { name: /选择分支|Select branch/ }),
     ).toBeNull();
     expect(screen.queryByText(/直聊|Direct chat/)).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Spec 模式|Spec mode/ }),
+    ).toBeNull();
+    expect(screen.queryByText("Spec 模式")).toBeNull();
   });
 
   it("shows only worktrees in the worktree context menu", async () => {
@@ -460,9 +521,9 @@ describe("WorkspaceView", () => {
       ...baseClient,
       session: {
         ...baseClient.session,
-        attach: async (request, options) => {
-          calls.push("attach");
-          return baseClient.session.attach(request, options);
+        start: async (request, options) => {
+          calls.push("start");
+          return baseClient.session.start(request, options);
         },
         prompt: async function* (request, options) {
           calls.push("prompt");
@@ -515,13 +576,13 @@ describe("WorkspaceView", () => {
         {
           id: "s1",
           workspaceId: "workspace-p1",
-          agentRef: "ora-space.opencode",
+          agentRef: AGENT_REF.opencode,
           status: "running",
           title: null,
           historyState: { type: "writable" },
         },
       ]);
-      expect(calls).toEqual(["attach", "prompt"]);
+      expect(calls).toEqual(["start", "prompt"]);
     });
     expect(useWorkspaceSelectionStore.getState().selection).toEqual({
       projectId: "p1",
@@ -543,10 +604,10 @@ describe("WorkspaceView", () => {
       ...baseClient,
       session: {
         ...baseClient.session,
-        attach: async (request, options) => {
+        start: async (request, options) => {
           attachCalls += 1;
           if (attachCalls === 1) throw new Error("session unavailable");
-          return baseClient.session.attach(request, options);
+          return baseClient.session.start(request, options);
         },
       },
     };
@@ -604,10 +665,10 @@ describe("WorkspaceView", () => {
       ...baseClient,
       session: {
         ...baseClient.session,
-        attach: async (request, options) => {
+        start: async (request, options) => {
           attachCalls += 1;
           if (attachCalls === 1) throw new Error("session unavailable");
-          return baseClient.session.attach(request, options);
+          return baseClient.session.start(request, options);
         },
       },
     };
@@ -652,7 +713,7 @@ describe("WorkspaceView", () => {
     expect(state.sessions).toHaveLength(0);
   });
 
-  it("clears sendInFlight and restores the draft when synchronous send setup fails", async () => {
+  it("keeps the started session when synchronous send setup fails", async () => {
     const user = userEvent.setup();
     const state = createMockClientState();
     state.projects = [{ id: "p1", name: "Ora" }];
@@ -689,25 +750,21 @@ describe("WorkspaceView", () => {
       screen.getByRole("button", { name: /发送消息|Send message/ }),
     );
 
-    await waitFor(() => {
-      const draft = useDraftSessionsStore
-        .getState()
-        .drafts.find((candidate) => candidate.id === draftId);
-      expect(draft).toEqual(
-        expect.objectContaining({
-          pendingSessionId: null,
-          sendInFlight: false,
-          text: "restore after setup",
-        }),
-      );
-      expect(useWorkspaceSelectionStore.getState().selection.draftId).toBe(
-        draftId,
-      );
-    });
+    // `start` persists before any of this setup runs, so the recovery boundary
+    // is behind us: restoring the draft would leave a phantom row pointing at a
+    // session the backend really created.
+    await waitFor(() => expect(state.sessions).toHaveLength(1));
+    const sessionId = state.sessions[0]!.id;
     await waitFor(() =>
-      expect(composerText(composer)).toBe("restore after setup"),
+      expect(useWorkspaceSelectionStore.getState().selection).toEqual(
+        expect.objectContaining({ sessionId, draftId: null }),
+      ),
     );
-    expect(state.sessions).toHaveLength(0);
+    expect(
+      useDraftSessionsStore
+        .getState()
+        .drafts.find((candidate) => candidate.id === draftId),
+    ).toBeUndefined();
     rekey.mockRestore();
   });
 
@@ -788,24 +845,24 @@ describe("WorkspaceView", () => {
       {
         id: "s-other",
         workspaceId: "workspace-t1",
-        agentRef: "ora-space.opencode",
+        agentRef: AGENT_REF.opencode,
         status: "running",
         title: "Other",
         historyState: { type: "writable" },
       },
     ];
     const baseClient = createMockClient(state);
-    let releaseWarm!: () => void;
-    const warmGate = new Promise<void>((resolve) => {
-      releaseWarm = resolve;
+    let releaseStart!: () => void;
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve;
     });
     const client: ContractsClient = {
       ...baseClient,
       session: {
         ...baseClient.session,
-        warm: async (request, options) => {
-          await warmGate;
-          return baseClient.session.warm(request, options);
+        start: async (request, options) => {
+          await startGate;
+          return baseClient.session.start(request, options);
         },
       },
     };
@@ -847,10 +904,10 @@ describe("WorkspaceView", () => {
         .selectSession("s-other", "t1", "p1");
     });
     await flushComposerEffects();
-    // Warm resolve continues through Promise chains after release; flush a
+    // The start resolve continues through Promise chains after release; flush a
     // macrotask so abandon repark / pendingSend clear stay inside act.
     await act(async () => {
-      releaseWarm();
+      releaseStart();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     await flushComposerEffects();
@@ -873,13 +930,12 @@ describe("WorkspaceView", () => {
     ).toBeEnabled();
   });
 
-  it("warms a fresh session for retry after attach fails, instead of reusing the consumed id", async () => {
+  it("creates a fresh session when a retry follows a failed start", async () => {
     const user = userEvent.setup();
     const state = createMockClientState();
     state.projects = [{ id: "p1", name: "Ora" }];
-    // An already-existing task keeps the warm-session query keyed the same
-    // way across both attempts (no task-creation side effect can re-target
-    // it), so this isolates the retry behavior this fix is about.
+    // An already-existing task keeps both attempts on one chat surface, so no
+    // task-creation side effect can re-target the retry.
     state.tasks = [
       {
         id: "t1",
@@ -889,21 +945,21 @@ describe("WorkspaceView", () => {
       },
     ];
     const baseClient = createMockClient(state);
-    let attachCalls = 0;
-    const attachedSessionIds: string[] = [];
+    let startCalls = 0;
+    const startedSessionIds: string[] = [];
     const client: ContractsClient = {
       ...baseClient,
       session: {
         ...baseClient.session,
-        attach: async (request, options) => {
-          attachCalls += 1;
-          attachedSessionIds.push(request.sessionId);
-          // The real backend's warm pool discards its entry the moment an
-          // attach is attempted, whether or not the rest of attach succeeds.
-          // Reusing the same warm session id here would incorrectly pass even
-          // if the client kept retrying with a stale id.
-          if (attachCalls === 1) throw new Error("session unavailable");
-          return baseClient.session.attach(request, options);
+        start: async (request, options) => {
+          startCalls += 1;
+          // A start that fails leaves nothing behind on either side: the backend
+          // releases the provider session it had created, and the client holds
+          // no identifier it could retry against.
+          if (startCalls === 1) throw new Error("session unavailable");
+          const response = await baseClient.session.start(request, options);
+          startedSessionIds.push(response.session.id);
+          return response;
         },
       },
     };
@@ -944,21 +1000,50 @@ describe("WorkspaceView", () => {
     );
 
     await waitFor(() => expect(state.sessions).toHaveLength(1));
-    expect(attachCalls).toBe(2);
-    // The retry must not reuse the id the failed attach already consumed.
-    expect(attachedSessionIds[1]).not.toBe(attachedSessionIds[0]);
-    expect(state.sessions[0]?.id).toBe(attachedSessionIds[1]);
+    expect(startCalls).toBe(2);
+    // Only the retry produced a session, and it is the one now persisted.
+    expect(startedSessionIds).toEqual([state.sessions[0]!.id]);
   });
 
   it("shows a model switch that never reached the agent", async () => {
     const user = userEvent.setup();
     const state = createMockClientState();
     state.projects = [{ id: "p1", name: "Ora" }];
+    state.tasks = [
+      {
+        id: "t1",
+        projectId: "p1",
+        workspaceId: "workspace-t1",
+        title: "Configured",
+      },
+    ];
+    state.sessions = [
+      {
+        id: "s1",
+        workspaceId: "workspace-t1",
+        agentRef: AGENT_REF.opencode,
+        status: "running",
+        title: null,
+        historyState: { type: "writable" },
+      },
+    ];
     const baseClient = createMockClient(state);
     const client: ContractsClient = {
       ...baseClient,
       session: {
         ...baseClient.session,
+        // A persisted session reports its options through load, and only a
+        // persisted session's model change is asked of the backend at all.
+        load: async function* () {
+          yield {
+            type: "session_update" as const,
+            update: {
+              sessionUpdate: "config_option_update" as const,
+              configOptions: state.configOptions,
+            },
+          };
+          yield { type: "completed" as const };
+        },
         setConfig: async () => {
           throw new Error("agent unreachable");
         },
@@ -969,7 +1054,7 @@ describe("WorkspaceView", () => {
       createTestQueryClient(),
       createChatStore(client.session),
     );
-    useWorkspaceSelectionStore.getState().selectProject("p1");
+    useWorkspaceSelectionStore.getState().selectSession("s1", "t1", "p1");
 
     render(
       <Wrapper>
@@ -983,7 +1068,6 @@ describe("WorkspaceView", () => {
       </Wrapper>,
     );
 
-    // The warm session supplies the picker's models, so wait for them to land.
     const picker = await screen.findByRole("button", {
       name: /选择模型|Select model/,
     });
@@ -1000,26 +1084,17 @@ describe("WorkspaceView", () => {
     expect(picker).toHaveTextContent("Big Pickle");
   });
 
-  it("keeps a switched model after the surface remounts with a still-warm session", async () => {
+  it("keeps a model picked before the first send across a remount", async () => {
     const user = userEvent.setup();
     const state = createMockClientState();
     state.projects = [{ id: "p1", name: "Ora" }];
     const baseClient = createMockClient(state);
-    const warm = vi.fn(baseClient.session.warm);
+    const discover = vi.fn(baseClient.agentRuntime.listModels);
     const client: ContractsClient = {
       ...baseClient,
-      session: {
-        ...baseClient.session,
-        warm,
-        // Reports back whichever model was requested, the way an agent answers
-        // a switch it accepted �?the mock's default ignores the request.
-        setConfig: async (req) => ({
-          configOptions: state.configOptions.map((option) =>
-            option.type === "select"
-              ? { ...option, currentValue: req.value }
-              : option,
-          ),
-        }),
+      agentRuntime: {
+        ...baseClient.agentRuntime,
+        listModels: discover,
       },
     };
     // One query client and one chat store across both renders, so this is the
@@ -1061,27 +1136,28 @@ describe("WorkspaceView", () => {
     picker = await screen.findByRole("button", {
       name: /选择模型|Select model/,
     });
-    // The warm session is reused rather than re-opened, so its pinned handshake
-    // response �?which still names the opening model �?is what a remount sees.
-    // Replaying it would silently undo a switch the agent already accepted.
+    // Nothing was sent, so the pick is still only an intent — one that belongs
+    // to this surface and must survive leaving it and coming back.
     await waitFor(() => expect(picker).toHaveTextContent("Small Pickle"));
-    expect(warm).toHaveBeenCalledOnce();
+    // Discovery is a cached query keyed by agent and workspace, so returning to
+    // the same surface asks the plugin nothing new.
+    expect(discover).toHaveBeenCalledOnce();
   });
 
-  it("says the model list is still arriving while the session is being warmed", async () => {
+  it("says the model list is still arriving while discovery is open", async () => {
     const user = userEvent.setup();
     const state = createMockClientState();
     state.projects = [{ id: "p1", name: "Ora" }];
     const baseClient = createMockClient(state);
-    let openHandshake: (response: WarmSessionResponse) => void = () => {};
+    let openHandshake: (response: ListAgentModelsResponse) => void = () => {};
     const client: ContractsClient = {
       ...baseClient,
-      session: {
-        ...baseClient.session,
+      agentRuntime: {
+        ...baseClient.agentRuntime,
         // Held open so the picker can be inspected mid-handshake, which is what
         // a real agent's a second or so of start-up looks like.
-        warm: () =>
-          new Promise<WarmSessionResponse>((resolve) => {
+        listModels: () =>
+          new Promise<ListAgentModelsResponse>((resolve) => {
             openHandshake = resolve;
           }),
       },
@@ -1117,9 +1193,14 @@ describe("WorkspaceView", () => {
     ).toBeNull();
 
     openHandshake({
-      sessionId: "s1",
-      workspaceId: "workspace-p1",
-      configOptions: state.configOptions,
+      models: [
+        { id: "opencode/big-pickle", displayName: "Big Pickle", default: true },
+        {
+          id: "opencode/small-pickle",
+          displayName: "Small Pickle",
+          default: false,
+        },
+      ],
     });
 
     expect(
@@ -1127,93 +1208,24 @@ describe("WorkspaceView", () => {
     ).toBeInTheDocument();
   });
 
-  it("offers a CLI's remembered models while a later surface is still warming", async () => {
-    const state = createMockClientState();
-    state.projects = [
-      { id: "p1", name: "Ora" },
-      { id: "p2", name: "Ora Docs" },
-    ];
-    const baseClient = createMockClient(state);
-    let handshakes = 0;
-    const client: ContractsClient = {
-      ...baseClient,
-      session: {
-        ...baseClient.session,
-        // The first surface handshakes normally; the second is held open, which
-        // is the wait this whole cache exists to hide.
-        warm: (request) => {
-          handshakes += 1;
-          if (handshakes === 1) return baseClient.session.warm(request);
-          return new Promise<WarmSessionResponse>(() => {});
-        },
-      },
-    };
-    // One query client and chat store across both renders, so the second
-    // surface opens in the same app run that already learned this CLI's models.
-    const Wrapper = createHookWrapper(
-      client,
-      createTestQueryClient(),
-      createChatStore(client.session),
-    );
-
-    const renderView = () =>
-      render(
-        <Wrapper>
-          <AppI18nProvider>
-            <PlatformProvider adapter={createStubPlatform()}>
-              <TooltipProvider>
-                <WorkspaceView userName="Eric" />
-              </TooltipProvider>
-            </PlatformProvider>
-          </AppI18nProvider>
-        </Wrapper>,
-      );
-
-    useWorkspaceSelectionStore.getState().selectProject("p1");
-    const first = renderView();
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: /选择模型|Select model/ }),
-      ).toHaveTextContent("Big Pickle"),
-    );
-    first.unmount();
-
-    useWorkspaceSelectionStore.getState().selectProject("p2");
-    renderView();
-
-    // A different surface, so nothing about the first one's session is reused —
-    // only what its handshake reported the CLI offers, which is what lets this
-    // one name a model before its own handshake has answered anything.
-    const picker = await screen.findByRole("button", {
-      name: /选择模型|Select model/,
-    });
-    await waitFor(() => expect(picker).toHaveTextContent("Big Pickle"));
-    expect(picker).not.toHaveTextContent(/加载中|Loading/);
-    expect(handshakes).toBe(2);
-  });
-
-  it("offers remembered models to read but not to pick until a session exists", async () => {
+  it("carries a model picked before the first send into startSession", async () => {
     const user = userEvent.setup();
     const state = createMockClientState();
     state.projects = [{ id: "p1", name: "Ora" }];
     const baseClient = createMockClient(state);
-    let openHandshake: (response: WarmSessionResponse) => void = () => {};
+    const started: StartSessionRequest[] = [];
     const setConfig = vi.fn(baseClient.session.setConfig);
     const client: ContractsClient = {
       ...baseClient,
       session: {
         ...baseClient.session,
         setConfig,
-        warm: () =>
-          new Promise<WarmSessionResponse>((resolve) => {
-            openHandshake = resolve;
-          }),
+        start: async (request, options) => {
+          started.push(request);
+          return baseClient.session.start(request, options);
+        },
       },
     };
-    // Stands in for an earlier surface in this run having handshaken this CLI.
-    useAgentModelStore.setState({
-      known: { "ora-space.opencode": state.configOptions },
-    });
     const Wrapper = createHookWrapper(
       client,
       createTestQueryClient(),
@@ -1236,25 +1248,83 @@ describe("WorkspaceView", () => {
     await user.click(
       await screen.findByRole("button", { name: /选择模型|Select model/ }),
     );
-    // The remembered list answers what the user opened the menu to find out,
-    // so it is shown rather than withheld behind the handshake.
-    const item = await screen.findByRole("menuitem", { name: "Small Pickle" });
-    // Applying a choice needs a session id, and there is none until the
-    // handshake lands — so the value is offered to read, not to act on.
-    expect(item).toHaveAttribute("data-disabled");
-    await user.click(item);
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Small Pickle" }),
+    );
+    // No session exists, so there is nothing to configure yet: the choice is
+    // recorded locally rather than sent anywhere.
     expect(setConfig).not.toHaveBeenCalled();
+    expect(started).toEqual([]);
 
-    openHandshake({
-      sessionId: "s1",
-      workspaceId: "workspace-p1",
-      configOptions: state.configOptions,
+    await user.keyboard("{Escape}");
+    await user.type(await screen.findByRole("textbox"), "hello");
+    await user.keyboard("{Enter}");
+
+    // The first send is where that intent is spent, in the same call that
+    // creates the session — so the very first turn runs on the chosen model.
+    await waitFor(() =>
+      expect(started).toEqual([
+        {
+          workspaceId: "workspace-p1",
+          agentRef: AGENT_REF.opencode,
+          model: "opencode/small-pickle",
+        },
+      ]),
+    );
+    expect(setConfig).not.toHaveBeenCalled();
+  });
+
+  it("starts an untouched chat on the model remembered for its agent", async () => {
+    const user = userEvent.setup();
+    useAgentModelPreferenceStore.setState({
+      models: { [AGENT_REF.opencode]: "opencode/small-pickle" },
     });
+    const state = createMockClientState();
+    state.projects = [{ id: "p1", name: "Ora" }];
+    const baseClient = createMockClient(state);
+    const started: StartSessionRequest[] = [];
+    const client: ContractsClient = {
+      ...baseClient,
+      session: {
+        ...baseClient.session,
+        start: async (request, options) => {
+          started.push(request);
+          return baseClient.session.start(request, options);
+        },
+      },
+    };
+    const Wrapper = createHookWrapper(
+      client,
+      createTestQueryClient(),
+      createChatStore(client.session),
+    );
+    useWorkspaceSelectionStore.getState().selectProject("p1");
+
+    render(
+      <Wrapper>
+        <AppI18nProvider>
+          <PlatformProvider adapter={createStubPlatform()}>
+            <TooltipProvider>
+              <WorkspaceView userName="Eric" />
+            </TooltipProvider>
+          </PlatformProvider>
+        </AppI18nProvider>
+      </Wrapper>,
+    );
+
+    // The picker is never opened: what the surface is labelled with has to be
+    // what the send asks for, or the first turn silently runs on another model.
+    await user.type(await screen.findByRole("textbox"), "hello");
+    await user.keyboard("{Enter}");
 
     await waitFor(() =>
-      expect(
-        screen.getByRole("menuitem", { name: "Small Pickle" }),
-      ).not.toHaveAttribute("data-disabled"),
+      expect(started).toEqual([
+        {
+          workspaceId: "workspace-p1",
+          agentRef: AGENT_REF.opencode,
+          model: "opencode/small-pickle",
+        },
+      ]),
     );
   });
 
@@ -1274,7 +1344,7 @@ describe("WorkspaceView", () => {
       {
         id: "s1",
         workspaceId: "workspace-t1",
-        agentRef: "ora-space.opencode",
+        agentRef: AGENT_REF.opencode,
         status: "running",
         title: null,
         historyState: { type: "writable" },
@@ -1376,7 +1446,7 @@ describe("WorkspaceView", () => {
   });
 
   /**
-   * Builds a client whose `warm` reports Claude's own models, so a switch can be
+   * Builds a client whose discovery reports Claude's own models, so a switch can be
    * observed offering the incoming CLI's list rather than the outgoing one's.
    */
   function createSwitchTargetClient(
@@ -1393,29 +1463,26 @@ describe("WorkspaceView", () => {
           prompted.push(request.sessionId);
           return baseClient.session.prompt(request, options);
         },
-        warm: async (request, options) => {
-          const response = await baseClient.session.warm(request, options);
-          if (request.agentRef !== "ora-space.claude") return response;
-          return {
-            ...response,
-            configOptions: [
-              {
-                id: "model",
-                name: "Model",
-                category: "model",
-                type: "select",
-                currentValue: "claude/sonnet",
-                options: [
-                  { value: "claude/sonnet", name: "Sonnet" },
-                  { value: "claude/haiku", name: "Haiku" },
-                ],
-              },
-            ],
-          };
-        },
         switchAgent: async (request, options) => {
           switched.push(request);
           return baseClient.session.switchAgent(request, options);
+        },
+      },
+      agentRuntime: {
+        ...baseClient.agentRuntime,
+        listModels: async (request, options) => {
+          const response = await baseClient.agentRuntime.listModels(
+            request,
+            options,
+          );
+          if (request.agentRef !== AGENT_REF.claude) return response;
+          return {
+            ...response,
+            models: [
+              { id: "claude/sonnet", displayName: "Sonnet", default: true },
+              { id: "claude/haiku", displayName: "Haiku", default: false },
+            ],
+          };
         },
       },
     };
@@ -1439,7 +1506,7 @@ describe("WorkspaceView", () => {
       {
         id: "s1",
         workspaceId: "workspace-t1",
-        agentRef: "ora-space.opencode",
+        agentRef: AGENT_REF.opencode,
         status: "running",
         title: null,
         historyState: { type: "writable" },
@@ -1480,7 +1547,7 @@ describe("WorkspaceView", () => {
 
     // Picking a CLI is only half the decision, so the menu is still open on the
     // models that CLI actually offers rather than the ones it replaced. Those
-    // come from warming it, which leaves the conversation's own agent running.
+    // come from discovery, which leaves the conversation's own agent running.
     const menu = await screen.findByRole("menu");
     expect(
       await within(menu).findByRole("menuitem", { name: "Haiku" }),
@@ -1491,7 +1558,7 @@ describe("WorkspaceView", () => {
     // Rebinding here would tear down an agent that may be mid-reply, so nothing
     // is asked of the backend until the next message carries the move.
     expect(switched).toEqual([]);
-    expect(state.sessions[0]?.agentRef).toBe("ora-space.opencode");
+    expect(state.sessions[0]?.agentRef).toBe(AGENT_REF.opencode);
   });
 
   it("commits a recorded agent move with the next message", async () => {
@@ -1529,11 +1596,69 @@ describe("WorkspaceView", () => {
     await user.keyboard("{Enter}");
 
     await waitFor(() =>
-      expect(state.sessions[0]?.agentRef).toBe("ora-space.claude"),
+      expect(state.sessions[0]?.agentRef).toBe(AGENT_REF.claude),
     );
     expect(switched).toEqual([
-      { sessionId: "s1", agentRef: "ora-space.claude" },
+      { sessionId: "s1", agentRef: AGENT_REF.claude, model: null },
     ]);
+  });
+
+  it("moves a session off an unavailable agent with the next message", async () => {
+    const user = userEvent.setup();
+    const state = createMockClientState();
+    seedSwitchableSession(state);
+    state.sessions[0]!.agentRef = "ora-space.opencode";
+    state.installedPlugins = state.installedPlugins.filter(
+      (plugin) => plugin.id !== AGENT_REF.opencode,
+    );
+    state.agentRuntimeStatuses = state.agentRuntimeStatuses.filter(
+      (status) => status.agentRef !== AGENT_REF.opencode,
+    );
+    const { client, switched, prompted } = createSwitchTargetClient(state);
+    client.session.load = async function* (request) {
+      if (request.sessionId === "s1") {
+        throw new Error("ora-space.opencode is not installed");
+      }
+      yield { type: "completed" };
+    };
+    const Wrapper = createHookWrapper(
+      client,
+      createTestQueryClient(),
+      createChatStore(client.session),
+    );
+    useWorkspaceSelectionStore.getState().selectSession("s1", "t1", "p1");
+
+    render(
+      <Wrapper>
+        <AppI18nProvider>
+          <PlatformProvider adapter={createStubPlatform()}>
+            <TooltipProvider>
+              <WorkspaceView userName="Eric" />
+            </TooltipProvider>
+          </PlatformProvider>
+        </AppI18nProvider>
+      </Wrapper>,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveAttribute(
+      "data-agent-availability",
+      "uninstalled",
+    );
+    await user.click(
+      await screen.findByRole("button", { name: /选择模型|Select model/ }),
+    );
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Claude Code" }),
+    );
+    await user.keyboard("{Escape}");
+    await user.type(await screen.findByRole("textbox"), "hello");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(prompted).toEqual(["s1"]));
+    expect(switched).toEqual([
+      { sessionId: "s1", agentRef: AGENT_REF.claude, model: null },
+    ]);
+    expect(state.sessions[0]?.agentRef).toBe(AGENT_REF.claude);
   });
 
   it("sends without rebinding when the picker returns to the session's own agent", async () => {
@@ -1577,7 +1702,7 @@ describe("WorkspaceView", () => {
     // Asking the backend to move a session onto its own agent is refused with
     // `session_agent_unchanged`, which would have failed the message with it.
     expect(switched).toEqual([]);
-    expect(state.sessions[0]?.agentRef).toBe("ora-space.opencode");
+    expect(state.sessions[0]?.agentRef).toBe(AGENT_REF.opencode);
   });
 
   it("resumes a session whose history stopped recording", async () => {
@@ -1596,7 +1721,7 @@ describe("WorkspaceView", () => {
       {
         id: "s1",
         workspaceId: "workspace-t1",
-        agentRef: "ora-space.opencode",
+        agentRef: AGENT_REF.opencode,
         status: "running",
         title: null,
         historyState: { type: "degraded", reason: "no space left on device" },

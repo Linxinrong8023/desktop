@@ -35,6 +35,9 @@ static QUOTED_VALUE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap_or_else(|error| panic!("invalid built-in quoted value pattern: {error}"))
 });
 
+// Keep the alternate policy compiled into the module so it remains available for explicit,
+// tightly scoped callers and tests even while emitted reports use unrestricted rendering.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ReportRendering {
     Unrestricted,
@@ -50,14 +53,9 @@ pub struct ErrorReport {
 }
 
 impl ErrorReport {
-    /// Preserves complete diagnostics in debug builds and sanitizes release-build log fields.
+    /// Preserves complete diagnostics for emitted logs while retaining the sanitizer for future use.
     pub fn from_error(error: &(dyn Error + 'static)) -> Self {
-        let rendering = if cfg!(debug_assertions) {
-            ReportRendering::Unrestricted
-        } else {
-            ReportRendering::Sanitized
-        };
-        Self::render(error, rendering)
+        Self::render(error, ReportRendering::Unrestricted)
     }
 
     /// Traverses an error chain using an explicit rendering policy so both modes stay testable.
@@ -252,17 +250,15 @@ mod tests {
     }
 
     #[test]
-    fn uses_build_appropriate_rendering() {
+    fn uses_unrestricted_rendering_for_emitted_reports() {
         let report = ErrorReport::from_error(&ContextError { source: RootError });
-        let rendering = if cfg!(debug_assertions) {
-            ReportRendering::Unrestricted
-        } else {
-            ReportRendering::Sanitized
-        };
 
         assert_eq!(
             report,
-            ErrorReport::render(&ContextError { source: RootError }, rendering)
+            ErrorReport::render(
+                &ContextError { source: RootError },
+                ReportRendering::Unrestricted
+            )
         );
     }
 

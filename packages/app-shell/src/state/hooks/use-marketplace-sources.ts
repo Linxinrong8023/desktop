@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { UpdateMarketplaceSourceRequest } from "@ora/contracts";
 import { useContractsClient } from "../../contracts-client-context";
 import { queryKeys } from "./query-keys";
 
@@ -49,14 +50,15 @@ export function useDeleteMarketplaceSource() {
 }
 
 /**
- * Changes only one marketplace source's proxy policy and refreshes the list.
+ * Changes one marketplace source's URL, branch, proxy policy, or enabled state
+ * and refreshes the list.
  */
 export function useUpdateMarketplaceSource() {
   const client = useContractsClient();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ url, useProxy }: { url: string; useProxy: boolean }) =>
-      client.plugin.updateSource({ url, useProxy }),
+    mutationFn: (request: UpdateMarketplaceSourceRequest) =>
+      client.plugin.updateSource(request),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: queryKeys.marketplaceSources }),
   });

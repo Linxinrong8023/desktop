@@ -13,6 +13,7 @@ import {
 import { useAgentRuntimeStatus } from "../../state/hooks/use-agent-runtime-status";
 import { useInstalledPlugins } from "../../state/hooks/use-installed-plugins";
 import { SessionAgentBanner } from "./session-agent-banner";
+import { AGENT_REF, officialAgentRef } from "../../test/agent-identity";
 
 /**
  * The runtime half of an installed package.
@@ -31,7 +32,7 @@ function agentPlugin(
   runtime: PluginRuntime = { runtime: "running" },
 ): InstalledPlugin {
   return {
-    id: "official/ora-space.reviewer",
+    id: officialAgentRef("ora-space.reviewer"),
     namespace: "official",
     name: "ora-space.reviewer",
     description: "ora-space.reviewer plugin",
@@ -104,7 +105,7 @@ function renderBanner(plugins: InstalledPlugin[], bound: Session) {
 
 describe("SessionAgentBanner", () => {
   it("reports an agent whose package is gone as uninstalled", async () => {
-    renderBanner([], session("ora-space.reviewer"));
+    renderBanner([], session(officialAgentRef("ora-space.reviewer")));
 
     expect(await screen.findByRole("alert")).toHaveAttribute(
       "data-agent-availability",
@@ -112,15 +113,28 @@ describe("SessionAgentBanner", () => {
     );
   });
 
+  it("directs the user to switch agents when the bound package is gone", async () => {
+    renderBanner([], session(officialAgentRef("ora-space.reviewer")));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      /当前 Agent 不可用，请切换 Agent 继续对话。|This session's agent is unavailable\. Switch agents to continue the conversation\./,
+    );
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
   it("stays silent for a built-in CLI, which has no plugin package", async () => {
-    renderBanner([], session("ora-space.nga"));
+    renderBanner([], session(AGENT_REF.nga));
 
     await screen.findByTestId("availability-settled");
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("stays silent while an installed plugin is serving the session", async () => {
-    renderBanner([agentPlugin()], session("ora-space.reviewer"));
+    renderBanner(
+      [agentPlugin()],
+      session(officialAgentRef("ora-space.reviewer")),
+    );
 
     await screen.findByTestId("availability-settled");
     expect(screen.queryByRole("alert")).toBeNull();
@@ -134,7 +148,7 @@ describe("SessionAgentBanner", () => {
           failureReason: "deno exited with 1",
         }),
       ],
-      session("ora-space.reviewer"),
+      session(officialAgentRef("ora-space.reviewer")),
     );
 
     const alert = await screen.findByRole("alert");

@@ -43,6 +43,15 @@ export type AvailablePlugin =
      */
     kind: string;
     namespace: string;
+    /**
+     * Canonical URL of the marketplace source that publishes this listing.
+     *
+     * Two sources may publish the same `identifier`, and both listings then appear side by side.
+     * Every other field on the card — title, description, icon — comes from a manifest either
+     * repository can copy verbatim, and `namespace` is a digest-suffixed slug that means nothing
+     * to a reader, so this is the only field that lets the user tell the two cards apart.
+     */
+    sourceUrl: string;
     version: string;
     description: string;
     /**
@@ -251,6 +260,39 @@ export type ListMarketplaceSourcesResponse = {
 };
 
 /**
+ * Describes how one marketplace source retrieves its `.orax` release artifacts.
+ *
+ * The S3 variant deliberately excludes credentials: source queries may populate editors and
+ * logs, so secrets remain write-only outside the backend persistence boundary.
+ */
+export type MarketplaceArtifactRetrieval = { "type": "direct_https" } | {
+  "type": "s3_sigv4";
+  endpoint: string;
+  bucket: string;
+  region: string;
+};
+
+/**
+ * Carries the complete artifact-retrieval state submitted by the source editor.
+ */
+export type MarketplaceArtifactRetrievalUpdate = { "type": "direct_https" } | {
+  "type": "s3_sigv4";
+  endpoint: string;
+  bucket: string;
+  region: string;
+  credentials: MarketplaceS3CredentialsUpdate;
+};
+
+/**
+ * Selects whether an S3 source update retains or atomically replaces its credential pair.
+ */
+export type MarketplaceS3CredentialsUpdate = { "action": "preserve" } | {
+  "action": "replace";
+  accessKeyId: string;
+  secretAccessKey: string;
+};
+
+/**
  * Lists one configured marketplace source repository and its tracked branch.
  */
 export type MarketplaceSource = {
@@ -266,6 +308,14 @@ export type MarketplaceSource = {
    * Whether Git fetches and plugin downloads for this source use the configured proxy.
    */
   useProxy: boolean;
+  /**
+   * Whether this source participates in marketplace sync, listing, and install.
+   */
+  enabled: boolean;
+  /**
+   * Release-artifact retrieval policy, with S3 credentials omitted.
+   */
+  artifactRetrieval: MarketplaceArtifactRetrieval;
 };
 
 /**
@@ -346,6 +396,10 @@ export type PluginSettingDetails = {
   declaration: PluginSettingDeclaration;
   storedValue: PluginSettingValue | null;
   effectiveValue: PluginSettingValue | null;
+  /**
+   * True when the host deliberately withholds a value used by an MCP process.
+   */
+  redacted: boolean;
   source: PluginSettingValueSource;
   valueErrorCode: string | null;
 };
@@ -412,6 +466,10 @@ export type SavePluginConfigurationRequest = {
   expectedRevision: bigint;
   declarationFingerprint: string;
   values: { [key in string]: PluginSettingValue };
+  /**
+   * Host-redacted stored values that an unchanged editor must retain.
+   */
+  preserveSettingIds: Array<string>;
 };
 
 /**
@@ -468,12 +526,22 @@ export type UninstallPluginRequest = {
 export type UninstallPluginResponse = { pluginId: string };
 
 /**
- * Requests changing only one marketplace source's proxy policy.
+ * Requests replacing the editable fields of one marketplace source.
+ *
+ * `url` identifies the persisted row. `new_url` is the replacement Git address and may equal
+ * `url` when only branch, proxy policy, or enabled state changes.
  */
-export type UpdateMarketplaceSourceRequest = { url: string; useProxy: boolean };
+export type UpdateMarketplaceSourceRequest = {
+  url: string;
+  newUrl: string;
+  branch: string;
+  useProxy: boolean;
+  enabled: boolean;
+  artifactRetrieval: MarketplaceArtifactRetrievalUpdate;
+};
 
 /**
- * Returns the source list immediately after one source's proxy policy is persisted.
+ * Returns the source list immediately after one source is updated.
  */
 export type UpdateMarketplaceSourceResponse = {
   sources: Array<MarketplaceSource>;

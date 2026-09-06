@@ -32,7 +32,6 @@ import { useProjects } from "../../state/hooks/use-projects";
 import { useTasks } from "../../state/hooks/use-tasks";
 import { useSessions } from "../../state/hooks/use-sessions";
 import { useWorkspaces } from "../../state/hooks/use-workspaces";
-import { useRestoreWorkspaceSelection } from "../../state/hooks/use-restore-workspace-selection";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { usePersistHydrated } from "../../state/hooks/use-persist-hydrated";
 import { useUiStore } from "../../state/stores/ui-store";
@@ -176,9 +175,9 @@ export function WorkspaceSidebar({ user }: WorkspaceSidebarProps) {
     tasksQuery.isPending ||
     sessionsQuery.isPending ||
     workspacesQuery.isPending;
-  // Bootstrap and restore both need a successful tree. `!isPending` alone would
-  // let a failed/empty fetch miss-clear `pendingRestore` and persist that wipe
-  // so the next launch has nothing to restore (flaky "sometimes works").
+  // Tree bootstrap needs a successful tree. `!isPending` alone would let a
+  // failed/empty fetch miss-bootstrap and seal nothing, so only a success box
+  // seals the expand-all seed.
   const treeReady =
     projectsQuery.isSuccess &&
     tasksQuery.isSuccess &&
@@ -198,13 +197,6 @@ export function WorkspaceSidebar({ user }: WorkspaceSidebarProps) {
       }),
     [projects, tasks],
   );
-
-  useRestoreWorkspaceSelection({
-    projects,
-    tasks,
-    sessions,
-    treePending: !treeReady,
-  });
 
   const tasksByProjectId = useStableGroupBy(tasks, projectIdOfTask);
   const sessionsByWorkspaceId = useStableGroupBy(

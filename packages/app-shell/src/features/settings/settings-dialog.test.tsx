@@ -1,7 +1,7 @@
 import { createChatStore } from "@ora/chat";
 import type { ContractsClient } from "@ora/contracts";
 import { PlatformProvider } from "../../platform";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -168,6 +168,7 @@ describe("SettingsDialog developer options", () => {
           },
           storedValue: null,
           effectiveValue: null,
+          redacted: false,
           source: "absent",
           valueErrorCode: null,
         },
@@ -203,6 +204,25 @@ describe("SettingsDialog developer options", () => {
     expect(
       await screen.findByRole("heading", { name: "Appearance" }),
     ).toBeInTheDocument();
+  });
+
+  it("opens on the requested settings category when deep-linked", async () => {
+    const client = createMockClient(createMockClientState());
+    renderDialog(client);
+
+    // Deep-linking writes directly to the Zustand UI store; wrap it in act so
+    // the resulting SettingsDialog state update stays inside the test boundary.
+    act(() => {
+      useUiStore.getState().openSettingsAt("plugins");
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "Plugins" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Appearance" }),
+    ).not.toBeInTheDocument();
+    expect(useUiStore.getState().settingsCategory).toBe("plugins");
   });
 });
 

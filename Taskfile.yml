@@ -19,12 +19,14 @@ tasks:
     cmds:
       - task: install:frontend
       - task: install:crates
-      - task: build
+      - task: build:test
 
   install:frontend:
     desc: Install dependencies for the frontend packages
     cmds:
-      - pnpm install
+      - deno task check:toolchain
+      - deno install
+      - deno task prepare
 
   install:crates:
     desc: Install dependencies for all Rust workspace packages
@@ -36,44 +38,54 @@ tasks:
   ###################################################
 
   export-contracts:
-    desc: Regenerate TypeScript contracts and the frontend SDK package
+    desc: Regenerate frontend contracts and the plugin protocol bindings
     cmds:
       - cargo xtask export-contracts
-      - pnpm --filter @ora/contracts generate:error-schema
+      - deno task --filter @ora/contracts generate:error-schema
 
   build:
     desc: Build all Rust workspace packages
     cmds:
       - cargo build --workspace
 
+  build:test:
+    desc: Precompile Rust workspace checks and test targets
+    env:
+      CARGO_INCREMENTAL: "0"
+    cmds:
+      - cargo clippy --workspace --exclude ora-desktop --exclude ora-desktop-tests -- -D warnings
+      - cargo test --workspace --exclude ora-desktop --exclude ora-desktop-tests --no-run
+
   build:reaper:
     desc: Build the debug process reaper sidecar for the current target
     cmds:
-      - node scripts/build-reaper.mjs
+      - deno run -A scripts/build-reaper.ts
 
   build:reaper:release:
     desc: Build the release process reaper sidecar for the current target
     cmds:
-      - node scripts/build-reaper.mjs --release
+      - deno run -A scripts/build-reaper.ts --release
 
   build:desktop:
-    desc: Build and bundle the Tauri desktop app installers
+    desc: >-
+      Internal base task for building the Tauri desktop bundle; use
+      package:desktop for a complete local installer
     cmds:
       - task: build:reaper:release
       - task: export-contracts
-      - pnpm --filter @ora/desktop tauri build
+      - deno task --filter @ora/desktop tauri build
+
+  package:desktop:
+    desc: >-
+      Build a complete local desktop installer the same way desktop-build.yml
+      does (sidecars enabled, working-copy edits restored afterward)
+    cmds:
+      - deno run -A scripts/package-desktop.ts {{.CLI_ARGS}}
 
   clean:
     desc: Clean build artifacts
     cmds:
-      - rm -rf node_modules
-      - |
-        {{if eq OS "windows"}}
-        pnpm -r exec -- powershell -NoProfile -Command "if (Test-Path node_modules) { Remove-Item -Recurse -Force node_modules }"
-        {{else}}
-        pnpm -r exec -- rm -rf node_modules
-        {{end}}
-      - pnpm store prune
+      - deno task clean:frontend
       - cargo clean
 
   clean:debug:
@@ -84,7 +96,7 @@ tasks:
   format:
     desc: Format files changed in the working tree or staging area
     cmds:
-      - pnpm exec node scripts/format-changed.mjs
+      - deno run -A scripts/format-changed.ts
 
   format:all:
     desc: Format all frontend and Rust workspace packages
@@ -96,12 +108,12 @@ tasks:
     desc: Format all frontend packages covered by lint
     silent: true
     cmds:
-      - pnpm --filter @ora/desktop format
-      - pnpm --filter @ora/chat format
-      - pnpm --filter @ora/editor format
-      - pnpm --filter @ora/workflow-runtime format
-      - pnpm --filter @ora/app-shell format
-      - pnpm --filter @ora-space/plugin-sdk format
+      - deno task --filter @ora/desktop format
+      - deno task --filter @ora/chat format
+      - deno task --filter @ora/editor format
+      - deno task --filter @ora/workflow-runtime format
+      - deno task --filter @ora/app-shell format
+      - deno task --filter @ora-space/plugin-sdk format
 
   format:crates:
     desc: Format all Rust workspace packages
@@ -119,22 +131,39 @@ tasks:
     desc: Run linters on all frontend packages
     silent: true
     cmds:
-      - pnpm --filter @ora/desktop lint
-      - pnpm --filter @ora/contracts lint
-      - pnpm --filter @ora/chat lint
-      - pnpm --filter @ora/editor lint
-      - pnpm --filter @ora/workflow-runtime lint
-      - pnpm --filter @ora/app-shell lint
-      - pnpm --filter @ora-space/plugin-sdk lint
+      - deno task check:tooling
+      - deno task --filter @ora/desktop lint
+      - deno task --filter @ora/contracts lint
+      - deno task --filter @ora/chat lint
+      - deno task --filter @ora/editor lint
+      - deno task --filter @ora/workflow-runtime lint
+      - deno task --filter @ora/app-shell lint
+      - deno task --filter @ora-space/plugin-sdk lint
 
   lint:crates:
-    desc: Run linters on all Rust workspace packages
+    desc: Run linters on all crates packages
     env:
       CARGO_INCREMENTAL: "0"
     silent: true
     cmds:
       - cargo fmt --all -- --check
-      - cargo clippy --workspace -- -D warnings
+      - cargo clippy --workspace --exclude ora-desktop --exclude ora-desktop-tests -- -D warnings
+
+  lint:tauri:
+    desc: Run linters on the Tauri desktop package
+    env:
+      CARGO_INCREMENTAL: "0"
+    silent: true
+    cmds:
+      - cargo clippy --package ora-desktop -- -D warnings
+
+  lint:e2e:
+    desc: Run linters on the Desktop E2E package
+    env:
+      CARGO_INCREMENTAL: "0"
+    silent: true
+    cmds:
+      - cargo clippy --package ora-desktop-tests --tests -- -D warnings
 
   test:
     desc: Run all frontend and Rust workspace checks (may take a long time)
@@ -142,19 +171,22 @@ tasks:
     cmds:
       - task: test:frontend
       - task: test:crates
+      - task: test:tauri
+      - task: test:e2e
 
   test:frontend:
     desc: Run all frontend TypeScript package test suites
     cmds:
       - task: export-contracts
       - task: lint:frontend
-      - pnpm --filter @ora/desktop test
-      - pnpm --filter @ora/contracts test
-      - pnpm --filter @ora/chat test
-      - pnpm --filter @ora/editor test
-      - pnpm --filter @ora/workflow-runtime test
-      - pnpm --filter @ora/app-shell test
-      - pnpm --filter @ora-space/plugin-sdk test
+      - deno task test:tooling
+      - deno task --filter @ora/desktop test
+      - deno task --filter @ora/contracts test
+      - deno task --filter @ora/chat test
+      - deno task --filter @ora/editor test
+      - deno task --filter @ora/workflow-runtime test
+      - deno task --filter @ora/app-shell test
+      - deno task --filter @ora-space/plugin-sdk test
 
   test:crates:
     desc: Run all Rust workspace package test suites
@@ -167,7 +199,23 @@ tasks:
         msg: "Deno is not available on PATH. Install it before running Rust tests."
     cmds:
       - task: lint:crates
-      - cargo test --workspace
+      - cargo test --workspace --exclude ora-desktop --exclude ora-desktop-tests
+
+  test:tauri:
+    desc: Run the Tauri desktop package test suite
+    env:
+      CARGO_INCREMENTAL: "0"
+    cmds:
+      - task: lint:tauri
+      - cargo test --package ora-desktop
+
+  test:e2e:
+    desc: Run the Desktop E2E test suite
+    env:
+      CARGO_INCREMENTAL: "0"
+    cmds:
+      - task: lint:e2e
+      - cargo test --package ora-desktop-tests
 
   ###################################################
   ############# Run Development Servers #############
@@ -185,7 +233,8 @@ tasks:
       VSLANG: "1033"
     cmds:
       - task: build:reaper
-      - pnpm --filter @ora/desktop tauri dev
+      - cargo xtask reconcile-migrations "{{.ROOT_DIR}}/.data"
+      - deno task --filter @ora/desktop tauri dev
 
   logdy:
     desc: Follow Ora backend's daily logs in the local Logdy UI

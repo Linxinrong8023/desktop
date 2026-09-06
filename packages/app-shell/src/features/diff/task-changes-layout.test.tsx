@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PlatformProvider } from "../../platform";
 import { useState, type ReactNode } from "react";
@@ -11,11 +11,7 @@ import {
 } from "./task-changes-navigation-context";
 import { WorkspaceReviewLayout } from "../workspace/workspace-review-layout";
 import { responsiveReviewWidth } from "../workspace/workspace-review-layout-utils";
-import { flushDebouncedPersistStorage } from "../../state/stores/debounced-json-storage";
-import {
-  REVIEW_STORAGE_KEY,
-  useReviewStore,
-} from "../../state/stores/review-store";
+import { useReviewStore } from "../../state/stores/review-store";
 
 vi.mock("./task-diff-view", () => ({
   TaskDiffView: ({
@@ -160,11 +156,7 @@ const taskContext = {
 };
 
 beforeEach(() => {
-  flushDebouncedPersistStorage();
-  window.localStorage.clear();
   useReviewStore.setState({ byContext: {} });
-  flushDebouncedPersistStorage();
-  window.localStorage.clear();
 });
 
 /** Clicks the Changes tab in the review toolbar. */
@@ -283,7 +275,7 @@ describe("WorkspaceReviewLayout", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: /显示或隐藏变更文件目录|toggle file tree/i,
+        name: /宽屏展开变更面板|Expand changes panel/,
       }),
     ).toBeInTheDocument();
   });
@@ -455,7 +447,7 @@ describe("WorkspaceReviewLayout", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: /显示或隐藏变更文件目录|Show or hide changed file tree/,
+        name: /宽屏展开变更面板|Expand changes panel/,
       }),
     ).toBeInTheDocument();
 
@@ -476,7 +468,7 @@ describe("WorkspaceReviewLayout", () => {
     expect(screen.getByTestId("files-panel")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", {
-        name: /显示或隐藏变更文件目录|Show or hide changed file tree/,
+        name: /宽屏展开变更面板|Expand changes panel/,
       }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /文件|Files/ })).toHaveAttribute(
@@ -607,47 +599,6 @@ describe("WorkspaceReviewLayout", () => {
     expect(screen.getByTestId("files-request").textContent).toBe("");
   });
 
-  it("restores an open Changes panel and file after review storage hydrates", async () => {
-    window.localStorage.setItem(
-      REVIEW_STORAGE_KEY,
-      JSON.stringify({
-        state: {
-          byContext: {
-            "task:task-1": {
-              open: true,
-              panel: "changes",
-              width: 720,
-              files: { changes: { path: "src/main.ts", line: 4 } },
-            },
-          },
-        },
-        version: 0,
-      }),
-    );
-
-    await act(async () => {
-      await useReviewStore.persist.rehydrate();
-    });
-
-    render(
-      <PlatformProvider adapter={createStubPlatform()}>
-        <AppI18nProvider>
-          <WorkspaceReviewLayout context={taskContext}>
-            <main>Workspace</main>
-          </WorkspaceReviewLayout>
-        </AppI18nProvider>
-      </PlatformProvider>,
-    );
-
-    expect(
-      screen.getByRole("region", { name: "Task diff" }),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId("requested-file")).toHaveTextContent(
-      "src/main.ts",
-    );
-    expect(screen.getByTestId("requested-line")).toHaveTextContent("4");
-  });
-
   it("re-applies per-context open state when switching tasks", async () => {
     useReviewStore.getState().upsertContext("task:task-1", {
       open: true,
@@ -659,10 +610,6 @@ describe("WorkspaceReviewLayout", () => {
       open: false,
       panel: "files",
       width: 640,
-    });
-
-    await act(async () => {
-      await useReviewStore.persist.rehydrate();
     });
 
     const { rerender } = render(
@@ -722,10 +669,6 @@ describe("WorkspaceReviewLayout", () => {
       files: { files: { path: "README.md", line: 2 } },
     });
 
-    await act(async () => {
-      await useReviewStore.persist.rehydrate();
-    });
-
     render(
       <PlatformProvider adapter={createStubPlatform()}>
         <AppI18nProvider>
@@ -755,10 +698,6 @@ describe("WorkspaceReviewLayout", () => {
       files: { files: { path: "src/b.ts" } },
     });
 
-    await act(async () => {
-      await useReviewStore.persist.rehydrate();
-    });
-
     const user = userEvent.setup();
     render(
       <PlatformProvider adapter={createStubPlatform()}>
@@ -773,7 +712,6 @@ describe("WorkspaceReviewLayout", () => {
     expect(screen.getByTestId("files-request")).toHaveTextContent("src/b.ts:");
 
     await clickChangesTab(user);
-    flushDebouncedPersistStorage();
 
     expect(useReviewStore.getState().byContext["task:task-1"]?.files).toEqual({
       files: { path: "src/b.ts" },
@@ -786,10 +724,6 @@ describe("WorkspaceReviewLayout", () => {
       panel: "files",
       width: 640,
       files: { files: { path: "src/closed.ts" } },
-    });
-
-    await act(async () => {
-      await useReviewStore.persist.rehydrate();
     });
 
     const user = userEvent.setup();
@@ -817,10 +751,6 @@ describe("WorkspaceReviewLayout", () => {
       width: 640,
     });
 
-    await act(async () => {
-      await useReviewStore.persist.rehydrate();
-    });
-
     const user = userEvent.setup();
     render(
       <PlatformProvider adapter={createStubPlatform()}>
@@ -833,9 +763,6 @@ describe("WorkspaceReviewLayout", () => {
     );
 
     await user.click(screen.getByTestId("simulate-files-preview"));
-    await act(async () => {
-      flushDebouncedPersistStorage();
-    });
 
     expect(useReviewStore.getState().byContext["task:task-1"]).toMatchObject({
       files: { files: { path: "src/tree-picked.ts" } },
@@ -847,10 +774,6 @@ describe("WorkspaceReviewLayout", () => {
       open: true,
       panel: "changes",
       width: 640,
-    });
-
-    await act(async () => {
-      await useReviewStore.persist.rehydrate();
     });
 
     const user = userEvent.setup();
@@ -865,9 +788,6 @@ describe("WorkspaceReviewLayout", () => {
     );
 
     await user.click(screen.getByTestId("simulate-diff-preview"));
-    await act(async () => {
-      flushDebouncedPersistStorage();
-    });
 
     expect(useReviewStore.getState().byContext["task:task-1"]).toMatchObject({
       panel: "changes",
@@ -881,10 +801,6 @@ describe("WorkspaceReviewLayout", () => {
       panel: "files",
       width: 640,
       files: { files: { path: "src/a.ts" } },
-    });
-
-    await act(async () => {
-      await useReviewStore.persist.rehydrate();
     });
 
     const user = userEvent.setup();
@@ -921,10 +837,6 @@ describe("WorkspaceReviewLayout", () => {
       files: { files: { path: "src/a.ts" } },
     });
 
-    await act(async () => {
-      await useReviewStore.persist.rehydrate();
-    });
-
     const user = userEvent.setup();
     render(
       <PlatformProvider adapter={createStubPlatform()}>
@@ -939,9 +851,6 @@ describe("WorkspaceReviewLayout", () => {
     await clickChangesTab(user);
     await user.click(screen.getByTestId("simulate-diff-preview"));
     await clickFilesTab(user);
-    await act(async () => {
-      flushDebouncedPersistStorage();
-    });
 
     // The diff-only path stays under `changes`; Files keeps its own selection.
     expect(useReviewStore.getState().byContext["task:task-1"]).toMatchObject({

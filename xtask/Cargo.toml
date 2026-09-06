@@ -16,6 +16,8 @@ workspace = true
 
 [dependencies]
 ora-contracts = { workspace = true }
+ora-db = { workspace = true }
+ora-plugin-protocol = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]

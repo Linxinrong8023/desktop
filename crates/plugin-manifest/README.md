@@ -8,14 +8,24 @@ forms accept an optional human-readable `title` that falls back to the identifie
 
 ## Responsibilities and boundaries
 
-- Reject malformed TOML, missing or unknown fields, unsupported resolver versions, and invalid
-  field values with structured errors.
-- Model plugin identifiers (`identifier`), source categories, plugin kinds (`workbench`, `agent`,
+- Reject malformed TOML, missing required fields, unsupported resolver versions, and invalid field
+  values with structured errors.
+- Ignore fields the schema does not know, at every nesting depth. Manifests are written by
+  third-party authors and read by many Ora versions at once, so rejecting an unrecognized key would
+  make each purely additive schema change delete the whole listing from an older client's
+  marketplace. Additive change is absorbed here; breaking change is gated by `resolver`. The price
+  is that a misspelled optional key now reads as an absent one — the entry becomes uninstallable or
+  loses its icon instead of failing to parse — which is visible in publishing and is the better
+  half of the trade. Required fields are not relaxed with it.
+- Model plugin identifiers (`identifier`), plugin kinds (`workbench`, `agent`,
   `webview`, `skill`, `mcp`, `hook`), HTTPS URLs, SHA-256 digests, optional source repository
   metadata, and optional Ora host version requirements as validated values.
 - Pair kind-specific sections with the matching `kind`: optional `[workbench]` (page-visible
   method names) for workbench plugins, required `[webview]` (`start_url`, `allowed_origins`,
   download policy) for webview plugins. Agent, skill, MCP, and hook plugins reject both sections.
+- Model each release `url` as a `ReleaseLocator`: either an absolute HTTPS URL or a validated S3
+  object key. The parser does not choose a retrieval mode; the marketplace source that owns the
+  manifest decides whether that locator is usable.
 - Model the resolver-one release source as a mutually exclusive union: one universal `url` +
   `sha256` pair installable on every host, or one or more unique `[[targets]]` entries each carrying
   an exact Rust target triple (`HookTarget`) from a known rustc allowlist, URL, and digest. The
@@ -26,7 +36,8 @@ forms accept an optional human-readable `title` that falls back to the identifie
   local import apply the same host-compatibility check; the target is never part of plugin
   identity. That section is mandatory only for `hook` — an `agent` that resolves its CLI from PATH
   is a legitimate universal package with no target to declare. Universal and targeted forms may
-  not coexist.
+  not coexist. Which form an agent's package was built from is not a build-time fact for the plugin
+  code inside it; it learns that at spawn time from `ora-plugin-lifecycle` instead.
 - Report structural failures with the TOML path of the offending value and semantic failures with
   a typed `ManifestField`, including the index of a webview origin or download rule.
 - Preserve deterministic validation order so callers receive a stable first error.
@@ -34,8 +45,14 @@ forms accept an optional human-readable `title` that falls back to the identifie
 
 ## Non-responsibilities
 
+- No namespace. A manifest never names the namespace its plugin is installed under: manifests are
+  third-party editable content, and a namespace decides which install directory, private data
+  directory, and Skill rows a package owns. The host derives it from the marketplace source that
+  published the entry (`ora-domain::PluginNamespace`), so a residual `namespace` key in an older
+  manifest is just another ignored unknown field.
 - No filesystem access, fixed manifest filename, source-path diagnostics, or input-size policy.
-- No network access, download, repository probing, or release checksum calculation.
+- No network access, download, repository probing, S3 signing, source-configuration lookup, or
+  release checksum calculation.
 - No plugin installation, discovery, execution, update selection, or integration with
   `ora-plugin-manager`.
 - No host policy for kind-specific packages: workbench page files on disk, webview origin

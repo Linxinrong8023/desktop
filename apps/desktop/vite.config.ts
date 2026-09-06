@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
@@ -25,6 +25,13 @@ export default defineConfig({
     __ORA_APP_VERSION__: JSON.stringify(readWorkspaceVersion()),
   },
   plugins: [react(), tailwindcss()],
+  test: {
+    // Set ORA_VITEST_MAX_WORKERS only on machines that need a lower memory peak;
+    // leaving it unset preserves Vitest's existing defaults for everyone else.
+    maxWorkers: process.env.ORA_VITEST_MAX_WORKERS
+      ? Number.parseInt(process.env.ORA_VITEST_MAX_WORKERS, 10)
+      : undefined,
+  },
   resolve: {
     alias: [
       { find: "@", replacement: path.resolve(__dirname, "./web") },

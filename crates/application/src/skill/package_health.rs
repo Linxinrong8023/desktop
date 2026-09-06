@@ -93,19 +93,21 @@ pub(crate) fn claim_untracked_name<Storage: SkillStorage>(
         .map_err(ApplicationError::from_skill_storage_error)
 }
 
-/// Promotes staging into `<name>`, replacing an existing leftover through a journaled swap.
+/// Promotes staging into `<name>`, optionally replacing an existing untracked package.
 ///
 /// `commit_create` cannot succeed while the formal directory exists, so claiming an untracked
 /// name must not delete first. A swap keeps the leftover in the compensation backup until the
-/// database write commits.
+/// database write commits. The replacement decision is captured before staging so a concurrent
+/// import cannot turn a create into a replacement after it claims the name.
 pub(crate) fn commit_unclaimed_package<Storage: SkillStorage>(
     storage: &Storage,
     skill_id: &SkillId,
     name: &str,
     staging: &Path,
+    had_untracked_package: bool,
 ) -> Result<PromotedPackage, ApplicationError> {
-    if storage.formal_exists(name)
-        && storage
+    if had_untracked_package {
+        if storage
             .list_journals()
             .map_err(ApplicationError::from_skill_storage_error)?
             .iter()
@@ -113,12 +115,21 @@ pub(crate) fn commit_unclaimed_package<Storage: SkillStorage>(
                 matches!(journal.op, JournalOp::Create | JournalOp::Swap { .. })
                     && (journal.name == name || journal.from_name == name)
             })
-    {
-        return Err(ApplicationError::SkillFolderConflict {
-            name: name.to_string(),
-        });
+        {
+            return Err(ApplicationError::SkillFolderConflict {
+                name: name.to_string(),
+            });
+        }
+        return promote_staging(storage, skill_id, name, staging);
     }
-    promote_staging(storage, skill_id, name, staging)
+
+    // Keep the create operation selected after observing an unclaimed name. If another import
+    // claims the name before the rename, commit_create reports a typed occupancy conflict instead
+    // of treating the concurrent package as a replaceable leftover.
+    storage
+        .commit_create(name, skill_id, staging)
+        .map(PromotedPackage::Created)
+        .map_err(ApplicationError::from_skill_storage_error)
 }
 
 /// Promotes staging for an unavailable catalog row, optionally renaming its old package.

@@ -35,6 +35,7 @@ import { startThemeSubscription } from "./state/stores/settings-store";
 import { useTranslation } from "react-i18next";
 import { WorkflowRuntimeProvider } from "./features/workflow-run/workflow-runtime-context";
 import { AppEventGate } from "./state/app-event-gate";
+import { useSuppressNativeContextMenu } from "./lib/suppress-native-context-menu";
 export { AppEventGate } from "./state/app-event-gate";
 
 interface AppShellProps {
@@ -86,6 +87,10 @@ function AppShellContent({
   platform,
   user: injectedUser,
 }: AppShellProps) {
+  // Right-click stays inside Ora: suppress the browser/OS context menu on every
+  // surface without its own listener, while custom menus (Base UI triggers)
+  // keep working because they stop propagation before this document listener.
+  useSuppressNativeContextMenu();
   // Mirror theme onto <html> for the shell's lifetime.
   useEffect(() => startThemeSubscription(), []);
   // Track which sessions finished a turn while the user was looking elsewhere.

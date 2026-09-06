@@ -18,6 +18,7 @@ ora-logging = { workspace = true }
 ora-plugin-config = { workspace = true }
 ora-plugin-manager = { workspace = true }
 ora-plugin-manifest = { workspace = true }
+ora-plugin-protocol = { workspace = true }
 ora-plugin-runtime = { workspace = true }
 ora-process = { workspace = true }
 ora-utils = { workspace = true }

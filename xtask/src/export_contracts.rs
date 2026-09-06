@@ -17,12 +17,13 @@ pub fn run_export_contracts(workspace_root: &Path) -> Result<(), Box<dyn std::er
 
     remove_stale_typescript_bindings(&contracts_source_directory)?;
     export_typescript_bindings_to(&contracts_source_directory)?;
-    append_js_extension_to_exported_imports(&contracts_source_directory)?;
+    append_ts_extension_to_exported_imports(&contracts_source_directory)?;
     let endpoints = frontend_endpoints();
     write_generated_file(
         &contracts_source_directory.join("endpoints.ts"),
         &render_endpoints_module(&endpoints),
     )?;
+    crate::export_plugin_protocol::run(workspace_root)?;
 
     Ok(())
 }
@@ -48,23 +49,23 @@ fn remove_stale_typescript_bindings(directory: &Path) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-/// Rewrites every ts-rs cross-file import so it resolves under the package `NodeNext` setting.
+/// Rewrites every ts-rs cross-file import so Deno can execute the TypeScript sources directly.
 ///
 /// ts-rs emits extensionless specifiers, which `moduleResolution: "NodeNext"` rejects.
-fn append_js_extension_to_exported_imports(
+fn append_ts_extension_to_exported_imports(
     contracts_source_directory: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for entry in fs::read_dir(contracts_source_directory)? {
         let path = entry?.path();
 
         if path.is_dir() {
-            append_js_extension_to_exported_imports(&path)?;
+            append_ts_extension_to_exported_imports(&path)?;
             continue;
         }
 
         if path.extension().is_some_and(|extension| extension == "ts") {
             let contents = fs::read_to_string(&path)?;
-            let rewritten = append_js_extension_to_relative_specifiers(&contents);
+            let rewritten = append_ts_extension_to_relative_specifiers(&contents);
 
             if rewritten != contents {
                 fs::write(&path, rewritten)?;
@@ -75,8 +76,8 @@ fn append_js_extension_to_exported_imports(
     Ok(())
 }
 
-/// Appends the `.js` extension to each relative module specifier that still lacks one.
-fn append_js_extension_to_relative_specifiers(contents: &str) -> String {
+/// Appends the `.ts` extension to each relative module specifier that still lacks one.
+fn append_ts_extension_to_relative_specifiers(contents: &str) -> String {
     const SPECIFIER_PREFIX: &str = "from \"";
 
     let mut rewritten = String::with_capacity(contents.len());
@@ -93,9 +94,9 @@ fn append_js_extension_to_relative_specifiers(contents: &str) -> String {
         rewritten.push_str(&remainder[..specifier_end]);
 
         if (specifier.starts_with("./") || specifier.starts_with("../"))
-            && !specifier.ends_with(".js")
+            && !specifier.ends_with(".ts")
         {
-            rewritten.push_str(".js");
+            rewritten.push_str(".ts");
         }
 
         remainder = &remainder[specifier_end..];
@@ -134,7 +135,7 @@ fn render_endpoints_module(endpoints: &[FrontendEndpoint]) -> String {
         source.push_str(&join_types(&types));
         source.push_str(" } from \"./");
         source.push_str(module_name);
-        source.push_str(".js\";\n");
+        source.push_str(".ts\";\n");
     }
 
     source.push_str("export type FrontendEndpointDefinition = {\n");
@@ -261,9 +262,7 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "UpdateTaskRequest"
         | "UpdateTaskResponse" => "task",
         // session
-        "AttachSessionRequest"
-        | "AttachSessionResponse"
-        | "DeleteSessionRequest"
+        "DeleteSessionRequest"
         | "DeleteSessionResponse"
         | "GetAgentRuntimeStatusRequest"
         | "GetAgentRuntimeStatusResponse"
@@ -273,13 +272,14 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "RenameSessionResponse"
         | "SetSessionConfigRequest"
         | "SetSessionConfigResponse"
-        | "WarmSessionRequest"
-        | "WarmSessionResponse"
-        | "WarmSessionTarget"
+        | "StartSessionRequest"
+        | "StartSessionResponse"
         | "LoadSessionRequest"
         | "LoadSessionEvent"
         | "ListSessionsRequest"
         | "ListSessionsResponse"
+        | "ListAgentModelsRequest"
+        | "ListAgentModelsResponse"
         | "PromptSessionRequest"
         | "PromptSessionEvent"
         | "CancelSessionPromptRequest"
@@ -394,7 +394,11 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "GetProxySettingsResponse"
         | "ProxySettings"
         | "SetProxySettingsRequest"
-        | "SetProxySettingsResponse" => "proxy",
+        | "SetProxySettingsResponse"
+        | "ClearProxySettingsRequest"
+        | "ClearProxySettingsResponse"
+        | "CheckProxySettingsRequest"
+        | "CheckProxySettingsResponse" => "proxy",
 
         // workflow
         "CreateWorkflowRequest"
@@ -483,18 +487,14 @@ fn contract_module_for_type(type_name: &str) -> &'static str {
         | "WatchWorkspaceRequest"
         | "WatchProjectRequest"
         | "WorkspaceFileEventBatch" => "file-system",
-        // spec
-        "GetSpecCatalogRequest"
-        | "SpecCatalogResponse"
-        | "ReadSpecRequest"
-        | "ReadSpecResponse"
-        | "WatchSpecsRequest" => "spec",
         // gitIdentity
         "GetGitIdentityRequest" | "GitIdentityResponse" => "git",
         // runtimeLogLevel
         "GetRuntimeLogLevelRequest"
         | "SetRuntimeLogLevelRequest"
         | "RuntimeLogLevelStateResponse" => "runtimeLogLevel",
+        // effect
+        "GetEffectTargetStatusRequest" | "GetEffectTargetStatusResponse" => "effect",
         // developerMode
         "GetDeveloperModeRequest" | "SetDeveloperModeRequest" | "DeveloperModeResponse" => {
             "developerMode"
@@ -511,31 +511,32 @@ fn join_types(types: &BTreeSet<&'static str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_js_extension_to_relative_specifiers, render_endpoints_module, run_export_contracts,
+        append_ts_extension_to_relative_specifiers, render_endpoints_module, run_export_contracts,
     };
     use crate::frontend::frontend_endpoints;
+    use pretty_assertions::assert_eq;
     use std::fs;
     use tempfile::TempDir;
 
     /// Verifies ts-rs cross-file imports gain the extension `NodeNext` resolution requires.
     #[test]
-    fn appends_js_extension_to_extensionless_relative_imports() {
-        let rewritten = append_js_extension_to_relative_specifiers(
+    fn appends_ts_extension_to_extensionless_relative_imports() {
+        let rewritten = append_ts_extension_to_relative_specifiers(
             "import type { Session } from \"./session\";\nimport type { Task } from \"../task\";\n",
         );
 
         assert_eq!(
             rewritten,
-            "import type { Session } from \"./session.js\";\nimport type { Task } from \"../task.js\";\n"
+            "import type { Session } from \"./session.ts\";\nimport type { Task } from \"../task.ts\";\n"
         );
     }
 
     /// Verifies already-suffixed and bare package specifiers survive the rewrite untouched.
     #[test]
     fn preserves_specifiers_that_need_no_extension() {
-        let source = "import type { Task } from \"./task.js\";\nimport { z } from \"zod\";\nexport type A = { from: \"./x\" };\n";
+        let source = "import type { Task } from \"./task.ts\";\nimport { z } from \"zod\";\nexport type A = { from: \"./x\" };\n";
 
-        assert_eq!(append_js_extension_to_relative_specifiers(source), source);
+        assert_eq!(append_ts_extension_to_relative_specifiers(source), source);
     }
 
     /// Verifies the generated endpoint manifest preserves Desktop operation metadata.

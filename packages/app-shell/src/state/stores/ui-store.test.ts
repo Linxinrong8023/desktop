@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useUiStore, UI_STORAGE_KEY } from "./ui-store";
 import { flushDebouncedPersistStorage } from "./debounced-json-storage";
 import type { Session } from "@ora/contracts";
+import { AGENT_REF } from "../../test/agent-identity";
 
 beforeEach(() => {
   flushDebouncedPersistStorage();
@@ -9,6 +10,7 @@ beforeEach(() => {
   useUiStore.setState({
     sidebarCollapsed: false,
     settingsOpen: false,
+    settingsCategory: "appearance",
     workflowEditorOpen: false,
     expandedProjects: new Set<string>(),
     expandedTasks: new Set<string>(),
@@ -33,6 +35,13 @@ describe("useUiStore", () => {
   it("toggles settings dialog open state", () => {
     useUiStore.getState().setSettingsOpen(true);
     expect(useUiStore.getState().settingsOpen).toBe(true);
+  });
+  it("opens settings on the requested category", () => {
+    useUiStore.getState().openSettingsAt("plugins");
+    expect(useUiStore.getState().settingsOpen).toBe(true);
+    expect(useUiStore.getState().settingsCategory).toBe("plugins");
+    useUiStore.getState().setSettingsCategory("appearance");
+    expect(useUiStore.getState().settingsCategory).toBe("appearance");
   });
   it("toggles the workflow editor without persisting it", () => {
     useUiStore.getState().setWorkflowEditorOpen(true);
@@ -228,7 +237,7 @@ describe("useUiStore", () => {
     const session: Session = {
       id: "s1",
       workspaceId: "workspace-t1",
-      agentRef: "ora-space.opencode",
+      agentRef: AGENT_REF.opencode,
       status: "running",
       title: null,
       historyState: { type: "writable" },

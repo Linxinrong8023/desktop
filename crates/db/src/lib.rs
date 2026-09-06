@@ -12,20 +12,22 @@ mod git_cleanup_tests;
 #[cfg(test)]
 mod repository_tests;
 #[cfg(test)]
+mod test_clock;
+#[cfg(test)]
 mod tests;
 
-pub use bootstrap::{Database, DatabaseBootstrapper};
+pub use bootstrap::{DatabaseBootstrapper, reconcile_migration_history};
 pub use error::{DatabaseError, MigrationDirection};
 pub use location::DatabaseLocation;
 pub use migration::{AppliedMigration, Migration, MigrationCatalog, default_migration_catalog};
 pub use repository::{
-    CascadeDeleteOutcome, ClaimedReconcile, DueSurfaceReconcile, PluginMarketplaceSourceRecord,
-    PluginSkillProjection, ReconcileClaim, RepositoryPool, SourceMutationOutcome,
-    SourcePublication, SqliteAgentDefinitionRepository, SqliteCascadeRepository,
+    CascadeDeleteOutcome, PluginMarketplaceSourceRecord, PluginSkillProjection, RepositoryPool,
+    SourceMutationOutcome, SqliteAgentDefinitionRepository, SqliteCascadeRepository,
     SqliteEffectRepository, SqliteGitCleanupJobRepository, SqlitePluginMarketplaceSourceRepository,
-    SqliteProjectRepository, SqliteSessionRepository, SqliteSkillRepository, SqliteTaskRepository,
-    SqliteTaskWorkspaceRepository, SqliteUserConfigRepository, SqliteWorkflowRepository,
-    SqliteWorkflowRunEngineRepository, SqliteWorkflowRunRepository, SqliteWorkspaceRepository,
+    SqlitePluginSourceNamespaceRepository, SqliteProjectRepository, SqliteSessionRepository,
+    SqliteSkillRepository, SqliteTaskRepository, SqliteTaskWorkspaceRepository,
+    SqliteUserConfigRepository, SqliteWorkflowRepository, SqliteWorkflowRunEngineRepository,
+    SqliteWorkflowRunRepository, SqliteWorkspaceRepository,
     SqliteWorktreeProvisioningLeaseRepository, SqliteWorktreeRepository,
 };
-pub use time::{SystemTimestampSource, TimestampSource};
+pub use time::{LocalTimestampSource, SystemTimestampSource, TimestampSource};

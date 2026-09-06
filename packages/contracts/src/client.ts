@@ -3,12 +3,12 @@ import {
   type EndpointOperation,
   type RequestByOperation,
   type ResponseByOperation,
-} from "./endpoints.js";
+} from "./endpoints.ts";
 import type {
   ContractCallOptions,
   ContractTransport,
   ContractTransportRequest,
-} from "./transport.js";
+} from "./transport.ts";
 
 type ClientOperation<Operation extends EndpointOperation> = (
   request: RequestByOperation[Operation],
@@ -88,12 +88,10 @@ export function createContractsClient(
         executeOperation("deleteTask", request, transport, options),
     },
     session: {
-      warm: (request, options) =>
-        executeOperation("warmSession", request, transport, options),
+      start: (request, options) =>
+        executeOperation("startSession", request, transport, options),
       setConfig: (request, options) =>
         executeOperation("setSessionConfig", request, transport, options),
-      attach: (request, options) =>
-        executeOperation("attachSession", request, transport, options),
       get: (request, options) =>
         executeOperation("getSession", request, transport, options),
       list: (request, options) =>
@@ -129,6 +127,12 @@ export function createContractsClient(
     agentRuntime: {
       getStatus: (request, options) =>
         executeOperation("getAgentRuntimeStatus", request, transport, options),
+      listModels: (request, options) =>
+        executeOperation("listAgentModels", request, transport, options),
+    },
+    effect: {
+      getTargetStatus: (request, options) =>
+        executeOperation("getEffectTargetStatus", request, transport, options),
     },
     skill: {
       create: (request, options) =>
@@ -229,6 +233,10 @@ export function createContractsClient(
         executeOperation("getProxySettings", request, transport, options),
       set: (request, options) =>
         executeOperation("setProxySettings", request, transport, options),
+      clear: (request, options) =>
+        executeOperation("clearProxySettings", request, transport, options),
+      check: (request, options) =>
+        executeOperation("checkProxySettings", request, transport, options),
     },
     fileSystem: {
       listWorkspaceDirectory: (request, options) =>
@@ -247,14 +255,6 @@ export function createContractsClient(
         executeOperation("searchProject", request, transport, options),
       watchProject: (request, options) =>
         executeStreamOperation("watchProject", request, transport, options),
-    },
-    spec: {
-      catalog: (request, options) =>
-        executeOperation("getSpecCatalog", request, transport, options),
-      read: (request, options) =>
-        executeOperation("readSpec", request, transport, options),
-      watch: (request, options) =>
-        executeStreamOperation("watchSpecs", request, transport, options),
     },
     gitIdentity: {
       get: (request, options) =>

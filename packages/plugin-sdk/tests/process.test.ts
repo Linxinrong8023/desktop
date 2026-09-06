@@ -7,7 +7,7 @@ import {
   decodeFrames,
   encodeFrame,
   type PluginTransport,
-} from "../src/protocol.ts";
+} from "../src/protocol/index.ts";
 
 /** Compares JSON-compatible values without a Node compatibility dependency. */
 function assertEquals(actual: unknown, expected: unknown): void {
@@ -192,7 +192,7 @@ Deno.test(
     assertEquals((await harness.responses.next()).value, {
       jsonrpc: "2.0",
       id: 3,
-      method: "ora/childprocess/closeStdin",
+      method: "ora/childprocess/close_stdin",
       params: { processId: "7" },
     });
     await harness.send({ jsonrpc: "2.0", id: 3, result: {} });

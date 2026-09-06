@@ -82,7 +82,7 @@ impl ProjectApi {
 
     /// Executes project creation through the application handler.
     ///
-    /// The new main Workspace needs the Effect surfaces every running consumer already declared,
+    /// The new main Workspace needs the Effect Targets every running Consumer already declared,
     /// and no declaration will fire again on its own. Waking here is a latency optimization only:
     /// the worker converges the same Workspace within one scan interval regardless, so a wake lost
     /// to a crash costs a scan interval rather than the materialization.

@@ -1,5 +1,10 @@
 import { createPlugin, type Plugin, PluginMethodError } from "./plugin.ts";
-import type { JsonValue } from "./protocol.ts";
+import {
+  INVALID_PARAMS,
+  type JsonValue,
+  type WorkbenchCallParams,
+  type WorkbenchSurface as WireWorkbenchSurface,
+} from "./protocol/index.ts";
 import { createStorage, type PluginStorage } from "./storage.ts";
 
 /**
@@ -8,11 +13,11 @@ import { createStorage, type PluginStorage } from "./storage.ts";
  * The host fills these in from the calling webview; a `main.js` needs them only to tell its own
  * multiple open pages apart. They never widen what the call may do.
  */
-export interface WorkbenchSurface {
-  instanceId: number;
+export type WorkbenchSurface = {
+  instanceId: WireWorkbenchSurface["instance_id"];
   /** Generation of the plugin process Ora addressed for this call. */
-  generation: number;
-}
+  generation: WireWorkbenchSurface["generation"];
+};
 
 /** One method call from a workbench page, with the page-supplied input. */
 export interface WorkbenchCall<Input = JsonValue> {
@@ -75,16 +80,17 @@ function parseCall(method: string, params: JsonValue): WorkbenchCall {
     typeof surface.generation !== "number"
   ) {
     throw new PluginMethodError(
-      -32602,
+      INVALID_PARAMS,
       `${method} was not called with a valid surface envelope`,
     );
   }
+  const envelope = params as WorkbenchCallParams;
   return {
     surface: {
-      instanceId: surface.instance_id,
-      generation: surface.generation,
+      instanceId: envelope.surface.instance_id,
+      generation: envelope.surface.generation,
     },
-    input: (isRecord(params) ? params.input : undefined) ?? null,
+    input: envelope.input ?? null,
   };
 }
 

@@ -84,6 +84,7 @@ where
             });
         }
 
+        let had_untracked_package = self.storage.formal_exists(&name);
         let skill = Skill::new(
             self.id_generator.generate_skill_id(),
             namespace,
@@ -105,14 +106,25 @@ where
         self.storage
             .write_manifest(&staging, manifest.as_bytes())
             .map_err(ApplicationError::from_skill_storage_error)?;
-        let promoted = commit_unclaimed_package(&self.storage, &skill.id, &skill.name, &staging)?;
         let source_revision = self
             .storage
             .formal_package_path(&skill.name)
-            .map(|package_root| LocalSkillSourceRevision {
-                skill_md_digest: Digest::sha256(manifest.as_bytes()),
-                package_root,
-            });
+            .map(|package_root| {
+                LocalSkillSourceRevision::from_package(
+                    Digest::sha256(manifest.as_bytes()),
+                    package_root,
+                    &staging,
+                )
+            })
+            .transpose()
+            .map_err(ApplicationError::from_skill_storage_error)?;
+        let promoted = commit_unclaimed_package(
+            &self.storage,
+            &skill.id,
+            &skill.name,
+            &staging,
+            had_untracked_package,
+        )?;
         let created =
             persist_promoted_package(&self.storage, &promoted, || match source_revision {
                 Some(source) => self.repository.create_skill_with_source(skill, source),
@@ -318,6 +330,18 @@ where
         self.storage
             .write_manifest(&staging, rewritten.as_bytes())
             .map_err(ApplicationError::from_skill_storage_error)?;
+        let source_revision = self
+            .storage
+            .formal_package_path(&skill.name)
+            .map(|package_root| {
+                LocalSkillSourceRevision::from_package(
+                    Digest::sha256(rewritten.as_bytes()),
+                    package_root,
+                    &staging,
+                )
+            })
+            .transpose()
+            .map_err(ApplicationError::from_skill_storage_error)?;
         let promoted = commit_existing_package(
             &self.storage,
             &skill.id,
@@ -326,13 +350,6 @@ where
             &existing.name,
             &staging,
         )?;
-        let source_revision = self
-            .storage
-            .formal_package_path(&skill.name)
-            .map(|package_root| LocalSkillSourceRevision {
-                skill_md_digest: Digest::sha256(rewritten.as_bytes()),
-                package_root,
-            });
         let updated =
             persist_promoted_package(&self.storage, &promoted, || match source_revision {
                 Some(source) => self.repository.update_skill_with_source(skill, source),
@@ -498,6 +515,17 @@ where
     storage
         .write_manifest(&staging, manifest.as_bytes())
         .map_err(ApplicationError::from_skill_storage_error)?;
+    let source_revision = storage
+        .formal_package_path(&skill.name)
+        .map(|package_root| {
+            LocalSkillSourceRevision::from_package(
+                Digest::sha256(manifest.as_bytes()),
+                package_root,
+                &staging,
+            )
+        })
+        .transpose()
+        .map_err(ApplicationError::from_skill_storage_error)?;
     let promoted = commit_restored_package(
         storage,
         &skill.namespace,
@@ -507,12 +535,6 @@ where
         &existing.name,
         &staging,
     )?;
-    let source_revision = storage
-        .formal_package_path(&skill.name)
-        .map(|package_root| LocalSkillSourceRevision {
-            skill_md_digest: Digest::sha256(manifest.as_bytes()),
-            package_root,
-        });
     let updated = persist_promoted_package(storage, &promoted, || match source_revision {
         Some(source) => repository.update_skill_with_source(skill, source),
         None => repository.update_skill(skill),

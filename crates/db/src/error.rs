@@ -65,6 +65,4 @@ pub enum DatabaseError {
         #[source]
         source: rusqlite::Error,
     },
-    #[error("pooled sqlite connections require a file-backed database location")]
-    UnsupportedPooledLocation,
 }

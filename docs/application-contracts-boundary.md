@@ -6,7 +6,7 @@ The public application surface is split across `ora-domain`, `ora-contracts`, `o
 
 - `ora-domain` owns schema-backed entities, identifier newtypes, and categorical enums. See [Domain Models](domain-models.md).
 - `ora-contracts` owns serialization-friendly request, response, stream-event, and public-error
-  DTOs for Project, Task, Task Diff review, Spec management, Session, Skill, Skill Import, Effect,
+  DTOs for Project, Task, Task Diff review, Session, Skill, Skill Import, Effect,
   Agent, Workflow, Git identity, and workspace-file operations.
 - `ora-contracts` keeps Rust field names idiomatic while serializing JSON payloads in `camelCase` for adapter and frontend consumption.
 - ACP v1 wire types are owned by the official `agent-client-protocol-schema` crate in Rust and `@agentclientprotocol/sdk` package in TypeScript. `ora-contracts` may embed those types in Ora application DTOs, but does not duplicate the ACP schema.
@@ -14,9 +14,9 @@ The public application surface is split across `ora-domain`, `ora-contracts`, `o
 - `ora-contracts` exports TypeScript DTOs into `packages/contracts/src` so frontend packages consume the contract surface from `@ora/contracts`. See [Frontend Contract SDK](frontend-contract-sdk.md).
 - `ora-application` owns use-case handlers, `ApplicationError`, the repository/clock/identity/provisioning ports those handlers depend on, and domain-to-contract mapping.
 - `ora-db` implements those ports on SQLite and owns schema reconciliation. See [Database Repositories](database-repositories.md).
-- `ora-backend` owns SQLite bootstrap, the system clock, concrete repository and handler composition, task-diff workspace/baseline resolution, specification target/configuration/filesystem composition, transactional aggregate deletion, dynamic project selection for task Git operations, one application-scoped supervisor per supported agent CLI, grouped model discovery, per-session ACP routing, transport-neutral public error projection, and the shared request lifecycle used by runtime adapters.
+- `ora-backend` owns SQLite bootstrap, the system clock, concrete repository and handler composition, task-diff workspace/baseline resolution, transactional aggregate deletion, dynamic project selection for task Git operations, one application-scoped supervisor per supported agent CLI, grouped model discovery, per-session ACP routing, transport-neutral public error projection, and the shared request lifecycle used by runtime adapters.
 - The Tauri adapter stays thin: commands accept contract requests, delegate to the same `Backend` or Desktop filesystem service, then serialize stable public errors over IPC.
-- General filesystem browsing is deliberately outside `ora-backend`; Desktop composes the bounded workspace-file service in its command layer, while specification access remains part of backend composition because it combines persisted targets with discovery.
+- General filesystem browsing is deliberately outside `ora-backend`; Desktop composes the bounded workspace-file service in its command layer.
 
 ## Contract shapes
 
@@ -26,8 +26,9 @@ Contracts are the app-facing protocol, not a projection of the domain. Each enti
 - `Task`: `id`, `projectId`, `workspaceId`, `title`
 - `Session`: `id`, `taskId`, `agentCli`, `status`, `historyState`
 - `Skill`: `id`, `namespace`, `name`, `description`, `availability`
-- `WorkspaceEffect`: `workspaceId`, `generation`, and the complete normalized desired Skill set;
-  surface status exposes desired/observed/applied generations plus structured current conditions.
+- `EffectState`: `workspaceId`, `generation`, and the complete normalized Desired Effect set;
+  generic Target status exposes desired/observed/applied/ready generations, recovery identity, and
+  structured current Conditions.
 - `Agent`: `id`, `namespace`, `name`, `description`
 - `ProjectBranch`: `name`, `refName`, `displayName`
 - Workspace file contracts keep task identity in the request and expose only normalized relative paths: `WorkspaceEntry`, `ReadWorkspaceFileResponse`, `SearchWorkspaceResponse`, and `WorkspaceFileEventBatch`. The server resolves the task's managed workspace; callers never provide a filesystem root.

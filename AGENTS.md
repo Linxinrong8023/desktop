@@ -1,3 +1,9 @@
+# specs Repository
+
+`specs/` is an independent Git repository. Use `git -C specs` to inspect its status and history when
+changing its contents. It primarily contains ADRs, core test cases, and domain documentation; see
+`specs/AGENTS.md` for its detailed conventions.
+
 # Rust/crates
 
 1. **Code Documentation**: Unless it is a standard, self-explanatory method (e.g., `new()`), every function must include a comment above the signature describing its purpose. Provide inline comments for any complex logic, non-trivial algorithms, or specialized branching within function bodies. Write comments in English.
@@ -5,11 +11,12 @@
 3. **Design for Testability (DfT)**: Favor Dependency Injection and decoupled components. Define interfaces via Traits to allow easy mocking, and prefer small, pure functions that can be unit-tested in isolation.
 4. **Prefer Static Dispatch**: Use Generics and Trait Bounds over Trait Objects (e.g., `Box<dyn Trait>`) to leverage monomorphization and compiler optimizations, unless runtime polymorphism is strictly necessary.
 5. **Make Illegal States Unrepresentable**: Use Enums with associated data to model state machines, rather than Structs with many optional fields.
-6. **Backward Compatibility for Existing Users**: The product has existing users, so preserve compatibility for user-facing behavior, persisted data, public APIs, IPC/protocols, and other established integrations. When a breaking change is necessary, provide an explicit migration or deprecation path, document the impact, and remove compatibility code only after the supported transition period. Keep internal code clean by adapting old inputs at well-defined boundaries rather than spreading compatibility concerns through new code.
+6. **Compatibility Boundaries**: Prioritize architectural cleanliness over preserving compatibility in code, public APIs, IPC/protocols, and user-facing behavior. Treat the local filesystem layout as a hard compatibility boundary: changes must not create path collisions or leave upgrades from older versions unable to start or operate safely. When changing the layout, detect, migrate, isolate, or otherwise safely handle existing files before using the new layout.
 
 Ora is an IDE for AI Agent. In the crates folder where the rust code lives:
 
 - Crate names are prefixed with `ora-`. For example, the `core` folder's crate is named `ora-core`
+- Prefer `name.rs` as the module root with a sibling `name/` directory for submodules; do not introduce `mod.rs`.
 - When using format! and you can inline variables into {}, always do that.
 - Always collapse nested if statements which can be collapsed by &&-combining their conditions.
 - Always inline format! args when possible.
@@ -64,8 +71,8 @@ authoritative list of available tasks.
 
 ## Tests
 
-Frontend package tests run under `scripts/run-with-clean-stderr.mjs`. Any React Testing Library warning on stderr — especially `An update to … was not wrapped in act(...)` — fails the whole `task test` run even when Vitest reports green.
+Frontend package tests run under `scripts/run-with-clean-stderr.ts`. Any React Testing Library warning on stderr — especially `An update to … was not wrapped in act(...)` — fails the whole `task test` run even when Vitest reports green.
 
 A test that renders anything calling `useTranslation` must import `appI18n` itself: react-i18next keeps its instance in a `node_modules` module that Vitest loads once per worker, so a file relying on an earlier file in the same worker to have initialized it passes locally and fails on CI, where a different worker split leaves it first and the missing-instance warning trips the clean-stderr gate on an otherwise green run.
 
-When writing new frontend tests, fully await every operation that can update React: prefer awaited `userEvent` interactions and `findBy...` or `waitFor` assertions for user-visible outcomes; wrap direct writes to external stores such as Zustand in `act`; and handle promises, timers, animations, subscriptions, and editor transactions at their actual asynchronous boundary. Do not hide warnings with a global promise flush, arbitrary delay, or stderr allowlist. Otherwise an update can escape the test's `act` boundary or leak into a later test, producing stderr even though Vitest reports green and causing `task test` and CI to fail under `scripts/run-with-clean-stderr.mjs`.
+When writing new frontend tests, fully await every operation that can update React: prefer awaited `userEvent` interactions and `findBy...` or `waitFor` assertions for user-visible outcomes; wrap direct writes to external stores such as Zustand in `act`; and handle promises, timers, animations, subscriptions, and editor transactions at their actual asynchronous boundary. Do not hide warnings with a global promise flush, arbitrary delay, or stderr allowlist. Otherwise an update can escape the test's `act` boundary or leak into a later test, producing stderr even though Vitest reports green and causing `task test` and CI to fail under `scripts/run-with-clean-stderr.ts`.

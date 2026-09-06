@@ -19,7 +19,6 @@ beforeEach(() => {
       workflowRunId: null,
       draftId: null,
     },
-    pendingRestore: null,
     createFocus: null,
   });
 });
@@ -145,7 +144,6 @@ describe("useComposerFileContextStore", () => {
         workflowRunId: null,
         draftId: null,
       },
-      pendingRestore: null,
       createFocus: null,
     });
     const warn = vi.spyOn(toast, "warning").mockImplementation(() => "id");

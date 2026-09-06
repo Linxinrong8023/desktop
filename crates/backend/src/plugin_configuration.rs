@@ -10,10 +10,10 @@ use ora_contracts::{
     SavePluginConfigurationResponse,
 };
 use ora_plugin_config::{
-    ConfigurationCompleteness, ConfigurationDetails, ConfigurationError, ConfigurationSummary,
-    EffectiveValueSource, SettingType, SettingValue,
+    CompiledConfigurationFile, ConfigurationCompleteness, ConfigurationDetails, ConfigurationError,
+    ConfigurationSummary, EffectiveValueSource, SettingType, SettingValue,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 impl PluginApi {
     /// Returns one typed Plugin Configuration editor snapshot.
@@ -36,8 +36,13 @@ impl PluginApi {
                     "plugin does not declare configuration",
                 )
             })?;
+        let redacted = mcp_bound_settings(&request.plugin_id, &package_root, details.revision)?;
         Ok(GetPluginConfigurationResponse {
-            configuration: configuration_details(&request.plugin_id, details)?,
+            configuration: configuration_details(
+                &request.plugin_id,
+                details,
+                redacted.as_ref().unwrap_or(&BTreeSet::new()),
+            )?,
         })
     }
 
@@ -73,16 +78,24 @@ impl PluginApi {
         }
         let details = self
             .configuration
-            .save(
+            .save_preserving(
                 &request.plugin_id,
                 &package_root,
                 request.expected_revision,
                 &request.declaration_fingerprint,
                 values,
+                &request.preserve_setting_ids.into_iter().collect(),
             )
             .map_err(configuration_error)?;
+        self.notify_mcp_desired_changed();
+        self.notify_effect_reconcile();
+        let redacted = mcp_bound_settings(&request.plugin_id, &package_root, details.revision)?;
         Ok(SavePluginConfigurationResponse {
-            configuration: configuration_details(&request.plugin_id, details)?,
+            configuration: configuration_details(
+                &request.plugin_id,
+                details,
+                redacted.as_ref().unwrap_or(&BTreeSet::new()),
+            )?,
         })
     }
 
@@ -122,8 +135,15 @@ impl PluginApi {
             }
         }
         .map_err(configuration_error)?;
+        self.notify_mcp_desired_changed();
+        self.notify_effect_reconcile();
+        let redacted = mcp_bound_settings(&request.plugin_id, &package_root, details.revision)?;
         Ok(ResetPluginConfigurationResponse {
-            configuration: configuration_details(&request.plugin_id, details)?,
+            configuration: configuration_details(
+                &request.plugin_id,
+                details,
+                redacted.as_ref().unwrap_or(&BTreeSet::new()),
+            )?,
         })
     }
 }
@@ -132,11 +152,13 @@ impl PluginApi {
 fn configuration_details(
     plugin_id: &str,
     details: ConfigurationDetails,
+    redacted_setting_ids: &BTreeSet<String>,
 ) -> Result<PluginConfigurationDetails, BackendError> {
     let settings = details
         .settings
         .into_iter()
         .map(|setting| {
+            let redacted = redacted_setting_ids.contains(&setting.declaration.id);
             Ok(PluginSettingDetails {
                 declaration: PluginSettingDeclaration {
                     id: setting.declaration.id,
@@ -149,20 +171,33 @@ fn configuration_details(
                     },
                     required: setting.declaration.required,
                     order: setting.declaration.order,
-                    default: setting
-                        .declaration
-                        .default
-                        .map(contract_setting_value)
-                        .transpose()?,
+                    default: if redacted {
+                        None
+                    } else {
+                        setting
+                            .declaration
+                            .default
+                            .map(contract_setting_value)
+                            .transpose()?
+                    },
                 },
-                stored_value: setting
-                    .stored_value
-                    .map(contract_setting_value)
-                    .transpose()?,
-                effective_value: setting
-                    .effective_value
-                    .map(contract_setting_value)
-                    .transpose()?,
+                stored_value: if redacted {
+                    None
+                } else {
+                    setting
+                        .stored_value
+                        .map(contract_setting_value)
+                        .transpose()?
+                },
+                effective_value: if redacted {
+                    None
+                } else {
+                    setting
+                        .effective_value
+                        .map(contract_setting_value)
+                        .transpose()?
+                },
+                redacted,
                 source: match setting.source {
                     EffectiveValueSource::Stored => PluginSettingValueSource::Stored,
                     EffectiveValueSource::Default => PluginSettingValueSource::Default,
@@ -180,6 +215,33 @@ fn configuration_details(
         settings,
         summary: contract_configuration_summary(details.summary),
     })
+}
+
+/// Identifies every MCP Setting so the editor DTO never carries those values.
+fn mcp_bound_settings(
+    _plugin_id: &str,
+    package_root: &std::path::Path,
+    _configuration_revision: u64,
+) -> Result<Option<BTreeSet<String>>, BackendError> {
+    let configuration =
+        ora_plugin_config::ConfigurationService::configuration_file_from_package(package_root)
+            .map_err(configuration_error)?;
+    let Some(CompiledConfigurationFile::Mcp(configuration)) = configuration else {
+        return Ok(None);
+    };
+    Ok(Some(
+        configuration
+            .settings
+            .as_ref()
+            .map(|declaration| {
+                declaration
+                    .settings
+                    .iter()
+                    .map(|setting| setting.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default(),
+    ))
 }
 
 /// Maps one valid domain scalar into its JSON-compatible contract value.

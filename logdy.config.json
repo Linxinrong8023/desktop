@@ -24,23 +24,31 @@
       "handlerTsCode": "(line: Message): CellHandler => {\n  return { text: line.json_content?.level ?? \"\" };\n}"
     },
     {
+      "id": "ora-target",
+      "name": "target",
+      "idx": 3,
+      "width": 100,
+      "faceted": true,
+      "handlerTsCode": "(line: Message): CellHandler => {\n  return { text: line.json_content?.target ?? \"\" };\n}"
+    },
+    {
       "id": "ora-message",
       "name": "message",
-      "idx": 3,
+      "idx": 4,
       "width": 200,
       "handlerTsCode": "(line: Message): CellHandler => {\n  return { text: line.json_content?.message ?? \"\" };\n}"
     },
     {
       "id": "ora-context",
       "name": "context/error",
-      "idx": 4,
+      "idx": 5,
       "width": 500,
       "handlerTsCode": "(line: Message): CellHandler => {\n  const content = line.json_content?.level === \"ERROR\"\n    ? line.json_content?.error ?? {}\n    : line.json_content?.context ?? {};\n  return { text: content, isJson: true };\n}"
     },
     {
       "id": "ora-target",
       "name": "target",
-      "idx": 5,
+      "idx": 6,
       "width": 220,
       "hidden": true,
       "handlerTsCode": "(line: Message): CellHandler => {\n  return { text: line.json_content?.target ?? \"\" };\n}"
@@ -48,15 +56,15 @@
     {
       "id": "ora-method",
       "name": "method",
-      "idx": 6,
+      "idx": 7,
       "width": 180,
-      "faceted": true,
+      "faceted": false,
       "handlerTsCode": "(line: Message): CellHandler => {\n  return { text: line.json_content?.method ?? \"\" };\n}"
     },
     {
       "id": "ora-span",
       "name": "span",
-      "idx": 7,
+      "idx": 8,
       "width": 180,
       "hidden": true,
       "faceted": true,
@@ -65,7 +73,7 @@
     {
       "id": "ora-error",
       "name": "error",
-      "idx": 8,
+      "idx": 9,
       "width": 360,
       "hidden": true,
       "handlerTsCode": "(line: Message): CellHandler => {\n  return { text: line.json_content?.error ?? {}, isJson: true };\n}"

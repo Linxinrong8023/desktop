@@ -90,6 +90,20 @@ pub struct PluginConfigurationValidationParams {
     pub field_errors: Vec<PluginConfigurationFieldError>,
 }
 
+/// Carries a secret-free Session MCP setup or refresh failure.
+///
+/// `error_code` is the stable diagnostic. Optional Plugin ID, Setting ID, and transport name
+/// identify the failing member without carrying Setting values or ACP payloads.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "error.ts")]
+pub struct SessionMcpSetupFailedParams {
+    pub error_code: String,
+    pub plugin_id: Option<String>,
+    pub setting_id: Option<String>,
+    pub transport: Option<String>,
+}
+
 /// Enumerates every user-visible Ora failure and its exact interpolation parameters.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(tag = "code", content = "params", rename_all = "snake_case")]
@@ -132,6 +146,7 @@ pub enum PublicError {
     SessionBusy(EmptyErrorParams),
     SessionStopped(EmptyErrorParams),
     SessionLoadUnsupported(EmptyErrorParams),
+    SessionMcpSetupFailed(Box<SessionMcpSetupFailedParams>),
     SessionHistoryDegraded(EmptyErrorParams),
     SessionAgentUnchanged(EmptyErrorParams),
     PermissionRequestNotPending(EmptyErrorParams),
@@ -141,7 +156,6 @@ pub enum PublicError {
     WorkspaceUnavailable(EmptyErrorParams),
     TaskWorktreeUnavailable(EmptyErrorParams),
     FileSystemPathNotFound(EmptyErrorParams),
-    SpecDocumentNotFound(EmptyErrorParams),
     WorktreeRootNotAbsolute(EmptyErrorParams),
     WorktreeRootNotDirectory(EmptyErrorParams),
     OpenLocationFailed(OpenLocationFailedParams),
@@ -246,6 +260,7 @@ impl PublicError {
             Self::SessionBusy(_) => "session_busy",
             Self::SessionStopped(_) => "session_stopped",
             Self::SessionLoadUnsupported(_) => "session_load_unsupported",
+            Self::SessionMcpSetupFailed(_) => "session_mcp_setup_failed",
             Self::SessionHistoryDegraded(_) => "session_history_degraded",
             Self::SessionAgentUnchanged(_) => "session_agent_unchanged",
             Self::PermissionRequestNotPending(_) => "permission_request_not_pending",
@@ -255,7 +270,6 @@ impl PublicError {
             Self::WorkspaceUnavailable(_) => "workspace_unavailable",
             Self::TaskWorktreeUnavailable(_) => "task_worktree_unavailable",
             Self::FileSystemPathNotFound(_) => "file_system_path_not_found",
-            Self::SpecDocumentNotFound(_) => "spec_document_not_found",
             Self::WorktreeRootNotAbsolute(_) => "worktree_root_not_absolute",
             Self::WorktreeRootNotDirectory(_) => "worktree_root_not_directory",
             Self::OpenLocationFailed(_) => "open_location_failed",
@@ -344,8 +358,8 @@ pub(crate) fn export(config: &Config) -> Result<(), ExportError> {
 mod tests {
     use super::{
         ContractError, EmptyErrorParams, OpenLocationFailedParams, OpenLocationTarget,
-        PluginConfigurationValidationParams, PublicError, RequestId, SkillFolderConflictParams,
-        TaskBaseBranchNotFoundParams,
+        PluginConfigurationValidationParams, PublicError, RequestId, SessionMcpSetupFailedParams,
+        SkillFolderConflictParams, TaskBaseBranchNotFoundParams,
     };
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -417,6 +431,12 @@ mod tests {
             PublicError::SessionBusy(empty),
             PublicError::SessionStopped(empty),
             PublicError::SessionLoadUnsupported(empty),
+            PublicError::SessionMcpSetupFailed(Box::new(SessionMcpSetupFailedParams {
+                error_code: "mcp_http_capability_missing".to_string(),
+                plugin_id: Some("ora-space/tavily-search".to_string()),
+                setting_id: None,
+                transport: Some("http".to_string()),
+            })),
             PublicError::SessionHistoryDegraded(empty),
             PublicError::SessionAgentUnchanged(empty),
             PublicError::PermissionRequestNotPending(empty),
@@ -426,7 +446,6 @@ mod tests {
             PublicError::WorkspaceUnavailable(empty),
             PublicError::TaskWorktreeUnavailable(empty),
             PublicError::FileSystemPathNotFound(empty),
-            PublicError::SpecDocumentNotFound(empty),
             PublicError::WorktreeRootNotAbsolute(empty),
             PublicError::WorktreeRootNotDirectory(empty),
             PublicError::OpenLocationFailed(OpenLocationFailedParams {
@@ -520,6 +539,7 @@ mod tests {
                 | PublicError::SessionBusy(_)
                 | PublicError::SessionStopped(_)
                 | PublicError::SessionLoadUnsupported(_)
+                | PublicError::SessionMcpSetupFailed(_)
                 | PublicError::SessionHistoryDegraded(_)
                 | PublicError::SessionAgentUnchanged(_)
                 | PublicError::PermissionRequestNotPending(_)
@@ -529,7 +549,6 @@ mod tests {
                 | PublicError::WorkspaceUnavailable(_)
                 | PublicError::TaskWorktreeUnavailable(_)
                 | PublicError::FileSystemPathNotFound(_)
-                | PublicError::SpecDocumentNotFound(_)
                 | PublicError::WorktreeRootNotAbsolute(_)
                 | PublicError::WorktreeRootNotDirectory(_)
                 | PublicError::OpenLocationFailed(_)

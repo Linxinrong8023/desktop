@@ -2,7 +2,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Composer } from "./composer";
-import { LandingHeading, LandingSuggestions } from "./empty-state";
+import { LandingHeading } from "./empty-state";
 import { MessageList } from "./message-list";
 import type { ConversationNavigationPresentation } from "./conversation-navigator";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@ora/ui";
@@ -58,6 +58,13 @@ interface ChatViewProps {
    * message for a state the user can fix from the context bar directly above it.
    */
   disabledHint?: string;
+  /**
+   * Why the send button alone is unavailable while the composer stays typable —
+   * the state is fixable from the agent/model picker next to the button, so
+   * typing and picking must keep working. Never applies at the same time as
+   * `disabledHint`, so the two hover bubbles never compete.
+   */
+  sendDisabledHint?: string;
   skills?: Skill[];
   roles?: Agent[];
   availableCommands?: acp.AvailableCommand[];
@@ -99,6 +106,7 @@ export function ChatView({
   composerActions,
   conversationNavigation,
   disabledHint,
+  sendDisabledHint,
   skills = [],
   roles = [],
   availableCommands = [],
@@ -153,6 +161,10 @@ export function ChatView({
   return (
     <main
       className={`flex min-h-0 flex-1 flex-col bg-background ${isEmpty ? "overflow-y-auto" : ""}`}
+      // Right-click stays inside Ora: suppress the browser/OS context menu (Refresh,
+      // Back, Inspect) across the whole pane. Per-item menus like the chat file link's
+      // are opened by their own inner triggers before this bubbles, so they keep working.
+      onContextMenu={(event) => event.preventDefault()}
     >
       {isEmpty ? (
         // `mt-auto` here and `mb-auto` on the composer slot split the free space
@@ -279,6 +291,7 @@ export function ChatView({
                   disabled={disabled}
                   modelSelectorDisabled={modelSelectorDisabled}
                   modelSelectorSessionId={modelSelectorSessionId}
+                  sendDisabledHint={sendDisabledHint}
                   skills={skills}
                   roles={roles}
                   availableCommands={availableCommands}
@@ -286,13 +299,6 @@ export function ChatView({
               </TooltipTrigger>
               <TooltipContent sideOffset={12}>{disabledHint}</TooltipContent>
             </Tooltip>
-          )}
-          {composerVisible && isEmpty && (
-            <LandingSuggestions
-              onSend={onSend}
-              isResponding={isResponding}
-              disabled={disabled}
-            />
           )}
         </div>
         {composerActions && (

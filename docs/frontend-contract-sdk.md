@@ -27,11 +27,13 @@ Both carry a do-not-edit header. Everything else in the package — `client.ts`,
 
 `task export-contracts` wraps the Rust export and then runs `ts-to-zod` to derive `error.schema.ts` from `error.ts`. `task test:frontend` refreshes both generated layers before linting and testing. Contract generation is never a side effect of running tests.
 
+The contracts, chat, and editor package tests first run `tsc --noEmit`, then execute their TypeScript test files directly with `deno test --no-check`. The shared `run-with-clean-stderr.ts` wrapper rejects unexpected stderr. Relative imports use explicit source extensions and directory entry files, so tests need neither sloppy import resolution nor intermediate JavaScript output. Contract generation preserves `.ts` import extensions.
+
 ## Typed client
 
 `createContractsClient(transport)` returns a namespaced client whose shape is derived from the generated manifest: `ContractsClient` maps each endpoint's `namespace`/`memberName` pair into a nested object type. Because `createContractsClient` returns an object literal checked against that derived type, adding a route in Rust and regenerating without updating `client.ts` fails `tsc` with a missing-property error. The hand-written client stays in compile-time lockstep with Rust.
 
-Namespaces are `project`, `task`, `session`, `appEvents`, `agentRuntime`, `skill`, `skillImport`, `agent`, `fileSystem`, `gitIdentity`, `spec`, `workflow`, and `workflowRun`. The `appEvents` namespace exposes `client.appEvents.watch({})`; the stream begins with `Ready`, then carries best-effort invalidations such as `SessionTitleUpdated`. The `spec` namespace keeps unary catalog/read/configuration calls and its workspace-event stream behind one target-tagged API.
+Namespaces are `project`, `task`, `session`, `appEvents`, `agentRuntime`, `skill`, `skillImport`, `agent`, `fileSystem`, `gitIdentity`, `workflow`, and `workflowRun`. The `appEvents` namespace exposes `client.appEvents.watch({})`; the stream begins with `Ready`, then carries best-effort invalidations such as `SessionTitleUpdated`.
 
 For each call the client sends the operation name and the complete request DTO to the injected transport. It does not split, rename, or serialize request fields for a transport.
 

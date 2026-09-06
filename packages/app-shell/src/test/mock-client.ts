@@ -1,5 +1,10 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import {
+  AGENT_PACKAGES,
+  SEEDED_NAMESPACE,
+  officialAgentRef,
+} from "./agent-identity";
+import {
   RemoteContractError,
   type Agent,
   type AgentRuntimeStatus,
@@ -57,7 +62,6 @@ function mockWorkflowRun(record: MockWorkflowRunRecord): WorkflowRun {
     input: null,
     output: null,
     error: null,
-    payload: null,
     startedAt: null,
     finishedAt: null,
     createdAt: record.createdAt,
@@ -102,40 +106,22 @@ export interface MockClientState {
   runtimeLogLevel: RuntimeLogLevelStateResponse;
   workflows: MockWorkflowRecord[];
   workflowRuns: MockWorkflowRunRecord[];
-  /** Warm sessions handed out but not yet attached, keyed by session id. */
-  warmSessions: Map<string, { agentRef: string; workspaceId: string }>;
-  /** What every warm and persisted session reports as its configuration. */
+  /** What every started session reports as its configuration. */
   configOptions: acp.SessionConfigOption[];
   /**
-   * Per-CLI warm-session config overrides for tests. A CLI mapped to `null`
-   * reports no model catalog (warm failed); a CLI mapped to an array uses
+   * Per-CLI model discovery overrides for tests. A CLI mapped to `null`
+   * reports no model catalog; a CLI mapped to an array uses
    * those options instead of the shared `configOptions`.
    */
-  warmModelsByCli?: Partial<Record<string, acp.SessionConfigOption[] | null>>;
+  agentModelsByCli?: Partial<Record<string, acp.SessionConfigOption[] | null>>;
 }
 
-/**
- * Every agent this mock installation offers, supplied by an installed package and detected.
- *
- * Agents exist only because a package supplies them, so a test needs both halves to see one in a
- * picker: the installed package that names it, and a runtime status that reaches it. A test that
- * needs one unreachable overrides `agentRuntimeStatuses`; one that needs it gone entirely
- * overrides `installedPlugins` as well.
- */
-const AGENT_PACKAGES: { agentRef: string; displayName: string }[] = [
-  { agentRef: "ora-space.opencode", displayName: "OpenCode" },
-  { agentRef: "ora-space.nga", displayName: "NGA" },
-  { agentRef: "ora-space.codeagentcli", displayName: "CodeAgentCLI" },
-  { agentRef: "ora-space.claude", displayName: "Claude Code" },
-  { agentRef: "ora-space.codex", displayName: "Codex" },
-];
-
 /** Builds the installed-package record one seeded agent is supplied by. */
-function agentPackage(agentRef: string, displayName: string): InstalledPlugin {
+function agentPackage(name: string, displayName: string): InstalledPlugin {
   return {
-    id: `official/${agentRef}`,
-    namespace: "official",
-    name: agentRef,
+    id: officialAgentRef(name),
+    namespace: SEEDED_NAMESPACE,
+    name,
     displayName,
     version: "1.0.0",
     description: `${displayName} agent`,
@@ -152,6 +138,9 @@ function agentPackage(agentRef: string, displayName: string): InstalledPlugin {
 
 /** Creates a fresh in-memory mock state with no records. */
 export function createMockClientState(): MockClientState {
+  const installedPlugins = AGENT_PACKAGES.map((agent) =>
+    agentPackage(agent.name, agent.displayName),
+  );
   return {
     projects: [],
     workspaces: [],
@@ -159,12 +148,15 @@ export function createMockClientState(): MockClientState {
     sessions: [],
     agents: [],
     skills: [],
-    installedPlugins: AGENT_PACKAGES.map((agent) =>
-      agentPackage(agent.agentRef, agent.displayName),
-    ),
+    installedPlugins,
     pluginConfigurations: new Map(),
-    agentRuntimeStatuses: AGENT_PACKAGES.map((agent) => ({
-      agentRef: agent.agentRef,
+    // The runtime keys a supervised agent by the whole plugin id, so the seeded status has to be
+    // derived from the package rather than spelled again: a fixture that spells the two halves
+    // separately can agree with itself while disagreeing with the backend, which is exactly how a
+    // catalog keyed by the bare name once passed every test while offering an agent no session
+    // could bind to.
+    agentRuntimeStatuses: installedPlugins.map((plugin) => ({
+      agentRef: plugin.id,
       status: "ready",
     })),
     availablePlugins: [],
@@ -180,7 +172,6 @@ export function createMockClientState(): MockClientState {
     },
     workflows: [],
     workflowRuns: [],
-    warmSessions: new Map(),
     configOptions: [
       {
         id: "model",
@@ -287,6 +278,22 @@ function requireWorkflowRecord(
  */
 export function createMockClient(state: MockClientState): ContractsClient {
   return {
+    effect: {
+      getTargetStatus: async () => ({
+        status: {
+          targetId: "mock-effect-target",
+          desiredGeneration: 1,
+          observedGeneration: 1,
+          appliedGeneration: 1,
+          readyGeneration: 1,
+          phase: "current",
+          statusVersion: 1,
+          recoveryOperationId: null,
+          updatedAt: 1n,
+          conditions: [],
+        },
+      }),
+    },
     project: {
       list: async () => ({ projects: [...state.projects] }),
       listBranches: async () => ({
@@ -383,44 +390,31 @@ export function createMockClient(state: MockClientState): ContractsClient {
       get: async (req) => ({
         session: state.sessions.find((s) => s.id === req.sessionId)!,
       }),
-      warm: async (req) => {
-        const sessionId = nextId(
-          "s",
-          state.sessions.length + state.warmSessions.size,
+      start: async (req) => {
+        const sessionId = nextId("s", state.sessions.length);
+        const perCli = state.agentModelsByCli?.[req.agentRef];
+        const configOptions = structuredClone(
+          perCli === undefined ? state.configOptions : (perCli ?? []),
         );
-        const workspaceId = req.target.workspaceId;
-        state.warmSessions.set(sessionId, {
-          agentRef: req.agentRef,
-          workspaceId,
-        });
-        const perCli = state.warmModelsByCli?.[req.agentRef];
-        return {
-          sessionId,
-          workspaceId,
-          // A CLI mapped to null reports an empty catalog, which is how the
-          // contract expresses "no models" after a failed warm handshake.
-          configOptions:
-            perCli === undefined ? state.configOptions : (perCli ?? []),
-        };
-      },
-      setConfig: async () => ({ configOptions: state.configOptions }),
-      attach: async (req) => {
+        if (req.model !== null) {
+          const option = configOptions.find(
+            (candidate) =>
+              candidate.type === "select" && candidate.category === "model",
+          );
+          if (option?.type === "select") option.currentValue = req.model;
+        }
         const session: Session = {
-          id: req.sessionId,
-          workspaceId:
-            state.warmSessions.get(req.sessionId)?.workspaceId ??
-            req.workspaceId,
-          agentRef:
-            state.warmSessions.get(req.sessionId)?.agentRef ??
-            "ora-space.opencode",
+          id: sessionId,
+          workspaceId: req.workspaceId,
+          agentRef: req.agentRef,
           status: "running",
           title: null,
           historyState: { type: "writable" },
         };
-        state.warmSessions.delete(req.sessionId);
         state.sessions.push(session);
-        return { session, availableCommands: [] };
+        return { session, availableCommands: [], configOptions };
       },
+      setConfig: async () => ({ configOptions: state.configOptions }),
       switchAgent: async (req) => {
         const session = state.sessions.find(
           (candidate) => candidate.id === req.sessionId,
@@ -483,6 +477,33 @@ export function createMockClient(state: MockClientState): ContractsClient {
     },
     agentRuntime: {
       getStatus: async () => ({ statuses: [...state.agentRuntimeStatuses] }),
+      listModels: async (req) => {
+        const options = state.agentModelsByCli?.[req.agentRef];
+        const configOptions =
+          options === undefined ? state.configOptions : options;
+        if (configOptions === null) return { models: [] };
+        const selector = configOptions.find(
+          (option) => option.type === "select" && option.category === "model",
+        );
+        if (selector?.type !== "select") return { models: [] };
+        return {
+          models: selector.options.flatMap((entry) =>
+            "group" in entry
+              ? entry.options.map((option) => ({
+                  id: option.value,
+                  displayName: option.name,
+                  default: option.value === selector.currentValue,
+                }))
+              : [
+                  {
+                    id: entry.value,
+                    displayName: entry.name,
+                    default: entry.value === selector.currentValue,
+                  },
+                ],
+          ),
+        };
+      },
     },
     plugin: {
       listInstalled: async () => ({ plugins: [...state.installedPlugins] }),
@@ -503,6 +524,7 @@ export function createMockClient(state: MockClientState): ContractsClient {
               req.mode === "reset_all" ? req.expectedRevision : 0n,
             declarationFingerprint: req.declarationFingerprint,
             values: {},
+            preserveSettingIds: [],
           }),
         ),
       }),
@@ -518,6 +540,8 @@ export function createMockClient(state: MockClientState): ContractsClient {
           url: req.url,
           branch: req.branch,
           useProxy: req.useProxy,
+          enabled: true,
+          artifactRetrieval: { type: "direct_https" } as const,
         };
         state.marketplaceSources.push(source);
         return { sources: [...state.marketplaceSources] };
@@ -531,12 +555,31 @@ export function createMockClient(state: MockClientState): ContractsClient {
         return { sources: [...state.marketplaceSources] };
       },
       updateSource: async (req) => {
-        const source = state.marketplaceSources.find(
+        const idx = state.marketplaceSources.findIndex(
           (candidate) => candidate.url === req.url,
         );
-        if (source === undefined)
-          throw new Error(`marketplace source ${req.url} not found`);
-        source.useProxy = req.useProxy;
+        if (idx < 0) throw new Error(`marketplace source ${req.url} not found`);
+        if (
+          req.newUrl !== req.url &&
+          state.marketplaceSources.some((source) => source.url === req.newUrl)
+        ) {
+          throw new Error(`marketplace source ${req.newUrl} already exists`);
+        }
+        state.marketplaceSources[idx] = {
+          url: req.newUrl,
+          branch: req.branch,
+          useProxy: req.useProxy,
+          enabled: req.enabled,
+          artifactRetrieval:
+            req.artifactRetrieval.type === "direct_https"
+              ? req.artifactRetrieval
+              : {
+                  type: "s3_sigv4" as const,
+                  endpoint: req.artifactRetrieval.endpoint,
+                  bucket: req.artifactRetrieval.bucket,
+                  region: req.artifactRetrieval.region,
+                },
+        };
         return { sources: [...state.marketplaceSources] };
       },
       syncAvailable: async () => ({
@@ -728,6 +771,11 @@ export function createMockClient(state: MockClientState): ContractsClient {
         state.proxySettings = structuredClone(req.settings);
         return { settings: state.proxySettings };
       },
+      clear: async () => {
+        state.proxySettings = null;
+        return { settings: null };
+      },
+      check: async () => ({ outcome: "reachable" as const, status: 200 }),
     },
     fileSystem: {
       listWorkspaceDirectory: async () => ({ path: "", entries: [] }),
@@ -751,18 +799,6 @@ export function createMockClient(state: MockClientState): ContractsClient {
           yield* [];
         })(),
       watchProject: () =>
-        (async function* () {
-          yield* [];
-        })(),
-    },
-    spec: {
-      catalog: async () => ({ documents: [], truncated: false }),
-      read: async (request) => ({
-        relativePath: request.relativePath,
-        content: "",
-        byteSize: 0,
-      }),
-      watch: () =>
         (async function* () {
           yield* [];
         })(),
@@ -973,7 +1009,6 @@ export function createMockClient(state: MockClientState): ContractsClient {
           input: null,
           output: null,
           error: null,
-          payload: null,
           startedAt: null,
           finishedAt: null,
           createdAt: now,
@@ -1013,7 +1048,6 @@ export function createMockClient(state: MockClientState): ContractsClient {
             input: null,
             output: null,
             error: null,
-            payload: null,
             startedAt: null,
             finishedAt: null,
             createdAt: record.createdAt,
@@ -1022,6 +1056,8 @@ export function createMockClient(state: MockClientState): ContractsClient {
           name: record.name,
           projectId: record.projectId,
           workspaceId: record.workspaceId,
+          variables: [],
+          conditionDecisions: {},
           nodes: [],
         };
       },
@@ -1130,6 +1166,7 @@ function commitPluginConfiguration(
     expectedRevision: bigint;
     declarationFingerprint: string;
     values: { [key in string]: PluginSettingValue };
+    preserveSettingIds: string[];
   },
 ): PluginConfigurationDetails {
   const current = state.pluginConfigurations.get(req.pluginId);
@@ -1151,6 +1188,7 @@ function commitPluginConfiguration(
         source: "stored" as const,
         valueErrorCode: null,
       };
+    if (req.preserveSettingIds.includes(field.declaration.id)) return field;
     return {
       ...field,
       storedValue: null,

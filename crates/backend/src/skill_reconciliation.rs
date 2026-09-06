@@ -1,10 +1,10 @@
 use ora_application::{
-    BACKUP_DIR_NAME, FilesystemSkillStorage, JournalOp, JournalPhase, STAGING_DIR_NAME,
-    SkillRepository, SkillStorage, TransactionJournal,
+    BACKUP_DIR_NAME, FilesystemSkillStorage, JournalOp, JournalPhase, LocalSkillSourceRevision,
+    STAGING_DIR_NAME, SkillRepository, SkillStorage, TransactionJournal,
 };
-use ora_db::{RepositoryPool, SourcePublication, SqliteEffectRepository, SqliteSkillRepository};
+use ora_db::{RepositoryPool, SqliteSkillRepository};
 use ora_domain::SkillId;
-use ora_effect::{DesiredSkillState, Digest, SkillName, SkillSource, SkillState, SourceVersion};
+use ora_effect::Digest;
 use ora_logging::ora_warn;
 use std::collections::BTreeSet;
 use std::fs;
@@ -30,9 +30,9 @@ pub enum SkillStorageReconciliationError {
 pub(crate) fn reconcile_skill_storage(
     pool: &RepositoryPool,
     skills_root: &Path,
+    clock: &impl ora_db::TimestampSource,
 ) -> Result<(), SkillStorageReconciliationError> {
-    let repository = SqliteSkillRepository::new(pool.clone());
-    let effect_repository = SqliteEffectRepository::new(pool.clone());
+    let repository = SqliteSkillRepository::with_clock(pool.clone(), clock);
     let storage = FilesystemSkillStorage::new(skills_root.to_path_buf());
 
     let journals = storage.list_journals().map_err(operation_failed)?;
@@ -68,22 +68,16 @@ pub(crate) fn reconcile_skill_storage(
                 .as_ref()
                 .is_ok_and(|parsed| parsed.name == skill.name)
             {
-                let state = DesiredSkillState::try_new(SkillState {
-                    name: SkillName::parse(skill.name.clone()).map_err(operation_failed)?,
-                    skill_md_digest: Digest::sha256(&manifest),
-                    source: SkillSource::Local {
-                        namespace: skill.namespace.clone(),
-                        version: SourceVersion::parse(skill.audit_fields.updated_at.to_string())
-                            .map_err(operation_failed)?,
-                    },
-                })
-                .map_err(operation_failed)?;
-                effect_repository
-                    .publish_source(
-                        &state,
-                        &skills_root.join(&skill.name),
-                        SourcePublication::Create,
-                        skill.audit_fields.updated_at,
+                let package_root = skills_root.join(&skill.name);
+                repository
+                    .update_skill_with_source(
+                        skill.clone(),
+                        LocalSkillSourceRevision::from_package(
+                            Digest::sha256(&manifest),
+                            package_root.clone(),
+                            &package_root,
+                        )
+                        .map_err(operation_failed)?,
                     )
                     .map_err(operation_failed)?;
             } else {
@@ -124,7 +118,7 @@ pub(crate) fn reconcile_skill_storage(
 /// Directory ownership is decided by the immutable id recorded in the journal. A visible row that
 /// only shares the user-facing name cannot claim an interrupted transaction's package.
 fn recover_journal(
-    repository: &SqliteSkillRepository,
+    repository: &SqliteSkillRepository<impl ora_db::TimestampSource>,
     storage: &FilesystemSkillStorage,
     journal: &TransactionJournal,
     skills_root: &Path,
@@ -338,7 +332,7 @@ mod tests {
 
     /// Builds a repository pool over one temporary database.
     fn pool(database_path: &Path) -> RepositoryPool {
-        DatabaseBootstrapper::system()
+        DatabaseBootstrapper::new(crate::test_clock::TestClock)
             .bootstrap_repository_pool(
                 &DatabaseLocation::path(database_path),
                 &default_migration_catalog().unwrap(),
@@ -393,7 +387,8 @@ mod tests {
 
         // The database still claims the old skill.
         let database_path = temp.path().join("ora.sqlite3");
-        let repository = SqliteSkillRepository::new(pool(&database_path));
+        let repository =
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock);
         repository
             .create_skill(
                 Skill::new(
@@ -407,7 +402,12 @@ mod tests {
             )
             .unwrap();
 
-        reconcile_skill_storage(&pool(&database_path), &skills_root).unwrap();
+        reconcile_skill_storage(
+            &pool(&database_path),
+            &skills_root,
+            &crate::test_clock::TestClock,
+        )
+        .unwrap();
 
         assert!(!staging.exists());
         assert_eq!(
@@ -423,7 +423,8 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let skills_root = temp.path().join("atoms").join("skills");
         let database_path = temp.path().join("ora.sqlite3");
-        let repository = SqliteSkillRepository::new(pool(&database_path));
+        let repository =
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock);
         repository
             .create_skill(
                 Skill::new(
@@ -458,7 +459,12 @@ mod tests {
         };
         write_journal(&journal);
 
-        reconcile_skill_storage(&pool(&database_path), &skills_root).unwrap();
+        reconcile_skill_storage(
+            &pool(&database_path),
+            &skills_root,
+            &crate::test_clock::TestClock,
+        )
+        .unwrap();
 
         assert_eq!(
             fs::read_to_string(skills_root.join("review").join("SKILL.md")).unwrap(),
@@ -473,7 +479,8 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let skills_root = temp.path().join("atoms").join("skills");
         let database_path = temp.path().join("ora.sqlite3");
-        let repository = SqliteSkillRepository::new(pool(&database_path));
+        let repository =
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock);
         repository
             .create_skill(
                 Skill::new(
@@ -508,7 +515,12 @@ mod tests {
         };
         write_journal(&journal);
 
-        reconcile_skill_storage(&pool(&database_path), &skills_root).unwrap();
+        reconcile_skill_storage(
+            &pool(&database_path),
+            &skills_root,
+            &crate::test_clock::TestClock,
+        )
+        .unwrap();
 
         assert_eq!(
             fs::read_to_string(skills_root.join("review").join("SKILL.md")).unwrap(),
@@ -523,7 +535,8 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let skills_root = temp.path().join("atoms").join("skills");
         let database_path = temp.path().join("ora.sqlite3");
-        let repository = SqliteSkillRepository::new(pool(&database_path));
+        let repository =
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock);
         repository
             .create_skill(
                 Skill::new(
@@ -560,7 +573,12 @@ mod tests {
         };
         write_journal(&journal);
 
-        reconcile_skill_storage(&pool(&database_path), &skills_root).unwrap();
+        reconcile_skill_storage(
+            &pool(&database_path),
+            &skills_root,
+            &crate::test_clock::TestClock,
+        )
+        .unwrap();
 
         assert_eq!(
             fs::read_to_string(skills_root.join("gone").join("SKILL.md")).unwrap(),
@@ -575,7 +593,8 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let skills_root = temp.path().join("atoms").join("skills");
         let database_path = temp.path().join("ora.sqlite3");
-        let repository = SqliteSkillRepository::new(pool(&database_path));
+        let repository =
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock);
         repository
             .create_skill(
                 Skill::new(
@@ -609,7 +628,12 @@ mod tests {
         write_journal(&journal);
 
         ora_logging::with_trace_logging(|| {
-            reconcile_skill_storage(&pool(&database_path), &skills_root).unwrap();
+            reconcile_skill_storage(
+                &pool(&database_path),
+                &skills_root,
+                &crate::test_clock::TestClock,
+            )
+            .unwrap();
         });
 
         assert!(!skills_root.join("review").exists());
@@ -627,7 +651,8 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let skills_root = temp.path().join("atoms").join("skills");
         let database_path = temp.path().join("ora.sqlite3");
-        let repository = SqliteSkillRepository::new(pool(&database_path));
+        let repository =
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock);
         repository
             .create_skill(
                 Skill::new(
@@ -657,7 +682,12 @@ mod tests {
         };
         write_journal(&journal);
 
-        reconcile_skill_storage(&pool(&database_path), &skills_root).unwrap();
+        reconcile_skill_storage(
+            &pool(&database_path),
+            &skills_root,
+            &crate::test_clock::TestClock,
+        )
+        .unwrap();
 
         assert_eq!(
             fs::read_to_string(skills_root.join("review").join("SKILL.md")).unwrap(),
@@ -679,7 +709,8 @@ mod tests {
 
         // A legitimate skill shares the tree so reconciliation has real state to preserve.
         create_formal(&skills_root, "review", "---\nname: review\n---\n");
-        let repository = SqliteSkillRepository::new(pool(&database_path));
+        let repository =
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock);
         repository
             .create_skill(
                 Skill::new(
@@ -706,7 +737,7 @@ mod tests {
         fs::write(source.join("nested").join("note.md"), "payload").unwrap();
 
         let service = SkillImportService::new(
-            SqliteSkillRepository::new(pool(&database_path)),
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock),
             FilesystemSkillStorage::new(skills_root.clone()),
             UuidSkillImportIdGenerator,
             crate::clock::SystemClock,
@@ -763,7 +794,12 @@ mod tests {
         }
 
         // Restart: reconciliation must succeed rather than trip over a package on a reserved root.
-        reconcile_skill_storage(&pool(&database_path), &skills_root).unwrap();
+        reconcile_skill_storage(
+            &pool(&database_path),
+            &skills_root,
+            &crate::test_clock::TestClock,
+        )
+        .unwrap();
 
         assert_eq!(
             repository
@@ -788,7 +824,12 @@ mod tests {
         let skills_root = temp.path().join("atoms").join("skills");
         fs::create_dir_all(skills_root.join("orphan")).unwrap();
 
-        reconcile_skill_storage(&pool(&temp.path().join("ora.sqlite3")), &skills_root).unwrap();
+        reconcile_skill_storage(
+            &pool(&temp.path().join("ora.sqlite3")),
+            &skills_root,
+            &crate::test_clock::TestClock,
+        )
+        .unwrap();
 
         assert!(!skills_root.join("orphan").exists());
     }
@@ -825,7 +866,12 @@ mod tests {
         };
         write_journal(&journal);
 
-        reconcile_skill_storage(&pool(&temp.path().join("ora.sqlite3")), &skills_root).unwrap();
+        reconcile_skill_storage(
+            &pool(&temp.path().join("ora.sqlite3")),
+            &skills_root,
+            &crate::test_clock::TestClock,
+        )
+        .unwrap();
 
         assert_eq!(
             fs::read_to_string(skills_root.join("stray").join("SKILL.md")).unwrap(),
@@ -843,7 +889,12 @@ mod tests {
         create_formal(&skills_root, "stray", "untracked");
 
         ora_logging::with_trace_logging(|| {
-            reconcile_skill_storage(&pool(&temp.path().join("ora.sqlite3")), &skills_root).unwrap();
+            reconcile_skill_storage(
+                &pool(&temp.path().join("ora.sqlite3")),
+                &skills_root,
+                &crate::test_clock::TestClock,
+            )
+            .unwrap();
         });
 
         assert!(skills_root.join("stray").join("SKILL.md").is_file());
@@ -855,7 +906,8 @@ mod tests {
         let skills_root = temp.path().join("atoms").join("skills");
         fs::create_dir_all(&skills_root).unwrap();
         let database_path = temp.path().join("ora.sqlite3");
-        let repository = SqliteSkillRepository::new(pool(&database_path));
+        let repository =
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock);
         repository
             .create_skill(
                 Skill::new(
@@ -870,7 +922,12 @@ mod tests {
             .unwrap();
 
         ora_logging::with_trace_logging(|| {
-            reconcile_skill_storage(&pool(&database_path), &skills_root).unwrap();
+            reconcile_skill_storage(
+                &pool(&database_path),
+                &skills_root,
+                &crate::test_clock::TestClock,
+            )
+            .unwrap();
         });
 
         assert!(
@@ -896,7 +953,7 @@ mod tests {
             "review",
             "---\nname: review\ndescription: Reviews changes\n---\n",
         );
-        SqliteSkillRepository::new(repository_pool.clone())
+        SqliteSkillRepository::with_clock(repository_pool.clone(), crate::test_clock::TestClock)
             .create_skill(
                 Skill::new(
                     SkillId::new("skill-1"),
@@ -908,7 +965,7 @@ mod tests {
                 .unwrap(),
             )
             .unwrap();
-        SqliteProjectRepository::new(repository_pool.clone())
+        SqliteProjectRepository::with_clock(repository_pool.clone(), crate::test_clock::TestClock)
             .create_project(
                 Project::new(
                     ProjectId::new("project-1"),
@@ -923,7 +980,12 @@ mod tests {
             )
             .unwrap();
 
-        reconcile_skill_storage(&repository_pool, &skills_root).unwrap();
+        reconcile_skill_storage(
+            &repository_pool,
+            &skills_root,
+            &crate::test_clock::TestClock,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -934,7 +996,8 @@ mod tests {
         fs::create_dir_all(&leftover).unwrap();
         fs::write(leftover.join("notes.md"), "not a manifest").unwrap();
         let database_path = temp.path().join("ora.sqlite3");
-        let repository = SqliteSkillRepository::new(pool(&database_path));
+        let repository =
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock);
         repository
             .create_skill(
                 Skill::new(
@@ -949,7 +1012,12 @@ mod tests {
             .unwrap();
 
         ora_logging::with_trace_logging(|| {
-            reconcile_skill_storage(&pool(&database_path), &skills_root).unwrap();
+            reconcile_skill_storage(
+                &pool(&database_path),
+                &skills_root,
+                &crate::test_clock::TestClock,
+            )
+            .unwrap();
         });
 
         assert!(
@@ -969,7 +1037,8 @@ mod tests {
         fs::create_dir_all(&leftover).unwrap();
         fs::write(leftover.join("SKILL.md"), "---\nname: [unterminated").unwrap();
         let database_path = temp.path().join("ora.sqlite3");
-        let repository = SqliteSkillRepository::new(pool(&database_path));
+        let repository =
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock);
         repository
             .create_skill(
                 Skill::new(
@@ -984,7 +1053,12 @@ mod tests {
             .unwrap();
 
         ora_logging::with_trace_logging(|| {
-            reconcile_skill_storage(&pool(&database_path), &skills_root).unwrap();
+            reconcile_skill_storage(
+                &pool(&database_path),
+                &skills_root,
+                &crate::test_clock::TestClock,
+            )
+            .unwrap();
         });
 
         assert!(
@@ -1001,7 +1075,8 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let skills_root = temp.path().join("atoms").join("skills");
         let database_path = temp.path().join("ora.sqlite3");
-        let repository = SqliteSkillRepository::new(pool(&database_path));
+        let repository =
+            SqliteSkillRepository::with_clock(pool(&database_path), crate::test_clock::TestClock);
         repository
             .create_skill(
                 Skill::new(
@@ -1040,7 +1115,12 @@ mod tests {
         };
         write_journal(&journal);
 
-        reconcile_skill_storage(&pool(&database_path), &skills_root).unwrap();
+        reconcile_skill_storage(
+            &pool(&database_path),
+            &skills_root,
+            &crate::test_clock::TestClock,
+        )
+        .unwrap();
 
         // The record is soft-deleted, so recovery cleans the backup instead of restoring it.
         assert!(!backup.exists());

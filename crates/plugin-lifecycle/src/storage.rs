@@ -7,6 +7,11 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+pub use ora_plugin_protocol::{
+    MAX_STORAGE_FILE_BYTES, STORAGE_LIST_METHOD, STORAGE_READ_METHOD, STORAGE_REMOVE_METHOD,
+    STORAGE_WRITE_METHOD, StorageEntryKind, StorageErrorKind, StorageListEntry as StorageEntry,
+};
+use ora_plugin_protocol::{StorageListResult, StorageReadResult};
 use ora_plugin_runtime::{HostRequestError, HostRequestHandler};
 use ora_utils::path::{
     CanonicalPathRoot, PathContainmentError, PortableRelativePath,
@@ -17,64 +22,8 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
-/// Lists the entries directly below a logical directory.
-pub const STORAGE_LIST_METHOD: &str = "ora/storage/list";
-/// Reads one whole file as base64.
-pub const STORAGE_READ_METHOD: &str = "ora/storage/read";
-/// Replaces one whole file from base64, creating parent directories.
-pub const STORAGE_WRITE_METHOD: &str = "ora/storage/write";
-/// Removes one file or directory tree.
-pub const STORAGE_REMOVE_METHOD: &str = "ora/storage/remove";
-
-/// Largest file `read` returns and `write` accepts.
-///
-/// The protocol frame is capped at 16 MiB and base64 inflates content by one third, so 8 MiB of
-/// bytes (about 10.7 MiB encoded, plus envelope) is the largest payload that fits reliably.
-pub const MAX_STORAGE_FILE_BYTES: u64 = 8 * 1024 * 1024;
-
 /// Host-owned webview site data below the data directory; never part of the logical namespace.
 const WEB_PROFILE_DIRECTORY: &str = "web-profile";
-
-/// JSON-RPC codes, one per error kind, so a plugin can branch on either `code` or `data.kind`.
-const INVALID_PARAMS_CODE: i64 = -32602;
-const NOT_FOUND_CODE: i64 = -32004;
-const TOO_LARGE_CODE: i64 = -32005;
-const IO_CODE: i64 = -32000;
-
-/// Stable classification of a storage failure, serialized as `data.kind`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StorageErrorKind {
-    /// The request params are malformed (missing `path`, undecodable base64).
-    InvalidParams,
-    /// The logical path is outside the plugin's namespace or not a portable relative path.
-    InvalidPath,
-    NotFound,
-    TooLarge,
-    Io,
-}
-
-impl StorageErrorKind {
-    /// The wire spelling of the kind.
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::InvalidParams => "invalid_params",
-            Self::InvalidPath => "invalid_path",
-            Self::NotFound => "not_found",
-            Self::TooLarge => "too_large",
-            Self::Io => "io",
-        }
-    }
-
-    /// The JSON-RPC code paired with the kind.
-    fn code(self) -> i64 {
-        match self {
-            Self::InvalidParams | Self::InvalidPath => INVALID_PARAMS_CODE,
-            Self::NotFound => NOT_FOUND_CODE,
-            Self::TooLarge => TOO_LARGE_CODE,
-            Self::Io => IO_CODE,
-        }
-    }
-}
 
 /// One storage failure before it is rendered as a JSON-RPC error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,30 +73,6 @@ impl From<StorageError> for HostRequestError {
     fn from(error: StorageError) -> Self {
         HostRequestError::new(error.kind.code(), error.message)
             .with_data(json!({ "kind": error.kind.as_str() }))
-    }
-}
-
-/// One entry of a `list` result.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StorageEntry {
-    pub name: String,
-    pub kind: StorageEntryKind,
-    pub size_bytes: u64,
-}
-
-/// Only regular files and directories are exposed; symlinks and special files are hidden.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StorageEntryKind {
-    File,
-    Directory,
-}
-
-impl StorageEntryKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::File => "file",
-            Self::Directory => "directory",
-        }
     }
 }
 
@@ -310,21 +235,14 @@ impl HostRequestHandler for PluginStorage {
         };
         let storage = self.clone();
         let result = tokio::task::spawn_blocking(move || match operation {
-            StorageOperation::List => storage.list(&path).map(|entries| {
-                json!({
-                    "entries": entries
-                        .iter()
-                        .map(|entry| json!({
-                            "name": entry.name,
-                            "kind": entry.kind.as_str(),
-                            "size_bytes": entry.size_bytes,
-                        }))
-                        .collect::<Vec<_>>(),
+            StorageOperation::List => storage
+                .list(&path)
+                .map(|entries| json!(StorageListResult { entries })),
+            StorageOperation::Read => storage.read(&path).map(|bytes| {
+                json!(StorageReadResult {
+                    bytes_base64: BASE64.encode(bytes),
                 })
             }),
-            StorageOperation::Read => storage
-                .read(&path)
-                .map(|bytes| json!({ "bytes_base64": BASE64.encode(bytes) })),
             StorageOperation::Write => storage
                 .write(&path, &bytes.unwrap_or_default())
                 .map(|()| json!({})),

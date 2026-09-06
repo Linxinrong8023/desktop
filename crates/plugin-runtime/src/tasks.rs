@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ora_logging::{ora_error, ora_info, ora_warn};
+use ora_plugin_protocol::{read_message, write_message};
 use ora_process::ManagedProcess;
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
@@ -9,7 +10,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 
 use crate::PluginRuntimeError;
-use crate::codec::{read_frame, write_frame};
 use crate::host_requests::HostRequestHandler;
 use crate::protocol::handle_message;
 use crate::state::{
@@ -33,14 +33,7 @@ pub(crate) async fn run_writer<W>(
             },
             _ = &mut close => return,
         };
-        let payload = match serde_json::to_vec(&message) {
-            Ok(payload) => payload,
-            Err(error) => {
-                fail_runtime(&inner, format!("failed to encode plugin request: {error}")).await;
-                return;
-            }
-        };
-        if let Err(error) = write_frame(&mut stdin, &payload).await {
+        if let Err(error) = write_message(&mut stdin, &message).await {
             fail_runtime(&inner, format!("failed to write plugin frame: {error}")).await;
             return;
         }
@@ -54,21 +47,14 @@ where
     H: HostRequestHandler,
 {
     loop {
-        let payload = match read_frame(&mut stdout).await {
-            Ok(Some(payload)) => payload,
+        let message = match read_message(&mut stdout).await {
+            Ok(Some(message)) => message,
             Ok(None) => {
                 fail_runtime(&inner, "plugin stdout closed".to_string()).await;
                 return;
             }
             Err(error) => {
                 fail_runtime(&inner, format!("invalid plugin frame: {error}")).await;
-                return;
-            }
-        };
-        let message: Value = match serde_json::from_slice(&payload) {
-            Ok(message) => message,
-            Err(error) => {
-                fail_runtime(&inner, format!("invalid plugin JSON: {error}")).await;
                 return;
             }
         };

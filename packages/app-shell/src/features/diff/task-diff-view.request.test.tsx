@@ -242,7 +242,7 @@ describe("TaskDiffView file requests", () => {
     });
   });
 
-  it("vertically centers the requested line without shifting the diff sideways", async () => {
+  it("centers the requested line without shifting the diff sideways", async () => {
     const scrollTo = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollTo", {
       configurable: true,

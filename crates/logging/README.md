@@ -11,9 +11,9 @@
 - `ora_trace!`, `ora_debug!`, `ora_info!`, `ora_warn!`, and `ora_error!` attach the current method name and preserve the shared event shape.
 - Correlation helpers create spans whose trace and request identifiers propagate into nested events.
 - `ErrorReport::from_error` renders an `Error::source()` chain for the single
-  request-completion event emitted by runtime seams. Debug builds preserve original
-  node text without redaction or rendered length limits; release builds emit a
-  bounded, single-line, redacted chain. In both modes traversal itself stops after
+  request-completion event emitted by runtime seams. Emitted reports preserve the
+  original node text in all build modes. The sanitizer and its bounded rendering
+  policy remain available for explicit use and testing. Traversal itself stops after
   1,024 source nodes so a malformed cyclic chain cannot block completion logging,
   and `error.chain_depth` saturates at that safety limit when the chain continues.
 - `clock` exposes local time and offsets from the IANA timezone fixed during startup.

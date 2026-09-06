@@ -40,6 +40,7 @@ import { useCreateWorkflow, useDeleteWorkflow } from "./workflow-definitions";
 import { WorkflowEditor } from "./workflow-editor";
 import { WorkflowEditorList } from "./workflow-editor-list";
 import { useWorkflowEditorStore } from "./workflow-editor-store";
+import { AGENT_REF } from "../../test/agent-identity";
 
 /** Seeds the mock client with the demo workflows and their published versions. */
 function seedDemoWorkflows(state: MockClientState): void {
@@ -73,6 +74,7 @@ function seedDemoWorkflows(state: MockClientState): void {
           edges: workflow.edges as unknown as WorkflowDefinitionEdge[],
           viewport: workflow.viewport,
           annotations: workflow.annotations ?? [],
+          globalVariables: workflow.globalVariables ?? [],
           description: workflow.description,
         }),
         createdAt: now,
@@ -97,6 +99,7 @@ function seedDemoWorkflows(state: MockClientState): void {
           edges: version.graph.edges as unknown as WorkflowDefinitionEdge[],
           viewport: version.graph.viewport ?? workflow.viewport,
           annotations: version.graph.annotations ?? [],
+          globalVariables: version.graph.globalVariables ?? [],
           description: workflow.description,
         }),
         createdAt: BigInt(Date.parse(version.createdAt)),
@@ -121,7 +124,7 @@ function renderEditor(
   if (seedLibrary) {
     seedDemoWorkflows(state);
   }
-  // Model discovery needs a project cwd so warmSession can report real model catalogs.
+  // Model discovery resolves a Workspace, so the inspector needs one to ask against.
   state.projects = [{ id: "p1", name: "Demo" }];
   // Live Agent/Skill catalogs consumed by the workflow inspector's selectors.
   state.agents = [
@@ -216,7 +219,7 @@ function renderEditor(
       availability: "unavailable",
     },
   ];
-  // Warm-session model catalog consumed by the workflow inspector's model selector.
+  // Plugin-owned model catalog consumed by the workflow inspector's model selector.
   state.configOptions = [
     {
       id: "model",
@@ -675,12 +678,15 @@ describe("WorkflowEditor", () => {
 
     await user.click(screen.getByRole("button", { name: "Agent" }));
 
-    // The card carries the title text and the inspector header exposes the
-    // same title as an editable input (Dify-style grouped layout).
+    // The card and inspector header share the generated title; editing stays
+    // hidden until the user double-clicks that title.
     expect(screen.getByLabelText("Agent节点: Agent 1")).toHaveTextContent(
       "Agent 1",
     );
-    expect(screen.getByLabelText("名称")).toHaveValue("Agent 1");
+    expect(
+      screen.getByRole("heading", { name: "Agent 1" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("名称")).not.toBeInTheDocument();
     expect(nodeGraphPosition("Agent节点: Agent 1")).toEqual({
       x: "260px",
       y: "200px",
@@ -909,17 +915,21 @@ describe("WorkflowEditor", () => {
     renderEditor();
 
     const reviewNode = await screen.findByLabelText("Agent节点: 审查 Agent");
+    expect(within(reviewNode).getByText("review")).toBeInTheDocument();
     await user.click(reviewNode.closest(".react-flow__node") ?? reviewNode);
 
     expect(screen.getByLabelText("Agent 模型")).toBeInTheDocument();
     expect(screen.getByLabelText("角色")).toHaveTextContent("Reviewer");
     expect(screen.getAllByText("Skills")).toHaveLength(2);
-    expect(screen.getByLabelText("自定义 Prompt")).toHaveValue(
+    expect(screen.getByLabelText("自定义 Prompt")).toHaveTextContent(
       "按严重程度整理问题，并给出定位与修复建议。",
     );
     expect(screen.queryByText("输入上下文")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("项目权限")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("输出契约")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: "结构化输出" }),
+    ).not.toBeChecked();
+    expect(screen.queryByText("使用输出策略")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByLabelText("Agent 模型")).toHaveTextContent(
         "Big Pickle",
@@ -928,12 +938,71 @@ describe("WorkflowEditor", () => {
     const configuredParameters = within(reviewNode).getByLabelText("配置参数");
     expect(configuredParameters).toHaveTextContent("角色Reviewer");
     expect(configuredParameters).toHaveTextContent(
-      "ora-space.codeagentcli · opencode/big-pickle",
+      `${AGENT_REF.codeagentcli} · opencode/big-pickle`,
     );
     expect(configuredParameters).toHaveTextContent("Skillscode-defect-scan");
     expect(configuredParameters).not.toHaveTextContent(
       "按严重程度整理问题，并给出定位与修复建议。",
     );
+  });
+
+  it("opens system variables from the left toolbar as read-only cards", async () => {
+    const user = userEvent.setup();
+    renderEditor();
+
+    const toolbar = await screen.findByRole("toolbar", {
+      name: "画布工具",
+    });
+    const variablesButton = within(toolbar).getByRole("button", {
+      name: "全局变量",
+    });
+    const annotationButton = within(toolbar).getByRole("button", {
+      name: "添加注释",
+    });
+    expect(
+      variablesButton.compareDocumentPosition(annotationButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+
+    await user.click(variablesButton);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("系统变量")).toBeInTheDocument();
+    expect(within(dialog).getByText("sys.workflow_id")).toBeInTheDocument();
+    expect(within(dialog).getByText("当前工作流 ID")).toBeInTheDocument();
+    expect(within(dialog).getByText("sys.timestamp")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("应用开始运行时的时间戳"),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText("sys.user_id")).not.toBeInTheDocument();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "添加全局变量" }),
+    );
+    const customName = within(dialog).getByPlaceholderText(
+      "global.variable_name",
+    );
+    const customValue = within(dialog).getByPlaceholderText("例如：text");
+    expect(customName).toHaveValue("");
+    expect(customValue).toHaveValue("");
+    expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
+
+    await user.type(customName, "global.region");
+    await user.type(customValue, "上海");
+    expect(within(dialog).getByRole("button", { name: "保存" })).toBeEnabled();
+
+    await user.click(within(dialog).getByLabelText("全局变量 3 类型"));
+    await user.click(await screen.findByRole("option", { name: "integer" }));
+    expect(customValue).toHaveValue("");
+    expect(customValue).toHaveAttribute("placeholder", "例如：1");
+    await user.type(customValue, "1.5");
+    expect(customValue).toHaveAttribute("aria-invalid", "true");
+    expect(
+      within(dialog).getByText("值与 integer 类型不匹配。"),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "保存" })).toBeDisabled();
+    await user.clear(customValue);
+    await user.type(customValue, "2");
+    expect(within(dialog).getByRole("button", { name: "保存" })).toBeEnabled();
   });
 
   it("limits node descriptions to 30 characters and shows their count", async () => {
@@ -1038,10 +1107,10 @@ describe("WorkflowEditor", () => {
         availability: "available",
       },
     ];
-    // NGA exists as a CLI but its warm session reports no model catalog, so
+    // NGA exists as a CLI but reports no model catalog, so
     // picking it must keep the node on NGA instead of snapping back to the
     // first CLI with discovered models.
-    state.warmModelsByCli = { "ora-space.nga": null };
+    state.agentModelsByCli = { [AGENT_REF.nga]: null };
     renderEditor(<WorkflowEditor />, state);
 
     const reviewNode = await screen.findByLabelText("Agent节点: 审查 Agent");
@@ -1075,7 +1144,7 @@ describe("WorkflowEditor", () => {
       await screen.findByLabelText("Agent节点: Agent 1"),
     ).toBeInTheDocument();
     expect(
-      screen.getAllByText("ora-space.opencode · opencode/big-pickle").length,
+      screen.getAllByText(`${AGENT_REF.opencode} · opencode/big-pickle`).length,
     ).toBeGreaterThan(0);
   });
 

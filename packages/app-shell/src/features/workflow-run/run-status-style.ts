@@ -82,5 +82,14 @@ export function runStatusTone(
         badge: "border-border bg-muted/60 text-muted-foreground",
         labelKey: "workflowRun.nodeStatus.idle",
       };
+    case "inactive":
+      // A node behind a lost condition branch: never ran, never will. Dimmed so the active path
+      // reads clearly without implying failure.
+      return {
+        dot: "bg-muted-foreground/20",
+        ring: "border-transparent ring-transparent",
+        badge: "border-transparent bg-muted/30 text-muted-foreground/60",
+        labelKey: "workflowRun.nodeStatus.inactive",
+      };
   }
 }

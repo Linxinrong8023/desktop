@@ -18,7 +18,7 @@ The module receives a backend-resolved worktree path keyed by `WorkspaceId` and 
 
 ## Error and logging boundary
 
-Validation failures are semantic `ApplicationError` variants, such as `WorkspaceDiffCommitMessageBlank`. Git and persistence failures retain boxed `Error::source()` chains through the application port and are projected to `internal_error` by `ora-backend`. Handlers do not emit request-completion logs; Web, Tauri, and stream adapters emit one correlated completion event through `RequestLifecycle`, where `ora-logging` bounds and redacts the diagnostic chain.
+Validation failures are semantic `ApplicationError` variants, such as `WorkspaceDiffCommitMessageBlank`. Git and persistence failures retain boxed `Error::source()` chains through the application port and are projected to `internal_error` by `ora-backend`. Handlers do not emit request-completion logs; Web, Tauri, and stream adapters emit one correlated completion event through `RequestLifecycle`, where `ora-logging` renders the diagnostic chain.
 
 The diff reader enforces a bounded patch response. Oversized patches become the public `workspace_diff_too_large` payload, while the discarded byte count stays out of the public contract.
 

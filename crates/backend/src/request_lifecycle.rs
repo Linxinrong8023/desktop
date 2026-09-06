@@ -110,7 +110,7 @@ impl RequestLifecycle {
         );
     }
 
-    /// Records a failed request exactly once using its public classification and sanitized chain.
+    /// Records a failed request exactly once using its public classification and diagnostic chain.
     pub fn complete_failure(&self, error: &BackendError) {
         if !self.claim_completion() {
             return;

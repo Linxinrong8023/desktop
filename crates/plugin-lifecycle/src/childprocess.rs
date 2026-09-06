@@ -17,10 +17,17 @@
 //! and only sets the package root as the working directory), and it cannot reliably compute one —
 //! a relative program combined with a `cwd` resolves against different directories per platform,
 //! and the child's `cwd` must be the workspace rather than the package anyway.
+//!
+//! A `packageCommand` the package does not carry is reported as its own `package_command_missing`
+//! kind, distinct from the `invalid_package_command` a present-but-unrunnable one gets. One plugin
+//! source is built into both a package that bundles its CLI and one that leaves the user's own
+//! install to be found on PATH, and it cannot know at build time which package it ended up in;
+//! that distinction is the answer, and it lets a plugin fall back to `command` for the first case
+//! while treating the second as the deterministic package fault it is.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, PoisonError};
@@ -28,85 +35,67 @@ use std::sync::{Arc, Mutex as StdMutex, PoisonError};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use ora_logging::ora_warn;
+pub use ora_plugin_protocol::{
+    CHILDPROCESS_CLOSE_STDIN_METHOD, CHILDPROCESS_KILL_METHOD, CHILDPROCESS_SPAWN_METHOD,
+    CHILDPROCESS_WRITE_METHOD,
+};
+use ora_plugin_protocol::{
+    CHILDPROCESS_EXIT_METHOD, CHILDPROCESS_STDERR_METHOD, CHILDPROCESS_STDOUT_METHOD,
+    ChildProcessErrorKind, ChildProcessExit, ChildProcessIdParams, ChildProcessOutput,
+    ChildProcessSpawnParams, ChildProcessSpawnResult, ChildProcessWriteParams,
+    MAX_STORAGE_FILE_BYTES,
+};
 use ora_plugin_runtime::{
     HostRequestError, HostRequestHandler, PluginRuntime as ProcessPluginRuntime,
 };
 use ora_process::{ManagedProcess, ProcessSpawner, ProcessSpec, ProcessStdio};
-use ora_utils::path::{CanonicalPathRoot, PortableRelativePath};
+use ora_utils::path::{CanonicalPathRoot, PathContainmentError, PortableRelativePath};
 use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
-/// Spawns one child process; returns `{ processId, pid }`.
-pub const CHILDPROCESS_SPAWN_METHOD: &str = "ora/childprocess/spawn";
-/// Writes bytes to one spawned process's stdin.
-pub const CHILDPROCESS_WRITE_METHOD: &str = "ora/childprocess/write";
-/// Signals EOF on one spawned process's stdin without killing it.
-pub const CHILDPROCESS_CLOSE_STDIN_METHOD: &str = "ora/childprocess/closeStdin";
-/// Requests best-effort tree-wide termination of one spawned process.
-pub const CHILDPROCESS_KILL_METHOD: &str = "ora/childprocess/kill";
-
-/// Host-pushed notification carrying one chunk of a spawned process's stdout.
-const CHILDPROCESS_STDOUT_METHOD: &str = "ora/childprocess/stdout";
-/// Host-pushed notification carrying one chunk of a spawned process's stderr.
-const CHILDPROCESS_STDERR_METHOD: &str = "ora/childprocess/stderr";
-/// Host-pushed notification announcing that a spawned process has exited.
-const CHILDPROCESS_EXIT_METHOD: &str = "ora/childprocess/exit";
-
-const INVALID_PARAMS_CODE: i64 = -32602;
-const NOT_FOUND_CODE: i64 = -32004;
-const IO_CODE: i64 = -32000;
-
 /// Chunk size used when pumping a spawned process's stdout or stderr into notifications.
 const READ_CHUNK_BYTES: usize = 32 * 1024;
 
 /// Upper bound on one `write` request's decoded payload, mirroring
-/// [`crate::storage::MAX_STORAGE_FILE_BYTES`] so a plugin cannot force unbounded host memory
+/// [`ora_plugin_protocol::MAX_STORAGE_FILE_BYTES`] so a plugin cannot force unbounded host memory
 /// growth by streaming an oversized chunk to a spawned process's stdin.
-pub(crate) const MAX_WRITE_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_WRITE_BYTES: usize = MAX_STORAGE_FILE_BYTES as usize;
 
 /// Longest base64 string that can decode to `MAX_WRITE_BYTES`, checked before `BASE64.decode`
 /// allocates so an oversized payload is rejected without ever being decoded.
 const MAX_WRITE_BASE64_LEN: usize = MAX_WRITE_BYTES.div_ceil(3) * 4;
 
-/// Stable classification of a child-process failure, serialized as `data.kind`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ChildProcessErrorKind {
-    /// The request params are malformed.
-    InvalidParams,
-    /// `command` parsed but was empty.
-    InvalidCommand,
-    /// `packageCommand` does not name a usable executable inside the plugin's own package.
-    InvalidPackageCommand,
-    /// `processId` does not name a process this handler is tracking.
-    NotFound,
-    /// Spawn failed because the OS could not resolve the executable.
-    ProgramNotFound,
-    /// Any other spawn, write, or kill failure.
-    Io,
+/// Reserves the `ORA_MCP_*` environment namespace so a plugin cannot smuggle
+/// host-owned MCP secrets through a child-process spawn request.
+const MCP_ENVIRONMENT_PREFIX: &str = "ORA_MCP_";
+
+/// Supplies narrowly scoped environment variables for one host-managed Agent subprocess.
+///
+/// Implementations must derive values from host-owned configuration and must never include a
+/// secret in an error. The host calls the provider only after binding the request to the calling
+/// plugin and its requested workspace directory.
+pub trait ChildProcessEnvironmentProvider: Clone + Send + Sync + 'static {
+    /// Returns the variables authorized for this Agent plugin in this workspace.
+    fn environment(
+        &self,
+        plugin_id: &str,
+        workspace_root: &Path,
+    ) -> Result<BTreeMap<String, String>, String>;
 }
 
-impl ChildProcessErrorKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::InvalidParams => "invalid_params",
-            Self::InvalidCommand => "invalid_command",
-            Self::InvalidPackageCommand => "invalid_package_command",
-            Self::NotFound => "not_found",
-            Self::ProgramNotFound => "program_not_found",
-            Self::Io => "io",
-        }
-    }
+/// Leaves child-process environments unchanged when no host policy is configured.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoChildProcessEnvironment;
 
-    fn code(self) -> i64 {
-        match self {
-            Self::InvalidParams | Self::InvalidCommand | Self::InvalidPackageCommand => {
-                INVALID_PARAMS_CODE
-            }
-            Self::NotFound => NOT_FOUND_CODE,
-            Self::ProgramNotFound | Self::Io => IO_CODE,
-        }
+impl ChildProcessEnvironmentProvider for NoChildProcessEnvironment {
+    fn environment(
+        &self,
+        _plugin_id: &str,
+        _workspace_root: &Path,
+    ) -> Result<BTreeMap<String, String>, String> {
+        Ok(BTreeMap::new())
     }
 }
 
@@ -159,12 +148,13 @@ struct Tracked<P> {
     stderr_done: JoinHandle<()>,
 }
 
-struct Inner<S: ProcessSpawner> {
+struct Inner<S: ProcessSpawner, E: ChildProcessEnvironmentProvider> {
     plugin_id: String,
     /// Install root of the package this handler serves, and the boundary every `packageCommand`
     /// must resolve inside. Fixed by the launch, so a request can never widen it.
     package_root: PathBuf,
     spawner: S,
+    environment_provider: E,
     next_id: AtomicU64,
     tracked: StdMutex<HashMap<String, Tracked<S::Process>>>,
     /// Filled in once by [`PluginProcessHost::attach_runtime`] after the plugin connection this
@@ -181,15 +171,18 @@ struct Inner<S: ProcessSpawner> {
 /// Generic over [`ProcessSpawner`] for the same reason `DenoPluginRuntimeLauncher` is: production
 /// always uses [`ora_process::TokioProcessSpawner`], while tests inject a fake that never starts a
 /// real OS process.
-pub struct PluginProcessHost<S: ProcessSpawner>(Arc<Inner<S>>);
+pub struct PluginProcessHost<
+    S: ProcessSpawner,
+    E: ChildProcessEnvironmentProvider = NoChildProcessEnvironment,
+>(Arc<Inner<S, E>>);
 
-impl<S: ProcessSpawner> Clone for PluginProcessHost<S> {
+impl<S: ProcessSpawner, E: ChildProcessEnvironmentProvider> Clone for PluginProcessHost<S, E> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
     }
 }
 
-impl<S> PluginProcessHost<S>
+impl<S> PluginProcessHost<S, NoChildProcessEnvironment>
 where
     S: ProcessSpawner + Send + Sync + 'static,
     S::Process: Send + Sync + 'static,
@@ -200,11 +193,29 @@ where
     /// decides which tree a `packageCommand` may resolve inside, and taking it from a request
     /// would let a plugin name any directory on the host.
     pub fn new(plugin_id: impl Into<String>, package_root: PathBuf, spawner: S) -> Self {
+        Self::with_environment_provider(plugin_id, package_root, spawner, NoChildProcessEnvironment)
+    }
+}
+
+impl<S, E> PluginProcessHost<S, E>
+where
+    S: ProcessSpawner + Send + Sync + 'static,
+    S::Process: Send + Sync + 'static,
+    E: ChildProcessEnvironmentProvider,
+{
+    /// Binds a host-owned environment policy to one plugin process generation.
+    pub fn with_environment_provider(
+        plugin_id: impl Into<String>,
+        package_root: PathBuf,
+        spawner: S,
+        environment_provider: E,
+    ) -> Self {
         let (runtime, runtime_rx) = watch::channel(None);
         Self(Arc::new(Inner {
             plugin_id: plugin_id.into(),
             package_root,
             spawner,
+            environment_provider,
             next_id: AtomicU64::new(1),
             tracked: StdMutex::new(HashMap::new()),
             runtime,
@@ -264,9 +275,10 @@ where
     /// Resolves one spawn request's program into the exact path handed to the operating system.
     ///
     /// A `packageCommand` is joined onto this plugin's install root and canonicalized, which
-    /// rejects a target that does not exist or that escapes the package through a symlink. The
-    /// resulting absolute path frees the request's `cwd` to be the workspace the child should run
-    /// in, instead of doubling as the directory the program is resolved against.
+    /// rejects a target that escapes the package through a symlink and answers one the package
+    /// does not carry with its own classification. The resulting absolute path frees the request's
+    /// `cwd` to be the workspace the child should run in, instead of doubling as the directory the
+    /// program is resolved against.
     fn resolve_program(&self, program: SpawnProgram) -> Result<PathBuf, ChildProcessError> {
         let relative = match program {
             SpawnProgram::Host(command) => return Ok(PathBuf::from(command)),
@@ -278,15 +290,30 @@ where
                 format!("the plugin package root is unavailable: {error}"),
             )
         })?;
-        let resolved = root.resolve_existing(&relative).map_err(|error| {
-            ChildProcessError::new(
-                ChildProcessErrorKind::InvalidPackageCommand,
-                format!(
-                    "packageCommand `{}` must exist inside the plugin package: {error}",
-                    relative.as_str()
+        // "The package does not carry this file" is kept apart from every other resolution
+        // failure because they call for opposite reactions. One plugin source is built into both a
+        // package that bundles its CLI and one that does not, and only the host can tell the
+        // plugin which it is running from; a missing file is that answer, and the plugin falls
+        // back to a PATH lookup on it. Anything else means the package does carry something at
+        // that path but it cannot be run, which fails identically on every retry.
+        let resolved = root
+            .resolve_existing(&relative)
+            .map_err(|error| match error {
+                PathContainmentError::PathNotFound { .. } => ChildProcessError::new(
+                    ChildProcessErrorKind::PackageCommandMissing,
+                    format!(
+                        "packageCommand `{}` is not part of this plugin package",
+                        relative.as_str()
+                    ),
                 ),
-            )
-        })?;
+                other => ChildProcessError::new(
+                    ChildProcessErrorKind::InvalidPackageCommand,
+                    format!(
+                        "packageCommand `{}` must resolve inside the plugin package: {other}",
+                        relative.as_str()
+                    ),
+                ),
+            })?;
         // Path-based like the containment check above: it cannot prevent a replacement between
         // this check and the spawn, only a package that is already shaped wrong.
         if !resolved.is_file() {
@@ -309,10 +336,34 @@ where
             .stdin(ProcessStdio::Piped)
             .stdout(ProcessStdio::Piped)
             .stderr(ProcessStdio::Piped);
+        if request
+            .env
+            .iter()
+            .any(|(key, _)| key.starts_with(MCP_ENVIRONMENT_PREFIX))
+        {
+            return Err(ChildProcessError::new(
+                ChildProcessErrorKind::InvalidParams,
+                format!(
+                    "environment variable names beginning with `{MCP_ENVIRONMENT_PREFIX}` are reserved"
+                ),
+            )
+            .into());
+        }
+        let host_environment = match &request.cwd {
+            Some(workspace_root) => self
+                .0
+                .environment_provider
+                .environment(&self.0.plugin_id, workspace_root)
+                .map_err(|message| ChildProcessError::new(ChildProcessErrorKind::Io, message))?,
+            None => BTreeMap::new(),
+        };
         if let Some(cwd) = request.cwd {
             spec = spec.cwd(cwd);
         }
         for (key, value) in request.env {
+            spec = spec.env(key, value);
+        }
+        for (key, value) in host_environment {
             spec = spec.env(key, value);
         }
 
@@ -370,20 +421,18 @@ where
 
         tokio::spawn(watch_exit(self.clone(), process_id.clone(), process));
 
-        Ok(json!({ "processId": process_id, "pid": pid }))
+        Ok(json!(ChildProcessSpawnResult { process_id, pid }))
     }
 
     async fn handle_write(&self, params: Value) -> Result<Value, HostRequestError> {
-        let process_id = required_process_id(&params)?;
-        let bytes_base64 = params
-            .get("bytesBase64")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                ChildProcessError::new(
-                    ChildProcessErrorKind::InvalidParams,
-                    "missing string bytesBase64",
-                )
-            })?;
+        let request: ChildProcessWriteParams = serde_json::from_value(params).map_err(|error| {
+            ChildProcessError::new(
+                ChildProcessErrorKind::InvalidParams,
+                format!("invalid write params: {error}"),
+            )
+        })?;
+        let process_id = request.process_id;
+        let bytes_base64 = request.bytes_base64;
         if bytes_base64.len() > MAX_WRITE_BASE64_LEN {
             return Err(ChildProcessError::new(
                 ChildProcessErrorKind::InvalidParams,
@@ -391,7 +440,7 @@ where
             )
             .into());
         }
-        let bytes = BASE64.decode(bytes_base64).map_err(|error| {
+        let bytes = BASE64.decode(&bytes_base64).map_err(|error| {
             ChildProcessError::new(
                 ChildProcessErrorKind::InvalidParams,
                 format!("bytesBase64 is not valid base64: {error}"),
@@ -447,10 +496,11 @@ where
     }
 }
 
-impl<S> HostRequestHandler for PluginProcessHost<S>
+impl<S, E> HostRequestHandler for PluginProcessHost<S, E>
 where
     S: ProcessSpawner + Send + Sync + 'static,
     S::Process: Send + Sync + 'static,
+    E: ChildProcessEnvironmentProvider,
 {
     async fn handle(&self, method: &str, params: Value) -> Result<Value, HostRequestError> {
         match method {
@@ -484,14 +534,15 @@ async fn run_stdin_writer<W: AsyncWrite + Unpin>(
 }
 
 /// Forwards every chunk read from one spawned process's stdout or stderr as a notification.
-async fn pump_output<S, R>(
-    host: PluginProcessHost<S>,
+async fn pump_output<S, E, R>(
+    host: PluginProcessHost<S, E>,
     process_id: String,
     mut reader: R,
     method: &'static str,
 ) where
     S: ProcessSpawner + Send + Sync + 'static,
     S::Process: Send + Sync + 'static,
+    E: ChildProcessEnvironmentProvider,
     R: AsyncRead + Unpin,
 {
     let mut buffer = [0_u8; READ_CHUNK_BYTES];
@@ -501,9 +552,9 @@ async fn pump_output<S, R>(
             Ok(length) => {
                 host.push(
                     method,
-                    json!({
-                        "processId": process_id,
-                        "bytesBase64": BASE64.encode(&buffer[..length]),
+                    json!(ChildProcessOutput {
+                        process_id: process_id.clone(),
+                        bytes_base64: BASE64.encode(&buffer[..length]),
                     }),
                 )
                 .await;
@@ -514,10 +565,14 @@ async fn pump_output<S, R>(
 }
 
 /// Waits for one spawned process to exit, then reports it and stops tracking it.
-async fn watch_exit<S>(host: PluginProcessHost<S>, process_id: String, process: Arc<S::Process>)
-where
+async fn watch_exit<S, E>(
+    host: PluginProcessHost<S, E>,
+    process_id: String,
+    process: Arc<S::Process>,
+) where
     S: ProcessSpawner + Send + Sync + 'static,
     S::Process: Send + Sync + 'static,
+    E: ChildProcessEnvironmentProvider,
 {
     let status = process.wait().await;
     let tracked = host
@@ -541,7 +596,11 @@ where
     let (code, signal) = exit_fields(status.as_ref());
     host.push(
         CHILDPROCESS_EXIT_METHOD,
-        json!({ "processId": process_id, "code": code, "signal": signal }),
+        json!(ChildProcessExit {
+            process_id,
+            code,
+            signal,
+        }),
     )
     .await;
 }
@@ -581,71 +640,19 @@ struct SpawnParams {
 /// Parses and validates the `spawn` params, rejecting anything not shaped like the documented
 /// `{ command | packageCommand, args?, cwd?, env? }`.
 fn parse_spawn_params(params: &Value) -> Result<SpawnParams, ChildProcessError> {
-    let object = params.as_object().ok_or_else(|| {
-        ChildProcessError::new(
-            ChildProcessErrorKind::InvalidParams,
-            "spawn params must be an object",
-        )
-    })?;
-    let program = parse_spawn_program(object)?;
-    let args = match object.get("args") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(items)) => items
-            .iter()
-            .map(|item| {
-                item.as_str().map(str::to_owned).ok_or_else(|| {
-                    ChildProcessError::new(
-                        ChildProcessErrorKind::InvalidParams,
-                        "args must be strings",
-                    )
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        Some(_) => {
-            return Err(ChildProcessError::new(
+    let request: ChildProcessSpawnParams =
+        serde_json::from_value(params.clone()).map_err(|error| {
+            ChildProcessError::new(
                 ChildProcessErrorKind::InvalidParams,
-                "args must be an array of strings",
-            ));
-        }
-    };
-    let cwd = match object.get("cwd") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(value)) => Some(PathBuf::from(value)),
-        Some(_) => {
-            return Err(ChildProcessError::new(
-                ChildProcessErrorKind::InvalidParams,
-                "cwd must be a string",
-            ));
-        }
-    };
-    let env = match object.get("env") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Object(entries)) => entries
-            .iter()
-            .map(|(key, value)| {
-                value
-                    .as_str()
-                    .map(|value| (key.clone(), value.to_owned()))
-                    .ok_or_else(|| {
-                        ChildProcessError::new(
-                            ChildProcessErrorKind::InvalidParams,
-                            "env values must be strings",
-                        )
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        Some(_) => {
-            return Err(ChildProcessError::new(
-                ChildProcessErrorKind::InvalidParams,
-                "env must be an object of strings",
-            ));
-        }
-    };
+                format!("invalid spawn params: {error}"),
+            )
+        })?;
+    let program = parse_spawn_program(request.command, request.package_command)?;
     Ok(SpawnParams {
         program,
-        args,
-        cwd,
-        env,
+        args: request.args,
+        cwd: request.cwd.map(PathBuf::from),
+        env: request.env.into_iter().collect(),
     })
 }
 
@@ -655,10 +662,9 @@ fn parse_spawn_params(params: &Value) -> Result<SpawnParams, ChildProcessError> 
 /// `command` and a `packageCommand` are indistinguishable as strings, so letting one field serve
 /// both meanings would make the callsite decide by accident which directory resolves it.
 fn parse_spawn_program(
-    object: &serde_json::Map<String, Value>,
+    command: Option<String>,
+    package_command: Option<String>,
 ) -> Result<SpawnProgram, ChildProcessError> {
-    let command = optional_string(object, "command")?;
-    let package_command = optional_string(object, "packageCommand")?;
     match (command, package_command) {
         (Some(_), Some(_)) => Err(ChildProcessError::new(
             ChildProcessErrorKind::InvalidParams,
@@ -675,12 +681,12 @@ fn parse_spawn_program(
                     "command must not be empty",
                 ));
             }
-            Ok(SpawnProgram::Host(command.to_owned()))
+            Ok(SpawnProgram::Host(command))
         }
         // Portable parsing is what makes the value safe to join: it rejects parent traversal,
         // rooted paths, drive and UNC prefixes, reserved device names, and NUL on every host, so
         // the same package behaves identically wherever it is installed.
-        (None, Some(package_command)) => PortableRelativePath::parse(package_command)
+        (None, Some(package_command)) => PortableRelativePath::parse(&package_command)
             .map(SpawnProgram::Package)
             .map_err(|error| {
                 ChildProcessError::new(
@@ -691,31 +697,14 @@ fn parse_spawn_program(
     }
 }
 
-/// Reads one optional string field, treating an explicit null as absent.
-fn optional_string<'a>(
-    object: &'a serde_json::Map<String, Value>,
-    field: &str,
-) -> Result<Option<&'a str>, ChildProcessError> {
-    match object.get(field) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(value)) => Ok(Some(value)),
-        Some(_) => Err(ChildProcessError::new(
-            ChildProcessErrorKind::InvalidParams,
-            format!("{field} must be a string"),
-        )),
-    }
-}
-
 /// Extracts and validates the `processId` param shared by `write`, `closeStdin`, and `kill`.
 fn required_process_id(params: &Value) -> Result<String, ChildProcessError> {
-    params
-        .get("processId")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| {
+    serde_json::from_value::<ChildProcessIdParams>(params.clone())
+        .map(|request| request.process_id)
+        .map_err(|error| {
             ChildProcessError::new(
                 ChildProcessErrorKind::InvalidParams,
-                "missing string processId",
+                format!("invalid process params: {error}"),
             )
         })
 }

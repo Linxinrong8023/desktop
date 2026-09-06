@@ -28,4 +28,13 @@ describe("runStatusTone", () => {
     expect(runStatusTone("succeeded").dot).toContain("emerald");
     expect(runStatusTone("failed").dot).toContain("rose");
   });
+
+  it("labels inactive branch nodes distinctly from idle", () => {
+    expect(runStatusTone("inactive").labelKey).toBe(
+      "workflowRun.nodeStatus.inactive",
+    );
+    expect(runStatusTone("inactive").labelKey).not.toBe(
+      runStatusTone("idle").labelKey,
+    );
+  });
 });

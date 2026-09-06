@@ -69,7 +69,7 @@ export interface LocationActionsCapability {
 
 /**
  * Explains why a release cannot be installed by the updater itself. Mirrors the Rust
- * `ManualUpdateReason` in `apps/desktop/src-tauri/src/update/mod.rs`.
+ * `ManualUpdateReason` in `apps/desktop/src-tauri/src/update.rs`.
  */
 export type ManualUpdateReason = "system_package" | "unpackaged_binary";
 
@@ -230,6 +230,12 @@ export interface SurfaceCapability {
   onEvent(listener: (event: SurfaceEvent) => void): Promise<() => void>;
 }
 
+/** Lets the shell export the host's current diagnostic log without learning its private path. */
+export interface DiagnosticLogsCapability {
+  /** Opens a host save flow and reports whether the user completed the download. */
+  downloadToday(): Promise<boolean>;
+}
+
 /** Collects the host capabilities consumed by the shared application shell. */
 export interface PlatformAdapter {
   readonly worktreeStorage: WorktreeStorageCapability;
@@ -238,6 +244,7 @@ export interface PlatformAdapter {
   readonly surfaces: SurfaceCapability;
   readonly updates?: DesktopUpdateCapability;
   readonly pluginMarketplace?: PluginMarketplaceCapability;
+  readonly diagnosticLogs?: DiagnosticLogsCapability;
   selectPath(options: SelectPathOptions): Promise<string | null>;
   /** Opens the native save dialog and returns the chosen path, or null when dismissed. */
   selectSavePath(options: SelectSavePathOptions): Promise<string | null>;

@@ -12,15 +12,19 @@ sees a `RuntimeConnection` and cannot tell which kind of provider produced it.
 
 - Attach to one lifecycle-owned plugin process and read the notifications of that one generation.
 - Reject, at handshake time, any plugin whose registration does not cover `agent/start`,
-  `agent/stop`, `agent/listModels`, and the emitted `agent/acp`.
+  `agent/stop`, `agent/list_models`, and the emitted `agent/acp`.
 - Call `agent/start` and confirm the plugin will speak a protocol version this host understands.
-- Read the plugin's pre-session model list through `agent/listModels`.
+- Read the plugin's pre-session model list through `agent/list_models`, on demand and with the
+  Workspace directory the caller resolved. This is not part of bringing a connection up, and it
+  carries its own timeout because a plugin may start a one-shot process to answer it.
 - Relay ACP messages in both directions as `agent/acp` notifications.
 - Ask the plugin to stop its agent before the lifecycle ends the plugin's process tree.
-- Convert registered Workspace-relative Skill locators into host-owned Effect surfaces. The
-  canonical Plugin ID is the consumer identity; a plugin never chooses that persisted identity.
-- Define `effect/waitForIdle` and `effect/restart` as the coordination boundary for surfaces using
-  `wait_for_idle_and_restart`.
+- Convert registered Workspace-relative Skill locators into host-owned Effect
+  Resources. MCP is not an Effect Resource: configured MCP plugins are delivered
+  through ACP `session/new` and `session/load` `mcpServers`. The canonical Plugin
+  ID is the consumer identity; a plugin never chooses that persisted identity.
+- Define `effect/coordinate`, `effect/reactivate`, and `effect/verify_ready` as the generic Consumer
+  adapter boundary.
 
 ## Non-responsibilities
 
@@ -53,11 +57,16 @@ the supervisor publishes `Failing` and abandons the agent for the rest of the pr
 retrying, because the same plugin will fail identically every time and retrying only produces a
 warning per backoff interval.
 
-`agent/start` failures split in two. `-32001` means the agent CLI the plugin wraps is absent from
-this machine; that is an expected local configuration, so it is reported as `agent_not_installed`
-and is retried without logging or contributing to the crash counter. Every other code is a
-genuine startup failure. More than three genuine failures in one minute opens the connection
-supervisor's restart circuit, publishes `Failing` to the UI, and stops automatic retries.
+`agent/start` failures split in three, along the one line that matters here: whether another
+attempt could ever produce a different answer. `-32001` means the agent CLI the plugin wraps is
+absent from this machine; the user can install it while Ora runs, so that is an expected local
+configuration, reported as `agent_not_installed` and retried without logging or contributing to
+the crash counter. `-32002` means the CLI the plugin's own package ships cannot run here at all —
+a wrong-target, broken, or unrunnable bundled executable — which fails identically on every
+attempt; it is terminal, like an unservable contract, so the package fault surfaces once instead
+of disappearing behind a quiet missing-CLI report. Every other code is a genuine startup failure.
+More than three genuine failures in one minute opens the connection supervisor's restart circuit,
+publishes `Failing` to the UI, and stops automatic retries.
 
 A plugin the lifecycle refuses to start — because the user disabled it or uninstalled it — is
 reported exactly like a missing CLI, so the supervisor keeps retrying it silently until the user
@@ -86,40 +95,38 @@ connection supervisor schedules another attempt.
 
 ## Effect coordination
 
-An Agent registration may include `effectSurfaces`. Each declaration contains
-`workspaceRelativePath`, `materializationFormat`, and `coordination`; it never contains an absolute
-Workspace path. Ora validates the portable relative locator, combines declarations from all live
-Agent plugins, and persists one merged surface/consumer snapshot for every local Workspace.
+An Agent registration may include `effectResources`. Each declaration contains
+`workspaceRelativePath`, `materializationFormat`, and either `uninterrupted` or
+`quiesce_before_mutation`; it never contains an absolute Workspace path or a persisted identity.
+Ora validates the portable locator and maps the canonical Plugin ID to a stable Consumer. Each
+local Workspace gets its own Target, while identical physical Resource declarations share one
+Resource and merged projection inside that Workspace.
 
-Restart replaces the agent instance, so **every ACP session that instance was serving is invalid
-once `effect/restart` returns.** Ora owns that consequence: after a restart that followed a barrier
-it detaches the live sessions bound to that agent, and each one is re-established through the
-ordinary `session/load` path before its next prompt. A plugin therefore does not have to keep
-session ids alive across a restart, and must not replay host frames it captured behind the barrier —
-those carry session ids the replaced instance can no longer resolve, and re-sending them bypasses
-the re-establishment Ora is performing. Frames held at the barrier should be failed back to the host
-instead, which re-sends them once the session is loaded again.
+Before a shared Resource mutation, Ora calls `effect/coordinate` for every affected Target whose
+binding requires quiescence. The request names the exact `targetId` and complete `resourceIds` set.
+The plugin must stop new work that could consume those Resources and return an idempotent proof.
+After exact Resource verification, `effect/reactivate` releases that barrier. If reactivation
+replaces an Agent instance, Ora detaches its live ACP sessions so the ordinary `session/load` path
+re-establishes them before their next prompt.
 
-For `wait_for_idle_and_restart`, the plugin must register both `effect/waitForIdle` and
-`effect/restart`. `effect/waitForIdle` is idempotent by `surfaceKey`: it returns
-`waiting_for_idle` while any affected instance is serving a turn, and returns `ready` only after it
-has also blocked new turns that could read the surface. The barrier remains held until
-`effect/restart` is called with the stable locator and applied generation. Restart must replace or
-reinitialize every affected Agent instance before releasing the barrier. Ora can retry either call
-after a process or database failure, so both methods must be idempotent.
+`effect/verify_ready` receives `targetId`, `generation`, `consumerRevisionId`, and
+`projectionDigest`. Its proof advances Target readiness only when all four values match the current
+projection. Coordination receipts do not imply readiness for the Target's other Resources.
 
-`ora_backend::effect_worker` drives both calls. It claims a durable reconcile request and holds
-that claim's lease while coordination waits on a consumer, so a plugin that never answers costs one
-lease interval rather than the surface. A consumer whose plugin is not currently running is skipped
-rather than started: it holds no turn a mutation could corrupt, and it reads the surface fresh when
-it next starts.
+`ora_backend::effect_worker` drives this protocol from durable, fenced Target and Resource claims.
+A disconnected Consumer is already safe to mutate and will read the Resource on its next start, so
+the worker records a disconnected adapter receipt without launching the plugin. Failures before a
+journal exists enter retry scheduling; failures after preparation enter explicit recovery instead
+of invoking a second mutation.
 
-The worker also owns the other half of that snapshot. A declaration can only reach the Workspaces
-that exist at the moment its plugin starts, so every pass re-derives the surface set and registers
-the current declarations into any local Workspace that owns none. Keeping the surface set a
-convergence result rather than the side effect of one process event is what makes a Workspace
-created while a plugin is already running materialize on its own, instead of waiting for that
-plugin's next start.
+The worker also converges declarations in the opposite direction. Registration pairs a new
+Consumer with existing Workspaces immediately, and every worker pass pairs the current declaration
+snapshot with Workspaces created later. This level-triggered pairing prevents a one-shot process
+event from leaving a Workspace without its Target.
+
+MCP is not projected into Workspace files and is not injected as `ORA_MCP_*`
+environment variables. Session MCP setup lives in `session_setup` and is
+described in [Session MCP](../../../../../docs/session-mcp.md).
 
 ## Sandboxing
 

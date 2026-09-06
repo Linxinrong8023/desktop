@@ -24,7 +24,6 @@ type TauriStreamOperation =
   | "loadSession"
   | "promptSession"
   | "watchAppEvents"
-  | "watchSpecs"
   | "watchWorkspace"
   | "watchProject";
 type SupportedTauriOperation = Exclude<EndpointOperation, TauriStreamOperation>;
@@ -69,17 +68,10 @@ const tauriCommands = {
   searchProject: "search_project",
 
   // =============================================================================
-  // spec
-  // =============================================================================
-  getSpecCatalog: "get_spec_catalog",
-  readSpec: "read_spec",
-
-  // =============================================================================
   // session
   // =============================================================================
-  warmSession: "warm_session",
+  startSession: "start_session",
   setSessionConfig: "set_session_config",
-  attachSession: "attach_session",
   getSession: "get_session",
   listSessions: "list_sessions",
   switchSessionAgent: "switch_session_agent",
@@ -94,6 +86,7 @@ const tauriCommands = {
   // agentRuntime
   // =============================================================================
   getAgentRuntimeStatus: "get_agent_runtime_status",
+  listAgentModels: "list_agent_models",
   // =============================================================================
   // skill
   // =============================================================================
@@ -129,6 +122,7 @@ const tauriCommands = {
   updateMarketplaceSource: "update_marketplace_source",
   listInstalledPlugins: "list_installed_plugins",
   getPluginConfiguration: "get_plugin_configuration",
+  getEffectTargetStatus: "get_effect_target_status",
   savePluginConfiguration: "save_plugin_configuration",
   resetPluginConfiguration: "reset_plugin_configuration",
   scanPlugins: "scan_plugins",
@@ -193,6 +187,8 @@ const tauriCommands = {
   // =============================================================================
   getProxySettings: "get_proxy_settings",
   setProxySettings: "set_proxy_settings",
+  clearProxySettings: "clear_proxy_settings",
+  checkProxySettings: "check_proxy_settings",
   completeWorkflowNode: "complete_workflow_node",
 } as const satisfies Record<SupportedTauriOperation, string>;
 
@@ -265,7 +261,6 @@ function isTauriStreamOperation(
     operation === "loadSession" ||
     operation === "promptSession" ||
     operation === "watchAppEvents" ||
-    operation === "watchSpecs" ||
     operation === "watchWorkspace" ||
     operation === "watchProject"
   );

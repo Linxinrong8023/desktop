@@ -1,30 +1,22 @@
 use ora_logging::{ora_error, ora_info};
-use rusqlite::Connection;
 
 use crate::{
     DatabaseError, DatabaseLocation, MigrationCatalog, RepositoryPool, SystemTimestampSource,
     TimestampSource, migration,
 };
 
-/// Owns a SQLite connection that has already been reconciled with the active migration target.
-#[derive(Debug)]
-pub struct Database {
-    connection: Connection,
+/// Explicitly reconciles migration SQL drift for tooling that intentionally permits rollback.
+pub fn reconcile_migration_history(
+    location: &DatabaseLocation,
+    catalog: &MigrationCatalog,
+) -> Result<(), DatabaseError> {
+    let pool = RepositoryPool::new(location)?;
+    pool.with_connection_mut(|connection| {
+        migration::reconcile_database(connection, catalog, &SystemTimestampSource)
+    })
 }
 
-impl Database {
-    /// Exposes the managed SQLite connection for query and repository work.
-    pub fn connection(&self) -> &Connection {
-        &self.connection
-    }
-
-    /// Transfers ownership of the managed connection to callers that need direct control.
-    pub fn into_connection(self) -> Connection {
-        self.connection
-    }
-}
-
-/// Coordinates opening SQLite connections and reconciling them with the migration catalog.
+/// Coordinates opening SQLite connections and aligning migration versions for application startup.
 #[derive(Debug)]
 pub struct DatabaseBootstrapper<T> {
     timestamp_source: T,
@@ -46,16 +38,16 @@ where
         Self { timestamp_source }
     }
 
-    /// Opens a database location, reconciles it with the target migration prefix, and returns the ready connection.
-    pub fn bootstrap(
+    /// Opens a repository pool and aligns the database with the target migration version sequence.
+    pub fn bootstrap_repository_pool(
         &self,
         location: &DatabaseLocation,
         catalog: &MigrationCatalog,
-    ) -> Result<Database, DatabaseError> {
+    ) -> Result<RepositoryPool, DatabaseError> {
         ora_info!(message = "opening database", operation = "database_open");
 
-        let mut connection = match location.open() {
-            Ok(connection) => connection,
+        let pool = match RepositoryPool::new(location) {
+            Ok(pool) => pool,
             Err(error) => {
                 ora_error!(
                     message = "failed to open database",
@@ -69,9 +61,9 @@ where
 
         ora_info!(message = "opened database", operation = "database_open");
 
-        if let Err(error) =
-            migration::reconcile_database(&mut connection, catalog, &self.timestamp_source)
-        {
+        if let Err(error) = pool.with_connection_mut(|connection| {
+            migration::reconcile_database_versions(connection, catalog, &self.timestamp_source)
+        }) {
             ora_error!(
                 message = "database bootstrap failed",
                 operation = "database_bootstrap",
@@ -86,17 +78,6 @@ where
             operation = "database_bootstrap",
         );
 
-        Ok(Database { connection })
-    }
-
-    /// Reconciles the database schema and returns the configured repository pool for later use.
-    pub fn bootstrap_repository_pool(
-        &self,
-        location: &DatabaseLocation,
-        catalog: &MigrationCatalog,
-    ) -> Result<RepositoryPool, DatabaseError> {
-        self.bootstrap(location, catalog)?;
-
-        RepositoryPool::new(location)
+        Ok(pool)
     }
 }

@@ -3,7 +3,7 @@ mod agent_runtime;
 mod app_event;
 mod bootstrap;
 mod clock;
-mod effect_surface_registration;
+mod effect_registration;
 mod effect_worker;
 mod error;
 mod git_cleanup;
@@ -17,11 +17,13 @@ mod proxy;
 mod request_lifecycle;
 mod session;
 mod session_history;
+mod session_setup;
 mod skill;
 mod skill_reconciliation;
 mod source_boundary;
-mod spec;
 mod task;
+#[cfg(test)]
+mod test_clock;
 mod user_config;
 mod workflow;
 mod workspace_diff;
@@ -35,5 +37,7 @@ pub use request_lifecycle::{RequestIdGenerator, RequestLifecycle, UuidRequestIdG
 pub use skill_reconciliation::SkillStorageReconciliationError;
 pub use user_config::BackendPreferredLogLevelStore;
 
+#[cfg(test)]
+mod local_agent_package_tests;
 #[cfg(test)]
 mod plugin_install_tests;
