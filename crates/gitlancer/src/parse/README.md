@@ -5,7 +5,7 @@ This module converts stable Git porcelain and plumbing output into gitlancer dom
 ## Supported boundaries
 
 - Commit parsing reads the object-id and the following summary line into `CommitId` and `CommitResponse`; the summary may be empty.
-- Status parsing consumes porcelain-v2 NUL-delimited records, ignores headers, and preserves each machine record as a `StatusEntry`.
+- Status parsing consumes porcelain-v2 NUL-delimited records, ignores headers, and exposes both raw `StatusEntry` records and structured per-file `StatusFileEntry` staging entries.
 - Worktree parsing consumes `git worktree list --porcelain`, associates optional branch refs, and distinguishes the main checkout from linked worktrees.
 
 An empty or structurally incomplete required payload returns `ParseError`; parsers do not invent missing identities. Detached worktrees are represented by an absent branch rather than rejected.

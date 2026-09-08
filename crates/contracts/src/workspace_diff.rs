@@ -25,7 +25,7 @@ pub struct GetWorkspaceDiffRequest {
 ///
 /// `base_commit_id` is absent when the workspace has no recorded baseline (a
 /// project's main checkout, or a historical worktree whose creation commit was
-/// never recorded) — only meaningful for the `Branch`/`Committed` scopes.
+/// never recorded) - only meaningful for the `Branch`/`Committed` scopes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "workspace_diff.ts")]
@@ -35,7 +35,10 @@ pub struct GetWorkspaceDiffResponse {
     pub patch: String,
 }
 
-/// Commits every current change in one workspace's checkout.
+/// Commits only the currently staged change set in one workspace's checkout.
+///
+/// The caller must stage changes first (see `StageWorkspaceChanges`) because
+/// this operation never modifies the index.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "workspace_diff.ts")]
@@ -70,6 +73,72 @@ pub struct PushWorkspaceBranchResponse {
     pub remote_name: String,
 }
 
+/// Identifies which workspace staging status should be read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workspace_diff.ts")]
+pub struct GetWorkspaceStatusRequest {
+    pub workspace_id: String,
+}
+
+/// Returns the structured per-file staging state of one workspace checkout.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workspace_diff.ts")]
+pub struct GetWorkspaceStatusResponse {
+    pub entries: Vec<WorkspaceStatusEntry>,
+}
+
+/// Represents one changed file's staging state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workspace_diff.ts")]
+pub struct WorkspaceStatusEntry {
+    pub path: String,
+    pub is_staged: bool,
+    pub is_untracked: bool,
+}
+
+/// Stages selected changes in one workspace checkout.
+///
+/// An empty `paths` list stages every current change in the workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workspace_diff.ts")]
+pub struct StageWorkspaceChangesRequest {
+    pub workspace_id: String,
+    /// Repo-relative paths to stage; an empty list stages every current change.
+    pub paths: Vec<String>,
+}
+
+/// Returns the paths that were staged in one workspace checkout.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workspace_diff.ts")]
+pub struct StageWorkspaceChangesResponse {
+    pub staged_paths: Vec<String>,
+}
+
+/// Unstages selected changes in one workspace checkout.
+///
+/// An empty `paths` list is a defensive no-op and unstages nothing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workspace_diff.ts")]
+pub struct UnstageWorkspaceChangesRequest {
+    pub workspace_id: String,
+    /// Repo-relative paths to unstage; an empty list unstages nothing.
+    pub paths: Vec<String>,
+}
+
+/// Returns the paths that were unstaged in one workspace checkout.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workspace_diff.ts")]
+pub struct UnstageWorkspaceChangesResponse {
+    pub unstaged_paths: Vec<String>,
+}
+
 /// Exports every TypeScript binding owned by this module so the aggregate exporter can keep one call site per family.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     WorkspaceDiffScope::export(config)?;
@@ -79,6 +148,13 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     CommitWorkspaceChangesResponse::export(config)?;
     PushWorkspaceBranchRequest::export(config)?;
     PushWorkspaceBranchResponse::export(config)?;
+    GetWorkspaceStatusRequest::export(config)?;
+    GetWorkspaceStatusResponse::export(config)?;
+    WorkspaceStatusEntry::export(config)?;
+    StageWorkspaceChangesRequest::export(config)?;
+    StageWorkspaceChangesResponse::export(config)?;
+    UnstageWorkspaceChangesRequest::export(config)?;
+    UnstageWorkspaceChangesResponse::export(config)?;
     Ok(())
 }
 

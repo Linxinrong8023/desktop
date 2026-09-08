@@ -9,7 +9,9 @@ This module adapts workflow-run application use cases to the production backend 
 - `executor.rs` drives agent nodes through Ora sessions, publishes each session only after its
   owning prompt is admitted, and records node outputs and file changes.
 - `prerequisites.rs` resolves roles and freezes required-skill paths through an injected Agent
-  delivery-capability provider. Effect owns physical Skill materialization. The current provider
+  delivery-capability provider. Effect owns physical Skill materialization. Skill resolution is
+  origin-aware: a local skill resolves through its formal catalog directory and a plugin-imported
+  skill through the immutable plugin package recorded in its catalog row. The current provider
   declares the shared `.agents/skills` root; future plugin-backed providers can declare different
   or multiple roots without changing the workflow or prompt layers.
 - `prompt.rs` assembles the localized, worktree-bounded, topology-aware handoff for an agent node.

@@ -29,7 +29,7 @@ import {
   DEFAULT_WORKFLOW_ZOOM,
   MAX_WORKFLOW_ZOOM,
   MIN_WORKFLOW_ZOOM,
-} from "./viewport";
+} from "../../workflow-node-chrome/viewport";
 import {
   WORKFLOW_FLOW_EDGE_TYPE,
   WORKFLOW_FLOW_NODE_TYPE,

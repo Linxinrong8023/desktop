@@ -11,6 +11,12 @@ pub trait WorkspaceDiffReader {
         &self,
         request: ReadWorkspaceDiffRequest,
     ) -> Result<WorkspaceDiffSnapshot, WorkspaceDiffReaderError>;
+
+    /// Reads structured per-file staging status so the review panel can render stage toggles.
+    fn read_workspace_status(
+        &self,
+        worktree_path: &Path,
+    ) -> Result<WorkspaceStatusSnapshot, WorkspaceDiffReaderError>;
 }
 
 /// Selects the Git layer represented by a workspace diff snapshot.
@@ -95,6 +101,37 @@ pub trait WorkspaceGitWriter {
         &self,
         worktree_path: &Path,
     ) -> Result<WorkspaceGitPush, WorkspaceGitWriterError>;
+
+    /// Stages the supplied repo-relative paths after verifying its recorded branch.
+    ///
+    /// An empty `paths` list stages every current change in the workspace, matching the
+    /// review panel's "stage all" action.
+    fn stage_changes(
+        &self,
+        request: StageWorkspaceGitRequest,
+    ) -> Result<WorkspaceGitStage, WorkspaceGitWriterError>;
+
+    /// Unstages the supplied repo-relative paths after verifying its recorded branch.
+    fn unstage_changes(
+        &self,
+        request: UnstageWorkspaceGitRequest,
+    ) -> Result<WorkspaceGitUnstage, WorkspaceGitWriterError>;
+
+    /// Stages the supplied paths in a workspace with no recorded branch to verify.
+    ///
+    /// An empty `paths` list stages every current change in the workspace.
+    fn stage_worktree_changes(
+        &self,
+        worktree_path: &Path,
+        paths: Vec<String>,
+    ) -> Result<WorkspaceGitStage, WorkspaceGitWriterError>;
+
+    /// Unstages the supplied paths in a workspace with no recorded branch to verify.
+    fn unstage_worktree_changes(
+        &self,
+        worktree_path: &Path,
+        paths: Vec<String>,
+    ) -> Result<WorkspaceGitUnstage, WorkspaceGitWriterError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +157,46 @@ pub struct WorkspaceGitCommit {
 pub struct WorkspaceGitPush {
     pub branch_name: String,
     pub remote_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StageWorkspaceGitRequest {
+    pub worktree_path: PathBuf,
+    pub expected_branch_name: String,
+    /// Repo-relative paths to stage; an empty list stages every current change.
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnstageWorkspaceGitRequest {
+    pub worktree_path: PathBuf,
+    pub expected_branch_name: String,
+    /// Repo-relative paths to unstage; an empty list is a defensive no-op.
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceGitStage {
+    pub staged_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceGitUnstage {
+    pub unstaged_paths: Vec<String>,
+}
+
+/// Represents one changed file's staging state in a workspace checkout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceStatusFile {
+    pub path: String,
+    pub is_staged: bool,
+    pub is_untracked: bool,
+}
+
+/// Returns the structured per-file staging state of one workspace checkout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceStatusSnapshot {
+    pub entries: Vec<WorkspaceStatusFile>,
 }
 
 #[derive(Debug, Error)]

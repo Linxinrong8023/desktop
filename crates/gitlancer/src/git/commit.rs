@@ -27,6 +27,19 @@ pub struct StageAllRequest<'a> {
     pub worktree: &'a WorktreeHandle,
 }
 
+/// Carries the information needed to unstage one or more repo-relative paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnstageRequest<'a> {
+    pub worktree: &'a WorktreeHandle,
+    pub paths: Vec<RepoRelativePath>,
+}
+
+/// Returns the paths that were requested for unstaging.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnstageResponse {
+    pub unstaged_paths: Vec<RepoRelativePath>,
+}
+
 /// Carries the information needed to create a commit in one worktree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitRequest<'a> {
@@ -67,6 +80,23 @@ impl<R: GitRunner> Git<R> {
             GitIntent::Mutating,
         ))?;
         Ok(())
+    }
+
+    /// Moves the supplied repo-relative paths out of the index, leaving worktree edits intact.
+    ///
+    /// An empty path list is a defensive no-op: unstaging nothing should never run Git or error.
+    pub fn unstage(&self, request: UnstageRequest<'_>) -> Result<UnstageResponse, GitlancerError> {
+        if request.paths.is_empty() {
+            return Ok(UnstageResponse {
+                unstaged_paths: Vec::new(),
+            });
+        }
+        let command = build_unstage_command(&request);
+        let _output = self.runner().run(&command)?;
+
+        Ok(UnstageResponse {
+            unstaged_paths: request.paths,
+        })
     }
 
     /// Creates one commit and returns typed metadata once the commit parser is implemented.
@@ -133,6 +163,28 @@ pub fn build_add_command(request: &AddRequest<'_>) -> GitCommand {
     )
 }
 
+/// Builds a stable `git restore --staged` command so unstaging can be tested without process execution.
+pub fn build_unstage_command(request: &UnstageRequest<'_>) -> GitCommand {
+    let mut args = vec![
+        "restore".to_string(),
+        "--staged".to_string(),
+        "--".to_string(),
+    ];
+    args.extend(
+        request
+            .paths
+            .iter()
+            .map(|path| path.as_path().to_string_lossy().into_owned()),
+    );
+
+    GitCommand::new(
+        request.worktree.worktree_root().as_path().to_path_buf(),
+        args,
+        GitEnv::default(),
+        GitIntent::Mutating,
+    )
+}
+
 /// Builds a stable `git commit` command so commit policy and options stay centralized.
 pub fn build_commit_command(request: &CommitRequest<'_>) -> GitCommand {
     let mut args = vec![
@@ -152,4 +204,58 @@ pub fn build_commit_command(request: &CommitRequest<'_>) -> GitCommand {
         GitEnv::default(),
         GitIntent::Mutating,
     )
+}
+#[cfg(test)]
+mod tests {
+    use super::{UnstageRequest, build_unstage_command};
+    use crate::domain::paths::{RepoRelativePath, WorktreeRoot};
+    use crate::domain::repo::Repository;
+    use crate::domain::worktree::{WorktreeHandle, WorktreeKind};
+    use crate::exec::command::{GitCommand, GitIntent};
+    use crate::exec::env::GitEnv;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn builds_unstage_command_for_the_requested_paths() {
+        let worktree = worktree_fixture();
+        let paths = vec![
+            RepoRelativePath::new("a.txt"),
+            RepoRelativePath::new("dir/b.txt"),
+        ];
+
+        let command = build_unstage_command(&UnstageRequest {
+            worktree: &worktree,
+            paths,
+        });
+
+        assert_eq!(
+            command,
+            GitCommand::new(
+                worktree.worktree_root().as_path().to_path_buf(),
+                vec![
+                    "restore".to_string(),
+                    "--staged".to_string(),
+                    "--".to_string(),
+                    "a.txt".to_string(),
+                    "dir/b.txt".to_string(),
+                ],
+                GitEnv::default(),
+                GitIntent::Mutating,
+            )
+        );
+    }
+
+    /// Builds an isolated linked worktree handle pointing at a stable fixture root.
+    fn worktree_fixture() -> WorktreeHandle {
+        let repository = Repository::new(crate::RepoRoot::new("/repo"));
+        WorktreeHandle::new(
+            repository.root().clone(),
+            WorktreeRoot::new("/repo/wt"),
+            crate::GitDir::new("/repo/.git/worktrees/wt"),
+            WorktreeKind::Linked {
+                name: "wt".to_string(),
+            },
+            None,
+        )
+    }
 }

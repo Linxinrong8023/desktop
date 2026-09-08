@@ -324,6 +324,12 @@ pub enum MarketplaceArtifactRetrieval {
 }
 
 /// Selects whether an S3 source update retains or atomically replaces its credential pair.
+///
+/// # Security
+///
+/// `Serialize` emits plaintext credentials for IPC transport to the backend, including when
+/// this value is nested in an update request. Never serialize it into logs, traces, or telemetry.
+/// Only the manual `Debug` implementation redacts the credential pair.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(
     tag = "action",
@@ -425,6 +431,9 @@ pub struct ListMarketplaceSourcesResponse {
 }
 
 /// Requests adding one marketplace Git source.
+///
+/// New sources use Direct HTTPS retrieval. Configure S3 SigV4 and its credential pair with
+/// `UpdateMarketplaceSourceRequest` after the source has been added.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "plugin.ts")]

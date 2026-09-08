@@ -1,0 +1,24 @@
+{
+  "modules": {
+    "crates/application/src/workflow_run/engine/graph.rs": {
+      "owner": "ora-application",
+      "lines": 879,
+      "split_plan": "Extract graph parsing/validation and indexed traversal into private modules, keeping accepted graph schemas and readiness rules covered by their existing tests."
+    },
+    "crates/backend/src/agent_runtime.rs": {
+      "owner": "ora-backend",
+      "lines": 1076,
+      "split_plan": "Extract runtime command admission from manager ownership. Preserve the single scheduler, supervisor map and session actors; move the corresponding lifecycle tests with each responsibility. Durable record ownership now lives in agent_runtime/record.rs, and load/attach in agent_runtime/load.rs and agent_runtime/attach.rs."
+    },
+    "crates/backend/src/plugin.rs": {
+      "owner": "ora-backend",
+      "lines": 814,
+      "split_plan": "Marketplace release resolution and package transfer now live in plugin/marketplace.rs. Split the remaining private plugin-host configuration and gateway/projection responsibilities while retaining Plugins as the public operations interface. Preserve registry identity, runtime synchronization and Effect generation semantics."
+    },
+    "crates/db/src/repository/workflow_run_engine.rs": {
+      "owner": "ora-db",
+      "lines": 1051,
+      "split_plan": "Group run-state transitions, node/history rows and artifact persistence into private repository modules. Preserve the existing transaction scopes and repository interface, with real SQLite transition tests accompanying extraction."
+    }
+  }
+}

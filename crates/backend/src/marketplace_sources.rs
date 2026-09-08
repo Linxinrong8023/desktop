@@ -1,6 +1,8 @@
 mod artifact_retrieval;
+mod error;
 
-use artifact_retrieval::{ArtifactRetrievalError, StoredArtifactRetrieval};
+use artifact_retrieval::StoredArtifactRetrieval;
+pub(crate) use error::{MarketplaceSourceStoreError, map_marketplace_source_error};
 use ora_contracts::{
     MarketplaceArtifactRetrieval, MarketplaceSource, UpdateMarketplaceSourceRequest,
 };
@@ -8,35 +10,14 @@ use ora_db::{
     PluginMarketplaceSourceRecord, SqlitePluginMarketplaceSourceRepository,
     SqlitePluginSourceNamespaceRepository,
 };
-use ora_domain::{PluginIdError, PluginNamespace};
+use ora_domain::PluginNamespace;
 use ora_plugin_registry::{RegistryError, RegistrySource};
 use ora_utils::url::canonical_repository_url;
 use std::path::{Path, PathBuf};
-use thiserror::Error;
 
 /// The seed source used the first time a backend opens before any user configuration exists.
 const DEFAULT_MARKETPLACE_URL: &str = "https://github.com/ora-space/marketplace";
 const DEFAULT_MARKETPLACE_BRANCH: &str = "main";
-
-/// Reports failures while loading, validating, or persisting the marketplace source list.
-#[derive(Debug, Error)]
-pub(crate) enum MarketplaceSourceStoreError {
-    #[error("invalid marketplace source: {0}")]
-    Validation(#[from] RegistryError),
-    #[error("marketplace source already exists: {0}")]
-    Duplicate(String),
-    #[error("marketplace source was not found: {0}")]
-    NotFound(String),
-    #[error("marketplace source repository operation failed: {0}")]
-    Repository(#[from] ora_db::DatabaseError),
-    #[error("invalid marketplace artifact retrieval configuration: {0}")]
-    ArtifactRetrieval(#[from] ArtifactRetrievalError),
-    /// A persisted binding holds a namespace this version cannot represent, so the source cannot
-    /// be used without either inventing a new identity for it or silently changing an existing
-    /// one — both of which would detach its already-installed plugins.
-    #[error("persisted marketplace source namespace is unusable: {0}")]
-    CorruptNamespace(#[from] PluginIdError),
-}
 
 /// Owns SQLite-backed marketplace source configuration and binds each row to a namespace and a
 /// checkout path.
@@ -59,9 +40,11 @@ impl ConfiguredMarketplaceSource {
         &self.source
     }
 
-    /// Builds S3 signing configuration only for the S3 SigV4 retrieval variant.
-    pub(crate) fn s3_config(&self) -> Option<ora_utils::http::S3Config> {
-        self.artifact_retrieval.s3_config()
+    /// Propagates invalid S3 configuration without falling back to unsigned retrieval.
+    pub(crate) fn s3_config(
+        &self,
+    ) -> Result<Option<ora_utils::http::S3Config>, MarketplaceSourceStoreError> {
+        self.artifact_retrieval.s3_config().map_err(Into::into)
     }
 }
 

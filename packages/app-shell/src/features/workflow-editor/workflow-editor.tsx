@@ -99,7 +99,7 @@ import {
   useWorkflowDraft,
   useWorkflowLibrary,
   useWorkflowVersions,
-} from "./workflow-definitions";
+} from "../../state/data/workflows";
 import { WorkflowDraftSaveStatusLabel } from "./workflow-draft-save-status";
 import { useWorkflowDraftAutosave } from "./use-workflow-draft-autosave";
 import { useWorkflowHistory } from "./use-workflow-history";

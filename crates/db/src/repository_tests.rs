@@ -448,6 +448,7 @@ fn workflow_run_round_trip_uses_workspace_id() {
             workspace_id: workspace.id.clone(),
             project_id: ProjectId::new("project-1"),
             workflow_id: run.workflow_id.clone(),
+            version: "draft".to_string(),
             status: run.status,
             has_awaiting_node: false,
             started_at: run.started_at,

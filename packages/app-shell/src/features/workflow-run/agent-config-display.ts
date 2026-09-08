@@ -2,7 +2,10 @@ import type {
   WorkflowAgentConfig,
   WorkflowNodeData,
 } from "@ora/workflow-runtime";
-import { agentLabel, type AgentEntry } from "../chat/agent-catalog";
+import {
+  agentLabel,
+  type AgentEntry,
+} from "../../state/hooks/use-agent-catalog";
 
 /**
  * Formats `agent · modelId`, naming the agent the way its package does.

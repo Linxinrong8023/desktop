@@ -5,6 +5,10 @@ export const requestIdSchema = z.string();
 
 export const emptyErrorParamsSchema = z.record(z.string(), z.never());
 
+export const marketplaceArtifactRetrievalFieldInvalidParamsSchema = z.object({
+    field: z.string()
+});
+
 export const taskBaseBranchNotFoundParamsSchema = z.object({
     branchName: z.string()
 });
@@ -79,6 +83,12 @@ export const contractErrorSchema = z.object({
     }), z.object({
         "code": z.literal("plugin_host_incompatible"),
         "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("marketplace_s3_credentials_required"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("marketplace_artifact_retrieval_field_invalid"),
+        "params": marketplaceArtifactRetrievalFieldInvalidParamsSchema
     }), z.object({
         "code": z.literal("plugin_configuration_declaration_invalid"),
         "params": emptyErrorParamsSchema
@@ -387,6 +397,12 @@ export const publicErrorSchema = z.union([z.object({
     }), z.object({
         "code": z.literal("plugin_host_incompatible"),
         "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("marketplace_s3_credentials_required"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("marketplace_artifact_retrieval_field_invalid"),
+        "params": marketplaceArtifactRetrievalFieldInvalidParamsSchema
     }), z.object({
         "code": z.literal("plugin_configuration_declaration_invalid"),
         "params": emptyErrorParamsSchema

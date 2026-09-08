@@ -43,6 +43,22 @@ tasks:
       - cargo xtask export-contracts
       - deno task --filter @ora/contracts generate:error-schema
 
+  check:contracts:
+    desc: Verify all generated contracts without changing the working tree
+    cmds:
+      - cargo xtask check-contracts
+      - deno run -A scripts/check-contract-schema.ts
+
+  check:features:
+    desc: Verify named public feature interfaces and shared-state dependencies
+    cmds:
+      - deno run -A scripts/check-feature-interfaces.ts
+
+  check:rust-size:
+    desc: Check production Rust module size and ratcheting legacy exceptions
+    cmds:
+      - cargo xtask check-rust-size
+
   build:
     desc: Build all Rust workspace packages
     cmds:
@@ -132,6 +148,7 @@ tasks:
     silent: true
     cmds:
       - deno task check:tooling
+      - task: check:features
       - deno task --filter @ora/desktop lint
       - deno task --filter @ora/contracts lint
       - deno task --filter @ora/chat lint
@@ -147,6 +164,7 @@ tasks:
     silent: true
     cmds:
       - cargo fmt --all -- --check
+      - task: check:rust-size
       - cargo clippy --workspace --exclude ora-desktop --exclude ora-desktop-tests -- -D warnings
 
   lint:tauri:
@@ -177,7 +195,7 @@ tasks:
   test:frontend:
     desc: Run all frontend TypeScript package test suites
     cmds:
-      - task: export-contracts
+      - task: check:contracts
       - task: lint:frontend
       - deno task test:tooling
       - deno task --filter @ora/desktop test

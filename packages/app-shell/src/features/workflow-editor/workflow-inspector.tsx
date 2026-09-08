@@ -39,7 +39,10 @@ import {
   normalizeWorkflowAgentConfig,
 } from "@ora/workflow-mock";
 import type { Node } from "@xyflow/react";
-import { agentLabel, type AgentEntry } from "../chat/agent-catalog";
+import {
+  agentLabel,
+  type AgentEntry,
+} from "../../state/hooks/use-agent-catalog";
 import { PluginLogoMark } from "../settings/plugin-logo";
 import type { WorkflowAgentCliStatus } from "../../state/hooks/use-workflow-agent-models";
 import {

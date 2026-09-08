@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { addComposerFileSelections } from "./chat/add-composer-file-selection";
+import { addComposerFileSelections } from "../state/actions/add-composer-file-selection";
 
 /**
  * One quoteable row. `key` must be unique within the rendered surface: file

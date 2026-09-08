@@ -21,6 +21,14 @@ export type ContractError =
     | { "code": "plugin_not_found"; "params": EmptyErrorParams }
     | { "code": "plugin_host_incompatible"; "params": EmptyErrorParams }
     | {
+      "code": "marketplace_s3_credentials_required";
+      "params": EmptyErrorParams;
+    }
+    | {
+      "code": "marketplace_artifact_retrieval_field_invalid";
+      "params": MarketplaceArtifactRetrievalFieldInvalidParams;
+    }
+    | {
       "code": "plugin_configuration_declaration_invalid";
       "params": EmptyErrorParams;
     }
@@ -158,6 +166,11 @@ export type ContractError =
 export type EmptyErrorParams = { [key: string]: never };
 
 /**
+ * Identifies an invalid retrieval field without including its submitted or stored value.
+ */
+export type MarketplaceArtifactRetrievalFieldInvalidParams = { field: string };
+
+/**
  * Carries the safe target name for an open-location failure.
  */
 export type OpenLocationFailedParams = { target: OpenLocationTarget };
@@ -200,6 +213,14 @@ export type PublicError =
   | { "code": "agent_not_found"; "params": EmptyErrorParams }
   | { "code": "plugin_not_found"; "params": EmptyErrorParams }
   | { "code": "plugin_host_incompatible"; "params": EmptyErrorParams }
+  | {
+    "code": "marketplace_s3_credentials_required";
+    "params": EmptyErrorParams;
+  }
+  | {
+    "code": "marketplace_artifact_retrieval_field_invalid";
+    "params": MarketplaceArtifactRetrievalFieldInvalidParams;
+  }
   | {
     "code": "plugin_configuration_declaration_invalid";
     "params": EmptyErrorParams;

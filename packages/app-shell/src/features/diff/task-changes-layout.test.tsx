@@ -10,7 +10,7 @@ import {
   type FileNavigationLocation,
 } from "./task-changes-navigation-context";
 import { WorkspaceReviewLayout } from "../workspace/workspace-review-layout";
-import { responsiveReviewWidth } from "../workspace/workspace-review-layout-utils";
+import { responsiveReviewWidth } from "../../state/stores/review-layout";
 import { useReviewStore } from "../../state/stores/review-store";
 
 vi.mock("./task-diff-view", () => ({

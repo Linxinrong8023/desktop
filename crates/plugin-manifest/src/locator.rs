@@ -26,18 +26,10 @@ impl ReleaseLocator {
     /// Non-HTTPS schemes (`http://`, `s3://`, …) are rejected rather than being mistaken for keys.
     pub fn parse(value: &str) -> Result<Self, ReleaseLocatorError> {
         let unwrapped = strip_markdown_link(value);
-        if unwrapped.starts_with("https://") {
-            return Ok(Self::Https(ReleaseUrl::parse(value)?));
-        }
-        // Non-HTTPS schemes must not be mistaken for object keys; reuse URL validation so
-        // `http://` reports NotHttps instead of an object-key error.
+        // Let URL validation normalize schemes and whitespace as well as reject non-HTTPS
+        // schemes, so locator classification cannot disagree with a successful URL parse.
         if unwrapped.contains("://") {
-            return match ReleaseUrl::parse(value) {
-                Ok(_) => {
-                    unreachable!("a locator containing a non-https scheme cannot parse as HTTPS")
-                }
-                Err(error) => Err(error.into()),
-            };
+            return Ok(Self::Https(ReleaseUrl::parse(value)?));
         }
         Ok(Self::ObjectKey(ObjectKey::parse(unwrapped)?))
     }
@@ -141,7 +133,7 @@ pub enum ObjectKeyError {
 #[cfg(test)]
 mod tests {
     use super::{ObjectKey, ObjectKeyError, ReleaseLocator, ReleaseLocatorError};
-    use crate::urls::UrlError;
+    use crate::urls::{ReleaseUrl, UrlError};
     use pretty_assertions::assert_eq;
 
     /// HTTPS release URLs stay HTTPS locators, including Markdown wrappers.
@@ -156,6 +148,27 @@ mod tests {
         )
         .expect("markdown https");
         assert_eq!(wrapped.as_str(), "https://example.com/plugin.orax");
+    }
+
+    /// Untrusted URL spellings accepted by the URL parser must also be valid locators.
+    #[test]
+    fn parses_normalized_https_urls_without_panicking() {
+        let expected = ReleaseLocator::Https(
+            ReleaseUrl::parse("https://example.com/plugin.orax").expect("https"),
+        );
+        for value in [
+            "HTTPS://example.com/plugin.orax",
+            "hTtPs://example.com/plugin.orax",
+            "  https://example.com/plugin.orax",
+            "\tHTTPS://example.com/plugin.orax\r\n",
+            "[plugin](HTTPS://example.com/plugin.orax)",
+            "[plugin](  https://example.com/plugin.orax  )",
+        ] {
+            assert_eq!(
+                ReleaseLocator::parse(value).expect("https locator"),
+                expected
+            );
+        }
     }
 
     /// A bare object key is accepted and round-trips.
@@ -173,14 +186,18 @@ mod tests {
     /// `http://` and other schemes are rejected instead of being treated as keys.
     #[test]
     fn rejects_non_https_schemes() {
-        assert!(matches!(
-            ReleaseLocator::parse("http://example.com/plugin.orax"),
-            Err(ReleaseLocatorError::Url(UrlError::NotHttps))
-        ));
-        assert!(matches!(
-            ReleaseLocator::parse("s3://bucket/plugin.orax"),
-            Err(ReleaseLocatorError::Url(UrlError::NotHttps))
-        ));
+        for value in [
+            "http://example.com/plugin.orax",
+            "s3://bucket/plugin.orax",
+            "HTTP://example.com/plugin.orax",
+            "  http://example.com/plugin.orax",
+            "[plugin](S3://bucket/plugin.orax)",
+        ] {
+            assert!(matches!(
+                ReleaseLocator::parse(value),
+                Err(ReleaseLocatorError::Url(UrlError::NotHttps))
+            ));
+        }
     }
 
     /// Object-key validation rejects empty, absolute, traversing, and oversized values.

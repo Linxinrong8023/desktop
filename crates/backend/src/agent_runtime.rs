@@ -1,9 +1,13 @@
 mod actor;
+mod attach;
 mod connection;
 mod events;
 mod handoff;
 mod history;
+mod load;
+mod operations;
 pub(crate) mod plugin_agent;
+mod record;
 mod replay;
 mod restart_circuit;
 mod routing;
@@ -17,12 +21,18 @@ mod title_acquisition;
 #[cfg(test)]
 mod history_tests;
 #[cfg(test)]
+mod load_tests;
+#[cfg(test)]
 mod replaced_sessions_tests;
 #[cfg(test)]
 mod unavailable_session_tests;
 
 use crate::app_event::AppEventPublisher;
+use attach::RebuiltBinding;
+use handoff::HandoffDebt;
 use history::{LocalHistoryClock, RecordOutcome, SessionRecorder};
+use load::UnreadableHistory;
+pub use operations::AgentRuntime;
 pub use stream::SessionEventStream;
 use support::*;
 use title_acquisition::TitleAcquisition;
@@ -36,16 +46,17 @@ use agent_client_protocol_schema::v1::AvailableCommand;
 use agent_client_protocol_schema::v1::ContentBlock;
 use agent_client_protocol_schema::v1::SessionUpdate;
 use agent_client_protocol_schema::v1::{RequestPermissionOutcome, RequestPermissionResponse};
-use agent_client_protocol_schema::v1::{SessionConfigId, SessionConfigOptionValue};
+use agent_client_protocol_schema::v1::{
+    SessionConfigId, SessionConfigOption, SessionConfigOptionValue,
+};
 use connection::{ConnectionStatus, ConnectionSupervisor, ConnectionSupervisors};
 use ora_application::{Clock, SessionIdGenerator, SessionRepository, UuidSessionIdGenerator};
 use ora_contracts::{
     CancelSessionPromptRequest, CancelSessionPromptResponse, DeleteSessionResponse,
     LoadSessionEvent, LoadSessionRequest, PromptSessionEvent, PromptSessionRequest,
-    RespondToPermissionRequest, RespondToPermissionResponse, ResumeSessionHistoryRequest,
-    ResumeSessionHistoryResponse, SetSessionConfigRequest, SetSessionConfigResponse,
-    StartSessionRequest, StartSessionResponse, StopSessionRequest, StopSessionResponse,
-    SwitchSessionAgentRequest, SwitchSessionAgentResponse,
+    RespondToPermissionRequest, RespondToPermissionResponse, SetSessionConfigRequest,
+    SetSessionConfigResponse, StartSessionRequest, StartSessionResponse, StopSessionRequest,
+    StopSessionResponse, SwitchSessionAgentRequest, SwitchSessionAgentResponse,
 };
 use ora_contracts::{EmptyErrorParams, PublicError};
 use ora_db::{RepositoryPool, SqliteSessionRepository};
@@ -53,8 +64,8 @@ use ora_domain::{
     AgentRef, AuditFields, HistoryState, PluginId, Session, SessionId, SessionStatus, SessionTitle,
     WorkspaceId,
 };
-use ora_history::{HistoryIntegrity, binding_needs_handoff, read_session_history};
-use ora_logging::{ora_debug, ora_warn};
+use ora_history::{binding_needs_handoff, read_session_history};
+use ora_logging::ora_debug;
 use ora_scheduler::Scheduler;
 use routing::{SessionChannel, SessionEvent};
 use std::collections::{HashMap, HashSet};
@@ -74,7 +85,7 @@ const MAX_PROMPT_BYTES: usize = 16 * 1024 * 1024;
 ///
 /// Effect coordination restarts an Agent plugin's process so it re-reads a materialized surface,
 /// which silently invalidates every provider-side session that process was holding. Implementations
-/// detach those sessions so the next interaction re-establishes them through the ordinary load path
+/// detach those sessions so the next prompt re-establishes them through the ordinary attach path
 /// rather than prompting against an id the fresh process cannot resolve.
 ///
 /// The Effect worker depends on this capability rather than on the whole agent runtime, so a
@@ -188,6 +199,8 @@ pub(super) enum RuntimeCommand {
         operation_id: u64,
         prompt: Vec<ContentBlock>,
         record_prompt: Option<Vec<ContentBlock>>,
+        /// Applied by the attach this prompt performs, and ignored when none is needed.
+        model: Option<String>,
         events: mpsc::Sender<Result<PromptSessionEvent, BackendError>>,
         accepted: oneshot::Sender<Result<(), BackendError>>,
     },
@@ -202,8 +215,15 @@ pub(super) enum RuntimeCommand {
     Cancel {
         operation_id: u64,
     },
-    PreemptTitlePolling {
-        response: oneshot::Sender<()>,
+    /// A caller outside the actor is about to address this session's provider directly.
+    ///
+    /// Answers with the provider session it must address. That is not always the binding in the
+    /// row: a session rebuilt to replace one that could not be restored is only persisted once the
+    /// prompt carrying the transcript is accepted, so until then the actor is the only holder of
+    /// the identity the agent actually answers to. Standing down title polling comes with it,
+    /// because the reply is the point at which the caller starts using that identity.
+    ClaimDirectProviderCall {
+        response: oneshot::Sender<String>,
     },
     AdoptUserTitle {
         title: SessionTitle,
@@ -227,12 +247,23 @@ struct RuntimeActor {
     commands: mpsc::UnboundedReceiver<RuntimeCommand>,
     recorder: SessionRecorder,
     sessions_root: PathBuf,
-    /// Whether the current provider binding still has to be told the history.
+    /// Opens provider sessions when a prompt needs one this actor does not hold.
+    connections: ConnectionSupervisors,
+    /// Whether the current provider binding still has to be told the conversation.
     ///
-    /// Switching agents rebinds eagerly but injects lazily, so this is answered
-    /// from the record when the actor opens and cleared once a prompt carries the
-    /// transcript across.
-    handoff_pending: bool,
+    /// A binding is established eagerly but told lazily, so this is answered from the record when
+    /// the actor opens and settled once a prompt carries the transcript across.
+    handoff: HandoffDebt,
+    /// A provider session built to replace one that could not be restored, not yet in the row.
+    rebuilt_binding: Option<RebuiltBinding>,
+    /// What the provider this actor is attached to last reported as its configuration.
+    ///
+    /// Held rather than recorded because it describes the provider serving the conversation right
+    /// now, not what was said in it. A load answers with it so that "this session reports options"
+    /// means "this session is attached" — the client decides between configuring the live session
+    /// and offering the agent's own catalog on exactly that, and inferring it from a stale absence
+    /// would silently drop a model chosen for a session that could already have been told.
+    reported_config_options: Vec<SessionConfigOption>,
     scheduler: Scheduler,
     app_events: AppEventPublisher,
     title_acquisition: TitleAcquisition,
@@ -242,17 +273,6 @@ struct RuntimeActor {
     live_mcp: LiveMcpState,
     #[cfg(test)]
     exit_probe: Option<oneshot::Sender<()>>,
-}
-
-/// One session's opened recorder together with what reading its file revealed.
-struct OpenedRecorder {
-    recorder: SessionRecorder,
-    handoff_pending: bool,
-    /// Set when the history could not be read, which degrades the session.
-    ///
-    /// A history Ora cannot read is one it cannot safely extend: appending
-    /// without knowing the positions already used would overwrite them.
-    failure: Option<String>,
 }
 
 /// Controls whether a newly persisted session is visible before an owning workflow row commits.
@@ -390,9 +410,10 @@ impl AgentRuntimeManager {
                     connection: supervisor,
                     channel: Some(channel),
                     recorder: opened.recorder,
-                    handoff_pending: false,
+                    handoff: HandoffDebt::Settled,
                     title_acquisition,
                     live_mcp: LiveMcpState::Active(mcp_revision),
+                    config_options: config_options.clone(),
                 },
             )?;
             Ok::<_, BackendError>(StartSessionResponse {
@@ -508,20 +529,27 @@ impl AgentRuntimeManager {
         let config_id = SessionConfigId::new(request.config_id);
         let value = SessionConfigOptionValue::value_id(request.value);
         let session = self.find_session(&request.session_id)?;
-        if let Some(handle) = self.lookup_actor(&session.id)? {
-            let (response, acknowledged) = oneshot::channel();
-            handle
-                .commands
-                .send(RuntimeCommand::PreemptTitlePolling { response })
-                .map_err(|_error| runtime_unavailable())?;
-            acknowledged.await.map_err(|_error| runtime_unavailable())?;
-        }
+        // The live actor is asked which provider session to address rather than reading the row,
+        // because a session it rebuilt is not in the row until the transcript reaches it — writing
+        // configuration to the row's identity would reach the provider being replaced. A session
+        // with no actor holds no rebuilt binding, so its row is authoritative.
+        let agent_session_id = match self.lookup_actor(&session.id)? {
+            Some(handle) => {
+                let (response, claimed) = oneshot::channel();
+                handle
+                    .commands
+                    .send(RuntimeCommand::ClaimDirectProviderCall { response })
+                    .map_err(|_error| runtime_unavailable())?;
+                claimed.await.map_err(|_error| runtime_unavailable())?
+            }
+            None => session.agent_session_id.clone(),
+        };
         // The provider request remains direct because it is independent of the actor's
-        // serialized prompt/load stream; only the title-polling attempt needs preemption.
+        // serialized prompt/load stream; only the title-polling attempt needs standing down.
         let config_options = start::request_config_option(
             &self.inner.connections,
             &session.agent_ref,
-            &session.agent_session_id,
+            &agent_session_id,
             &config_id,
             &value,
         )
@@ -642,9 +670,10 @@ impl AgentRuntimeManager {
                     channel: Some(channel),
                     recorder,
                     // The new agent knows nothing; the next prompt carries the transcript.
-                    handoff_pending: true,
+                    handoff: HandoffDebt::Recorded,
                     title_acquisition: TitleAcquisition::locked(),
                     live_mcp: LiveMcpState::Active(mcp_revision),
+                    config_options: config_options.clone(),
                 },
             )?;
             Ok::<_, BackendError>(SwitchSessionAgentResponse {
@@ -699,132 +728,6 @@ impl AgentRuntimeManager {
         Ok((self.settle_record(session, outcome), opened.recorder))
     }
 
-    /// Returns a session whose history writes failed to a writable state.
-    ///
-    /// The gap is recorded before anything else, so what the failure cost stays
-    /// visible to everyone who reads the file afterwards — including the agent
-    /// that receives this conversation next.
-    pub(crate) async fn resume_history(
-        &self,
-        request: ResumeSessionHistoryRequest,
-    ) -> Result<ResumeSessionHistoryResponse, BackendError> {
-        let _lifecycle = self.inner.lifecycle.lock().await;
-        let session = self.find_session(&request.session_id)?;
-        let HistoryState::Degraded { reason } = session.history_state.clone() else {
-            return Ok(ResumeSessionHistoryResponse {
-                session: contract_session(session),
-            });
-        };
-        // The live actor still holds a stopped recorder, so it is discarded and
-        // rebuilt from the recovered row on the session's next operation.
-        if let Some(handle) = self.lookup_actor(&session.id)? {
-            self.stop_actor(handle).await?;
-        }
-        self.actors_write()?.remove(&session.id);
-
-        let mut opened = self.open_recorder(&session)?;
-        if let Some(failure) = opened.failure {
-            return Err(BackendError::new(
-                ErrorClassification::Internal,
-                PublicError::SessionHistoryDegraded(EmptyErrorParams {}),
-                format!("session history is still unreadable: {failure}"),
-            ));
-        }
-        if let RecordOutcome::JustFailed { reason } = opened.recorder.resume(reason) {
-            return Err(BackendError::new(
-                ErrorClassification::Internal,
-                PublicError::SessionHistoryDegraded(EmptyErrorParams {}),
-                format!("session history is still unwritable: {reason}"),
-            ));
-        }
-        let now = self.inner.clock.now_timestamp_millis();
-        let session = SqliteSessionRepository::new(self.inner.pool.clone())
-            .update_session_history_state(
-                &SessionId::new(request.session_id.clone()),
-                &HistoryState::Writable,
-                now,
-            )
-            .map_err(|source| BackendError::internal("failed to resume session history", source))?;
-        Ok(ResumeSessionHistoryResponse {
-            session: contract_session(session),
-        })
-    }
-
-    /// Opens one session's recorder, resuming its position counter from the file.
-    fn open_recorder(&self, session: &Session) -> Result<OpenedRecorder, BackendError> {
-        let root = &self.inner.sessions_root;
-        let session_id = session.id.as_ref();
-        match read_session_history(root, session_id) {
-            Ok(history) => {
-                if let HistoryIntegrity::Damaged { unreadable_lines } = history.integrity {
-                    ora_warn!(
-                        session_id = %session.id,
-                        unreadable_lines = unreadable_lines.get(),
-                        "session history contains unreadable lines",
-                    );
-                }
-                let recorder = SessionRecorder::open(
-                    root,
-                    session_id,
-                    history.next_seq,
-                    &session.history_state,
-                    LocalHistoryClock,
-                )
-                .map_err(|source| {
-                    BackendError::internal("failed to open session history", source)
-                })?;
-                Ok(OpenedRecorder {
-                    recorder,
-                    handoff_pending: binding_needs_handoff(&history),
-                    failure: None,
-                })
-            }
-            Err(error) => {
-                // Appending without knowing which positions are already used would
-                // overwrite them, so an unreadable file stops recording outright.
-                ora_warn!(session_id = %session.id, error = %error, "session history is unreadable");
-                let failure = error.to_string();
-                let recorder = SessionRecorder::open(
-                    root,
-                    session_id,
-                    0,
-                    &HistoryState::Degraded {
-                        reason: failure.clone(),
-                    },
-                    LocalHistoryClock,
-                )
-                .map_err(|source| {
-                    BackendError::internal("failed to open session history", source)
-                })?;
-                Ok(OpenedRecorder {
-                    recorder,
-                    handoff_pending: false,
-                    failure: Some(failure),
-                })
-            }
-        }
-    }
-
-    /// Persists the degraded state when a recording attempt just broke the history.
-    fn settle_record(&self, session: Session, outcome: RecordOutcome) -> Session {
-        let RecordOutcome::JustFailed { reason } = outcome else {
-            return session;
-        };
-        let now = self.inner.clock.now_timestamp_millis();
-        let degraded = session.with_history_state(HistoryState::Degraded { reason }, now);
-        match SqliteSessionRepository::new(self.inner.pool.clone()).update_session_history_state(
-            &degraded.id,
-            &degraded.history_state,
-            now,
-        ) {
-            Ok(stored) => stored,
-            Err(error) => {
-                ora_warn!(error = %error, "failed to persist degraded session history state");
-                degraded
-            }
-        }
-    }
-
     /// Resolves a workspace's execution directory without consulting a Task projection.
     pub(crate) fn workspace_cwd(
         &self,
@@ -837,27 +740,35 @@ impl AgentRuntimeManager {
         )
     }
 
-    /// Loads one session conversation, using Ora's record when its provider cannot be restored.
+    /// Serves one session conversation from Ora's own record, following a live turn when there is one.
+    ///
+    /// Opening a conversation never touches ACP. The transcript belongs to Ora rather than to the
+    /// agent that produced it, so a session whose plugin was uninstalled — or whose CLI cannot
+    /// start — still reads, and no provider session is created for a reader who may never send
+    /// anything. The agent is reached by the first prompt instead.
+    ///
+    /// A live actor answers its own loads: only it knows the durable cutoff and the records of a
+    /// turn still streaming, which is what lets a load hand off from disk to live without a gap.
     pub(crate) async fn load_session(
         &self,
         request: LoadSessionRequest,
     ) -> Result<SessionEventStream<LoadSessionEvent>, BackendError> {
         let _lifecycle = self.inner.lifecycle.lock().await;
         let session = self.find_session(&request.session_id)?;
-        let handle = match self.actor_for(session.clone()) {
-            Ok(handle) => handle,
-            Err(error)
-                if matches!(
-                    error.public_error(),
-                    PublicError::AgentRuntimeUnavailable(_)
-                ) =>
-            {
-                // Ora owns the transcript independently of the provider. A removed agent cannot
-                // be restored, but it must not hide the history the user needs before choosing a
-                // replacement; the ordinary switch path creates the replacement actor later.
-                return self.load_recorded_history(session);
-            }
-            Err(error) => return Err(error),
+        let Some(handle) = self.lookup_actor(&session.id)? else {
+            return load::detached_replay(&self.inner.sessions_root, session.id.as_ref()).map_err(
+                |UnreadableHistory { reason }| {
+                    // A record no reader can see must not be appended to either, and a load is
+                    // usually the first thing to touch it. Degrading here rather than waiting for
+                    // a prompt to open its recorder is what stops the composer at the same moment
+                    // the transcript stops being readable.
+                    self.settle_record(session, RecordOutcome::JustFailed { reason });
+                    runtime_internal(
+                        "session_history_unreadable",
+                        "session history could not be read",
+                    )
+                },
+            );
         };
         let operation_id = self.inner.next_operation_id.fetch_add(1, Ordering::Relaxed);
         let (events_sender, events) = mpsc::channel(CONTRACT_QUEUE_CAPACITY);
@@ -878,36 +789,6 @@ impl AgentRuntimeManager {
         ))
     }
 
-    /// Streams Ora's durable transcript without restoring its unavailable provider binding.
-    fn load_recorded_history(
-        &self,
-        session: Session,
-    ) -> Result<SessionEventStream<LoadSessionEvent>, BackendError> {
-        let history = read_session_history(&self.inner.sessions_root, session.id.as_ref())
-            .map_err(|error| {
-                let reason = error.to_string();
-                ora_warn!(
-                    session_id = %session.id,
-                    error = %error,
-                    "session history is unreadable during provider-independent load"
-                );
-                self.settle_record(session, RecordOutcome::JustFailed { reason });
-                runtime_internal(
-                    "session_history_unreadable",
-                    "session history could not be read",
-                )
-            })?;
-        let (sender, receiver) = mpsc::channel(CONTRACT_QUEUE_CAPACITY);
-        tokio::spawn(async move {
-            for event in replay::recorded_replay(history).chain([LoadSessionEvent::Completed]) {
-                if sender.send(Ok(event)).await.is_err() {
-                    break;
-                }
-            }
-        });
-        Ok(SessionEventStream::with_cleanup(receiver, || {}))
-    }
-
     /// Starts one structured ACP prompt stream after validating the public payload limit.
     pub(crate) async fn prompt_session(
         &self,
@@ -915,6 +796,7 @@ impl AgentRuntimeManager {
     ) -> Result<SessionEventStream<PromptSessionEvent>, BackendError> {
         let prompt = request.prompt;
         let record_prompt = request.record_prompt;
+        let model = request.model;
         if prompt.is_empty()
             || prompt.iter().all(|content| {
                 matches!(content, ContentBlock::Text(text) if text.text.trim().is_empty())
@@ -938,9 +820,10 @@ impl AgentRuntimeManager {
         }
         let _lifecycle = self.inner.lifecycle.lock().await;
         let session = self.find_session(&request.session_id)?;
-        if session.status != SessionStatus::Running {
-            return Err(session_stopped());
-        }
+        // Lifecycle status is not a precondition: a session that has only been read holds no
+        // provider, and acquiring one is part of sending rather than something the caller has to
+        // arrange first. The actor attaches, and reports its own failure if it cannot.
+        //
         // A session whose history stopped recording refuses new turns rather than
         // producing conversation that would never be part of the record.
         if let HistoryState::Degraded { .. } = session.history_state {
@@ -956,6 +839,7 @@ impl AgentRuntimeManager {
                 operation_id,
                 prompt,
                 record_prompt,
+                model,
                 events: events_sender,
                 accepted: accepted_sender,
             })
@@ -1078,7 +962,11 @@ impl AgentRuntimeManager {
             Some(reason) => self.settle_record(session, RecordOutcome::JustFailed { reason }),
             None => session,
         };
-        let handoff_pending = opened.handoff_pending;
+        let handoff = if opened.handoff_pending {
+            HandoffDebt::Recorded
+        } else {
+            HandoffDebt::Settled
+        };
         self.insert_actor(
             session,
             ActorSetup {
@@ -1086,9 +974,10 @@ impl AgentRuntimeManager {
                 connection,
                 channel: None,
                 recorder: opened.recorder,
-                handoff_pending,
+                handoff,
                 title_acquisition: TitleAcquisition::disabled(),
                 live_mcp: LiveMcpState::Inactive,
+                config_options: Vec::new(),
             },
         )
     }
@@ -1131,7 +1020,10 @@ impl AgentRuntimeManager {
                 commands: receiver,
                 recorder: setup.recorder,
                 sessions_root: self.inner.sessions_root.clone(),
-                handoff_pending: setup.handoff_pending,
+                connections: self.inner.connections.clone(),
+                handoff: setup.handoff,
+                rebuilt_binding: None,
+                reported_config_options: setup.config_options,
                 scheduler: self.inner.scheduler.clone(),
                 app_events: self.inner.app_events.clone(),
                 title_acquisition: setup.title_acquisition,
@@ -1175,9 +1067,11 @@ struct ActorSetup {
     connection: ConnectionSupervisor,
     channel: Option<SessionChannel>,
     recorder: SessionRecorder,
-    handoff_pending: bool,
+    handoff: HandoffDebt,
     title_acquisition: TitleAcquisition,
     live_mcp: LiveMcpState,
+    /// What the handshake that produced `channel` reported, empty when there is no channel.
+    config_options: Vec<SessionConfigOption>,
 }
 
 /// Builds the refusal returned while a session's history cannot be extended.

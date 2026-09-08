@@ -114,7 +114,7 @@ impl WorkflowRunCallback for WorkflowRunEngineCallback {
 pub(crate) struct WorkflowRunEngineAssembly {
     pub control: Arc<ConcreteWorkflowRunControl>,
     /// Serializes every scheduling-affecting mutation per run. Shared with the callback and the
-    /// `Backend` control entry points so no two engine mutations for one run interleave.
+    /// workflow-run control entry points so no two engine mutations for one run interleave.
     pub run_locks: Arc<KeyedResourceLocks>,
     /// The raw engine, used by boot recovery to resume scheduling on a stalled run.
     pub engine: Arc<ConcreteWorkflowRunEngine>,

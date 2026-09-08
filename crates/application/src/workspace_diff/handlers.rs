@@ -1,13 +1,17 @@
-use super::ports::{CommitWorkspaceGitRequest, PushWorkspaceGitRequest, WorkspaceGitWriter};
+use super::ports::{
+    CommitWorkspaceGitRequest, PushWorkspaceGitRequest, StageWorkspaceGitRequest,
+    UnstageWorkspaceGitRequest, WorkspaceGitWriter,
+};
 use crate::{ApplicationError, WorktreeRepository};
 use ora_contracts::{
     CommitWorkspaceChangesRequest, CommitWorkspaceChangesResponse, PushWorkspaceBranchRequest,
-    PushWorkspaceBranchResponse,
+    PushWorkspaceBranchResponse, StageWorkspaceChangesRequest, StageWorkspaceChangesResponse,
+    UnstageWorkspaceChangesRequest, UnstageWorkspaceChangesResponse,
 };
 use ora_domain::{WorkspaceId, Worktree};
 use std::path::PathBuf;
 
-/// Commits the complete change set from one workspace checkout.
+/// Commits the currently staged change set from one workspace checkout.
 pub struct CommitWorkspaceChangesHandler<WorktreeRepositoryPort, GitWriter> {
     worktree_repository: WorktreeRepositoryPort,
     git_writer: GitWriter,
@@ -69,6 +73,128 @@ where
             commit_id: commit.commit_id,
             summary: commit.summary,
         })
+    }
+}
+
+/// Stages changes from one workspace checkout, verified against its recorded branch when present.
+pub struct StageWorkspaceChangesHandler<WorktreeRepositoryPort, GitWriter> {
+    worktree_repository: WorktreeRepositoryPort,
+    git_writer: GitWriter,
+    worktree_path: PathBuf,
+}
+
+impl<WorktreeRepositoryPort, GitWriter>
+    StageWorkspaceChangesHandler<WorktreeRepositoryPort, GitWriter>
+{
+    /// Builds a staging handler from persistence, Git, and backend path dependencies.
+    pub fn new(
+        worktree_repository: WorktreeRepositoryPort,
+        git_writer: GitWriter,
+        worktree_path: PathBuf,
+    ) -> Self {
+        Self {
+            worktree_repository,
+            git_writer,
+            worktree_path,
+        }
+    }
+}
+
+impl<WorktreeRepositoryPort, GitWriter>
+    StageWorkspaceChangesHandler<WorktreeRepositoryPort, GitWriter>
+where
+    WorktreeRepositoryPort: WorktreeRepository,
+    GitWriter: WorkspaceGitWriter,
+{
+    /// Stages the requested paths through the verified path when a `Worktree` row is recorded,
+    /// or the unguarded path when it is a plain checkout.
+    pub fn handle(
+        &self,
+        request: StageWorkspaceChangesRequest,
+    ) -> Result<StageWorkspaceChangesResponse, ApplicationError> {
+        let workspace_id = WorkspaceId::new(request.workspace_id);
+        let worktree = load_worktree(&self.worktree_repository, &workspace_id)?;
+        let staged_paths = match worktree {
+            Some(worktree) => {
+                self.git_writer
+                    .stage_changes(StageWorkspaceGitRequest {
+                        worktree_path: self.worktree_path.clone(),
+                        expected_branch_name: recorded_branch(&worktree)?.to_string(),
+                        paths: request.paths,
+                    })
+                    .map_err(workspace_git_writer_error)?
+                    .staged_paths
+            }
+            None => {
+                self.git_writer
+                    .stage_worktree_changes(&self.worktree_path, request.paths)
+                    .map_err(workspace_git_writer_error)?
+                    .staged_paths
+            }
+        };
+
+        Ok(StageWorkspaceChangesResponse { staged_paths })
+    }
+}
+
+/// Unstages changes from one workspace checkout, verified against its recorded branch when present.
+pub struct UnstageWorkspaceChangesHandler<WorktreeRepositoryPort, GitWriter> {
+    worktree_repository: WorktreeRepositoryPort,
+    git_writer: GitWriter,
+    worktree_path: PathBuf,
+}
+
+impl<WorktreeRepositoryPort, GitWriter>
+    UnstageWorkspaceChangesHandler<WorktreeRepositoryPort, GitWriter>
+{
+    /// Builds an unstaging handler from persistence, Git, and backend path dependencies.
+    pub fn new(
+        worktree_repository: WorktreeRepositoryPort,
+        git_writer: GitWriter,
+        worktree_path: PathBuf,
+    ) -> Self {
+        Self {
+            worktree_repository,
+            git_writer,
+            worktree_path,
+        }
+    }
+}
+
+impl<WorktreeRepositoryPort, GitWriter>
+    UnstageWorkspaceChangesHandler<WorktreeRepositoryPort, GitWriter>
+where
+    WorktreeRepositoryPort: WorktreeRepository,
+    GitWriter: WorkspaceGitWriter,
+{
+    /// Unstages the requested paths through the verified path when a `Worktree` row is recorded,
+    /// or the unguarded path when it is a plain checkout.
+    pub fn handle(
+        &self,
+        request: UnstageWorkspaceChangesRequest,
+    ) -> Result<UnstageWorkspaceChangesResponse, ApplicationError> {
+        let workspace_id = WorkspaceId::new(request.workspace_id);
+        let worktree = load_worktree(&self.worktree_repository, &workspace_id)?;
+        let unstaged_paths = match worktree {
+            Some(worktree) => {
+                self.git_writer
+                    .unstage_changes(UnstageWorkspaceGitRequest {
+                        worktree_path: self.worktree_path.clone(),
+                        expected_branch_name: recorded_branch(&worktree)?.to_string(),
+                        paths: request.paths,
+                    })
+                    .map_err(workspace_git_writer_error)?
+                    .unstaged_paths
+            }
+            None => {
+                self.git_writer
+                    .unstage_worktree_changes(&self.worktree_path, request.paths)
+                    .map_err(workspace_git_writer_error)?
+                    .unstaged_paths
+            }
+        };
+
+        Ok(UnstageWorkspaceChangesResponse { unstaged_paths })
     }
 }
 
@@ -149,8 +275,8 @@ fn workspace_git_writer_error(error: super::WorkspaceGitWriterError) -> Applicat
     }
 }
 
-/// Loads the optional `Worktree` row recorded for a workspace, so commit and push share
-/// identical lookup behavior.
+/// Loads the optional `Worktree` row recorded for a workspace, so commit, push, stage, and
+/// unstage share identical lookup behavior.
 fn load_worktree<WorktreeRepositoryPort>(
     worktree_repository: &WorktreeRepositoryPort,
     workspace_id: &WorkspaceId,

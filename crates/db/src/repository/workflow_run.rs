@@ -287,10 +287,12 @@ fn list_summary_rows(
     let sql = format!(
         "SELECT wr.id, wr.workspace_id, w.project_id, wr.name, wr.workflow_id, wr.run_status,
                 wr.started_at, wr.finished_at, wr.created_at,
+                ws.version AS snapshot_version,
                 EXISTS(SELECT 1 FROM workflow_node_runs n
                        WHERE n.run_id = wr.id AND n.status = 0 AND n.is_deleted = 0) AS has_awaiting_node
          FROM workflow_runs wr
          JOIN workspaces w ON w.id = wr.workspace_id AND w.is_deleted = 0
+         LEFT JOIN workflow_snapshots ws ON ws.id = wr.snapshot_id
          WHERE {predicate} AND wr.is_deleted = 0
          ORDER BY wr.created_at ASC, wr.id ASC"
     );
@@ -304,6 +306,11 @@ fn list_summary_rows(
             workspace_id: WorkspaceId::new(row.get::<_, String>("workspace_id")?),
             project_id: ProjectId::new(row.get::<_, String>("project_id")?),
             workflow_id: WorkflowId::new(row.get::<_, String>("workflow_id")?),
+            // The foreign key guarantees the snapshot row, so the fallback only tolerates a
+            // manually corrupted database instead of dropping the run from the list.
+            version: row
+                .get::<_, Option<String>>("snapshot_version")?
+                .unwrap_or_default(),
             status: WorkflowRunStatus::from_database_value(row.get("run_status")?)?,
             has_awaiting_node: row.get("has_awaiting_node")?,
             started_at: row.get("started_at")?,

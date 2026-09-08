@@ -1,3 +1,4 @@
+import { isTerminalRunStatus } from "@ora/workflow-runtime";
 import {
   useEffect,
   useMemo,
@@ -7,7 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge, cn, toast } from "@ora/ui";
-import { useUpdateWorkflowRunInput } from "../../state/hooks/use-workflow-runs";
+import { useUpdateWorkflowRunInput } from "../../state/data/workflow-runs";
 import { filterArtifacts, latestArtifact } from "./artifact-filter";
 import { RunActInspector } from "./run-act-inspector";
 import { RunResultAct } from "./run-result-act";
@@ -16,7 +17,6 @@ import { RunTheaterParallelStage } from "./run-theater-parallel-stage";
 import { RunTheaterPathRail } from "./run-theater-path-rail";
 import { resolveTheaterFocus } from "./run-focus";
 import { isNodeWorking } from "./run-status-style";
-import { isTerminalRunStatus } from "./run-status-style";
 import {
   animateOverlayWidth,
   cancelOverlayWidthAnimation,

@@ -11,10 +11,23 @@ import {
 import { createStubPlatform } from "../../test/stub-platform";
 import { createChatStore } from "@ora/chat";
 import {
-  createMockClient,
-  createMockClientState,
-  type MockClientState,
-} from "../../test/mock-client";
+  createTestClient,
+  type TestHandlers,
+} from "../../test/contracts-transport";
+import {
+  createWorkspaceMemory,
+  workspaceHandlers,
+} from "../../test/memory/workspaces";
+import {
+  createSessionMemory,
+  sessionHandlers,
+} from "../../test/memory/sessions";
+import {
+  createAgentRuntimeMemory,
+  agentRuntimeHandlers,
+} from "../../test/memory/agent-runtime";
+import { createPluginMemory, pluginHandlers } from "../../test/memory/plugins";
+import "../../i18n/i18n-instance";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
 import { useUiStore } from "../../state/stores/ui-store";
 import {
@@ -25,8 +38,30 @@ import { usePendingAgentStore } from "../../state/stores/pending-agent-store";
 import { useAgentModelPreferenceStore } from "../../state/stores/agent-model-preference-store";
 import type { AgentStatus } from "@ora/contracts";
 import { ModelSelector } from "./model-selector";
-import { queryKeys } from "../../state/hooks/query-keys";
+import { agentRuntimeKeys } from "../../state/data/agent-runtime";
 import { AGENT_REF } from "../../test/agent-identity";
+
+/** State for this test surface; no unrelated domain fixtures are initialized. */
+function createFixtureState() {
+  return {
+    ...createWorkspaceMemory(),
+    ...createSessionMemory(),
+    ...createAgentRuntimeMemory(),
+    ...createPluginMemory(),
+  };
+}
+
+type FixtureState = ReturnType<typeof createFixtureState>;
+
+/** Explicit domain composition for the behaviors exercised by this test file. */
+function createFixtureHandlers(state: FixtureState): TestHandlers {
+  return {
+    ...workspaceHandlers(state),
+    ...sessionHandlers(state),
+    ...agentRuntimeHandlers(state),
+    ...pluginHandlers(state),
+  };
+}
 
 beforeEach(() => {
   useWorkspaceSelectionStore.getState().clearSelection();
@@ -39,7 +74,7 @@ beforeEach(() => {
 
 /** Replaces what the runtime reports about OpenCode, leaving every other agent detected. */
 function reportOpenCode(status: AgentStatus) {
-  return (state: MockClientState) => {
+  return (state: FixtureState) => {
     state.agentRuntimeStatuses = state.agentRuntimeStatuses.map((candidate) =>
       candidate.agentRef === AGENT_REF.opencode
         ? { ...candidate, status }
@@ -48,10 +83,8 @@ function reportOpenCode(status: AgentStatus) {
   };
 }
 
-function renderModelSelector(
-  seed: (state: MockClientState) => void = () => {},
-) {
-  const state = createMockClientState();
+function renderModelSelector(seed: (state: FixtureState) => void = () => {}) {
+  const state = createFixtureState();
   state.tasks = [
     {
       id: "t1",
@@ -73,8 +106,10 @@ function renderModelSelector(
     lifecycle: "active" as const,
   }));
   seed(state);
-  const client = createMockClient(state);
+  const clientHandlers: TestHandlers = createFixtureHandlers(state);
+  const client = createTestClient(clientHandlers);
   const discover = vi.spyOn(client.agentRuntime, "listModels");
+  const setConfig = vi.spyOn(client.session, "setConfig");
   const chatStore = createChatStore(client.session);
   const queryClient = createTestQueryClient();
   const Wrapper = createHookWrapper(client, queryClient, chatStore);
@@ -89,7 +124,22 @@ function renderModelSelector(
       </AppI18nProvider>
     </Wrapper>,
   );
-  return { queryClient, state, discover, chatStore };
+  return { queryClient, state, discover, setConfig, chatStore };
+}
+
+/** One persisted session bound to OpenCode, selected as the surface the picker reads. */
+function selectPersistedSession(state: FixtureState) {
+  state.sessions = [
+    {
+      id: "s1",
+      workspaceId: "workspace-t1",
+      title: null,
+      agentRef: AGENT_REF.opencode,
+      status: "stopped",
+      historyState: { type: "writable" },
+    },
+  ];
+  useWorkspaceSelectionStore.getState().selectSession("s1", "t1", "p1");
 }
 
 /** The collapsed trigger, which names the agent this surface is currently on. */
@@ -113,6 +163,106 @@ async function pickAgent(
   await user.click(within(menu).getByText(agentLabel));
   await user.keyboard("{Escape}");
 }
+
+/**
+ * Replays the conversation the way opening one does, which reports no options.
+ *
+ * A load that finishes without them is what settles the session as unattached; before it does,
+ * "not answered yet" must not read as "has no provider".
+ */
+async function openDetachedConversation(
+  chatStore: ReturnType<typeof createChatStore>,
+) {
+  await act(async () => {
+    await chatStore.getState().loadSession("s1");
+  });
+}
+
+describe("ModelSelector for a session that has not attached", () => {
+  /**
+   * Reading a conversation never reaches its agent, so a persisted session can be open with no
+   * provider and nothing to configure. The picker is then in exactly the position of a chat that
+   * has not started, and asking the agent for its own catalog is the only way to offer anything.
+   */
+  it("offers the agent's own catalog while the session reports no options", async () => {
+    const { discover, chatStore } = renderModelSelector(selectPersistedSession);
+    await openDetachedConversation(chatStore);
+
+    await waitFor(() =>
+      expect(discover).toHaveBeenCalledWith(
+        expect.objectContaining({ agentRef: AGENT_REF.opencode }),
+      ),
+    );
+    const user = userEvent.setup();
+    await user.click(picker());
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText(/Big Pickle/)).toBeInTheDocument();
+  });
+
+  /**
+   * The pick has nowhere to go while no provider exists, so it is recorded and carried by the
+   * message that attaches one. Writing it through `setSessionConfig` would address a provider
+   * session the agent has never heard of.
+   */
+  it("records a pick as an intent instead of configuring an absent provider", async () => {
+    const { setConfig, chatStore } = renderModelSelector(
+      selectPersistedSession,
+    );
+    await openDetachedConversation(chatStore);
+    const user = userEvent.setup();
+
+    await user.click(picker());
+    const menu = await screen.findByRole("menu");
+    await user.click(within(menu).getByText(/Small Pickle/));
+
+    await waitFor(() =>
+      expect(
+        usePendingAgentStore.getState().models[
+          `session:s1|agent:${AGENT_REF.opencode}`
+        ],
+      ).toEqual("opencode/small-pickle"),
+    );
+    expect(setConfig).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Options are what say a provider is there to configure. Once one reports them the session is
+   * authoritative about its own model, and the agent's pre-session catalog must not be asked for
+   * or shown — it lists what the agent can serve, not what this conversation is running.
+   */
+  it("configures the live session once it reports options of its own", async () => {
+    const { discover, setConfig, chatStore } = renderModelSelector(
+      selectPersistedSession,
+    );
+    act(() => {
+      chatStore.getState().setConfigOptions("s1", [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "session/current",
+          options: [
+            { value: "session/current", name: "Session Current" },
+            { value: "session/other", name: "Session Other" },
+          ],
+        },
+      ]);
+    });
+
+    const user = userEvent.setup();
+    await user.click(picker());
+    const menu = await screen.findByRole("menu");
+    await user.click(within(menu).getByText(/Session Other/));
+
+    await waitFor(() =>
+      expect(setConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: "s1", value: "session/other" }),
+      ),
+    );
+    expect(discover).not.toHaveBeenCalled();
+  });
+});
 
 describe("ModelSelector agent isolation across not-yet-started chats", () => {
   it("keeps one task's picked agent stable while another task's pick changes", async () => {
@@ -241,14 +391,16 @@ describe("ModelSelector agent availability", () => {
       expect(within(menu).queryByText("Big Pickle")).not.toBeNull(),
     );
     await waitFor(() =>
-      expect(queryClient.getQueryData(queryKeys.agentRuntimeStatus)).toEqual(
-        state.agentRuntimeStatuses,
-      ),
+      expect(
+        queryClient.getQueryData(agentRuntimeKeys.agentRuntimeStatus),
+      ).toEqual(state.agentRuntimeStatuses),
     );
 
     reportOpenCode("unavailable")(state);
     await act(() =>
-      queryClient.invalidateQueries({ queryKey: queryKeys.agentRuntimeStatus }),
+      queryClient.invalidateQueries({
+        queryKey: agentRuntimeKeys.agentRuntimeStatus,
+      }),
     );
 
     await waitFor(() =>
@@ -271,14 +423,16 @@ describe("ModelSelector agent availability", () => {
     expect(within(picker()).queryByText("OpenCode")).toBeNull();
     expect(within(picker()).queryByText("NGA")).toBeNull();
     await waitFor(() =>
-      expect(queryClient.getQueryData(queryKeys.agentRuntimeStatus)).toEqual(
-        state.agentRuntimeStatuses,
-      ),
+      expect(
+        queryClient.getQueryData(agentRuntimeKeys.agentRuntimeStatus),
+      ).toEqual(state.agentRuntimeStatuses),
     );
 
     reportOpenCode("ready")(state);
     await act(() =>
-      queryClient.invalidateQueries({ queryKey: queryKeys.agentRuntimeStatus }),
+      queryClient.invalidateQueries({
+        queryKey: agentRuntimeKeys.agentRuntimeStatus,
+      }),
     );
 
     const user = userEvent.setup();
@@ -298,20 +452,22 @@ describe("ModelSelector agent availability", () => {
 
     act(() => useWorkspaceSelectionStore.getState().selectTask("t1", "p1"));
     await waitFor(() =>
-      expect(queryClient.getQueryData(queryKeys.agentRuntimeStatus)).toEqual(
-        state.agentRuntimeStatuses,
-      ),
+      expect(
+        queryClient.getQueryData(agentRuntimeKeys.agentRuntimeStatus),
+      ).toEqual(state.agentRuntimeStatuses),
     );
     expect(discover).not.toHaveBeenCalled();
 
     reportOpenCode("starting")(state);
     await act(() =>
-      queryClient.invalidateQueries({ queryKey: queryKeys.agentRuntimeStatus }),
+      queryClient.invalidateQueries({
+        queryKey: agentRuntimeKeys.agentRuntimeStatus,
+      }),
     );
     await waitFor(() =>
-      expect(queryClient.getQueryData(queryKeys.agentRuntimeStatus)).toEqual(
-        state.agentRuntimeStatuses,
-      ),
+      expect(
+        queryClient.getQueryData(agentRuntimeKeys.agentRuntimeStatus),
+      ).toEqual(state.agentRuntimeStatuses),
     );
     expect(discover).not.toHaveBeenCalled();
 
@@ -322,7 +478,9 @@ describe("ModelSelector agent availability", () => {
 
     reportOpenCode("ready")(state);
     await act(() =>
-      queryClient.invalidateQueries({ queryKey: queryKeys.agentRuntimeStatus }),
+      queryClient.invalidateQueries({
+        queryKey: agentRuntimeKeys.agentRuntimeStatus,
+      }),
     );
 
     await waitFor(() => expect(discover).toHaveBeenCalledOnce());
@@ -451,7 +609,7 @@ async function pickModel(
 }
 
 /** A second agent whose catalog shares no model with OpenCode's. */
-function claudeModels(state: MockClientState) {
+function claudeModels(state: FixtureState) {
   state.agentModelsByCli = {
     [AGENT_REF.claude]: [
       {

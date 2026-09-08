@@ -64,7 +64,9 @@ Task Changes panel: parsed worktree patches, file tree, and git commit/push acti
   The line note is what chat history reads back to redraw the same chip label:
   the hunk counts only cover the body, which is shorter than the span whenever
   the drag crossed a collapsed hunk.
-- Own commit/push UI for the same task worktree.
+- Own commit/push UI for the same task worktree, plus per-file and stage-all /
+  unstage-all actions through `getWorkspaceStatus` / `stageWorkspaceChanges` /
+  `unstageWorkspaceChanges`; commit always targets only the staged change set.
 
 ## Non-responsibilities
 

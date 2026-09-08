@@ -9,12 +9,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { appI18n } from "../../i18n/i18n-instance";
 import { useTaskDiffQuoteGutter } from "./task-diff-quote-gutter";
 
-vi.mock("../chat/add-composer-file-selection", () => ({
+vi.mock("../../state/actions/add-composer-file-selection", () => ({
   addComposerFileSelections: vi.fn(),
 }));
 
 const addComposerFileSelections = vi.mocked(
-  await import("../chat/add-composer-file-selection"),
+  await import("../../state/actions/add-composer-file-selection"),
 ).addComposerFileSelections;
 
 const PATCH = [

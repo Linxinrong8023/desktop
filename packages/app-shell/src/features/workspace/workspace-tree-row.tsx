@@ -29,7 +29,7 @@ import type { GraphWorkflowRunStatus } from "@ora/workflow-runtime";
 import {
   useRenameWorkflowRun,
   useWorkflowRunsByProject,
-} from "../../state/hooks/use-workflow-runs";
+} from "../../state/data/workflow-runs";
 import { useInlineTreeRename } from "./use-inline-tree-rename";
 
 /**
@@ -109,6 +109,10 @@ interface TreeRowProps {
   createFocused?: boolean;
   icon: ReactNode;
   label: string;
+  /**
+   * Supplementary text revealed on row hover so rows stay clean by default; the
+   * span keeps its layout space while invisible, so the label never reflows.
+   */
   meta?: string;
   expanded?: boolean;
   onClick: () => void;
@@ -234,7 +238,8 @@ export function TreeRow({
               </span>
               {meta && (
                 <span
-                  className={`truncate text-[11px] ${active ? "text-sidebar-accent-foreground/80" : "text-amber-700 dark:text-amber-300"}`}
+                  title={meta}
+                  className={`min-w-0 max-w-28 shrink truncate text-[11px] opacity-0 transition-opacity duration-100 group-hover/tree:opacity-100 group-focus-within/tree:opacity-100 ${active ? "text-sidebar-accent-foreground/80" : "text-muted-foreground"}`}
                 >
                   {meta}
                 </span>
@@ -366,6 +371,7 @@ export const ProjectWorkflowRunRows = memo(function ProjectWorkflowRunRows({
               </span>
             }
             label={run.name}
+            meta={run.version}
             onClick={() => onSelectRun(run.id)}
             action={<ArchiveButton />}
             onRename={(name) =>

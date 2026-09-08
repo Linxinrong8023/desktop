@@ -1,10 +1,12 @@
 use super::ports::{
     ReadWorkspaceDiffRequest, ReadWorkspaceDiffScope, WorkspaceDiffReader,
-    WorkspaceDiffReaderError, WorkspaceDiffSnapshot,
+    WorkspaceDiffReaderError, WorkspaceDiffSnapshot, WorkspaceStatusFile, WorkspaceStatusSnapshot,
 };
 use gitlancer::git::diff::{DiffRequest, DiffResponse, DiffScope};
+use gitlancer::git::status::StatusEntriesRequest;
 use gitlancer::git::worktree::FindWorktreeRequest;
 use gitlancer::{CliGitRunner, CommitId, Git, RepoRoot, Repository};
+use std::path::Path;
 use std::path::PathBuf;
 
 /// Reads workspace-scoped unified diffs through the shared Gitlancer runtime.
@@ -58,6 +60,37 @@ impl WorkspaceDiffReader for GitWorkspaceDiffReader {
                 scope,
             })
             .map(map_diff_response)
+            .map_err(workspace_diff_operation_error)
+    }
+
+    /// Resolves the backend-owned worktree before reading its structured per-file status.
+    fn read_workspace_status(
+        &self,
+        worktree_path: &Path,
+    ) -> Result<WorkspaceStatusSnapshot, WorkspaceDiffReaderError> {
+        let worktree = self
+            .git
+            .find_worktree(FindWorktreeRequest {
+                repository: &self.repository,
+                candidate_path: worktree_path,
+            })
+            .map_err(workspace_diff_operation_error)?;
+
+        self.git
+            .status_entries(StatusEntriesRequest {
+                worktree: &worktree,
+            })
+            .map(|response| WorkspaceStatusSnapshot {
+                entries: response
+                    .entries
+                    .into_iter()
+                    .map(|entry| WorkspaceStatusFile {
+                        path: entry.path,
+                        is_staged: entry.is_staged,
+                        is_untracked: entry.is_untracked,
+                    })
+                    .collect(),
+            })
             .map_err(workspace_diff_operation_error)
     }
 }

@@ -236,6 +236,11 @@ export type WorkflowRunSummary = {
   workspaceId: string;
   projectId: string;
   workflowId: string;
+  /**
+   * The published snapshot version the run froze, distinguishing runs created from different
+   * versions of the same workflow.
+   */
+  version: string;
   status: WorkflowRunStatus;
   startedAt: bigint | null;
   finishedAt: bigint | null;

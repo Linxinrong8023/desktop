@@ -35,7 +35,7 @@ pub use skill::{
     FilesystemSkillStorage, GetSkillHandler, JOURNAL_DIR_NAME, JournalOp, JournalPhase,
     ListSkillsHandler, LocalSkillSourceRevision, STAGING_DIR_NAME, SkillIdGenerator,
     SkillRepository, SkillStorage, SkillStorageError, SwapHandle, TransactionJournal,
-    UpdateSkillHandler, UuidSkillIdGenerator, has_usable_package,
+    UpdateSkillHandler, UuidSkillIdGenerator, has_usable_package, skill_package_is_usable,
 };
 pub use skill_import::{
     DuplicateSkillName, NoopSkillImportProgressPublisher, SkillImportConfig, SkillImportError,
@@ -83,8 +83,10 @@ pub use workflow_run::{
 pub use workspace_diff::{
     CommitWorkspaceChangesHandler, CommitWorkspaceGitRequest, GitWorkspaceDiffReader,
     GitWorkspaceGitWriter, PushWorkspaceBranchHandler, PushWorkspaceGitRequest,
-    ReadWorkspaceDiffRequest, ReadWorkspaceDiffScope, WorkspaceDiffReader,
-    WorkspaceDiffReaderError, WorkspaceDiffSnapshot, WorkspaceGitCommit, WorkspaceGitPush,
-    WorkspaceGitWriter, WorkspaceGitWriterError,
+    ReadWorkspaceDiffRequest, ReadWorkspaceDiffScope, StageWorkspaceChangesHandler,
+    StageWorkspaceGitRequest, UnstageWorkspaceChangesHandler, UnstageWorkspaceGitRequest,
+    WorkspaceDiffReader, WorkspaceDiffReaderError, WorkspaceDiffSnapshot, WorkspaceGitCommit,
+    WorkspaceGitPush, WorkspaceGitStage, WorkspaceGitUnstage, WorkspaceGitWriter,
+    WorkspaceGitWriterError, WorkspaceStatusFile, WorkspaceStatusSnapshot,
 };
 pub use worktree::WorktreeRepository;

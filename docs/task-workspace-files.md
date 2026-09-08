@@ -18,7 +18,7 @@ The layers remain narrow:
 
 - `apps/desktop/src-tauri/src/workspace_files.rs` maps filesystem results to
   contract values and preserves typed lifecycle errors across IPC.
-- `apps/desktop/src-tauri/src/commands.rs` owns Tauri extraction, task-root
+- `apps/desktop/src-tauri/src/commands/files.rs` owns Tauri extraction, task-root
   resolution, and the command/channel boundary.
 - `packages/app-shell/src/features/files` owns the file tree, viewer, search UI,
   cache invalidation, and gutter `+` line quotes into the composer. A quote

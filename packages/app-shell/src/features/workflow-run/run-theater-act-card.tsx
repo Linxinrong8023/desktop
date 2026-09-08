@@ -8,7 +8,7 @@ import { Badge, Button, cn } from "@ora/ui";
 import { createMockWorkflowNodeType } from "@ora/workflow-mock";
 import { formatRunClock } from "../../lib/format";
 import { formatWorkflowNodeOutput } from "./format-node-output";
-import { useAgentCatalog } from "../chat/agent-catalog";
+import { useAgentCatalog } from "../../state/hooks/use-agent-catalog";
 import {
   AgentExecutionModeMark,
   WorkflowNodeCardShell,

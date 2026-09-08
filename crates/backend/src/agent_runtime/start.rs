@@ -99,7 +99,7 @@ impl AgentRuntimeManager {
 }
 
 /// Performs one authoritative provider handshake and applies a pre-session model intent.
-async fn create_provider_session(
+pub(super) async fn create_provider_session(
     connections: &ConnectionSupervisors,
     session_mcp: &SessionMcpHost,
     ora_session_id: &SessionId,
@@ -176,8 +176,8 @@ async fn create_provider_session(
     })
 }
 
-/// Applies a model only when the just-created session authoritatively offers that value.
-async fn apply_model_intent(
+/// Applies a model only when the session authoritatively offers that value.
+pub(super) async fn apply_model_intent(
     connections: &ConnectionSupervisors,
     agent_ref: &AgentRef,
     agent_session_id: &str,

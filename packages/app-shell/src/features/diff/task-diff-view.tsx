@@ -41,8 +41,10 @@ import {
 import { useTranslation } from "react-i18next";
 import { useContractsClient } from "../../contracts-client-context";
 import { localizeContractError } from "../../i18n/contract-error";
-import { queryKeys } from "../../state/hooks/query-keys";
+import { invalidateWorkspaceDiffs } from "../../state/data/diff";
+import { invalidateWorkspaceStatus } from "../../state/data/workspace-status";
 import { useWorkspaceDiff } from "../../state/hooks/use-workspace-diff";
+import { useWorkspaceStatus } from "../../state/hooks/use-workspace-status";
 import {
   countChanges,
   DEFER_PARSE_PATCH_CHARS,
@@ -159,6 +161,14 @@ export function TaskDiffView({
   const [pushOpen, setPushOpen] = useState(false);
   const [gitNotice, setGitNotice] = useState<string | null>(null);
   const diffQuery = useWorkspaceDiff(workspaceId, scope);
+  const statusQuery = useWorkspaceStatus(workspaceId);
+  const stagedByPath = useMemo(() => {
+    const staged = new Set<string>();
+    for (const entry of statusQuery.data?.entries ?? []) {
+      if (entry.isStaged) staged.add(entry.path);
+    }
+    return staged;
+  }, [statusQuery.data?.entries]);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [appliedFileRequestId, setAppliedFileRequestId] = useState<
     number | null
@@ -530,9 +540,8 @@ export function TaskDiffView({
       // A baseline-less workspace has no fixed "committed" comparison to show;
       // its remaining uncommitted changes are still the most useful view.
       setScope(hasBaseline ? "committed" : "unstaged");
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.workspaceDiffs(workspaceId),
-      });
+      await invalidateWorkspaceDiffs(queryClient, workspaceId);
+      await invalidateWorkspaceStatus(queryClient, workspaceId);
     },
   });
   const pushBranch = useMutation({
@@ -555,15 +564,49 @@ export function TaskDiffView({
     await commitChanges.mutateAsync(message);
     await pushBranch.mutateAsync();
   };
+  /** Refreshes both the diff scopes and staging status after an index mutation. */
+  const refreshStaging = useCallback(() => {
+    void invalidateWorkspaceDiffs(queryClient, workspaceId);
+    void invalidateWorkspaceStatus(queryClient, workspaceId);
+  }, [queryClient, workspaceId]);
+
+  const stageOne = useMutation({
+    mutationFn: (path: string) =>
+      client.workspace.stageChanges({ workspaceId, paths: [path] }),
+    onSuccess: refreshStaging,
+  });
+  const unstageOne = useMutation({
+    mutationFn: (path: string) =>
+      client.workspace.unstageChanges({ workspaceId, paths: [path] }),
+    onSuccess: refreshStaging,
+  });
+  const stageAll = useMutation({
+    mutationFn: () => client.workspace.stageChanges({ workspaceId, paths: [] }),
+    onSuccess: refreshStaging,
+  });
+  const unstageAll = useMutation({
+    mutationFn: () =>
+      client.workspace.unstageChanges({
+        workspaceId,
+        paths: [...stagedByPath],
+      }),
+    onSuccess: refreshStaging,
+  });
   const diff = diffQuery.data;
 
   const gitActions = (
     <TaskGitActions
       open={gitActionsOpen}
       message={commitMessage}
-      additions={stats.additions}
-      deletions={stats.deletions}
-      pending={commitChanges.isPending || pushBranch.isPending}
+      stagedCount={stagedByPath.size}
+      pending={
+        commitChanges.isPending ||
+        pushBranch.isPending ||
+        stageAll.isPending ||
+        unstageAll.isPending ||
+        stageOne.isPending ||
+        unstageOne.isPending
+      }
       onOpenChange={(open) => {
         if (open) {
           commitChanges.reset();
@@ -573,6 +616,8 @@ export function TaskDiffView({
         setGitActionsOpen(open);
       }}
       onMessageChange={setCommitMessage}
+      onStageAll={() => void stageAll.mutateAsync()}
+      onUnstageAll={() => void unstageAll.mutateAsync()}
       onCommit={() => {
         setGitNotice(null);
         void commitChanges.mutateAsync(commitMessage.trim());
@@ -881,6 +926,15 @@ export function TaskDiffView({
                 <TaskDiffFileTree
                   files={files}
                   selectedPath={activeFilePath}
+                  stagedByPath={stagedByPath}
+                  onToggleStage={(path) => {
+                    if (stagedByPath.has(path)) {
+                      void unstageOne.mutateAsync(path);
+                    } else {
+                      void stageOne.mutateAsync(path);
+                    }
+                  }}
+                  stagingPending={stageOne.isPending || unstageOne.isPending}
                   onSelect={selectFile}
                   onCollapse={() => onFileTreeOpenChange(false)}
                 />

@@ -10,13 +10,6 @@ export function isNodeWorking(
   return status === "running" || status === "awaiting_input";
 }
 
-/** Run-level terminal statuses. */
-export function isTerminalRunStatus(status: GraphWorkflowRunStatus): boolean {
-  return (
-    status === "succeeded" || status === "failed" || status === "cancelled"
-  );
-}
-
 /** Shared run/node status chrome —color is never the only signal (dot + label + tone). */
 export function runStatusTone(
   status: GraphWorkflowRunStatus | GraphWorkflowNodeStatus,

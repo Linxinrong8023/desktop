@@ -7,12 +7,12 @@ import {
   utf8ByteColumnToStringIndex,
 } from "./workspace-file-viewer-utils";
 
-vi.mock("../chat/add-composer-file-selection", () => ({
+vi.mock("../../state/actions/add-composer-file-selection", () => ({
   addComposerFileSelections: vi.fn(),
 }));
 
 const addComposerFileSelections = vi.mocked(
-  await import("../chat/add-composer-file-selection"),
+  await import("../../state/actions/add-composer-file-selection"),
 ).addComposerFileSelections;
 
 afterEach(() => {

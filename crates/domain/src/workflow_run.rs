@@ -222,6 +222,9 @@ pub struct WorkflowRunSummary {
     pub workspace_id: WorkspaceId,
     pub project_id: ProjectId,
     pub workflow_id: WorkflowId,
+    /// The published snapshot version the run froze, so list views can distinguish runs created
+    /// from different versions of the same workflow.
+    pub version: String,
     pub status: WorkflowRunStatus,
     /// Whether the run has an awaiting (`Pending`) interactive node; the wire status derives
     /// `AwaitingInput` from this while the persisted run status stays `Running`.

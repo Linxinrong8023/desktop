@@ -58,7 +58,9 @@ impl StoredArtifactRetrieval {
     pub(super) fn parse(json: &str) -> Result<Self, ArtifactRetrievalError> {
         let retrieval: Self = serde_json::from_str(json)
             .map_err(|_| ArtifactRetrievalError::InvalidPersistedConfiguration)?;
-        retrieval.validated()
+        retrieval
+            .validated()
+            .map_err(|_| ArtifactRetrievalError::InvalidPersistedConfiguration)
     }
 
     /// Applies an editor update, preserving a credential pair only for an existing S3 source.
@@ -125,10 +127,10 @@ impl StoredArtifactRetrieval {
         }
     }
 
-    /// Builds the generic downloader configuration when this source uses S3 SigV4.
-    pub(super) fn s3_config(&self) -> Option<S3Config> {
+    /// Rejects invalid endpoints before constructing the credential-bearing downloader config.
+    pub(super) fn s3_config(&self) -> Result<Option<S3Config>, ArtifactRetrievalError> {
         match self {
-            Self::DirectHttps => None,
+            Self::DirectHttps => Ok(None),
             Self::S3SigV4 {
                 endpoint,
                 bucket,
@@ -136,22 +138,21 @@ impl StoredArtifactRetrieval {
                 access_key_id,
                 secret_access_key,
             } => {
-                let parsed = Url::parse(endpoint)
-                    .unwrap_or_else(|_| unreachable!("stored endpoints are validated"));
+                let parsed = validated_endpoint(endpoint)?;
                 let host = parsed
                     .host_str()
-                    .unwrap_or_else(|| unreachable!("stored endpoints have a host"));
+                    .ok_or(ArtifactRetrievalError::InvalidField("endpoint"))?;
                 let authority = match parsed.port() {
                     Some(port) => format!("{host}:{port}"),
                     None => host.to_owned(),
                 };
-                Some(S3Config::new(
+                Ok(Some(S3Config::new(
                     authority,
                     bucket.clone(),
                     region.clone(),
                     access_key_id.clone(),
                     secret_access_key.clone(),
-                ))
+                )))
             }
         }
     }
@@ -167,7 +168,9 @@ impl StoredArtifactRetrieval {
                 access_key_id,
                 secret_access_key,
             } => {
-                let endpoint = validated_endpoint(&endpoint)?;
+                let endpoint = validated_endpoint(&endpoint)?
+                    .origin()
+                    .ascii_serialization();
                 validate_scalar("bucket", &bucket, MAX_BUCKET_BYTES)?;
                 if bucket.contains('/') || bucket.contains('\\') {
                     return Err(ArtifactRetrievalError::InvalidField("bucket"));
@@ -192,7 +195,7 @@ impl StoredArtifactRetrieval {
 }
 
 /// Reports invalid source-scoped artifact retrieval without rendering credential values.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub(crate) enum ArtifactRetrievalError {
     #[error("persisted artifact retrieval configuration is invalid")]
     InvalidPersistedConfiguration,
@@ -203,7 +206,7 @@ pub(crate) enum ArtifactRetrievalError {
 }
 
 /// Validates and canonicalizes an HTTPS origin used as an S3-compatible endpoint.
-fn validated_endpoint(value: &str) -> Result<String, ArtifactRetrievalError> {
+fn validated_endpoint(value: &str) -> Result<Url, ArtifactRetrievalError> {
     if value.len() > MAX_ENDPOINT_BYTES {
         return Err(ArtifactRetrievalError::InvalidField("endpoint"));
     }
@@ -220,7 +223,7 @@ fn validated_endpoint(value: &str) -> Result<String, ArtifactRetrievalError> {
     {
         return Err(ArtifactRetrievalError::InvalidField("endpoint"));
     }
-    Ok(endpoint.origin().ascii_serialization())
+    Ok(endpoint)
 }
 
 /// Applies shared non-empty, bounded, and printable-text constraints to one S3 scalar.
@@ -254,6 +257,66 @@ mod tests {
             retrieval.public(),
             MarketplaceArtifactRetrieval::DirectHttps
         );
+        assert_eq!(retrieval.s3_config(), Ok(None));
+    }
+
+    /// Signing preserves the full source configuration, including a non-default HTTPS port.
+    #[test]
+    fn builds_s3_config_with_the_configured_authority() {
+        for (endpoint, authority) in [
+            ("https://s3.example.com:443", "s3.example.com"),
+            ("https://s3.example.com:9443", "s3.example.com:9443"),
+        ] {
+            let retrieval = StoredArtifactRetrieval::S3SigV4 {
+                endpoint: endpoint.to_owned(),
+                bucket: "plugins".to_owned(),
+                region: "region-1".to_owned(),
+                access_key_id: "test-access-key".to_owned(),
+                secret_access_key: "test-secret-key".to_owned(),
+            };
+            assert_eq!(
+                retrieval.s3_config(),
+                Ok(Some(S3Config::new(
+                    authority,
+                    "plugins",
+                    "region-1",
+                    "test-access-key",
+                    "test-secret-key",
+                ))),
+            );
+        }
+    }
+
+    /// Even unchecked construction must reject malformed or unsafe endpoints without a panic.
+    #[test]
+    fn rejects_invalid_s3_endpoints_before_signing() {
+        for endpoint in [
+            "not a URL",
+            "https://",
+            "file:///plugins",
+            "http://s3.example.com",
+            "https://user:password@s3.example.com",
+            "https://s3.example.com/bucket",
+            "https://s3.example.com?token=secret",
+            "https://s3.example.com#fragment",
+            "https://[::1]",
+        ] {
+            let retrieval = StoredArtifactRetrieval::S3SigV4 {
+                endpoint: endpoint.to_owned(),
+                bucket: "plugins".to_owned(),
+                region: "region-1".to_owned(),
+                access_key_id: "test-access-key".to_owned(),
+                secret_access_key: "test-secret-key".to_owned(),
+            };
+            assert_eq!(
+                retrieval.s3_config(),
+                Err(ArtifactRetrievalError::InvalidField("endpoint")),
+            );
+            assert_eq!(
+                StoredArtifactRetrieval::parse(&retrieval.to_json().expect("stored JSON")),
+                Err(ArtifactRetrievalError::InvalidPersistedConfiguration),
+            );
+        }
     }
 
     /// Enabling S3 requires replacement credentials and canonicalizes the endpoint origin.

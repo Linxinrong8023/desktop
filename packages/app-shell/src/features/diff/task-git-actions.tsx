@@ -10,6 +10,8 @@ import {
   IconCheck,
   IconChevronDown,
   IconGitCommit,
+  IconMinus,
+  IconPlus,
   IconUpload,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
@@ -17,11 +19,12 @@ import { useTranslation } from "react-i18next";
 interface TaskGitActionsProps {
   open: boolean;
   message: string;
-  additions: number;
-  deletions: number;
+  stagedCount: number;
   pending: boolean;
   onOpenChange: (open: boolean) => void;
   onMessageChange: (message: string) => void;
+  onStageAll: () => void;
+  onUnstageAll: () => void;
   onCommit: () => void;
   onCommitAndPush: () => void;
   onPush: () => void;
@@ -31,17 +34,18 @@ interface TaskGitActionsProps {
 export function TaskGitActions({
   open,
   message,
-  additions,
-  deletions,
+  stagedCount,
   pending,
   onOpenChange,
   onMessageChange,
+  onStageAll,
+  onUnstageAll,
   onCommit,
   onCommitAndPush,
   onPush,
 }: TaskGitActionsProps) {
   const { t } = useTranslation();
-  const canCommit = message.trim() !== "";
+  const canCommit = message.trim() !== "" && stagedCount > 0;
 
   const handleMessageKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (
@@ -101,21 +105,34 @@ export function TaskGitActions({
           />
           <div className="mt-2 flex items-center gap-1.5 rounded-md bg-muted/35 px-2 py-1.5 text-[11px] text-muted-foreground">
             <IconCheck
-              className="size-3.5 shrink-0 text-emerald-600"
+              className={`size-3.5 shrink-0 ${
+                stagedCount > 0
+                  ? "text-emerald-600"
+                  : "text-muted-foreground/50"
+              }`}
               aria-hidden="true"
             />
             <span className="min-w-0 flex-1 truncate">
-              {t("diff.allChangesIncluded")}
-            </span>
-            <span className="shrink-0 font-mono text-emerald-600">
-              +{additions}
-            </span>
-            <span className="shrink-0 font-mono text-red-600">
-              -{deletions}
+              {stagedCount > 0
+                ? t("diff.stagedSummary", { count: stagedCount })
+                : t("diff.nothingStaged")}
             </span>
           </div>
         </div>
         <div className="p-1.5">
+          <GitActionRow
+            icon={<IconPlus />}
+            label={t("diff.stageAll")}
+            disabled={pending}
+            onClick={onStageAll}
+          />
+          <GitActionRow
+            icon={<IconMinus />}
+            label={t("diff.unstageAll")}
+            disabled={pending || stagedCount === 0}
+            onClick={onUnstageAll}
+          />
+          <div className="my-1 border-t border-border/70" />
           <GitActionRow
             icon={<IconGitCommit />}
             label={pending ? t("diff.committing") : t("diff.commit")}

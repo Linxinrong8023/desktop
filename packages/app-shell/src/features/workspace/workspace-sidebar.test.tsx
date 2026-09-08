@@ -25,11 +25,26 @@ import { PlatformProvider } from "../../platform";
 import { AppI18nProvider } from "../../i18n/i18n";
 import { appI18n } from "../../i18n/i18n-instance";
 import {
-  createMockClient,
-  createMockClientState,
-  type MockClientState,
-  type MockWorkflowRecord,
-} from "../../test/mock-client";
+  createTestClient,
+  type TestHandlers,
+} from "../../test/contracts-transport";
+import {
+  createWorkspaceMemory,
+  workspaceHandlers,
+} from "../../test/memory/workspaces";
+import {
+  createSessionMemory,
+  sessionHandlers,
+} from "../../test/memory/sessions";
+import {
+  createWorkflowMemory,
+  workflowHandlers,
+} from "../../test/memory/workflows";
+import {
+  createWorkflowRunMemory,
+  workflowRunHandlers,
+} from "../../test/memory/workflow-runs";
+import type { MockWorkflowRecord } from "../../test/memory/workflows";
 import {
   createHookWrapper,
   createTestQueryClient,
@@ -43,6 +58,28 @@ import { dismissSessionDraft } from "../../state/session-drafts";
 import { WorkspaceSidebar } from "./workspace-sidebar";
 import { useWorkflowEditorStore } from "../workflow-editor/workflow-editor-store";
 import { AGENT_REF } from "../../test/agent-identity";
+
+/** State for this test surface; no unrelated domain fixtures are initialized. */
+function createFixtureState() {
+  return {
+    ...createWorkspaceMemory(),
+    ...createSessionMemory(),
+    ...createWorkflowMemory(),
+    ...createWorkflowRunMemory(),
+  };
+}
+
+type FixtureState = ReturnType<typeof createFixtureState>;
+
+/** Explicit domain composition for the behaviors exercised by this test file. */
+function createFixtureHandlers(state: FixtureState): TestHandlers {
+  return {
+    ...workspaceHandlers(state),
+    ...sessionHandlers(state),
+    ...workflowHandlers(state),
+    ...workflowRunHandlers(state),
+  };
+}
 
 const USER = { name: "Eric", email: "eric@example.com" };
 // Deliberately not "Ora": the sidebar header renders that as the product mark,
@@ -73,9 +110,9 @@ const DIRECT_SESSION: Session = {
 
 /** Renders the sidebar with the same provider stack AppShell gives it. */
 function renderSidebar(
-  state: MockClientState,
+  state: FixtureState,
   chatStore?: ChatStore,
-  client = createMockClient(state),
+  client = createTestClient(createFixtureHandlers(state)),
 ) {
   const store = chatStore ?? createChatStore(client.session);
   const Wrapper = createHookWrapper(client, createTestQueryClient(), store);
@@ -117,7 +154,11 @@ function conversation(
 }
 
 /** A library workflow with a published snapshot — the only kind the sidebar picker lists. */
-function mockPublishedWorkflow(id: string, name: string): MockWorkflowRecord {
+function mockPublishedWorkflow(
+  id: string,
+  name: string,
+  version = "v1",
+): MockWorkflowRecord {
   return {
     workflow: {
       id,
@@ -139,7 +180,7 @@ function mockPublishedWorkflow(id: string, name: string): MockWorkflowRecord {
       {
         id: `${id}-pub`,
         workflowId: id,
-        version: "v1",
+        version,
         graph: "{}",
         createdAt: 0n,
         updatedAt: null,
@@ -172,8 +213,8 @@ function mockDraftWorkflow(id: string, name: string): MockWorkflowRecord {
 }
 
 /** Populates the tree the collapse tests operate on. */
-function workspaceWithOneSession(): MockClientState {
-  const state = createMockClientState();
+function workspaceWithOneSession(): FixtureState {
+  const state = createFixtureState();
   state.projects = [PROJECT];
   state.tasks = [TASK];
   state.sessions = [SESSION];
@@ -386,7 +427,7 @@ describe("WorkspaceSidebar", () => {
 
   it("keeps New chat visible when the selected chat belongs to the main workspace", async () => {
     const user = userEvent.setup();
-    const state = createMockClientState();
+    const state = createFixtureState();
     state.projects = [PROJECT];
     state.tasks = [];
     state.sessions = [DIRECT_SESSION];
@@ -801,6 +842,7 @@ describe("WorkspaceSidebar", () => {
         projectId: PROJECT.id,
         workflowId: "wf1",
         snapshotId: "snap1",
+        version: "v3",
         name: "Review bot",
         status: "pending",
         workspaceId: "workspace-p1",
@@ -811,6 +853,14 @@ describe("WorkspaceSidebar", () => {
     renderSidebar(state);
 
     await waitFor(() => expect(treeRow("Review bot")).not.toBeNull());
+    const versionMark = within(treeRow("Review bot")!).getByText("v3");
+    expect(versionMark).not.toBeNull();
+    // The version stays hidden until the row is hovered or keyboard-focused.
+    expect(versionMark.className).toContain("opacity-0");
+    expect(versionMark.className).toContain("group-hover/tree:opacity-100");
+    expect(versionMark.className).toContain(
+      "group-focus-within/tree:opacity-100",
+    );
     const runRow = treeRow("Review bot")!.closest(
       "div.group\\/tree",
     ) as HTMLElement;
@@ -827,6 +877,7 @@ describe("WorkspaceSidebar", () => {
         projectId: PROJECT.id,
         workflowId: "wf-task",
         snapshotId: "snap-task",
+        version: "v1",
         name: "Task workflow",
         status: "pending",
         workspaceId: TASK.workspaceId,
@@ -838,6 +889,7 @@ describe("WorkspaceSidebar", () => {
         projectId: PROJECT.id,
         workflowId: "wf-project",
         snapshotId: "snap-project",
+        version: "v2",
         name: "Project workflow",
         status: "pending",
         workspaceId: "workspace-p1",
@@ -904,7 +956,7 @@ describe("WorkspaceSidebar", () => {
     expect(
       screen.queryByRole("button", { name: "Unpublished draft" }),
     ).toBeNull();
-    await user.click(await screen.findByRole("button", { name: "Deploy bot" }));
+    await user.click(await screen.findByRole("button", { name: /Deploy bot/ }));
 
     expect(useUiStore.getState().dialog).toEqual({
       kind: "runWorkflow",
@@ -933,7 +985,7 @@ describe("WorkspaceSidebar", () => {
       }),
     );
     await user.click(
-      await screen.findByRole("button", { name: "Task review" }),
+      await screen.findByRole("button", { name: /Task review/ }),
     );
 
     expect(useUiStore.getState().dialog).toEqual({
@@ -969,6 +1021,43 @@ describe("WorkspaceSidebar", () => {
         name: /搜索工作流模板|Search workflow templates/,
       }),
     ).toHaveFocus();
+  });
+
+  it("shows the published version on workflow templates and filters by it", async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    const state = workspaceWithOneSession();
+    state.workflows = [
+      mockPublishedWorkflow("wf1", "Deploy bot", "v3"),
+      mockPublishedWorkflow("wf2", "Review bot", "v1"),
+    ];
+    renderSidebar(state);
+
+    await waitFor(() => expect(treeRow(PROJECT.name)).not.toBeNull());
+    await user.click(
+      await screen.findByRole("button", {
+        name: /在此项目中新建|Create in this project/,
+      }),
+    );
+    await user.hover(
+      await screen.findByRole("button", {
+        name: /运行工作流|Run workflow/,
+      }),
+    );
+    expect(
+      within(
+        await screen.findByRole("button", { name: /Deploy bot/ }),
+      ).getByText("v3"),
+    ).not.toBeNull();
+
+    await user.type(
+      await screen.findByRole("textbox", {
+        name: /搜索工作流模板|Search workflow templates/,
+      }),
+      "v3",
+    );
+
+    expect(screen.queryByRole("button", { name: /Review bot/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Deploy bot/ })).not.toBeNull();
   });
 
   it("renames a session from the context menu", async () => {
@@ -1052,9 +1141,10 @@ describe("WorkspaceSidebar", () => {
   it("does not persist twice when blur follows a successful Enter", async () => {
     const user = userEvent.setup();
     const state = workspaceWithOneSession();
-    const client = createMockClient(state);
-    const rename = vi.fn(client.session.rename);
-    client.session.rename = rename;
+    const clientHandlers: TestHandlers = createFixtureHandlers(state);
+    const client = createTestClient(clientHandlers);
+    const rename = vi.fn(clientHandlers.renameSession!);
+    clientHandlers.renameSession = rename;
     renderSidebar(state, undefined, client);
 
     await waitFor(() => expect(treeRow(NEW_SESSION_LABEL)).not.toBeNull());
@@ -1127,8 +1217,9 @@ describe("WorkspaceSidebar", () => {
   it("keeps the rename editor open when persisting the title fails", async () => {
     const user = userEvent.setup();
     const state = workspaceWithOneSession();
-    const client = createMockClient(state);
-    client.session.rename = async () => {
+    const clientHandlers: TestHandlers = createFixtureHandlers(state);
+    const client = createTestClient(clientHandlers);
+    clientHandlers.renameSession = async () => {
       throw new LocalTransportError("tauri_invoke_failure", "offline");
     };
     renderSidebar(state, undefined, client);
@@ -1182,9 +1273,10 @@ describe("WorkspaceSidebar", () => {
   it("renames a worktree from the context menu without status options", async () => {
     const user = userEvent.setup();
     const state = workspaceWithOneSession();
-    const client = createMockClient(state);
-    const update = vi.fn(client.task.update);
-    client.task.update = update;
+    const clientHandlers: TestHandlers = createFixtureHandlers(state);
+    const client = createTestClient(clientHandlers);
+    const update = vi.fn(clientHandlers.updateTask!);
+    clientHandlers.updateTask = update;
     renderSidebar(state, undefined, client);
 
     await waitFor(() => expect(treeRow(TASK.title)).not.toBeNull());
@@ -1221,18 +1313,16 @@ describe("WorkspaceSidebar", () => {
   it("renames a workflow run from the context menu without opening a dialog", async () => {
     const user = userEvent.setup();
     const state = workspaceWithOneSession();
-    const baseClient = createMockClient(state);
+    const baseClientHandlers: TestHandlers = createFixtureHandlers(state);
+    const baseClient = createTestClient(baseClientHandlers);
     const renameCalls: string[] = [];
-    const client: ContractsClient = {
-      ...baseClient,
-      workflowRun: {
-        ...baseClient.workflowRun,
-        rename: async (request, options) => {
-          renameCalls.push(request.name);
-          return baseClient.workflowRun.rename(request, options);
-        },
+    const client: ContractsClient = createTestClient({
+      ...baseClientHandlers,
+      renameWorkflowRun: async (request, options) => {
+        renameCalls.push(request.name);
+        return baseClient.workflowRun.rename(request, options);
       },
-    };
+    });
     state.tasks = [
       TASK,
       {
@@ -1248,6 +1338,7 @@ describe("WorkspaceSidebar", () => {
         projectId: PROJECT.id,
         workflowId: "wf1",
         snapshotId: "snap1",
+        version: "v1",
         name: "Review bot",
         status: "pending",
         workspaceId: "workspace-wt1",
@@ -1414,8 +1505,9 @@ describe("WorkspaceSidebar", () => {
 
   it("does not seal first-run bootstrap when the tree query fails", async () => {
     const state = workspaceWithOneSession();
-    const client = createMockClient(state);
-    vi.spyOn(client.project, "list").mockRejectedValue(
+    const clientHandlers: TestHandlers = createFixtureHandlers(state);
+    const client = createTestClient(clientHandlers);
+    vi.spyOn(clientHandlers, "listProjects").mockRejectedValue(
       new LocalTransportError("tauri_invoke_failure", "projects unavailable"),
     );
     renderSidebar(state, undefined, client);
@@ -1441,7 +1533,7 @@ describe("WorkspaceSidebar", () => {
   });
 
   it("uses the same circle chat icon for direct chats and worktree sessions", async () => {
-    const state = createMockClientState();
+    const state = createFixtureState();
     state.projects = [PROJECT];
     state.tasks = [TASK];
     state.sessions = [
@@ -1468,7 +1560,7 @@ describe("WorkspaceSidebar", () => {
     const state = workspaceWithOneSession();
     state.sessions = [{ ...SESSION, title: "Review auth flow" }];
     const store = createChatStore(
-      createMockClient(createMockClientState()).session,
+      createTestClient(createFixtureHandlers(createFixtureState())).session,
     );
     const { chatStore } = renderSidebar(state, store);
 
@@ -1533,7 +1625,7 @@ describe("WorkspaceSidebar", () => {
 
   it("shows the working indicator only while the session is responding", async () => {
     const store = createChatStore(
-      createMockClient(createMockClientState()).session,
+      createTestClient(createFixtureHandlers(createFixtureState())).session,
     );
     const { chatStore } = renderSidebar(workspaceWithOneSession(), store);
     await waitFor(() => expect(treeRow(NEW_SESSION_LABEL)).not.toBeNull());
@@ -1555,7 +1647,7 @@ describe("WorkspaceSidebar", () => {
 
   it("hides the working indicator while session history is still loading", async () => {
     const store = createChatStore(
-      createMockClient(createMockClientState()).session,
+      createTestClient(createFixtureHandlers(createFixtureState())).session,
     );
     const { chatStore } = renderSidebar(workspaceWithOneSession(), store);
     await waitFor(() => expect(treeRow(NEW_SESSION_LABEL)).not.toBeNull());
@@ -1603,7 +1695,7 @@ describe("WorkspaceSidebar", () => {
   it("prefers the working animation over the unread mark while responding", async () => {
     useUnreadSessionsStore.setState({ unread: new Set([SESSION.id]) });
     const store = createChatStore(
-      createMockClient(createMockClientState()).session,
+      createTestClient(createFixtureHandlers(createFixtureState())).session,
     );
     const { chatStore } = renderSidebar(workspaceWithOneSession(), store);
     await waitFor(() => expect(treeRow(NEW_SESSION_LABEL)).not.toBeNull());
@@ -1669,8 +1761,9 @@ describe("WorkspaceSidebar", () => {
     const user = userEvent.setup();
     await act(() => appI18n.changeLanguage("zh-CN"));
     const state = workspaceWithOneSession();
-    const client = createMockClient(state);
-    vi.spyOn(client.project, "list").mockRejectedValue(
+    const clientHandlers: TestHandlers = createFixtureHandlers(state);
+    const client = createTestClient(clientHandlers);
+    vi.spyOn(clientHandlers, "listProjects").mockRejectedValue(
       new LocalTransportError("tauri_invoke_failure", "projects unavailable"),
     );
     renderSidebar(state, undefined, client);

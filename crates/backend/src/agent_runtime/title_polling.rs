@@ -57,23 +57,31 @@ impl RuntimeActor {
                         return;
                     };
                     match command {
-                        RuntimeCommand::Load { operation_id, events, accepted } => {
+                        RuntimeCommand::Load { events, accepted, .. } => {
                             self.channel = Some(channel);
                             self.title_acquisition.preempt_attempt(attempt);
-                            // run_load resolves `accepted` only after the Running
-                            // row is persisted (see actor.rs for the ordering).
-                            self.run_load(operation_id, events, accepted).await;
+                            // Reading the record cannot disturb the provider, so the channel this
+                            // poll was using goes back to the actor untouched.
+                            self.run_load(events, accepted).await;
                             return;
                         }
-                        RuntimeCommand::Prompt { operation_id, prompt, record_prompt, events, accepted } => {
+                        RuntimeCommand::Prompt { operation_id, prompt, record_prompt, model, events, accepted } => {
                             self.channel = Some(channel);
                             self.title_acquisition.preempt_attempt(attempt);
-                            if let Err(error) = self.ensure_current_mcp().await {
-                                let _ = accepted.send(Err(error));
-                            } else {
-                                let _ = accepted.send(Ok(()));
-                                self.run_prompt(operation_id, prompt, record_prompt, events).await;
-                                self.refresh_idle_mcp_if_owed().await;
+                            // Admission goes through the same attach as the idle loop's. The
+                            // channel is already back, so nothing is opened here; what still has
+                            // to hold is that the provider carries the current MCP set.
+                            match self.ensure_attached(model.as_deref()).await {
+                                Ok(setup) => {
+                                    let _ = accepted.send(Ok(()));
+                                    if super::publish_setup(&events, setup) {
+                                        self.run_prompt(operation_id, prompt, record_prompt, events).await;
+                                        self.refresh_idle_mcp_if_owed().await;
+                                    }
+                                }
+                                Err(error) => {
+                                    let _ = accepted.send(Err(error));
+                                }
                             }
                             return;
                         }
@@ -112,10 +120,10 @@ impl RuntimeActor {
                             // it is not a cancellation of the independent title fallback.
                         }
                         RuntimeCommand::CancelActivePrompt => {}
-                        RuntimeCommand::PreemptTitlePolling { response } => {
+                        RuntimeCommand::ClaimDirectProviderCall { response } => {
                             self.channel = Some(channel);
                             self.title_acquisition.preempt_attempt(attempt);
-                            let _ = response.send(());
+                            let _ = response.send(self.provider_session_id().to_string());
                             return;
                         }
                         RuntimeCommand::AdoptUserTitle { title, response } => {
@@ -163,7 +171,7 @@ impl RuntimeActor {
                                 .sessions
                                 .into_iter()
                                 .find(|session| {
-                                    session.session_id.0.as_ref() == self.session.agent_session_id.as_str()
+                                    session.session_id.0.as_ref() == self.provider_session_id()
                                 })
                                 .and_then(|session| session.title)
                             {
@@ -276,13 +284,19 @@ impl RuntimeActor {
 
     /// Accepts an ACP session-info title only while the actor's acquisition window is open.
     pub(in crate::agent_runtime) fn observe_session_update(&mut self, update: &SessionUpdate) {
-        let SessionUpdate::SessionInfoUpdate(info) = update else {
-            return;
-        };
-        let Some(title) = info.title.value() else {
-            return;
-        };
-        self.persist_agent_title(title);
+        match update {
+            SessionUpdate::SessionInfoUpdate(info) => {
+                if let Some(title) = info.title.value() {
+                    self.persist_agent_title(title);
+                }
+            }
+            // An agent may reconfigure itself mid-turn, so what this actor answers loads with
+            // stays level with what the provider last said rather than frozen at attach.
+            SessionUpdate::ConfigOptionUpdate(config) => {
+                self.reported_config_options = config.config_options.clone();
+            }
+            _ => {}
+        }
     }
 
     /// Locks acquisition and records the user-chosen title so later agent titles cannot win.

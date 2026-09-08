@@ -68,12 +68,22 @@ pub(crate) fn read_skill_manifest<Storage: SkillStorage>(
     .map_err(ApplicationError::from_skill_storage_error)
 }
 
+/// Returns whether the package owned by the Skill's source — the mutable local catalog directory
+/// for a Local skill or the immutable plugin package for a Plugin skill — still has a root
+/// `SKILL.md` that parses as a skill manifest.
+pub fn skill_package_is_usable<Storage: SkillStorage>(
+    storage: &Storage,
+    skill: &Skill,
+) -> Result<bool, ApplicationError> {
+    Ok(read_skill_manifest(storage, skill)?.is_some_and(|bytes| manifest_is_usable(&bytes)))
+}
+
 /// Derives catalog availability from the package owned by the Skill's source.
 pub(crate) fn package_availability<Storage: SkillStorage>(
     storage: &Storage,
     skill: &Skill,
 ) -> Result<SkillAvailability, ApplicationError> {
-    if read_skill_manifest(storage, skill)?.is_some_and(|bytes| manifest_is_usable(&bytes)) {
+    if skill_package_is_usable(storage, skill)? {
         Ok(SkillAvailability::Available)
     } else {
         Ok(SkillAvailability::Unavailable)

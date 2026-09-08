@@ -18,6 +18,8 @@ import {
   IconJson,
   IconLayoutSidebarRightCollapse,
   IconMarkdown,
+  IconMinus,
+  IconPlus,
   IconX,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
@@ -31,6 +33,11 @@ interface TaskDiffFileTreeProps {
   files: FileData[];
   selectedPath: string;
   onSelect: (path: string) => void;
+  /** Paths currently staged in the index; absent paths are treated as unstaged. */
+  stagedByPath: ReadonlySet<string>;
+  /** Stages or unstages one changed file. Omit to hide the per-file toggle. */
+  onToggleStage?: (path: string) => void;
+  stagingPending?: boolean;
   /** Collapses the whole tree; the button sits at the right end of the header. */
   onCollapse?: () => void;
 }
@@ -39,6 +46,9 @@ interface TaskDiffFileTreeProps {
 export function TaskDiffFileTree({
   files,
   selectedPath,
+  stagedByPath,
+  onToggleStage,
+  stagingPending,
   onSelect,
   onCollapse,
 }: TaskDiffFileTreeProps) {
@@ -127,6 +137,9 @@ export function TaskDiffFileTree({
               node={node}
               depth={0}
               selectedPath={selectedPath}
+              stagedByPath={stagedByPath}
+              onToggleStage={onToggleStage}
+              stagingPending={stagingPending}
               onSelect={onSelect}
             />
           ))
@@ -140,6 +153,9 @@ interface DiffTreeNodeProps {
   node: DiffFileTreeNode;
   depth: number;
   selectedPath: string;
+  stagedByPath: ReadonlySet<string>;
+  onToggleStage?: (path: string) => void;
+  stagingPending?: boolean;
   onSelect: (path: string) => void;
 }
 
@@ -148,8 +164,12 @@ function DiffTreeNode({
   node,
   depth,
   selectedPath,
+  stagedByPath,
+  onToggleStage,
+  stagingPending,
   onSelect,
 }: DiffTreeNodeProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   if (node.kind === "directory") {
     return (
@@ -188,6 +208,9 @@ function DiffTreeNode({
                 node={child}
                 depth={depth + 1}
                 selectedPath={selectedPath}
+                stagedByPath={stagedByPath}
+                onToggleStage={onToggleStage}
+                stagingPending={stagingPending}
                 onSelect={onSelect}
               />
             ))}
@@ -198,22 +221,50 @@ function DiffTreeNode({
   }
 
   const selected = selectedPath === node.path;
+  const isStaged = stagedByPath.has(node.path);
+  const showToggle = onToggleStage !== undefined;
+
   return (
-    <button
-      type="button"
-      className={`relative flex h-8 w-full items-center gap-1.5 truncate text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
+    <div
+      className={`group relative flex h-8 items-center outline-none focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring ${
         selected
           ? "bg-accent text-accent-foreground"
           : "text-foreground/85 hover:bg-muted/60"
       }`}
-      style={{ paddingLeft: 23 + depth * 14 }}
-      aria-current={selected ? "page" : undefined}
-      title={node.path}
-      onClick={() => onSelect(node.path)}
     >
-      <DiffFileIcon path={node.path} />
-      <span className="min-w-0 flex-1 truncate">{node.name}</span>
-    </button>
+      <button
+        type="button"
+        className="flex h-full min-w-0 flex-1 items-center gap-1.5 truncate text-left text-xs outline-none"
+        style={{ paddingLeft: 23 + depth * 14 }}
+        aria-current={selected ? "page" : undefined}
+        title={node.path}
+        onClick={() => onSelect(node.path)}
+      >
+        <DiffFileIcon path={node.path} />
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+      </button>
+      {showToggle && (
+        <button
+          type="button"
+          className={`mr-1 flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${
+            isStaged ? "" : "opacity-0 group-hover:opacity-100"
+          }`}
+          aria-label={
+            isStaged
+              ? t("diff.unstageFile", { name: node.name })
+              : t("diff.stageFile", { name: node.name })
+          }
+          disabled={stagingPending}
+          onClick={() => onToggleStage(node.path)}
+        >
+          {isStaged ? (
+            <IconMinus className="size-3.5" />
+          ) : (
+            <IconPlus className="size-3.5" />
+          )}
+        </button>
+      )}
+    </div>
   );
 }
 

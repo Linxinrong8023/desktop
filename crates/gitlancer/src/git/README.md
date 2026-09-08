@@ -9,9 +9,9 @@ This module exposes the operations callers perform through `Git<R: GitRunner>` a
 - Branch operations list, validate, create, and delete local branches with checked or forced semantics.
 - Worktree-base operations list local refs and resolve a selected base to an immutable commit without network or repository-state side effects.
 - Diff operations produce standard unified patches for branch, unstaged, staged, and committed scopes, including untracked files without modifying the caller's index.
-- Commit operations stage `RepoRelativePath` values, create commits without GPG signing, and return typed commit metadata.
+- Stage operations add or unstage `RepoRelativePath` values; commit creates commits without GPG signing and returns typed commit metadata.
 - Push operations publish the verified checked-out branch to its default remote without enabling credential prompts.
-- Status uses porcelain v2 NUL-delimited output; global identity reads treat an unset Git key as `None`, not an execution failure.
+- Status uses porcelain v2 NUL-delimited output, exposing both raw records and structured per-file staging entries; global identity reads treat an unset Git key as `None`, not an execution failure.
 - Sync operations clone a repository into a fresh directory, fetch a remote, check out a branch, and fast-forward a branch against its remote so marketplace sources can be refreshed deterministically.
 
 Every command is classified by `GitIntent` and executed through the injected runner. Mutating operations perform domain checks such as duplicate/missing branch validation before issuing the mutation when the use case requires it.

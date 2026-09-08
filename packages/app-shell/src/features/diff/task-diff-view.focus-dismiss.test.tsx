@@ -5,10 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppI18nProvider } from "../../i18n/i18n";
 import { ContractsClientContext } from "../../contracts-client-context";
 import {
-  createMockClient,
-  createMockClientState,
-} from "../../test/mock-client";
-import { queryKeys } from "../../state/hooks/query-keys";
+  createTestClient,
+  type TestHandlers,
+} from "../../test/contracts-transport";
+import "../../i18n/i18n-instance";
+import { diffKeys } from "../../state/data/diff";
 import { TaskDiffView } from "./task-diff-view";
 
 /** Gives the virtualizer a viewport size in jsdom (no layout is performed). */
@@ -40,8 +41,9 @@ describe("TaskDiffView focus jump dismiss", () => {
   it("clears the jump highlight when clicking a non-cited line in focus mode", async () => {
     mockViewportSize(600);
     const patch = bigFilePatch();
-    const client = createMockClient(createMockClientState());
-    client.workspace.getDiff = async () => ({
+    const clientHandlers: TestHandlers = {};
+    const client = createTestClient(clientHandlers);
+    clientHandlers.getWorkspaceDiff = async () => ({
       baseCommitId: "base",
       headCommitId: "head",
       patch,
@@ -49,7 +51,7 @@ describe("TaskDiffView focus jump dismiss", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 0 } },
     });
-    queryClient.setQueryData(queryKeys.workspaceDiff("task-1", "branch"), {
+    queryClient.setQueryData(diffKeys.workspaceDiff("task-1", "branch"), {
       baseCommitId: "base",
       headCommitId: "head",
       patch,

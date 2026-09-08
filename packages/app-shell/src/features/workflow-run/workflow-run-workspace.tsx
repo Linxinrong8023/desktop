@@ -1,3 +1,4 @@
+import { isTerminalRunStatus } from "@ora/workflow-runtime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -24,14 +25,14 @@ import { DragRegion } from "../../components/drag-region";
 import { WindowControls } from "../../components/window-controls";
 import { useUiStore } from "../../state/stores/ui-store";
 import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
-import { useGraphWorkflowRunLive } from "../../state/hooks/use-graph-workflow-runs";
+import { useGraphWorkflowRunLive } from "../../state/data/mock-workflow-runs";
 import {
   useCancelWorkflowRun,
   useRealWorkflowRun,
   useRestartWorkflowRun,
   useStartWorkflowRun,
   useUpdateWorkflowRunInput,
-} from "../../state/hooks/use-workflow-runs";
+} from "../../state/data/workflow-runs";
 import {
   resolveCompletionAdvanceNodeId,
   resolveStageFocusNodeId,
@@ -44,7 +45,7 @@ import {
 import { RunOverviewCanvas } from "./run-overview-canvas";
 import { RunTheater } from "./run-theater";
 import { RunStatusBadge } from "./run-status-mark";
-import { isTerminalRunStatus, runStatusTone } from "./run-status-style";
+import { runStatusTone } from "./run-status-style";
 import type { WorkflowRunViewMode } from "./run-view-mode";
 import { WorkflowRunStartDialog } from "./workflow-run-start-dialog";
 import { LocationActionsButton } from "../workspace/location-actions-button";

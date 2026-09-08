@@ -15,7 +15,7 @@ import {
   IconRoute,
   IconSearch,
 } from "@tabler/icons-react";
-import { useWorkflowLibrary } from "../workflow-editor/workflow-definitions";
+import { useWorkflowLibrary } from "../../state/data/workflows";
 import { useUiStore } from "../../state/stores/ui-store";
 
 interface SidebarCreateMenuProps {
@@ -67,8 +67,10 @@ export function SidebarCreateMenu({
   const visibleWorkflows = useMemo(
     () =>
       needle
-        ? workflows.filter((workflow) =>
-            workflow.name.toLowerCase().includes(needle),
+        ? workflows.filter(
+            (workflow) =>
+              workflow.name.toLowerCase().includes(needle) ||
+              (workflow.publishedVersion ?? "").toLowerCase().includes(needle),
           )
         : workflows,
     [needle, workflows],
@@ -216,7 +218,7 @@ export function SidebarCreateMenu({
             side="right"
             alignOffset={-4}
             sideOffset={6}
-            className="w-44 gap-1 p-1"
+            className="w-56 gap-1 p-1"
           >
             <div className="relative">
               <IconSearch className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -246,7 +248,11 @@ export function SidebarCreateMenu({
                 <button
                   key={workflow.id}
                   type="button"
-                  title={workflow.name}
+                  title={
+                    workflow.publishedVersion == null
+                      ? workflow.name
+                      : `${workflow.name} · ${workflow.publishedVersion}`
+                  }
                   className={`${ITEM_CLASS} min-w-0`}
                   onClick={() => {
                     if (workspaceId === null) return;
@@ -264,6 +270,11 @@ export function SidebarCreateMenu({
                   <span className="min-w-0 flex-1 truncate">
                     {workflow.name}
                   </span>
+                  {workflow.publishedVersion != null && (
+                    <span className="max-w-16 shrink truncate text-[10px] text-muted-foreground">
+                      {workflow.publishedVersion}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

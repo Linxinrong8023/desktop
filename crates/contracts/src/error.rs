@@ -90,6 +90,14 @@ pub struct PluginConfigurationValidationParams {
     pub field_errors: Vec<PluginConfigurationFieldError>,
 }
 
+/// Identifies an invalid retrieval field without including its submitted or stored value.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "error.ts")]
+pub struct MarketplaceArtifactRetrievalFieldInvalidParams {
+    pub field: String,
+}
+
 /// Carries a secret-free Session MCP setup or refresh failure.
 ///
 /// `error_code` is the stable diagnostic. Optional Plugin ID, Setting ID, and transport name
@@ -123,6 +131,8 @@ pub enum PublicError {
     AgentNotFound(EmptyErrorParams),
     PluginNotFound(EmptyErrorParams),
     PluginHostIncompatible(EmptyErrorParams),
+    MarketplaceS3CredentialsRequired(EmptyErrorParams),
+    MarketplaceArtifactRetrievalFieldInvalid(MarketplaceArtifactRetrievalFieldInvalidParams),
     PluginConfigurationDeclarationInvalid(EmptyErrorParams),
     PluginConfigurationNotDeclared(EmptyErrorParams),
     ConfigurationRevisionConflict(EmptyErrorParams),
@@ -231,6 +241,10 @@ impl PublicError {
             Self::AgentNotFound(_) => "agent_not_found",
             Self::PluginNotFound(_) => "plugin_not_found",
             Self::PluginHostIncompatible(_) => "plugin_host_incompatible",
+            Self::MarketplaceS3CredentialsRequired(_) => "marketplace_s3_credentials_required",
+            Self::MarketplaceArtifactRetrievalFieldInvalid(_) => {
+                "marketplace_artifact_retrieval_field_invalid"
+            }
             Self::PluginConfigurationDeclarationInvalid(_) => {
                 "plugin_configuration_declaration_invalid"
             }
@@ -349,6 +363,7 @@ pub(crate) fn export(config: &Config) -> Result<(), ExportError> {
     TaskBaseBranchNotFoundParams::export_all(config)?;
     PluginConfigurationFieldError::export_all(config)?;
     PluginConfigurationValidationParams::export_all(config)?;
+    MarketplaceArtifactRetrievalFieldInvalidParams::export_all(config)?;
     PublicError::export_all(config)?;
     ContractError::export_all(config)?;
     Ok(())
@@ -357,9 +372,10 @@ pub(crate) fn export(config: &Config) -> Result<(), ExportError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ContractError, EmptyErrorParams, OpenLocationFailedParams, OpenLocationTarget,
-        PluginConfigurationValidationParams, PublicError, RequestId, SessionMcpSetupFailedParams,
-        SkillFolderConflictParams, TaskBaseBranchNotFoundParams,
+        ContractError, EmptyErrorParams, MarketplaceArtifactRetrievalFieldInvalidParams,
+        OpenLocationFailedParams, OpenLocationTarget, PluginConfigurationValidationParams,
+        PublicError, RequestId, SessionMcpSetupFailedParams, SkillFolderConflictParams,
+        TaskBaseBranchNotFoundParams,
     };
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -404,6 +420,12 @@ mod tests {
             PublicError::AgentNotFound(empty),
             PublicError::PluginNotFound(empty),
             PublicError::PluginHostIncompatible(empty),
+            PublicError::MarketplaceS3CredentialsRequired(empty),
+            PublicError::MarketplaceArtifactRetrievalFieldInvalid(
+                MarketplaceArtifactRetrievalFieldInvalidParams {
+                    field: "endpoint".to_owned(),
+                },
+            ),
             PublicError::PluginConfigurationDeclarationInvalid(empty),
             PublicError::PluginConfigurationNotDeclared(empty),
             PublicError::ConfigurationRevisionConflict(empty),
@@ -516,6 +538,8 @@ mod tests {
                 | PublicError::AgentNotFound(_)
                 | PublicError::PluginNotFound(_)
                 | PublicError::PluginHostIncompatible(_)
+                | PublicError::MarketplaceS3CredentialsRequired(_)
+                | PublicError::MarketplaceArtifactRetrievalFieldInvalid(_)
                 | PublicError::PluginConfigurationDeclarationInvalid(_)
                 | PublicError::PluginConfigurationNotDeclared(_)
                 | PublicError::ConfigurationRevisionConflict(_)
@@ -614,7 +638,7 @@ mod tests {
     #[test]
     fn public_error_codes_match_serde_tags_for_every_variant() {
         let samples = public_error_samples();
-        assert_eq!(samples.len(), 95);
+        assert_eq!(samples.len(), 97);
 
         for error in samples {
             let serialized = serde_json::to_value(&error).unwrap();

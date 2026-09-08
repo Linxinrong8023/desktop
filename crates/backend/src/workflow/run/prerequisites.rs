@@ -2,10 +2,12 @@ use ora_application::{
     AgentDefinitionRepository, AgentSkillDelivery, AgentSkillDeliveryProvider,
     FilesystemSkillStorage, MaterializedSkillBinding, NodeType, RepositoryError,
     SkillDiscoveryRoots, SkillMaterializationReceipt, SkillRepository, StartPrerequisitesError,
-    WorkflowGraph, WorkflowRunWorkspaceInitializer, has_usable_package,
+    WorkflowGraph, WorkflowRunWorkspaceInitializer, has_usable_package, skill_package_is_usable,
 };
-use ora_db::{RepositoryPool, SqliteAgentDefinitionRepository, SqliteSkillRepository};
-use ora_domain::{AgentDefinitionId, AgentRef, Namespace, SkillId};
+use ora_db::{
+    RepositoryPool, SqliteAgentDefinitionRepository, SqliteSkillRepository, TimestampSource,
+};
+use ora_domain::{AgentDefinitionId, AgentRef, Namespace};
 use ora_utils::path::StrictRelativePath;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -47,9 +49,10 @@ impl AgentSkillDeliveryProvider for SharedAgentSkillDeliveryProvider {
 /// Validates a run workspace's roles and skill bindings at deploy time.
 ///
 /// Roles and skills are deploy hard-dependencies: every agent's role must resolve in the agents
-/// catalog and every enabled skill must exist in the catalog. The Effect subsystem owns physical
-/// package materialization; this initializer only freezes the invocation names and Effect-owned
-/// discovery paths that execution uses to build the prompt.
+/// catalog and every enabled skill must exist in the catalog with a loadable package — the formal
+/// directory for a local skill, the immutable plugin package for a plugin-imported skill. The
+/// Effect subsystem owns physical package materialization; this initializer only freezes the
+/// invocation names and Effect-owned discovery paths that execution uses to build the prompt.
 #[derive(Clone)]
 pub struct SkillRoleWorkspaceInitializer<DeliveryProvider = SharedAgentSkillDeliveryProvider> {
     skills_root: PathBuf,
@@ -149,7 +152,7 @@ fn collect_roles(graph: &WorkflowGraph) -> Vec<String> {
 /// Resolves every node's enabled skills to the Effect-owned paths later consumed by execution.
 fn resolve_graph_skill_bindings<DeliveryProvider>(
     storage: &FilesystemSkillStorage,
-    skill_repository: &SqliteSkillRepository,
+    skill_repository: &SqliteSkillRepository<impl TimestampSource>,
     delivery_provider: &DeliveryProvider,
     graph: &WorkflowGraph,
 ) -> Result<SkillMaterializationReceipt, StartPrerequisitesError>
@@ -196,7 +199,7 @@ where
                 continue;
             }
             let catalog_name =
-                resolve_skill_catalog_name(storage, Some(skill_repository), &skill.skill_id)?;
+                resolve_skill_catalog_name(storage, skill_repository, &skill.skill_id)?;
             let invocation_name = normalize_skill_name(&catalog_name);
             let package_paths = discovery_roots
                 .iter()
@@ -228,29 +231,44 @@ where
 
 /// Resolves one enabled skill id to its catalog name.
 ///
-/// A namespaced id like `cdase:sfmea_review` resolves by the suffix after the colon. When that
-/// name is not a catalog directory, `skill_repository` resolves a skill id (the editor stores
-/// skill ids as `skillId`) back to the catalog name.
+/// Graphs store the catalog name in `skillId`, so the candidate name first resolves through the
+/// local formal package directory. When that directory is absent — the shape of every
+/// plugin-imported skill, whose package stays inside the plugin installation — the catalog row is
+/// matched and usability follows the row's owning package: the formal directory for a Local skill
+/// and the immutable plugin package for a Plugin skill, mirroring the availability that the
+/// settings and editor surfaces display for the same skill. A legacy namespaced id like
+/// `cdase:sfmea_review` resolves by the suffix after the colon, and a full catalog id such as
+/// `plugin:<plugin_id>:<name>` claims its row before the name match.
 fn resolve_skill_catalog_name(
     storage: &FilesystemSkillStorage,
-    skill_repository: Option<&SqliteSkillRepository>,
+    skill_repository: &SqliteSkillRepository<impl TimestampSource>,
     skill_id: &str,
 ) -> Result<String, StartPrerequisitesError> {
     let candidate = skill_id.rsplit(':').next().unwrap_or(skill_id);
     if skill_package_usable(storage, candidate)? {
         return Ok(candidate.to_string());
     }
-    if let Some(repository) = skill_repository {
-        let Some(skill) = repository
-            .find_skill(&SkillId::new(candidate))
-            .map_err(StartPrerequisitesError::Repository)?
-        else {
-            return Err(StartPrerequisitesError::WorkflowSkillNotFound {
-                skill_id: skill_id.to_string(),
-            });
-        };
-        if skill_package_usable(storage, &skill.name)? {
-            return Ok(skill.name);
+    let skills = skill_repository
+        .list_skills()
+        .map_err(StartPrerequisitesError::Repository)?;
+    // An exact catalog id match wins over name matches so a stored row id is honored even when
+    // its suffix is not the catalog name; name matching is ASCII-case-insensitive like the
+    // repository's COLLATE NOCASE lookups.
+    let mut matched = Vec::new();
+    if let Some(by_id) = skills.iter().find(|skill| skill.id.as_ref() == skill_id) {
+        matched.push(by_id);
+    }
+    matched.extend(skills.iter().filter(|skill| {
+        skill.name.eq_ignore_ascii_case(candidate) && skill.id.as_ref() != skill_id
+    }));
+    for skill in matched {
+        let usable = skill_package_is_usable(storage, skill).map_err(|error| {
+            StartPrerequisitesError::SkillMaterializationError {
+                message: error.to_string(),
+            }
+        })?;
+        if usable {
+            return Ok(skill.name.clone());
         }
     }
     Err(StartPrerequisitesError::WorkflowSkillNotFound {
@@ -258,7 +276,7 @@ fn resolve_skill_catalog_name(
     })
 }
 
-/// Returns whether the catalog still has a formal package that Get can load.
+/// Returns whether the local catalog still has a formal package that parses as a skill manifest.
 fn skill_package_usable(
     storage: &FilesystemSkillStorage,
     name: &str,
@@ -275,7 +293,7 @@ fn skill_package_usable(
 #[cfg(test)]
 fn resolve_executable_skill_name(
     storage: &FilesystemSkillStorage,
-    skill_repository: Option<&SqliteSkillRepository>,
+    skill_repository: &SqliteSkillRepository<impl TimestampSource>,
     skill_id: &str,
 ) -> Result<String, StartPrerequisitesError> {
     Ok(normalize_skill_name(&resolve_skill_catalog_name(
@@ -293,7 +311,10 @@ fn normalize_skill_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ora_db::{DatabaseBootstrapper, DatabaseLocation, default_migration_catalog};
+    use ora_db::{
+        DatabaseBootstrapper, DatabaseLocation, PluginSkillProjection, default_migration_catalog,
+    };
+    use ora_domain::PluginId;
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
@@ -321,6 +342,33 @@ mod tests {
             .expect("bootstrap repository pool")
     }
 
+    /// Projects one installed plugin skill into the catalog with its package kept outside the
+    /// local skills root, mirroring how a plugin import publishes its immutable skills.
+    fn install_plugin_skill(pool: &RepositoryPool, package_root: &Path, name: &str) {
+        std::fs::create_dir_all(package_root).unwrap();
+        std::fs::write(
+            package_root.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: review\n---\n"),
+        )
+        .unwrap();
+        SqliteSkillRepository::with_clock(pool.clone(), crate::test_clock::TestClock)
+            .replace_plugin_skills(
+                &PluginId::new("official", "review-pack").unwrap(),
+                "1.2.3",
+                &[PluginSkillProjection {
+                    name: name.to_string(),
+                    description: "Reviews changes".to_string(),
+                    package_root: package_root.to_path_buf(),
+                    skill_md_digest: ora_effect::Digest::sha256(b"manifest"),
+                    package_fingerprint: ora_effect::Fingerprint::from(
+                        ora_utils::directory::fingerprint_directory(package_root, &[]).unwrap(),
+                    ),
+                }],
+                10,
+            )
+            .unwrap();
+    }
+
     #[test]
     fn normalizes_skill_names_to_lowercase_dashes() {
         assert_eq!(normalize_skill_name("sfmea_review"), "sfmea-review");
@@ -338,9 +386,97 @@ mod tests {
         )
         .unwrap();
         let storage = FilesystemSkillStorage::new(skills_root);
+        // An empty catalog keeps this legacy-id resolution on the local package fast path.
+        let catalog_temp = TempDir::new().unwrap();
+        let repository = SqliteSkillRepository::with_clock(
+            test_pool(&catalog_temp),
+            crate::test_clock::TestClock,
+        );
         assert_eq!(
-            resolve_executable_skill_name(&storage, None, "cdase:sfmea_review").unwrap(),
+            resolve_executable_skill_name(&storage, &repository, "cdase:sfmea_review").unwrap(),
             "sfmea-review"
+        );
+    }
+
+    /// A plugin-imported skill resolves through its immutable plugin package — by the catalog
+    /// name the editor stores in `skillId` and by its full `plugin:` catalog id — even though no
+    /// formal directory exists in the local skills root.
+    #[test]
+    fn resolves_a_plugin_skill_through_its_plugin_package() {
+        let temp = TempDir::new().unwrap();
+        let skills_root = temp.path().join("skills");
+        let package_root = temp.path().join("plugins/review-pack/assets/review");
+        let pool = test_pool(&temp);
+        install_plugin_skill(&pool, &package_root, "review");
+        let storage = FilesystemSkillStorage::new(skills_root);
+        let repository = SqliteSkillRepository::with_clock(pool, crate::test_clock::TestClock);
+
+        assert_eq!(
+            resolve_executable_skill_name(&storage, &repository, "review").unwrap(),
+            "review"
+        );
+        assert_eq!(
+            resolve_executable_skill_name(
+                &storage,
+                &repository,
+                "plugin:official/review-pack:review",
+            )
+            .unwrap(),
+            "review"
+        );
+    }
+
+    /// A plugin skill whose package no longer loads must still block deployment instead of
+    /// resolving, matching the unavailable state the settings surface shows for it.
+    #[test]
+    fn rejects_a_plugin_skill_whose_package_is_unavailable() {
+        let temp = TempDir::new().unwrap();
+        let package_root = temp.path().join("plugins/review-pack/assets/review");
+        let pool = test_pool(&temp);
+        install_plugin_skill(&pool, &package_root, "review");
+        std::fs::remove_dir_all(&package_root).unwrap();
+        let storage = FilesystemSkillStorage::new(temp.path().join("skills"));
+        let repository = SqliteSkillRepository::with_clock(pool, crate::test_clock::TestClock);
+
+        assert!(matches!(
+            resolve_executable_skill_name(&storage, &repository, "review"),
+            Err(StartPrerequisitesError::WorkflowSkillNotFound { skill_id })
+                if skill_id == "review"
+        ));
+    }
+
+    /// A workflow node bound to a plugin-imported skill deploys: the receipt freezes the plugin
+    /// skill's invocation name and discovery paths like a local skill's.
+    #[test]
+    fn initialize_workspace_binds_a_plugin_skill_through_its_plugin_package() {
+        let temp = TempDir::new().unwrap();
+        let skills_root = temp.path().join("skills");
+        let package_root = temp.path().join("plugins/review-pack/assets/review");
+        let pool = test_pool(&temp);
+        install_plugin_skill(&pool, &package_root, "review");
+        let initializer = SkillRoleWorkspaceInitializer::new(skills_root, pool).unwrap();
+        let graph = WorkflowGraph::parse(
+            r#"{"nodes":[{"id":"a","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"ora-space.codex","modelId":"m"},"skills":[{"skillId":"review","enabled":true}]}}}],"edges":[]}"#,
+        )
+        .unwrap();
+        let worktree = temp.path().join("worktree");
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        let receipt = initializer.initialize_workspace(&graph, &worktree).unwrap();
+
+        assert!(!worktree.join(".agents").exists());
+        assert_eq!(
+            receipt,
+            SkillMaterializationReceipt {
+                bindings: vec![MaterializedSkillBinding {
+                    node_id: "a".to_string(),
+                    skill_id: "review".to_string(),
+                    invocation_name: "review".to_string(),
+                    package_paths: vec![
+                        StrictRelativePath::parse(".agents/skills/review").unwrap()
+                    ],
+                }],
+            }
         );
     }
 

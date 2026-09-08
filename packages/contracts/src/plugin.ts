@@ -12,6 +12,9 @@ export type ActivatePluginResponse = { plugin: InstalledPlugin };
 
 /**
  * Requests adding one marketplace Git source.
+ *
+ * New sources use Direct HTTPS retrieval. Configure S3 SigV4 and its credential pair with
+ * `UpdateMarketplaceSourceRequest` after the source has been added.
  */
 export type AddMarketplaceSourceRequest = {
   url: string;
@@ -285,6 +288,12 @@ export type MarketplaceArtifactRetrievalUpdate = { "type": "direct_https" } | {
 
 /**
  * Selects whether an S3 source update retains or atomically replaces its credential pair.
+ *
+ * # Security
+ *
+ * `Serialize` emits plaintext credentials for IPC transport to the backend, including when
+ * this value is nested in an update request. Never serialize it into logs, traces, or telemetry.
+ * Only the manual `Debug` implementation redacts the credential pair.
  */
 export type MarketplaceS3CredentialsUpdate = { "action": "preserve" } | {
   "action": "replace";

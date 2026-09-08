@@ -51,7 +51,7 @@ import {
   MAX_REVIEW_WIDTH,
   MIN_REVIEW_WIDTH,
   responsiveReviewWidth,
-} from "./workspace-review-layout-utils";
+} from "../../state/stores/review-layout";
 import "./workspace-review-layout.css";
 
 const EXPANDED_PANEL_EXIT_MS = 180;

@@ -5,10 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppI18nProvider } from "../../i18n/i18n";
 import { ContractsClientContext } from "../../contracts-client-context";
 import {
-  createMockClient,
-  createMockClientState,
-} from "../../test/mock-client";
-import { queryKeys } from "../../state/hooks/query-keys";
+  createTestClient,
+  type TestHandlers,
+} from "../../test/contracts-transport";
+import "../../i18n/i18n-instance";
+import { diffKeys } from "../../state/data/diff";
 import { TaskDiffView } from "./task-diff-view";
 
 /**
@@ -44,8 +45,9 @@ function largeFilePatch(path: string, lines: number): string {
  * a session switch back onto an already-loaded workspace diff.
  */
 function renderDiff(patch: string) {
-  const client = createMockClient(createMockClientState());
-  client.workspace.getDiff = async () => ({
+  const clientHandlers: TestHandlers = {};
+  const client = createTestClient(clientHandlers);
+  clientHandlers.getWorkspaceDiff = async () => ({
     baseCommitId: "base",
     headCommitId: "head",
     patch,
@@ -53,7 +55,7 @@ function renderDiff(patch: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 } },
   });
-  queryClient.setQueryData(queryKeys.workspaceDiff("task-1", "branch"), {
+  queryClient.setQueryData(diffKeys.workspaceDiff("task-1", "branch"), {
     baseCommitId: "base",
     headCommitId: "head",
     patch,

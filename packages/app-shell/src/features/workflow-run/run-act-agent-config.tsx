@@ -3,7 +3,7 @@ import { cn } from "@ora/ui";
 import type { WorkflowAgentConfig } from "@ora/workflow-runtime";
 import { IconRobot } from "@tabler/icons-react";
 import { PluginLogoMark } from "../settings/plugin-logo";
-import { useAgentCatalog } from "../chat/agent-catalog";
+import { useAgentCatalog } from "../../state/hooks/use-agent-catalog";
 import { useAgents } from "../../state/hooks/use-agents";
 import { useSkills } from "../../state/hooks/use-skills";
 import { formatAgentExecutorLabel } from "./agent-config-display";
