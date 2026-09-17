@@ -1,72 +1,75 @@
-# 学习笔记（docs_learn）
+# Ora 学习教材：用连续追问检查设计
 
-> 本文件夹用于存放学习 Ora Desktop 项目过程中的**个人理解笔记**，不是项目正式文档。
-> 内容使用中文，解释风格以通俗易懂为主。
+> 面向校招 AI 应用／Agent 开发，兼顾后端设计。以参与的 Agent、Workflow、插件体系为主线。只在 `project_learn` 分支整理学习资料。
 >
-> **重要约束**：本文件夹只允许在 `project_learn` 分支上进行修改。
+> **当前是样章验收阶段：只有下面两个样章完成了本轮重写，其余 19 篇仍是旧版。** 样章确认后才推广；历史资料在全部融合完成后删除。本轮没有新增 HTML 文件，文内折叠答案仍属于 Markdown 教材。
 
-## 目录
+## 先看这两个连续样章
 
-- [第 1 课：认识仓库、程序与依赖地图（总结）](./lesson-01.md)
-- [第 2 课：同一个"项目"的三种样子 + 数据链路（总结）](./lesson-02.md)
-- [第 3 课：接口、handler、组合根与完整流程（总结）](./lesson-03.md)
-- [第 4 课：错误体系 + 请求生命周期 + Backend 生命周期（总结）](./lesson-04.md)
-- [第 5 课：数据库持久化——迁移、连接池、repository（总结）](./lesson-05.md)
-- [第 6 课：Task 与 Git Worktree（gitlancer 与任务工作树）（总结）](./lesson-06.md)
-- [第 7 课：ACP Agent Runtime（完整：三讲全部完成）](./lesson-07.md)
-- [第 8 课：Session 生命周期与 Warm Session 深入（总结）](./lesson-08.md)
-- [第 9 课：⭐ 保存上下文信息——ora-history 会话历史与 transcript（总结）](./lesson-09.md)
-- [第 10 课：⭐ 模型选择与切换（Model Selector）（总结）](./lesson-10.md)
-- [第 11 课：⭐ 切换 Agent（会话换绑）（总结）](./lesson-11.md)
-- [第 12 课：Skill 体系与 AgentDefinition（简单总结）](./lesson-12.md)
-- [第 13 课：Spec 管理与租约（ProjectWorkContext）（总结）](./lesson-13.md)
-- [第 14 课：task_diff 与文件系统层（总结）](./lesson-14.md)
-- [第 15 课：Workflow 定义与版本管理（总结）](./lesson-15.md)
-- [第 16 课：Workflow 运行引擎（总结）](./lesson-16.md)
-- [第 17 课：Workflow 前端设计模式 + 模块全貌（总结）](./lesson-17.md)
+1. [对话历史保存](./对话历史保存/模块说明.md)：从“用户看到回复”开始，解释消息怎么合并、什么时候保存、为什么写入顺序不同，以及失败后还能知道什么。
+2. [智能体切换](./智能体切换/模块说明.md)：继续同一段修复重试问题的对话，解释换绑、交接确认、超长历史、可能的压缩方案和故障窗口。
 
-> 上述“已学”表示有历史课程记录，不等于已经掌握。插件专题根据用户最新反馈从零基础重新开始，并以主动复述作为掌握证据。
+两篇共用同一个会话 S、工作区 W 和逐步递增的历史位置。建议顺序阅读，再独立回答文末追问，最后展开参考思路。
 
-## 学习路线图
+验收重点是：不看代码能否理解过程；中间数据是否帮助推理；面试官改变条件后是否还能继续回答；已有保障与可能方案是否分得清。此阶段不要求批准其他旧版模块的质量。
 
-- [第 6 课起的章节规划（含四个关键专题）](./LESSON-PLAN.md)
-- [Agent 教学引导（如何给用户讲解）](./AGENT-TEACHING-GUIDE.md)
-- 已学完第 1~17 课（第二段 Workflow 专线全部完成）；第 18~19 课偏前端（可不学/粗读），第 20 课 Web 服务器运行时、第 21 课桌面运行时（Tauri）值得细学。
+## 阅读方式
 
-## 插件系统专题（Teach 工作区）
+每个重要设计问题都从实际矛盾出发，比较直观方案与当前方案，用同一个案例走过中间状态，再改变条件追问。专业概念用于给已经理解的事情命名，源码链接只供查证，不是阅读前提。
 
-> 当前最高优先级：为面试建立可口述、可追问、可落到源码的完整插件系统理解；开发扩展能力为第二优先级。
+- **当前实现**：依据实际执行路径核实的行为，不把注释或旧材料当作唯一事实。
+- **边界与缺口**：说明条件、影响和证据；阅读推断与实际复现分开。
+- **可能方案**：尚未实现的思考材料，需要解释做法、数据、成本和失败处理。
 
-- [学习使命](./MISSION.md)
-- [可信资料索引](./RESOURCES.md)
-- [插件系统速查图](./reference/plugin-system-map.html)
-- [专题第 1 课：插件到底是什么](./lessons/0001-package-contribution-runtime.html)
-- [专题第 2 课：插件文件、插件进程与插件数据](./lessons/0002-files-processes-and-data.html)
-- [专题第 3 课：Manifest 是插件的身份证](./lessons/0003-manifest.html)
-- [专题第 4 课：Manifest 与 Plugin Manager 的两阶段验证](./lessons/0004-two-stage-validation.html)
-- [专题第 5 课：InstalledPlugin 是验证后的可信宿主视图](./lessons/0005-installed-plugin.html)
-- [专题第 6 课：PluginContribution 与类型化能力](./lessons/0006-plugin-contribution.html)
-- [专题第 7 课：Contribution 不等于 Runtime](./lessons/0007-contribution-versus-runtime.html)
-- [专题第 8 课：Agent 插件的双进程模型](./lessons/0008-agent-two-processes.html)
-- [专题第 9 课：Plugin JSON-RPC 与 ACP 的协议分层](./lessons/0009-plugin-rpc-and-acp.html)
-- [专题第 10 课：一条 Prompt 的端到端协议路径](./lessons/0010-one-prompt-end-to-end.html)
-- [专题第 11 课：ora/register 与运行时能力合同](./lessons/0011-runtime-registration.html)
-- [专题第 12 课：Plugin ID 与 Process Generation](./lessons/0012-plugin-generation.html)
-- [专题第 13 课：Plugin Lifecycle 是唯一进程所有者](./lessons/0013-lifecycle-sole-owner.html)
-- [专题第 14 课：插件 Running 不等于 Agent Ready](./lessons/0014-running-versus-ready.html)
-- [Agent 插件主线阶段总结](./reference/agent-plugin-mainline.html)
-- [专题第 15 课：connection 与 ensure_running](./lessons/0015-connection-versus-ensure-running.html)
-- [专题第 16 课：为什么 Agent 需要 Runtime 与 Supervisor](./lessons/0016-runtime-and-supervisor.html)
-- [专题第 17 课：一个 Agent 如何准确服务多个 Session](./lessons/0017-shared-agent-session-routing.html)
-- [专题第 18 课：失败不是一种失败](./lessons/0018-failure-triage.html)
-- [专题第 19 课：Agent 插件到底安全吗](./lessons/0019-agent-plugin-security-boundary.html)
-- [专题第 20 课：启动与退出必须对称](./lessons/0020-symmetric-agent-teardown.html)
-- [专题第 21 课：Agent Ready 前的三次确认](./lessons/0021-three-stage-agent-handshake.html)
-- [专题第 22 课：PluginId 与 AgentRef](./lessons/0022-plugin-id-versus-agent-ref.html)
-- [专题第 23 课：三个 Generation 不是同一个计数器](./lessons/0023-three-generations.html)
-- [专题第 24 课：模型发现为什么有两条路径](./lessons/0024-two-model-discovery-paths.html)
-- [专题第 25 课：Ora 运行中安装与卸载如何生效](./lessons/0025-live-plugin-reconciliation.html)
-- [专题第 26 课：defineAgent 与插件作者的分工](./lessons/0026-define-agent-contract.html)
-- [Agent 插件学习覆盖审计：已掌握、待验收与遗漏](./reference/agent-plugin-coverage-audit.html)
+数据片段展示真实字段结构，但使用虚构内容；示意预算不是具体模型规格。设计回答要能解释“为什么”，不靠语言语法、函数名或术语堆砌。
 
-当前进度：Agent 插件覆盖审计中的四项 P0 已全部通过口述检查；P1 的 PluginId/AgentRef 与三种 generation 已通过复述，两条模型发现路径与动态安装协调已澄清待穿插复习，开始从插件作者视角学习 <code>defineAgent</code> 最小合同。
+## 四条学习路线
+
+### Agent 体系
+
+| 模块 | 当前状态 | 需要能够解释的问题 |
+| --- | --- | --- |
+| [对话历史保存](./对话历史保存/模块说明.md) | 样章一，待验收 | 从片段合并、落盘顺序到回放、缺口与耐久性。 |
+| [智能体切换](./智能体切换/模块说明.md) | 样章二，待验收 | 延续同一会话，推演换绑、交接、长历史预算和失败恢复。 |
+| [智能体运行时](./智能体运行时/模块说明.md) | 旧版，待重写 | 共享执行能力、会话隔离、故障范围与重启。 |
+| [会话生命周期](./会话生命周期/模块说明.md) | 旧版，待重写 | 创建、读取、发送、取消和删除的不同含义。 |
+| [模型发现与选择](./模型发现与选择/模块说明.md) | 旧版，待重写 | 用户选择、目标真实能力与上下文预算。 |
+
+### Workflow 体系
+
+| 模块 | 当前状态 | 需要能够解释的问题 |
+| --- | --- | --- |
+| [工作流定义与版本](./工作流定义与版本/模块说明.md) | 旧版，待重写 | 草稿、发布与运行使用的固定版本。 |
+| [工作流执行与恢复](./工作流执行与恢复/模块说明.md) | 旧版，待重写 | 依赖、分支、等待、执行副作用与故障恢复。 |
+
+### 插件体系
+
+| 模块 | 当前状态 | 需要能够解释的问题 |
+| --- | --- | --- |
+| [插件安装与生命周期](./插件安装与生命周期/模块说明.md) | 旧版，待重写 | 能力声明、安装验证和运行中变更。 |
+| [配置管理](./配置管理/模块说明.md) | 旧版，待重写 | 配置保存、并发修改与实际生效。 |
+| [工具服务接入](./工具服务接入/模块说明.md) | 旧版，待重写 | MCP 服务如何进入会话，变更怎样影响执行。 |
+| [技能与角色定义](./技能与角色定义/模块说明.md) | 旧版，待重写 | 资料、角色、执行能力的不同责任。 |
+| [技能交付与效果协调](./技能交付与效果协调/模块说明.md) | 旧版，待重写 | 期望状态、真实文件和消费者就绪之间的关系。 |
+| [插件界面与下载](./插件界面与下载/模块说明.md) | 旧版，待重写 | 实例身份、能力授权和异步结果归属。 |
+
+### 工程基础
+
+| 模块 | 当前状态 | 需要能够解释的问题 |
+| --- | --- | --- |
+| [系统架构与启动](./系统架构与启动/模块说明.md) | 旧版，待重写 | 业务与基础设施的责任，启动恢复为何分开。 |
+| [数据库设计](./数据库设计/模块说明.md) | 旧版，待重写 | 业务关系、事务边界和记录怎样支持恢复。 |
+| [项目与工作区](./项目与工作区/模块说明.md) | 旧版，待重写 | 项目身份、执行环境与位置证据。 |
+| [任务与工作树](./任务与工作树/模块说明.md) | 旧版，待重写 | 隔离、资源占用、补偿和清理。 |
+| [前端对话与状态管理](./前端对话与状态管理/模块说明.md) | 旧版，待重写 | 显示状态、真实状态和重复／缺失事件。 |
+| [文件浏览与代码审查](./文件浏览与代码审查/模块说明.md) | 旧版，待重写 | 当前文件事实、历史引用和访问边界。 |
+| [日志诊断与运行设置](./日志诊断与运行设置/模块说明.md) | 旧版，待重写 | 排障证据、业务提交与日志耐久性。 |
+| [应用更新与安装包恢复](./应用更新与安装包恢复/模块说明.md) | 旧版，待重写 | 可恢复下载、信任验证和安装结果。 |
+
+## 后续范围与当前边界
+
+样章验收后，按四条路线重写全部 21 个模块，每个中文模块目录保留一份 `模块说明.md`。前三条业务路线优先深入，工程基础服务于相关问题，不平均分配篇幅。
+
+旧课程、历史归档、问答、个人记录和汇报材料暂存于现有目录，供后续融合核对；它们不再作为学习入口。全部融合完成后清除，最终只留下模块教材和本导航。
+
+本轮只修改两个样章与本导航，没有修改产品代码、接口、数据库结构或真实数据，也没有自动提交。
