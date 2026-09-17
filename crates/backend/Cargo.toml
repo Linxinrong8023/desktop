@@ -23,6 +23,7 @@ ora-effect-skill = { workspace = true }
 ora-fs = { workspace = true }
 ora-history = { workspace = true }
 ora-logging = { workspace = true }
+ora-plugin-asset = { workspace = true }
 ora-plugin-config = { workspace = true }
 ora-plugin-manifest = { workspace = true }
 ora-plugin-lifecycle = { workspace = true }
@@ -50,6 +51,7 @@ uuid = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+ora-db = { workspace = true, features = ["test-support"] }
 rusqlite = { workspace = true }
 pretty_assertions = { workspace = true }
 ora-plugin-manifest = { workspace = true }

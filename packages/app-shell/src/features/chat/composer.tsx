@@ -21,6 +21,7 @@ import {
   ComposerEditor,
   type ComposerEditorHandle,
 } from "../editor/composer-editor";
+import { TextEditContextMenu } from "../editor/text-edit-context-menu";
 import type { PromptTokenKind } from "@ora/editor/composer";
 import {
   EMPTY_COMPOSER_QUERY,
@@ -32,6 +33,7 @@ import type { JSONContent } from "@tiptap/core";
 import type { Agent, Skill } from "@ora/contracts";
 import { useTranslation } from "react-i18next";
 import { ModelSelector } from "./model-selector";
+import { ThoughtLevelSelector } from "./thought-level-selector";
 import { PermissionSelector } from "./permission-selector";
 import { ComposerActionMenu } from "./composer-action-menu";
 import { ImagePreviewDialog } from "./image-preview-dialog";
@@ -483,6 +485,15 @@ export function Composer({
     fileMenuStatusMessageKey === undefined
       ? undefined
       : t(fileMenuStatusMessageKey);
+  const availableCommandNames = useMemo(
+    () => new Set(availableCommands.map(({ name }) => name)),
+    [availableCommands],
+  );
+  const unsupportedCommandTitle = useCallback(
+    (commandName: string) =>
+      t("chat.unsupportedCommand", { command: `/${commandName}` }),
+    [t],
+  );
   const showActionMenu =
     (plusMenuOpen ||
       (slashQuery !== null &&
@@ -923,13 +934,24 @@ export function Composer({
       )}
       <div className="flex flex-col p-2">
         {attachments.length > 0 && (
-          <div
-            className="flex gap-2 overflow-x-auto px-2 pb-2 pt-1"
-            aria-label={t("chat.attachments.selected")}
+          <TextEditContextMenu
+            editable={false}
+            hasSelection={false}
+            trigger={
+              <div
+                className="flex gap-2 overflow-x-auto px-2 pb-2 pt-1"
+                aria-label={t("chat.attachments.selected")}
+              />
+            }
+            onCut={() => undefined}
+            onCopy={() => undefined}
+            onPaste={() => undefined}
+            onSelectAll={() => undefined}
           >
             {attachments.map((attachment) => (
               <figure
                 key={attachment.id}
+                data-copyable-image
                 className="group/attachment relative size-16 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
               >
                 <button
@@ -967,7 +989,7 @@ export function Composer({
                 </button>
               </figure>
             ))}
-          </div>
+          </TextEditContextMenu>
         )}
         {attachmentError && (
           <p role="alert" className="px-2 pb-1 text-[11px] text-destructive">
@@ -990,6 +1012,8 @@ export function Composer({
               : undefined
           }
           onSubmit={submit}
+          availableCommandNames={availableCommandNames}
+          unsupportedCommandTitle={unsupportedCommandTitle}
           onQueryChange={setQuery}
           onDocChange={handleDocChange}
           onTextChange={(text) => {
@@ -1065,10 +1089,18 @@ export function Composer({
             className="flex shrink-0 items-center gap-2"
           >
             {showModelSelector && (
-              <ModelSelector
-                disabled={modelSelectorDisabled}
-                sessionId={modelSelectorSessionId}
-              />
+              <>
+                <ModelSelector
+                  disabled={modelSelectorDisabled}
+                  sessionId={modelSelectorSessionId}
+                />
+                {/* Shares the model picker's overflow gate: both describe the
+                    session's provider configuration and collapse together. */}
+                <ThoughtLevelSelector
+                  disabled={modelSelectorDisabled}
+                  sessionId={modelSelectorSessionId}
+                />
+              </>
             )}
             <Tooltip
               // Controlled so the refusal can pin it open. `onOpenChange` is

@@ -29,43 +29,58 @@ pub(crate) async fn forward_contract_stream<Event>(
     Event: Serialize + Send + 'static,
 {
     let cancellation = registration.cancellation().clone();
-    loop {
+    let outcome = loop {
         tokio::select! {
-            () = cancellation.cancelled() => {
-                lifecycle.complete_cancellation();
-                break;
-            },
-            event = stream.recv() => {
-                let is_terminal = matches!(&event, Some(Err(_)) | None);
-                let frame = match event {
-                    Some(Ok(data)) => serde_json::json!({ "type": "data", "data": data }),
-                    Some(Err(error)) => {
-                        lifecycle.complete_failure(&error);
-                        serde_json::json!({
-                            "type": "error",
-                            "error": error.contract_error(lifecycle.request_id()),
-                        })
-                    },
-                    None => {
-                        lifecycle.complete_success();
-                        serde_json::json!({ "type": "end" })
-                    },
-                };
-                if on_event.send(frame).is_err() {
-                    // The frontend Channel is gone, so no terminal frame can ever be delivered.
-                    // Record it as a caller-side teardown rather than a backend failure; the
-                    // exactly-once claim makes this a no-op when a terminal frame already
-                    // completed the request just above.
-                    lifecycle.complete_cancellation();
-                    break;
+            () = cancellation.cancelled() => break StreamEnd::Cancelled,
+            event = stream.recv() => match event {
+                Some(Ok(data)) => {
+                    if on_event.send(serde_json::json!({ "type": "data", "data": data })).is_err() {
+                        break StreamEnd::Cancelled;
+                    }
                 }
-                if is_terminal {
-                    break;
-                }
+                Some(Err(error)) => break StreamEnd::Failed(error),
+                None => break StreamEnd::Finished,
             }
         }
+    };
+    let cleanup = stream.cancel_and_wait().await;
+    finish_contract_stream(outcome, cleanup, registration, on_event, lifecycle);
+}
+
+/// Settles the business outcome and the independent cleanup receipt at the transport boundary.
+fn finish_contract_stream(
+    outcome: StreamEnd,
+    cleanup: Result<(), BackendError>,
+    registration: StreamRegistration,
+    on_event: Channel<serde_json::Value>,
+    lifecycle: RequestLifecycle,
+) {
+    let outcome = match (outcome, &cleanup) {
+        (StreamEnd::Failed(error), _) => StreamEnd::Failed(error),
+        (outcome, Ok(())) => outcome,
+        (StreamEnd::Cancelled | StreamEnd::Finished, Err(error)) => {
+            StreamEnd::Failed(error.clone())
+        }
+    };
+    match outcome {
+        StreamEnd::Cancelled => lifecycle.complete_cancellation(),
+        StreamEnd::Finished => {
+            lifecycle.complete_success();
+            let _ = on_event.send(serde_json::json!({ "type": "end" }));
+        }
+        StreamEnd::Failed(error) => {
+            lifecycle.complete_failure(&error);
+            let _ = on_event.send(serde_json::json!({ "type": "error", "error": error.contract_error(lifecycle.request_id()) }));
+        }
     }
-    drop(registration);
+    registration.finish(cleanup);
+}
+
+/// Defers lifecycle completion until owner cleanup has also settled.
+enum StreamEnd {
+    Cancelled,
+    Finished,
+    Failed(BackendError),
 }
 
 /// Forwards debounced native workspace changes until the Desktop stream is cancelled.
@@ -79,58 +94,57 @@ pub(crate) async fn forward_workspace_watch(
     let watch_cancellation = cancellation.clone();
     let terminal_channel = on_event.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        while !watch_cancellation.is_cancelled() {
-            match watcher.receive_batch(Duration::from_millis(100)) {
-                Ok(Some(changes)) if !changes.is_empty() => {
-                    let data = WorkspaceFileEventBatch {
-                        changes: changes.into_iter().map(to_contract_change).collect(),
-                    };
-                    if on_event
-                        .send(serde_json::json!({ "type": "data", "data": data }))
-                        .is_err()
-                    {
-                        return Err(WatchStop::ChannelClosed);
+        // Return the native owner on errors and closed channels too, so every exit awaits close.
+        let outcome = (|| {
+            while !watch_cancellation.is_cancelled() {
+                match watcher.receive_batch(Duration::from_millis(100)) {
+                    Ok(Some(changes)) if !changes.is_empty() => {
+                        let data = WorkspaceFileEventBatch {
+                            changes: changes.into_iter().map(to_contract_change).collect(),
+                        };
+                        if on_event
+                            .send(serde_json::json!({ "type": "data", "data": data }))
+                            .is_err()
+                        {
+                            return Err(WatchStop::ChannelClosed);
+                        }
                     }
+                    Ok(Some(_)) | Ok(None) => {}
+                    Err(error) => return Err(WatchStop::Watcher(error)),
                 }
-                Ok(Some(_)) | Ok(None) => {}
-                Err(error) => return Err(WatchStop::Watcher(error)),
             }
-        }
-        Ok(())
+            Ok(())
+        })();
+        (watcher, outcome)
     })
     .await;
 
-    if cancellation.is_cancelled() {
-        lifecycle.complete_cancellation();
-    } else {
-        match result {
-            Ok(Ok(())) => {
-                lifecycle.complete_success();
-                let _ = terminal_channel.send(serde_json::json!({ "type": "end" }));
-            }
-            // A closed Channel has no receiver left to inform, so this path only records the
-            // completion that the disconnected caller can no longer observe.
-            Ok(Err(WatchStop::ChannelClosed)) => lifecycle.complete_cancellation(),
-            Ok(Err(WatchStop::Watcher(error))) => {
-                let backend_error = workspace_file_backend_error(error);
-                lifecycle.complete_failure(&backend_error);
-                let _ = terminal_channel.send(serde_json::json!({
-                    "type": "error",
-                    "error": backend_error.contract_error(lifecycle.request_id()),
-                }));
-            }
-            Err(error) => {
-                let backend_error =
-                    BackendError::internal("Desktop workspace watcher failed", error);
-                lifecycle.complete_failure(&backend_error);
-                let _ = terminal_channel.send(serde_json::json!({
-                    "type": "error",
-                    "error": backend_error.contract_error(lifecycle.request_id()),
-                }));
-            }
+    let (result, cleanup) = match result {
+        Ok((watcher, result)) => (
+            Ok(result),
+            watcher.close().await.map_err(workspace_file_backend_error),
+        ),
+        Err(error) => {
+            let cleanup = BackendError::internal(
+                "workspace watcher cleanup was not confirmed",
+                std::io::Error::other(error.to_string()),
+            );
+            (Err(error), Err(cleanup))
         }
-    }
-    drop(registration);
+    };
+    let outcome = match result {
+        Ok(Ok(())) if cancellation.is_cancelled() => StreamEnd::Cancelled,
+        Ok(Ok(())) => StreamEnd::Finished,
+        Ok(Err(WatchStop::ChannelClosed)) => StreamEnd::Cancelled,
+        Ok(Err(WatchStop::Watcher(error))) => {
+            StreamEnd::Failed(workspace_file_backend_error(error))
+        }
+        Err(error) => StreamEnd::Failed(BackendError::internal(
+            "Desktop workspace watcher failed",
+            error,
+        )),
+    };
+    finish_contract_stream(outcome, cleanup, registration, terminal_channel, lifecycle);
 }
 
 /// Distinguishes the two reasons the blocking watch loop stops before cancellation.
@@ -275,6 +289,77 @@ mod tests {
         assert_eq!(send_attempts.load(Ordering::SeqCst), 1);
         assert_eq!(recorder.outcomes(), vec!["cancelled".to_string()]);
         assert!(registry.register(STREAM_CALL_ID.to_string()).is_ok());
+    }
+
+    /// A running stream cannot confirm cancellation while notify still owns a blocked callback.
+    #[test]
+    fn running_watch_cancellation_waits_for_native_release() {
+        ora_logging::with_trace_logging(|| {
+            runtime().block_on(async {
+                let workspace = tempfile::TempDir::new().unwrap();
+                let (watcher, gate) =
+                    ora_fs::watch_test_support::blocked_watcher(workspace.path()).unwrap();
+                std::fs::write(workspace.path().join("trigger"), "event").unwrap();
+                gate.wait_until_entered().unwrap();
+                let registry = StreamRegistry::default();
+                let registration = registry.register("blocked-native-run".to_string()).unwrap();
+                registration.cancellation().cancel();
+                let forwarding = forward_workspace_watch(
+                    watcher,
+                    registration,
+                    connected_channel(),
+                    RequestLifecycle::start("blocked_native_run", &UuidRequestIdGenerator),
+                );
+                tokio::pin!(forwarding);
+                let early = tokio::time::timeout(Duration::from_millis(100), &mut forwarding).await;
+                assert!(
+                    early.is_err(),
+                    "running cancellation confirmed while native callback was blocked"
+                );
+                assert!(
+                    tokio::time::timeout(
+                        std::time::Duration::from_millis(100),
+                        registry.cancel_and_wait("blocked-native-run")
+                    )
+                    .await
+                    .is_err()
+                );
+                gate.release();
+                tokio::time::timeout(NATIVE_EVENT_TIMEOUT, &mut forwarding)
+                    .await
+                    .unwrap();
+                registry
+                    .cancel_and_wait("blocked-native-run")
+                    .await
+                    .unwrap();
+            })
+        });
+    }
+
+    /// Cleanup failures belong to the cancellation receipt and must not overwrite a domain failure.
+    #[test]
+    fn business_failure_survives_a_simultaneous_cleanup_failure() {
+        ora_logging::with_trace_logging(|| {
+            runtime().block_on(async {
+            let registry = StreamRegistry::default();
+            let registration = registry.register("both-failed".to_string()).unwrap();
+            let frames = Arc::new(Mutex::new(Vec::new()));
+            let captured = frames.clone();
+            let channel = Channel::new(move |body| {
+                if let tauri::ipc::InvokeResponseBody::Json(json) = body {
+                    captured.lock().unwrap().push(serde_json::from_str::<serde_json::Value>(&json).unwrap());
+                }
+                Ok(())
+            });
+            let lifecycle = RequestLifecycle::start("both_failed", &UuidRequestIdGenerator);
+            let request_id = lifecycle.request_id().clone();
+            let failure = ora_backend::BackendError::new(ora_backend::ErrorClassification::Conflict, ora_contracts::PublicError::SessionHistoryDegraded(ora_contracts::EmptyErrorParams {}), "history is degraded");
+            let cleanup = ora_backend::BackendError::new(ora_backend::ErrorClassification::Internal, ora_contracts::PublicError::AgentRuntimeUnavailable(ora_contracts::EmptyErrorParams {}), "cleanup unconfirmed");
+            super::finish_contract_stream(super::StreamEnd::Failed(failure), Err(cleanup), registration, channel, lifecycle);
+            assert_eq!(*frames.lock().unwrap(), vec![serde_json::json!({"type":"error", "error":{"code":"session_history_degraded", "params":{}, "requestId":request_id}})]);
+            assert_eq!(registry.cancel_and_wait("both-failed").await.unwrap_err().public_error(), &ora_contracts::PublicError::AgentRuntimeUnavailable(ora_contracts::EmptyErrorParams {}));
+        })
+        });
     }
 
     /// Builds the current-thread runtime that keeps the scoped subscriber on the test thread.

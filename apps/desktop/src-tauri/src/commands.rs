@@ -2,6 +2,7 @@
 
 use crate::error::CommandError;
 use ora_backend::{BackendError, RequestLifecycle, UuidRequestIdGenerator};
+use ora_contracts::RequestId;
 use std::future::Future;
 use tracing::Instrument;
 
@@ -55,11 +56,23 @@ pub(super) async fn run_async_backend<Response, Call>(
 where
     Call: Future<Output = Result<Response, BackendError>>,
 {
+    run_async_backend_with_request_id(operation_name, |_| call).await
+}
+
+/// Supplies diagnostic correlation without granting the operation lifecycle completion authority.
+pub(super) async fn run_async_backend_with_request_id<Response, Operation, Call>(
+    operation_name: &'static str,
+    operation: Operation,
+) -> Result<Response, CommandError>
+where
+    Operation: FnOnce(RequestId) -> Call,
+    Call: Future<Output = Result<Response, BackendError>>,
+{
     let lifecycle = RequestLifecycle::start(operation_name, &UuidRequestIdGenerator);
     let request_span =
         ora_logging::span_with_request_id("tauri_command", &lifecycle.request_id().to_string());
     async move {
-        match call.await {
+        match operation(lifecycle.request_id()).await {
             Ok(response) => {
                 lifecycle.complete_success();
                 Ok(response)
@@ -121,3 +134,6 @@ pub(crate) mod task;
 pub(crate) mod workflow;
 pub(crate) mod workflow_run;
 pub(crate) mod workspace;
+
+#[cfg(test)]
+mod execution_tests;

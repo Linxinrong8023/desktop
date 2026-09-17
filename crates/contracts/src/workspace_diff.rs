@@ -4,7 +4,7 @@ use ts_rs::TS;
 /// Selects which Git layer should be rendered in the workspace review surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub enum WorkspaceDiffScope {
     Branch,
     Unstaged,
@@ -15,7 +15,7 @@ pub enum WorkspaceDiffScope {
 /// Identifies which workspace diff should be computed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct GetWorkspaceDiffRequest {
     pub workspace_id: String,
     pub scope: WorkspaceDiffScope,
@@ -28,7 +28,7 @@ pub struct GetWorkspaceDiffRequest {
 /// never recorded) - only meaningful for the `Branch`/`Committed` scopes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct GetWorkspaceDiffResponse {
     pub base_commit_id: Option<String>,
     pub head_commit_id: String,
@@ -41,7 +41,7 @@ pub struct GetWorkspaceDiffResponse {
 /// this operation never modifies the index.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct CommitWorkspaceChangesRequest {
     pub workspace_id: String,
     pub message: String,
@@ -50,7 +50,7 @@ pub struct CommitWorkspaceChangesRequest {
 /// Returns the commit created from the workspace checkout.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct CommitWorkspaceChangesResponse {
     pub commit_id: String,
     pub summary: String,
@@ -59,7 +59,7 @@ pub struct CommitWorkspaceChangesResponse {
 /// Pushes the current workspace branch to its default remote.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct PushWorkspaceBranchRequest {
     pub workspace_id: String,
 }
@@ -67,7 +67,7 @@ pub struct PushWorkspaceBranchRequest {
 /// Returns the branch and remote updated by a successful push.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct PushWorkspaceBranchResponse {
     pub branch_name: String,
     pub remote_name: String,
@@ -76,7 +76,7 @@ pub struct PushWorkspaceBranchResponse {
 /// Identifies which workspace staging status should be read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct GetWorkspaceStatusRequest {
     pub workspace_id: String,
 }
@@ -84,7 +84,7 @@ pub struct GetWorkspaceStatusRequest {
 /// Returns the structured per-file staging state of one workspace checkout.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct GetWorkspaceStatusResponse {
     pub entries: Vec<WorkspaceStatusEntry>,
 }
@@ -92,7 +92,7 @@ pub struct GetWorkspaceStatusResponse {
 /// Represents one changed file's staging state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct WorkspaceStatusEntry {
     pub path: String,
     pub is_staged: bool,
@@ -104,7 +104,7 @@ pub struct WorkspaceStatusEntry {
 /// An empty `paths` list stages every current change in the workspace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct StageWorkspaceChangesRequest {
     pub workspace_id: String,
     /// Repo-relative paths to stage; an empty list stages every current change.
@@ -114,7 +114,7 @@ pub struct StageWorkspaceChangesRequest {
 /// Returns the paths that were staged in one workspace checkout.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct StageWorkspaceChangesResponse {
     pub staged_paths: Vec<String>,
 }
@@ -124,7 +124,7 @@ pub struct StageWorkspaceChangesResponse {
 /// An empty `paths` list is a defensive no-op and unstages nothing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct UnstageWorkspaceChangesRequest {
     pub workspace_id: String,
     /// Repo-relative paths to unstage; an empty list unstages nothing.
@@ -134,7 +134,7 @@ pub struct UnstageWorkspaceChangesRequest {
 /// Returns the paths that were unstaged in one workspace checkout.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "workspace_diff.ts")]
+#[ts(export_to = "workspace-diff.ts")]
 pub struct UnstageWorkspaceChangesResponse {
     pub unstaged_paths: Vec<String>,
 }

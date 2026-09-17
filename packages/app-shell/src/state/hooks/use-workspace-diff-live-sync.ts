@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ChatStore, ChatToolCall, SessionConversation } from "@ora/chat";
 import type { Session } from "@ora/contracts";
-import { invalidateWorkspaceDiffs } from "../data/diff";
+import { refreshWorkspaceReview } from "../data/workspace-review";
 
 const DIFF_REFRESH_DEBOUNCE_MS = 400;
 
@@ -12,7 +12,7 @@ interface ConversationDiffSnapshot {
 }
 
 /**
- * Invalidates workspace diff snapshots after each completed file-change item and
+ * Invalidates workspace diff snapshots and staging status after each completed file-change item and
  * once more when its turn ends. Applies to any session's workspace checkout — an
  * isolated task worktree or a project's main checkout alike.
  */
@@ -43,7 +43,7 @@ export function useWorkspaceDiffLiveSync(
         const workspaceIds = [...pendingWorkspaceIds];
         pendingWorkspaceIds.clear();
         for (const pendingWorkspaceId of workspaceIds) {
-          void invalidateWorkspaceDiffs(queryClient, pendingWorkspaceId);
+          void refreshWorkspaceReview(queryClient, pendingWorkspaceId);
         }
       }, DIFF_REFRESH_DEBOUNCE_MS);
     };

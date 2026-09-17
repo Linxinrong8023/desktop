@@ -5,7 +5,6 @@ mod entry;
 mod error;
 mod host;
 mod index;
-mod logo;
 mod readme;
 mod source;
 

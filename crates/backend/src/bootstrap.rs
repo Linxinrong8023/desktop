@@ -171,10 +171,12 @@ impl Backend {
             pool.clone(),
             baselines_root.clone(),
             clock,
+            app_events.publisher(),
         );
         let workflow_run_engine = workflow_run_assembly.control;
         let run_locks = workflow_run_assembly.run_locks;
         let workflow_engine = workflow_run_assembly.engine;
+        let workflow_transitions = workflow_run_assembly.transitions;
 
         // Crash recovery: fail orphaned node runs, then reconcile stalled Running runs left by a
         // previous process before serving new commands (best-effort; a failure must not block
@@ -212,6 +214,7 @@ impl Backend {
             agent_runtime: agent_runtime.clone(),
             engine: workflow_run_engine,
             run_locks,
+            transitions: workflow_transitions,
             clock,
         }));
 

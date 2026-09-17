@@ -40,6 +40,7 @@ ora-contracts = { path = "../../../crates/contracts" }
 ora-fs = { path = "../../../crates/fs" }
 ora-domain = { path = "../../../crates/domain" }
 ora-logging = { path = "../../../crates/logging" }
+ora-plugin-asset = { path = "../../../crates/plugin-asset" }
 ora-plugin-lifecycle = { path = "../../../crates/plugin-lifecycle" }
 ora-plugin-manager = { path = "../../../crates/plugin-manager" }
 ora-plugin-manifest = { path = "../../../crates/plugin-manifest" }
@@ -61,6 +62,7 @@ urlencoding = "2"
 uuid = { version = "1", features = ["v5"] }
 
 [dev-dependencies]
+ora-fs = { workspace = true, features = ["test-support"] }
 pretty_assertions = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 tauri = { version = "2.11.5", features = ["test"] }

@@ -10,3 +10,6 @@ apps/desktop/web/tauri-bindings.generated.ts
 packages/plugin-sdk
 *.tsbuildinfo
 deno.lock
+
+apps/desktop/web/marketplace-sync.generated.ts
+apps/desktop/web/marketplace-sync-fixtures.generated.ts

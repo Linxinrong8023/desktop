@@ -1,0 +1,23 @@
+[package]
+name = "ora-plugin-asset"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ora-contracts = { workspace = true }
+ora-domain = { workspace = true }
+ora-logging = { workspace = true }
+ora-utils = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }

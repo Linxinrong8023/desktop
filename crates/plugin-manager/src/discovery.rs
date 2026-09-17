@@ -1,8 +1,8 @@
 use crate::MAX_MANIFEST_BYTES;
 use crate::issue::{PluginDiscoveryIssue, PluginDiscoveryIssueKind};
-use crate::logo;
 use crate::validation::{InstalledPlugin, validate};
 use ora_domain::PluginNamespace;
+use ora_plugin_asset::PluginLogoVariants;
 use ora_plugin_manifest::{ManifestError, PluginManifest};
 use semver::Version;
 use std::fs::{self, File};
@@ -55,15 +55,11 @@ pub(crate) fn discover(data_dir: &Path) -> PluginDiscovery {
     let mut installed_plugins = Vec::new();
     for location in package_roots {
         let manifest_path = location.package_root.join(MANIFEST_FILE_NAME);
-        // An unusable icon is reported on its own and never blocks the package: presentation
-        // metadata must not decide whether a plugin is discovered.
-        let logo = match logo::read(&location.package_root) {
-            Ok(logo) => logo,
-            Err(issue) => {
-                issues.push(issue);
-                None
-            }
-        };
+        // An icon candidate that cannot be served counts as absent, so an unusable one leaves a
+        // warning and never becomes a discovery issue: presentation metadata must not decide
+        // whether a plugin is discovered, and the composition it resolves to is the same one the
+        // marketplace index computed from the same filenames.
+        let logo = ora_plugin_asset::resolve_logo(&location.package_root);
         match read_and_validate_manifest(&location, &manifest_path, logo) {
             Ok(plugin) => installed_plugins.push(plugin),
             Err(issue) => issues.push(issue),
@@ -265,7 +261,7 @@ fn sorted_directories(
 fn read_and_validate_manifest(
     location: &InstalledPackageLocation,
     manifest_path: &Path,
-    logo: Option<String>,
+    logo: Option<PluginLogoVariants>,
 ) -> Result<InstalledPlugin, PluginDiscoveryIssue> {
     let package_root = location.package_root.as_path();
     let file_type = match fs::symlink_metadata(manifest_path) {

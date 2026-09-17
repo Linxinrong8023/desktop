@@ -361,7 +361,8 @@ describe("ModelSelector agent availability", () => {
       expect(within(menu).queryByText("OpenCode")).toBeNull(),
     );
     expect(within(picker()).queryByText("OpenCode")).toBeNull();
-    expect(picker().querySelectorAll("svg")).toHaveLength(1);
+    // No agent logo remains: the trigger carries no other icon while idle.
+    expect(picker().querySelectorAll("svg")).toHaveLength(0);
     expect(useSettingsStore.getState().settings.agentCli).toBe(
       AGENT_REF.opencode,
     );
@@ -378,7 +379,8 @@ describe("ModelSelector agent availability", () => {
     expect(useSettingsStore.getState().settings.agentCli).toBe(
       AGENT_REF.opencode,
     );
-    expect(picker().querySelectorAll("svg")).toHaveLength(1);
+    // No agent logo remains: the trigger carries no other icon while idle.
+    expect(picker().querySelectorAll("svg")).toHaveLength(0);
   });
 
   it("removes a disabled agent's previously discovered models", async () => {
@@ -410,7 +412,8 @@ describe("ModelSelector agent availability", () => {
     expect(within(menu).queryByText("Small Pickle")).toBeNull();
     expect(within(picker()).queryByText("Big Pickle")).toBeNull();
     expect(within(picker()).queryByText("OpenCode")).toBeNull();
-    expect(picker().querySelectorAll("svg")).toHaveLength(1);
+    // No agent logo remains: the trigger carries no other icon while idle.
+    expect(picker().querySelectorAll("svg")).toHaveLength(0);
   });
 
   it("does not select a newly enabled agent for an untouched surface", async () => {

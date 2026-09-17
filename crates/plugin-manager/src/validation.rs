@@ -4,6 +4,7 @@ use crate::skill::{InstalledSkillDescriptor, validate_skill};
 use crate::webview::{InstalledWebviewDescriptor, validate_webview};
 use crate::workbench::{InstalledWorkbenchDescriptor, validate_workbench};
 use ora_domain::{PluginId, PluginNamespace};
+use ora_plugin_asset::PluginLogoVariants;
 use ora_plugin_config::{CompiledConfigurationFile, ConfigurationError, ConfigurationService};
 use ora_plugin_manifest::{PluginKind, PluginManifest};
 use ora_utils::path::{CanonicalPathRoot, PortableRelativePath};
@@ -84,8 +85,8 @@ pub struct InstalledPlugin {
     pub homepage: Option<String>,
     pub license: Option<String>,
     pub contributes: PluginContribution,
-    /// Trusted SVG source for the package icon, absent when the package ships none.
-    pub logo: Option<String>,
+    /// Which candidate files back the package icon, absent when the package ships none.
+    pub logo: Option<PluginLogoVariants>,
     pub configuration_declaration: PluginConfigurationDeclarationValidity,
 }
 
@@ -123,13 +124,13 @@ impl ManifestValidationError {
 /// content, and a namespace it could name for itself would let it claim another source's
 /// directories, configuration, and Skill rows.
 ///
-/// `logo` arrives already read and security-validated by the discovery layer, so this function
-/// keeps its filesystem work limited to the files it must resolve.
+/// `logo` arrives already resolved and validated by the discovery layer, so this function keeps
+/// its filesystem work limited to the files it must resolve.
 pub(crate) fn validate(
     package_root: &Path,
     manifest: &PluginManifest,
     namespace: &PluginNamespace,
-    logo: Option<String>,
+    logo: Option<PluginLogoVariants>,
 ) -> Result<InstalledPlugin, ManifestValidationError> {
     let name = manifest.name().as_str();
     // The name passed the manifest grammar, which is a strict subset of what the domain id

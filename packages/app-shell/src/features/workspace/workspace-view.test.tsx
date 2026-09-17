@@ -11,6 +11,7 @@ import { TooltipProvider } from "@ora/ui";
 import { PlatformProvider } from "../../platform";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppI18nProvider } from "../../i18n/i18n";
+import { useSessionSetupStore } from "../chat/session-setup";
 import { appI18n } from "../../i18n/i18n-instance";
 import {
   createHookWrapper,
@@ -101,6 +102,7 @@ beforeEach(() => {
   useWorkspaceSelectionStore.getState().clearSelection();
   useDraftSessionsStore.getState().clear();
   useComposerInputStore.getState().reset();
+  useSessionSetupStore.setState({ setups: {} });
   useUiStore.setState({ workflowEditorOpen: false });
   // Outlives a render on purpose — remembering one CLI's models across chat
   // surfaces is the point of the store — so each test has to start from a CLI
@@ -168,6 +170,126 @@ describe("WorkspaceView", () => {
     await waitFor(() =>
       expect(chatStore.getState().conversations.s1?.isLoaded).toBe(true),
     );
+  });
+
+  it("shows reported usage in the conversation header but hides reload and waiting states", async () => {
+    const state = createFixtureState();
+    state.projects = [{ id: "p1", name: "Ora" }];
+    state.tasks = [
+      {
+        id: "t1",
+        projectId: "p1",
+        workspaceId: "workspace-t1",
+        title: "Usage header",
+      },
+    ];
+    state.sessions = [
+      {
+        id: "s1",
+        workspaceId: "workspace-t1",
+        agentRef: AGENT_REF.opencode,
+        status: "running",
+        title: null,
+        historyState: { type: "writable" },
+      },
+    ];
+    const clientHandlers: TestHandlers = createFixtureHandlers(state);
+    const client = createTestClient(clientHandlers);
+    clientHandlers.loadSession = vi.fn(async function* () {
+      yield { type: "completed" as const };
+    });
+    const chatStore = createChatStore(client.session);
+    const Wrapper = createHookWrapper(
+      client,
+      createTestQueryClient(),
+      chatStore,
+    );
+    useWorkspaceSelectionStore.getState().selectSession("s1", "t1", "p1");
+
+    render(
+      <Wrapper>
+        <AppI18nProvider>
+          <PlatformProvider adapter={createStubPlatform()}>
+            <TooltipProvider>
+              <WorkspaceView userName="Eric" />
+            </TooltipProvider>
+          </PlatformProvider>
+        </AppI18nProvider>
+      </Wrapper>,
+    );
+
+    await waitFor(() =>
+      expect(chatStore.getState().conversations.s1?.isLoaded).toBe(true),
+    );
+    expect(
+      screen.queryByRole("button", {
+        name: /Usage data is not saved|用量数据不会随历史记录保存/,
+      }),
+    ).not.toBeInTheDocument();
+
+    act(() => {
+      chatStore.setState((current) => {
+        const conversation = current.conversations.s1;
+        if (!conversation) throw new Error("expected loaded conversation");
+        return {
+          conversations: {
+            ...current.conversations,
+            s1: {
+              ...conversation,
+              usage: {
+                context: { status: "awaiting_report" },
+                lastTurnTokens: { status: "awaiting_completion" },
+              },
+            },
+          },
+        };
+      });
+    });
+    expect(
+      screen.queryByRole("button", {
+        name: /Waiting for the agent to report usage|正在等待 Agent 上报用量/,
+      }),
+    ).not.toBeInTheDocument();
+
+    act(() => {
+      chatStore.setState((current) => {
+        const conversation = current.conversations.s1;
+        if (!conversation) throw new Error("expected loaded conversation");
+        return {
+          conversations: {
+            ...current.conversations,
+            s1: {
+              ...conversation,
+              usage: {
+                context: {
+                  status: "reported",
+                  snapshot: {
+                    usedTokens: 34_000,
+                    sizeTokens: 100_000,
+                    receivedAt: Date.now(),
+                  },
+                },
+                lastTurnTokens: { status: "none" },
+              },
+            },
+          },
+        };
+      });
+    });
+
+    const usageButton = screen.getByRole("button", {
+      name: /Context 34%|上下文 34%/,
+    });
+    const locationActions = screen.getByRole("group", {
+      name: /Open location|打开位置/,
+    });
+    const header = locationActions.parentElement;
+    expect(header).not.toBeNull();
+    expect(header).toContainElement(usageButton);
+    expect(
+      usageButton.compareDocumentPosition(locationActions) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("shows the Changes button for a selected task's review panel", async () => {
@@ -627,6 +749,11 @@ describe("WorkspaceView", () => {
       });
     });
     expect(screen.getByText(/你好\s+workspace mode/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", {
+        name: /Agent 会话已建立|Agent session established/,
+      }),
+    ).toBeInTheDocument();
     expect(state.tasks).toEqual([]);
     await waitFor(() => {
       expect(state.sessions).toEqual([
@@ -1484,6 +1611,7 @@ describe("WorkspaceView", () => {
    */
   function createSwitchTargetClient(
     state: ReturnType<typeof createFixtureState>,
+    beforeSwitch: () => Promise<void> = async () => {},
   ) {
     const baseClientHandlers: TestHandlers = createFixtureHandlers(state);
     const baseClient = createTestClient(baseClientHandlers);
@@ -1497,6 +1625,7 @@ describe("WorkspaceView", () => {
       },
       switchSessionAgent: async (request, options) => {
         switched.push(request);
+        await beforeSwitch();
         return baseClient.session.switchAgent(request, options);
       },
       listAgentModels: async (request, options) => {
@@ -1588,11 +1717,23 @@ describe("WorkspaceView", () => {
     expect(state.sessions[0]?.agentRef).toBe(AGENT_REF.opencode);
   });
 
-  it("commits a recorded agent move with the next message", async () => {
+  it("commits a recorded agent move and retains its setup timing across session navigation", async () => {
     const user = userEvent.setup();
     const state = createFixtureState();
     seedSwitchableSession(state);
-    const { client, switched } = createSwitchTargetClient(state);
+    state.sessions.push({
+      ...state.sessions[0]!,
+      id: "s2",
+      title: "Other session",
+    });
+    let finishSwitch: () => void = () => {};
+    const switching = new Promise<void>((resolve) => {
+      finishSwitch = resolve;
+    });
+    const { client, switched } = createSwitchTargetClient(
+      state,
+      () => switching,
+    );
     const Wrapper = createHookWrapper(
       client,
       createTestQueryClient(),
@@ -1622,12 +1763,50 @@ describe("WorkspaceView", () => {
     await user.type(await screen.findByRole("textbox"), "hello");
     await user.keyboard("{Enter}");
 
+    expect(
+      await screen.findByRole("status", {
+        name: /正在建立 Agent 会话|Establishing Agent session/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", {
+        name: /助手正在运行|Assistant is working/,
+      }),
+    ).toBeNull();
+
+    finishSwitch();
+
     await waitFor(() =>
       expect(state.sessions[0]?.agentRef).toBe(AGENT_REF.claude),
     );
+    expect(
+      screen.getByRole("status", {
+        name: /Agent 会话已建立|Agent session established/,
+      }),
+    ).toHaveTextContent(/用时|Took/);
     expect(switched).toEqual([
       { sessionId: "s1", agentRef: AGENT_REF.claude, model: null },
     ]);
+
+    act(() =>
+      useWorkspaceSelectionStore.getState().selectSession("s2", "t1", "p1"),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("status", {
+          name: /Agent 会话已建立|Agent session established/,
+        }),
+      ).toBeNull(),
+    );
+
+    act(() =>
+      useWorkspaceSelectionStore.getState().selectSession("s1", "t1", "p1"),
+    );
+    expect(
+      await screen.findByRole("status", {
+        name: /Agent 会话已建立|Agent session established/,
+      }),
+    ).toHaveTextContent(/用时|Took/);
   });
 
   it("moves a session off an unavailable agent with the next message", async () => {
@@ -1813,7 +1992,7 @@ describe("WorkspaceView", () => {
 
     expect(
       await screen.findByRole("button", {
-        name: /导出工作流|Export workflow/,
+        name: /^(导出|Export)$/,
       }),
     ).toBeInTheDocument();
     expect(

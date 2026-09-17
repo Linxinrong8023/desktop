@@ -57,12 +57,14 @@ impl RuntimeActor {
                         return;
                     };
                     match command {
-                        RuntimeCommand::Load { events, accepted, .. } => {
+                        RuntimeCommand::Load { operation_id, events, accepted, cleanup } => {
                             self.channel = Some(channel);
                             self.title_acquisition.preempt_attempt(attempt);
                             // Reading the record cannot disturb the provider, so the channel this
                             // poll was using goes back to the actor untouched.
                             self.run_load(events, accepted).await;
+                            self.record_cleanup(operation_id, Ok(()));
+                            let _ = cleanup.send(Ok(()));
                             return;
                         }
                         RuntimeCommand::Prompt { operation_id, prompt, record_prompt, model, events, accepted } => {
@@ -115,7 +117,8 @@ impl RuntimeActor {
                             self.on_idle_mcp_desired_changed().await;
                             return;
                         }
-                        RuntimeCommand::Cancel { .. } => {
+                        RuntimeCommand::Cancel { operation_id, completion } => {
+                            if let Some(completion) = completion { let _ = completion.send(self.cleanup_outcome(operation_id)); }
                             // A prompt stream sends this after its Completed event is consumed;
                             // it is not a cancellation of the independent title fallback.
                         }

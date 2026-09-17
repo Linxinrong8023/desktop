@@ -2,6 +2,7 @@ import type * as acp from "@agentclientprotocol/sdk";
 import type {
   SessionHistoryNotice,
   SessionPermissionRequest,
+  TokenUsageReport,
 } from "@ora/contracts";
 
 /** Identifies who produced a rendered chat message. */
@@ -58,6 +59,8 @@ export interface ChatToolCall {
   rawInput?: unknown;
   rawOutput?: unknown;
   createdAt: number;
+  startedAt?: number;
+  durationMs?: number;
   updatedAt: number;
 }
 
@@ -77,6 +80,20 @@ export type ChatTurnItem =
 /** Describes the lifecycle of one user prompt and its agent response. */
 export type ChatTurnStatus = "streaming" | "completed" | "cancelled" | "failed";
 
+/**
+ * Records that the backend re-sent this turn's prompt after the agent stalled.
+ *
+ * Counted from the first retry so it reads as `retry / maxRetries`. Live state
+ * only: a reloaded transcript carries no retry marker, so the field is absent
+ * there and the notice belongs to the streaming turn alone.
+ */
+export interface ChatTurnRetry {
+  retry: number;
+  maxRetries: number;
+  /** The last retry also stalled and the turn failed with the agent's timeout. */
+  exhausted?: boolean;
+}
+
 /** Groups one user message with every agent update produced in response. */
 export interface ChatTurn {
   id: string;
@@ -86,6 +103,10 @@ export interface ChatTurn {
   stopReason: acp.StopReason | null;
   error: string | null;
   createdAt: number;
+  /** Starts after any pre-prompt session preparation, so response time excludes handoff. */
+  responseStartedAt?: number;
+  durationMs?: number;
+  retry?: ChatTurnRetry;
 }
 
 /**
@@ -101,6 +122,35 @@ export interface ChatModelChange {
   /** The human-readable name of the model that took over. */
   modelName: string;
   createdAt: number;
+}
+
+/** One non-persisted context snapshot reported by the active agent. */
+export interface ContextUsageSnapshot {
+  usedTokens: number;
+  sizeTokens: number;
+  cost?: acp.Cost;
+  receivedAt: number;
+}
+
+/** Models whether Ora can currently show an agent-authored context snapshot. */
+export type ContextUsageState =
+  | { status: "hidden" }
+  | { status: "needs_interaction" }
+  | { status: "awaiting_report" }
+  | { status: "unavailable" }
+  | { status: "reported"; snapshot: ContextUsageSnapshot };
+
+/** Models the most recently completed prompt's optional draft token report. */
+export type LastTurnTokenState =
+  | { status: "none" }
+  | { status: "awaiting_completion" }
+  | { status: "unavailable" }
+  | { status: "reported"; usage: TokenUsageReport; receivedAt: number };
+
+/** Owns all volatile usage data for one loaded conversation. */
+export interface SessionUsage {
+  context: ContextUsageState;
+  lastTurnTokens: LastTurnTokenState;
 }
 
 /** Holds the in-memory chat state isolated to one stable Ora session identifier. */
@@ -125,5 +175,7 @@ export interface SessionConversation {
   isLoading: boolean;
   isResponding: boolean;
   pendingPermissions: SessionPermissionRequest[];
+  /** Volatile agent telemetry; intentionally absent from Ora's session history. */
+  usage: SessionUsage;
   error: string | null;
 }

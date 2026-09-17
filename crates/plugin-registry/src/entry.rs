@@ -1,4 +1,5 @@
 use ora_domain::{PluginId, PluginNamespace};
+use ora_plugin_asset::PluginLogoVariants;
 use ora_plugin_manifest::{PluginManifest, PluginReleaseSource};
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -35,13 +36,13 @@ pub struct RegistryEntry {
     source_url: String,
     version: Version,
     description: String,
-    /// Trusted SVG source for the entry icon, absent when the entry ships none.
+    /// Which candidate files back this entry's icon, absent when the entry publishes none.
     ///
-    /// The icon is inlined into the index rather than referenced by path so consumers can render
-    /// the marketplace listing straight from the cached index without reaching back into the
-    /// source checkout, which install-time resolution is the only step that still needs.
+    /// The index records the composition, not the bytes: the icon is served from the entry
+    /// directory on demand, so a listing that is never drawn costs no reads and the index stays
+    /// the same size however large the icons are.
     #[serde(default)]
-    logo: Option<String>,
+    logo: Option<PluginLogoVariants>,
     /// Cached release-source target support, so the UI can disable installation of an
     /// unsupported target before downloading any artifact.
     ///
@@ -58,7 +59,7 @@ impl RegistryEntry {
         manifest: &PluginManifest,
         namespace: &PluginNamespace,
         source_url: &str,
-        logo: Option<String>,
+        logo: Option<PluginLogoVariants>,
     ) -> Self {
         let release_targets = match manifest.release_source() {
             Some(PluginReleaseSource::Universal { .. }) => Some(Vec::new()),
@@ -124,9 +125,9 @@ impl RegistryEntry {
         &self.description
     }
 
-    /// Returns the trusted SVG source of the entry icon, when one is published.
-    pub fn logo(&self) -> Option<&str> {
-        self.logo.as_deref()
+    /// Returns the icon composition this entry publishes, when it publishes one.
+    pub fn logo(&self) -> Option<PluginLogoVariants> {
+        self.logo
     }
 
     /// Returns the target triples the release ships artifacts for.

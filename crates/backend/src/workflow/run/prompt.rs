@@ -551,6 +551,7 @@ mod tests {
             instruction: None,
             input_variables: Vec::new(),
             agent_config: Some(AgentConfig {
+                mcps: Vec::new(),
                 executor: AgentExecutor {
                     agent_cli: "open_code".to_string(),
                     model_id: "m".to_string(),
@@ -563,6 +564,7 @@ mod tests {
             }),
             condition_config: None,
             output_config: None,
+            iteration_config: None,
         };
         let raw_texts = block_texts(assemble_workflow_prompt(WorkflowPromptRequest {
             node: &node,
@@ -643,6 +645,7 @@ mod tests {
             instruction: None,
             input_variables: Vec::new(),
             agent_config: Some(AgentConfig {
+                mcps: Vec::new(),
                 executor: AgentExecutor {
                     agent_cli: "open_code".to_string(),
                     model_id: "m".to_string(),
@@ -666,6 +669,7 @@ mod tests {
             }),
             condition_config: None,
             output_config: None,
+            iteration_config: None,
         };
         let texts = block_texts(assemble_workflow_prompt(WorkflowPromptRequest {
             node: &node,

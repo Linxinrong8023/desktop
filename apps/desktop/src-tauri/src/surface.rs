@@ -12,6 +12,7 @@ mod error;
 mod gateway;
 mod hooks;
 mod idle;
+mod logo_assets;
 mod migrate;
 mod service;
 mod spec;

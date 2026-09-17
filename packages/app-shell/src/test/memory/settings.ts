@@ -19,7 +19,6 @@ export function createSettingsMemory(): SettingsMemoryState {
     runtimeLogLevel: {
       configuredLevel: "info",
       effectiveLevel: "info",
-      startupOverride: null,
     },
   };
 }
@@ -50,7 +49,6 @@ export function settingsHandlers(state: SettingsMemoryState) {
       state.runtimeLogLevel = {
         configuredLevel: request.level,
         effectiveLevel: request.level,
-        startupOverride: state.runtimeLogLevel.startupOverride,
       };
       return { ...state.runtimeLogLevel };
     },

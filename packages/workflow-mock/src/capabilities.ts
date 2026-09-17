@@ -6,6 +6,14 @@ export interface WorkflowChoice {
   label: string;
 }
 
+/** Availability is descriptive: authors can save bindings before configuring the plugin. */
+export interface WorkflowMcpChoice extends WorkflowChoice {
+  unavailableReason?:
+    | "configurationIncomplete"
+    | "configurationUnavailable"
+    | "invalidDeclaration";
+}
+
 export type WorkflowConfigField =
   | "agent"
   | "initialPrompt"
@@ -15,7 +23,8 @@ export type WorkflowConfigField =
   | "waitStrategy"
   | "failureStrategy"
   | "maxAttempts"
-  | "exitCondition";
+  | "exitCondition"
+  | "iteration";
 
 export interface WorkflowAgentModel {
   agentCli: string;
@@ -30,7 +39,7 @@ export interface WorkflowCapabilities {
   roles: WorkflowChoice[];
   skills: WorkflowChoice[];
   /** MCP catalog choices for Agent node attachments (optional per node). */
-  mcps: WorkflowChoice[];
+  mcps: WorkflowMcpChoice[];
   tools: WorkflowChoice[];
   /** Comparison operators offered by Condition nodes, keyed by stable value. */
   conditionOperators: WorkflowChoice[];
@@ -115,6 +124,7 @@ export function createMockWorkflowCapabilities(
     createMockWorkflowNodeType("start", locale),
     createMockWorkflowNodeType("agent", locale),
     createMockWorkflowNodeType("condition", locale),
+    createMockWorkflowNodeType("iteration", locale),
     createMockWorkflowNodeType("output", locale),
   ];
   const models = [
@@ -279,6 +289,16 @@ export function createMockWorkflowNodeType(
             ? "重复执行直到满足条件"
             : "Repeat until the exit condition is met",
         configFields: ["maxAttempts", "exitCondition"],
+      };
+    case "iteration":
+      return {
+        kind,
+        label: locale === "zh-CN" ? "迭代" : "Iteration",
+        description:
+          locale === "zh-CN"
+            ? "对数组逐项执行区域内节点"
+            : "Run the region once per array element",
+        configFields: ["iteration"],
       };
     case "subflow":
       return {

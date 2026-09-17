@@ -15,10 +15,7 @@ mod navigation;
 mod registry;
 mod state;
 
-pub use assets::{
-    ASSET_SCHEME, AssetRequest, AssetUrlForm, asset_base, asset_content_type, entry_url,
-    workbench_csp,
-};
+pub use assets::{AssetRequest, asset_base, entry_url, workbench_csp};
 pub use definition::{
     InstancePolicy, MountTarget, RemoteSiteDefinition, SurfaceDefinition, SurfaceKind,
     SurfaceSource, WorkbenchDefinition,

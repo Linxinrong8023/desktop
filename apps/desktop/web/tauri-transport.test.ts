@@ -364,7 +364,6 @@ describe("createTauriTransport", () => {
     const response = {
       configuredLevel: "debug",
       effectiveLevel: "debug",
-      startupOverride: null,
     };
     const invoke = vi.fn().mockResolvedValue(response);
     const transport = createTauriTransport(invoke);

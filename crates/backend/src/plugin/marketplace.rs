@@ -50,7 +50,7 @@ impl PluginApi {
         progress: Option<ProgressCallback>,
     ) -> Result<InstallPluginResponse, BackendError> {
         let (manifest, namespace, use_proxy, s3_config) =
-            self.resolve_marketplace_release(&request.plugin_id)?;
+            self.resolve_marketplace_release(&request.plugin_id).await?;
         let release_source = self.select_marketplace_release(&manifest)?;
         match release_source.download() {
             ora_utils::http::DownloadSource::Url(url) => {
@@ -63,7 +63,7 @@ impl PluginApi {
                 ora_info!(plugin_id = %request.plugin_id, key = %key, "installing marketplace plugin from object store");
             }
         }
-        let installer = self.marketplace_installer(use_proxy, s3_config)?;
+        let installer = self.marketplace_installer(use_proxy, s3_config).await?;
         match progress {
             Some(progress) => {
                 installer
@@ -121,7 +121,7 @@ impl PluginApi {
         progress: Option<ProgressCallback>,
     ) -> Result<UpdatePluginResponse, BackendError> {
         let (manifest, namespace, use_proxy, s3_config) =
-            self.resolve_marketplace_release(&request.plugin_id)?;
+            self.resolve_marketplace_release(&request.plugin_id).await?;
         let release_source = self.select_marketplace_release(&manifest)?;
         match release_source.download() {
             ora_utils::http::DownloadSource::Url(url) => {
@@ -142,7 +142,7 @@ impl PluginApi {
             })
             .await
             .map_err(BackendError::from)?;
-        let installer = self.marketplace_installer(use_proxy, s3_config)?;
+        let installer = self.marketplace_installer(use_proxy, s3_config).await?;
         match progress {
             Some(progress) => {
                 installer
@@ -175,11 +175,12 @@ impl PluginApi {
     /// answer: the returned namespace and proxy policy always belong to the entry's own
     /// repository, and an install or update can never be redirected by reordering the source list
     /// or by another source publishing the same `identifier`.
-    fn resolve_marketplace_release(
+    async fn resolve_marketplace_release(
         &self,
         plugin_id: &str,
     ) -> Result<(PluginManifest, PluginNamespace, bool, Option<S3Config>), BackendError> {
-        let registry_sources = self.prepared_registry_sources()?;
+        let proxy_settings = self.settings.network_proxy_settings().await?;
+        let registry_sources = self.prepared_registry_sources(proxy_settings)?;
         // A malformed identifier can never name a registry entry, so it is reported the same way
         // as an unknown one instead of leaking the id grammar as a separate error class.
         let plugin_id = PluginId::parse(plugin_id).map_err(|_| {
@@ -248,11 +249,11 @@ impl PluginApi {
     }
 
     /// Returns the downloader proxy configuration for one marketplace source's proxy policy.
-    fn download_proxy_for(&self, use_proxy: bool) -> Result<ProxyConfig, BackendError> {
+    async fn download_proxy_for(&self, use_proxy: bool) -> Result<ProxyConfig, BackendError> {
         if !use_proxy {
             return Ok(ProxyConfig::default());
         }
-        let proxy_settings = self.settings.network_proxy_settings()?;
+        let proxy_settings = self.settings.network_proxy_settings().await?;
         proxy::download_proxy(proxy_settings.as_ref())?.ok_or_else(|| {
             BackendError::invalid_proxy_settings(
                 "a marketplace source uses the proxy but no proxy is configured",
@@ -261,12 +262,12 @@ impl PluginApi {
     }
 
     /// Builds a source-scoped downloader that signs only the configured S3 endpoint and bucket.
-    fn marketplace_installer(
+    async fn marketplace_installer(
         &self,
         use_proxy: bool,
         s3_config: Option<S3Config>,
     ) -> Result<Installer<S3AwareDownloader>, BackendError> {
-        let download_proxy = self.download_proxy_for(use_proxy)?;
+        let download_proxy = self.download_proxy_for(use_proxy).await?;
         Ok(Installer::new(S3AwareDownloader::new(
             ReqwestDownloader::new(download_proxy),
             s3_config,

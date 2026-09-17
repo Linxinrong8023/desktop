@@ -29,6 +29,15 @@ impl RepositoryPool {
         Ok(Self { inner })
     }
 
+    /// Holds a real pooled connection while a test controls when contention ends.
+    #[cfg(feature = "test-support")]
+    pub fn with_held_connection<T>(
+        &self,
+        operation: impl FnOnce() -> T,
+    ) -> Result<T, DatabaseError> {
+        self.with_connection(|_connection| Ok(operation()))
+    }
+
     /// Runs one repository operation with a configured pooled SQLite connection.
     pub(crate) fn with_connection<T>(
         &self,

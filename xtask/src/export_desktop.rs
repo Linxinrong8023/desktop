@@ -1,5 +1,7 @@
 //! Joins public operations with Desktop-owned handlers and explicit command grants.
 
+mod marketplace_sync;
+
 use crate::desktop_bindings::{Binding, Permission, bindings};
 use crate::export_contracts::{GENERATED_FILE_HEADER, write_generated_file};
 use crate::frontend::{FrontendEndpoint, FrontendResponseMode};
@@ -19,6 +21,7 @@ pub(crate) fn export(
     endpoints: &[FrontendEndpoint],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let catalog = validate(endpoints, &bindings())?;
+    marketplace_sync::export(staging)?;
     let desktop = staging.join("apps").join("desktop");
     let tauri = desktop.join("src-tauri");
     write_generated_file(

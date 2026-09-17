@@ -44,14 +44,17 @@ impl AppEventHub {
         let _ = stream_sender.try_send(Ok(AppEvent::Ready));
         let forward_cancellation = cancellation.clone();
         let forward_sender = stream_sender;
-        tokio::spawn(forward_events(
+        let worker = tokio::spawn(forward_events(
             receiver,
             forward_sender,
             forward_cancellation,
         ));
 
-        SessionEventStream::with_cleanup(stream_receiver, move || {
+        SessionEventStream::with_cleanup(stream_receiver, move || async move {
             cancellation.cancel();
+            worker
+                .await
+                .map_err(|error| BackendError::internal("application event cleanup failed", error))
         })
     }
 }
@@ -206,5 +209,27 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+    /// Confirmation releases this subscriber while leaving independent subscriptions usable.
+    #[tokio::test]
+    async fn cancellation_confirms_unsubscription_and_preserves_other_streams() {
+        let hub = AppEventHub::new();
+        let mut first = hub.subscribe();
+        let mut second = hub.subscribe();
+        assert_eq!(hub.events.receiver_count(), 2);
+        first
+            .cancel_and_wait()
+            .await
+            .expect("confirmed unsubscribe");
+        first.cancel_and_wait().await.expect("repeat confirmation");
+        assert_eq!(hub.events.receiver_count(), 1);
+        assert_eq!(second.recv().await.unwrap().unwrap(), AppEvent::Ready);
+        let event = AppEvent::SessionTitleUpdated {
+            session_id: "remaining".to_string(),
+        };
+        hub.publisher().try_publish(event.clone());
+        assert_eq!(second.recv().await.unwrap().unwrap(), event);
+        second.cancel_and_wait().await.expect("final unsubscribe");
+        assert_eq!(hub.events.receiver_count(), 0);
     }
 }

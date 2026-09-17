@@ -88,16 +88,33 @@ export const useSettingsStore = create<SettingsState>()(
   ),
 );
 
+/** The media query that decides what "system" resolves to. */
+export const DARK_THEME_QUERY = "(prefers-color-scheme: dark)";
+
+/**
+ * Collapses the three-state preference into the two states anything actually renders in.
+ *
+ * Exported because more than the DOM applier needs the answer: assets that ship a light and a
+ * dark file have to pick one, and they must pick it the same way the stylesheet does or the icon
+ * and its surroundings disagree.
+ */
+export function isDarkTheme(theme: ThemeMode): boolean {
+  return (
+    theme === "dark" ||
+    (theme === "system" && window.matchMedia(DARK_THEME_QUERY).matches)
+  );
+}
+
 /** Applies the active theme to <html> so Tailwind variant classes resolve correctly. */
 export type ThemeApplier = (settings: SettingsPreferences) => void;
 
 let themeApplier: ThemeApplier = defaultThemeApplier;
 
 function defaultThemeApplier(settings: SettingsPreferences): void {
-  const media = window.matchMedia("(prefers-color-scheme: dark)");
-  const dark =
-    settings.theme === "dark" || (settings.theme === "system" && media.matches);
-  document.documentElement.classList.toggle("dark", dark);
+  document.documentElement.classList.toggle(
+    "dark",
+    isDarkTheme(settings.theme),
+  );
   document.documentElement.dataset.theme = settings.theme;
 }
 
@@ -116,7 +133,7 @@ export function startThemeSubscription(): () => void {
   const unsubscribeStore = useSettingsStore.subscribe((state) =>
     themeApplier(state.settings),
   );
-  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const media = window.matchMedia(DARK_THEME_QUERY);
   media.addEventListener("change", apply);
 
   themeSubscriptionCleanup = () => {

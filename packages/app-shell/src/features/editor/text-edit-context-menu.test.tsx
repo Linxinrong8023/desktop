@@ -1,0 +1,177 @@
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AppI18nProvider } from "../../i18n/i18n";
+import { appI18n } from "../../i18n/i18n-instance";
+import {
+  copyImageElement,
+  TextEditContextMenu,
+  writeClipboardText,
+} from "./text-edit-context-menu";
+
+afterEach(async () => {
+  cleanup();
+  await appI18n.changeLanguage("zh-CN");
+});
+
+const ONE_PIXEL_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+describe("TextEditContextMenu", () => {
+  it.each([
+    { locale: "zh-CN", labels: ["剪切", "复制", "粘贴", "全选"] },
+    { locale: "en-US", labels: ["Cut", "Copy", "Paste", "Select All"] },
+  ] as const)(
+    "renders editing actions in $locale and disables read-only actions",
+    async ({ locale, labels }) => {
+      await act(async () => {
+        await appI18n.changeLanguage(locale);
+      });
+      const [cut, copy, paste, selectAll] = labels;
+      const user = userEvent.setup();
+      render(
+        <AppI18nProvider>
+          <TextEditContextMenu
+            trigger={<div data-testid="host">body</div>}
+            editable={false}
+            hasSelection={false}
+            onCut={() => undefined}
+            onCopy={() => undefined}
+            onPaste={() => undefined}
+            onSelectAll={() => undefined}
+          >
+            visible
+          </TextEditContextMenu>
+        </AppI18nProvider>,
+      );
+
+      fireEvent.contextMenu(screen.getByTestId("host"));
+
+      expect(
+        await screen.findByRole("menuitem", { name: cut }),
+      ).toHaveAttribute("data-disabled");
+      expect(screen.getByRole("menuitem", { name: copy })).toHaveAttribute(
+        "data-disabled",
+      );
+      expect(screen.getByRole("menuitem", { name: paste })).toHaveAttribute(
+        "data-disabled",
+      );
+      expect(
+        screen.getByRole("menuitem", { name: selectAll }),
+      ).not.toHaveAttribute("data-disabled");
+      await user.click(screen.getByRole("menuitem", { name: selectAll }));
+    },
+  );
+
+  it("copies the bitmap when the right-click target is a copyable image", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(true),
+    });
+
+    render(
+      <AppI18nProvider>
+        <TextEditContextMenu
+          trigger={<div data-testid="host" />}
+          editable={false}
+          hasSelection={false}
+          onCut={() => undefined}
+          onCopy={() => undefined}
+          onPaste={() => undefined}
+          onSelectAll={() => undefined}
+        >
+          <figure data-copyable-image>
+            <img alt="shot" src={ONE_PIXEL_PNG} />
+          </figure>
+        </TextEditContextMenu>
+      </AppI18nProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByAltText("shot"));
+    const copy = await screen.findByRole("menuitem", { name: "复制" });
+    await waitFor(() => expect(copy).not.toHaveAttribute("data-disabled"));
+    await user.click(copy);
+    await waitFor(() =>
+      expect(document.execCommand).toHaveBeenCalledWith("copy"),
+    );
+  });
+
+  it("writes a PNG ClipboardItem when native image copy is unavailable", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(false),
+    });
+    const write = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal(
+      "ClipboardItem",
+      class {
+        constructor(public items: Record<string, Blob>) {}
+      },
+    );
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { write, writeText: vi.fn(), readText: vi.fn() },
+    });
+
+    render(
+      <AppI18nProvider>
+        <TextEditContextMenu
+          trigger={<div data-testid="host" />}
+          editable={false}
+          hasSelection={false}
+          onCut={() => undefined}
+          onCopy={() => undefined}
+          onPaste={() => undefined}
+          onSelectAll={() => undefined}
+        >
+          <figure data-copyable-image>
+            <img alt="shot" src={ONE_PIXEL_PNG} />
+          </figure>
+        </TextEditContextMenu>
+      </AppI18nProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByAltText("shot"));
+    const copy = await screen.findByRole("menuitem", { name: "复制" });
+    await waitFor(() => expect(copy).not.toHaveAttribute("data-disabled"));
+    await user.click(copy);
+    await waitFor(() => expect(write).toHaveBeenCalled());
+  });
+
+  it("swallows clipboard write denials so Copy does not reject", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    await expect(writeClipboardText("hello")).resolves.toBeUndefined();
+  });
+
+  it("does not reject when both ClipboardItem construction paths throw", async () => {
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(false),
+    });
+    vi.stubGlobal(
+      "ClipboardItem",
+      class {
+        constructor() {
+          throw new Error("unsupported");
+        }
+      },
+    );
+    const img = document.createElement("img");
+    img.src = ONE_PIXEL_PNG;
+    document.body.append(img);
+    await expect(copyImageElement(img)).resolves.toBeUndefined();
+    img.remove();
+  });
+});

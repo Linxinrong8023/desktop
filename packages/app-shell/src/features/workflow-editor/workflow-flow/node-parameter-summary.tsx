@@ -9,7 +9,7 @@ import {
 } from "../../workflow-node-chrome";
 import { useAgents } from "../../../state/hooks/use-agents";
 import { useSkills } from "../../../state/hooks/use-skills";
-import { MCP_CATALOG } from "../mcp-catalog";
+import { useInstalledPlugins } from "../../../state/hooks/use-installed-plugins";
 
 interface NodeParameter {
   label: string;
@@ -25,6 +25,7 @@ export function WorkflowNodeParameterSummary({
   const { i18n, t } = useTranslation();
   const agentsQuery = useAgents();
   const skillsQuery = useSkills();
+  const pluginsQuery = useInstalledPlugins();
   // The workflow JSON stores role/skill by name, so name-keyed lookups resolve directly.
   const agentNameById = new Map(
     (agentsQuery.data ?? []).map((agent) => [agent.name, agent.name]),
@@ -32,7 +33,11 @@ export function WorkflowNodeParameterSummary({
   const skillNameById = new Map(
     (skillsQuery.data ?? []).map((skill) => [skill.name, skill.name]),
   );
-  const mcpNameById = new Map(MCP_CATALOG.map((mcp) => [mcp.id, mcp.name]));
+  const mcpNameById = new Map(
+    (pluginsQuery.data ?? [])
+      .filter((plugin) => plugin.kind === "mcp")
+      .map((plugin) => [plugin.id, plugin.displayName]),
+  );
   const locale =
     i18n.resolvedLanguage === "en-US" ? ("en-US" as const) : ("zh-CN" as const);
   const labels = createWorkflowSummaryLabels(locale);
@@ -182,6 +187,35 @@ function configuredParameters(
       parameters,
       t("settings.workflow.field.exitCondition"),
       data.exitCondition,
+    );
+    return parameters;
+  }
+  if (data.kind === "iteration") {
+    const config = data.iterationConfig;
+    if (config === undefined) {
+      return parameters;
+    }
+    appendParameter(
+      parameters,
+      t("settings.workflow.field.iterationIterator"),
+      config.iteratorSelector.join("."),
+    );
+    appendParameter(
+      parameters,
+      t("settings.workflow.field.iterationCollect"),
+      config.collectSelector.join("."),
+    );
+    appendParameter(
+      parameters,
+      t("settings.workflow.field.iterationErrorStrategy"),
+      config.errorStrategy === "continue"
+        ? t("settings.workflow.iteration.continueStrategy")
+        : t("settings.workflow.iteration.failStrategy"),
+    );
+    appendParameter(
+      parameters,
+      t("settings.workflow.field.maxIterations"),
+      config.maxIterations.toString(),
     );
     return parameters;
   }

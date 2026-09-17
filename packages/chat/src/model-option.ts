@@ -17,6 +17,40 @@ export function findModelOption(
   );
 }
 
+/**
+ * Finds the agent's thought (reasoning effort) selector among its configuration options.
+ *
+ * Unlike the model picker there is no fallback for an uncategorised option: the
+ * protocol names `thought_level` explicitly, and guessing would risk presenting
+ * some unrelated selector as the effort control. An agent that reports none — or
+ * has not reported its options yet — yields `null`, and the picker stays hidden.
+ */
+export function findThoughtLevelOption(
+  configOptions: acp.SessionConfigOption[],
+): acp.SessionConfigOption | null {
+  return (
+    configOptions.find(
+      (option) =>
+        option.type === "select" && option.category === "thought_level",
+    ) ?? null
+  );
+}
+
+/**
+ * The thought levels that form an ordered scale, in the agent's order.
+ *
+ * Some agents list a `default` entry alongside the real levels. It is not a
+ * level of its own but a pointer to whichever one the agent applies when not
+ * told, and its position in the list says nothing about how much effort that
+ * is — so it is left off the scale rather than shown as its lowest rung. A
+ * session whose current value is `default` therefore maps to no rung.
+ */
+export function thoughtLevelScale(
+  option: acp.SessionConfigOption,
+): acp.SessionConfigSelectOption[] {
+  return selectableValues(option).filter((value) => value.value !== "default");
+}
+
 /** Flattens grouped and ungrouped select values into one ordered list. */
 export function selectableValues(
   option: acp.SessionConfigOption,

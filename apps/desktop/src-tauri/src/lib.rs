@@ -1,6 +1,7 @@
 mod commands;
 mod diagnostic_logs;
 mod error;
+mod marketplace_sync;
 mod open_external;
 mod open_location;
 mod state;
@@ -13,7 +14,7 @@ mod workspace_files;
 use crate::error::DesktopBootstrapError;
 use crate::state::{BundledBinaryPaths, DesktopRuntimeGuard, DesktopState};
 use crate::update::DesktopUpdateMode;
-use ora_backend::{Backend, BackendError, BackendPaths, Settings};
+use ora_backend::{Backend, BackendPaths, Settings};
 use ora_logging::{
     FileLoggingConfig, LogLevel, LogOutput, LoggingConfig, RotationPolicy, init_logging, ora_error,
     ora_info, ora_warn, register_gitlancer_logger,
@@ -34,7 +35,8 @@ macro_rules! desktop_command_registry {
     };
 }
 
-const LOG_LEVEL_ENV_VAR: &str = "ORA_LOG_LEVEL";
+/// Logs emitted before storage opens use the same explicit default as an unset preference.
+const DEFAULT_DESKTOP_LOG_LEVEL: LogLevel = LogLevel::Info;
 
 /// The directory name under the user home where Ora-owned plugins and worktrees live.
 const ORA_HOME_DIRECTORY_NAME: &str = ".ora";
@@ -119,13 +121,7 @@ fn bootstrap_desktop(
         .map_err(DesktopBootstrapError::OraHomeDirectory)?;
     let home_directory = user_home_directory.join(ORA_HOME_DIRECTORY_NAME);
     let resolved_timezone = read_system_timezone();
-    let startup_override = read_desktop_log_level_override(|key| std::env::var(key).ok())?;
-    let provisional_log_level = startup_override.unwrap_or(LogLevel::Info);
-    let logging = init_logging(desktop_logging_config(
-        &app_data_directory,
-        resolved_timezone.timezone,
-        provisional_log_level,
-    ))?;
+    let logging = initialize_desktop_logging(&app_data_directory, resolved_timezone.timezone)?;
     let (logging_guard, level_control) = logging.into_parts();
     match &resolved_timezone.warning {
         Some(DesktopTimezoneWarning::SystemRead { error }) => {
@@ -168,19 +164,15 @@ fn bootstrap_desktop(
     };
     let home_directory = backend_paths.home_directory.clone();
     let backend = Backend::open(backend_paths)?;
-    let (configured_log_level, resolved_log_level) = tauri::async_runtime::block_on(
-        load_desktop_log_level(backend.settings(), startup_override),
-    )
-    .map_err(DesktopBootstrapError::RuntimePreference)?;
-    if resolved_log_level.effective_level != provisional_log_level {
-        level_control.set_level(resolved_log_level.effective_level)?;
-    }
+    let configured_log_level = tauri::async_runtime::block_on(restore_desktop_log_level(
+        backend.settings(),
+        &level_control,
+    ))?;
     ora_info!(
         message = "logging initialized",
         timezone = %resolved_timezone.timezone,
         timezone_source = "system_timezone",
-        log_level = %resolved_log_level.effective_level,
-        log_level_source = resolved_log_level.source.as_str(),
+        log_level = %configured_log_level,
     );
     let workspace_files = Arc::new(workspace_files::WorkspaceFileApi::new(
         binary_paths.ripgrep_path().to_path_buf(),
@@ -198,11 +190,18 @@ fn bootstrap_desktop(
         },
     )
     .map_err(DesktopBootstrapError::Update)?;
+    // Unlike release updates, a marketplace refresh only rebuilds a cached listing, so it runs in
+    // development builds too rather than staying untested until a packaged release.
+    let marketplace_sync = marketplace_sync::MarketplaceSyncService::start(
+        app.clone(),
+        backend.plugins(),
+        resolved_timezone.timezone,
+    )
+    .map_err(DesktopBootstrapError::MarketplaceSync)?;
     let runtime_log_level = RuntimeLogLevelManager::new(
         level_control,
         backend.settings().preferred_log_level_store(),
         configured_log_level,
-        resolved_log_level.startup_override,
     );
     Ok((
         DesktopState {
@@ -216,6 +215,7 @@ fn bootstrap_desktop(
         },
         DesktopRuntimeGuard {
             _logging: logging_guard,
+            _marketplace_sync: marketplace_sync,
         },
     ))
 }
@@ -271,74 +271,29 @@ enum DesktopTimezoneWarning {
     InvalidTimezone { timezone: String },
 }
 
-/// Carries the typed startup level and whether Desktop obtained it from the environment.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ResolvedDesktopLogLevel {
-    effective_level: LogLevel,
-    startup_override: Option<LogLevel>,
-    source: DesktopLogLevelSource,
-}
-
-/// Identifies the Desktop startup source without relying on an ambiguous boolean.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DesktopLogLevelSource {
-    Environment,
-    Preference,
-}
-
-impl DesktopLogLevelSource {
-    /// Returns the stable source label recorded in the logging bootstrap event.
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Environment => "environment",
-            Self::Preference => "preference",
-        }
-    }
-}
-
-/// Reads Desktop's optional startup override through an injected reader for deterministic tests.
-fn read_desktop_log_level_override(
-    mut read_variable: impl FnMut(&str) -> Option<String>,
-) -> Result<Option<LogLevel>, DesktopBootstrapError> {
-    let Some(raw_level) = read_variable(LOG_LEVEL_ENV_VAR) else {
-        return Ok(None);
-    };
-    let level =
-        raw_level
-            .parse::<LogLevel>()
-            .map_err(|error| DesktopBootstrapError::InvalidLogLevel {
-                value: error.value().to_string(),
-            })?;
-
-    Ok(Some(level))
-}
-
-/// Resolves the runtime-ready Desktop level after Backend loads the shared preference.
-fn resolve_desktop_log_level(
-    startup_override: Option<LogLevel>,
-    configured_level: LogLevel,
-) -> ResolvedDesktopLogLevel {
-    ResolvedDesktopLogLevel {
-        effective_level: startup_override.unwrap_or(configured_level),
-        startup_override,
-        source: if startup_override.is_some() {
-            DesktopLogLevelSource::Environment
-        } else {
-            DesktopLogLevelSource::Preference
-        },
-    }
-}
-
-/// Loads the shared preference before resolving the process-scoped Desktop override.
-async fn load_desktop_log_level(
-    settings: &Settings,
-    startup_override: Option<LogLevel>,
-) -> Result<(LogLevel, ResolvedDesktopLogLevel), BackendError> {
-    let configured_level = settings.preferred_log_level().await?;
-    Ok((
-        configured_level,
-        resolve_desktop_log_level(startup_override, configured_level),
+/// Installs Desktop's real process logger before storage is opened, with an explicit default.
+fn initialize_desktop_logging(
+    app_data_directory: &Path,
+    timezone: chrono_tz::Tz,
+) -> Result<ora_logging::InitializedLogging, ora_logging::LoggingInitError> {
+    init_logging(desktop_logging_config(
+        app_data_directory,
+        timezone,
+        DEFAULT_DESKTOP_LOG_LEVEL,
     ))
+}
+
+/// Restores storage before startup proceeds; read failures must not become default preferences.
+async fn restore_desktop_log_level(
+    settings: &Settings,
+    control: &ora_logging::LogLevelControl,
+) -> Result<LogLevel, DesktopBootstrapError> {
+    let level = settings
+        .preferred_log_level()
+        .await
+        .map_err(DesktopBootstrapError::RuntimePreference)?;
+    control.set_level(level)?;
+    Ok(level)
 }
 
 /// Reads the operating system's IANA timezone once for the Desktop process lifetime.
@@ -402,159 +357,105 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        DesktopLogLevelSource, DesktopTimezoneWarning, ResolvedDesktopLogLevel,
-        ResolvedDesktopTimezone, desktop_logging_config, load_desktop_log_level,
-        read_desktop_log_level_override, resolve_desktop_log_level, resolve_system_timezone,
+        DEFAULT_DESKTOP_LOG_LEVEL, DesktopTimezoneWarning, ResolvedDesktopTimezone,
+        desktop_logging_config, initialize_desktop_logging, resolve_system_timezone,
+        restore_desktop_log_level,
     };
 
-    /// Verifies Desktop accepts every supported environment-backed log level.
+    /// Runs the real startup logger in fresh processes for both first launch and restart.
     #[test]
-    fn resolves_supported_desktop_log_levels() {
-        for (raw, expected) in [
-            ("trace", LogLevel::Trace),
-            (" DEBUG ", LogLevel::Debug),
-            ("Info", LogLevel::Info),
-            ("wArN", LogLevel::Warn),
-            ("ERROR", LogLevel::Error),
-        ] {
-            assert_eq!(
-                resolve_desktop_log_level(
-                    read_desktop_log_level_override(|_| Some(raw.to_string())).unwrap(),
-                    LogLevel::Info,
-                ),
-                ResolvedDesktopLogLevel {
-                    effective_level: expected,
-                    startup_override: Some(expected),
-                    source: DesktopLogLevelSource::Environment,
-                }
-            );
+    fn legacy_log_level_environment_does_not_affect_startup() {
+        for value in ["trace", " DEBUG ", "error", "verbose", ""] {
+            let directory = TempDir::new().unwrap();
+            for expected in ["info", "warn"] {
+                let output = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "tests::desktop_logging_startup_child",
+                        "--ignored",
+                        "--nocapture",
+                    ])
+                    .env("ORA_LOG_LEVEL", value)
+                    .env("ORA_TEST_LOGGING_DIRECTORY", directory.path())
+                    .env("ORA_TEST_EXPECTED_LOG_LEVEL", expected)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "startup failed for legacy value {value:?}, expected {expected}:\n{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                );
+                assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+            }
         }
     }
 
-    /// Verifies a missing environment value selects the documented info default.
+    /// Exercises production initialization without sharing its process-global clock or subscriber.
     #[test]
-    fn uses_persisted_desktop_log_level_without_environment_override() {
-        assert_eq!(
-            resolve_desktop_log_level(
-                read_desktop_log_level_override(|_| None).unwrap(),
-                LogLevel::Warn,
-            ),
-            ResolvedDesktopLogLevel {
-                effective_level: LogLevel::Warn,
-                startup_override: None,
-                source: DesktopLogLevelSource::Preference,
-            }
-        );
-    }
-
-    /// Verifies an unsupported environment value fails with the Desktop bootstrap error.
-    #[test]
-    fn rejects_unsupported_desktop_log_level() {
-        let error = read_desktop_log_level_override(|_| Some("verbose".to_string())).unwrap_err();
-
-        assert!(matches!(
-            error,
-            super::DesktopBootstrapError::InvalidLogLevel { value } if value == "verbose"
-        ));
-    }
-
-    /// Verifies injected startup values do not leak into a later independent resolution.
-    #[test]
-    fn keeps_desktop_log_level_resolution_process_scoped() {
-        let explicit = resolve_desktop_log_level(
-            read_desktop_log_level_override(|_| Some("trace".to_string())).unwrap(),
-            LogLevel::Info,
-        );
-        let later_default = resolve_desktop_log_level(
-            read_desktop_log_level_override(|_| None).unwrap(),
-            LogLevel::Warn,
-        );
-
-        assert_eq!(
-            (explicit, later_default),
-            (
-                ResolvedDesktopLogLevel {
-                    effective_level: LogLevel::Trace,
-                    startup_override: Some(LogLevel::Trace),
-                    source: DesktopLogLevelSource::Environment,
-                },
-                ResolvedDesktopLogLevel {
-                    effective_level: LogLevel::Warn,
-                    startup_override: None,
-                    source: DesktopLogLevelSource::Preference,
-                },
-            )
-        );
-    }
-
-    /// Verifies Desktop restores the SQLite preference and still gives an override precedence.
-    #[tokio::test]
-    async fn loads_persisted_desktop_log_level_after_restart() {
-        let temp_dir = TempDir::new().unwrap();
-        let first = Backend::open(test_backend_paths(temp_dir.path())).unwrap();
-        assert_eq!(
-            load_desktop_log_level(first.settings(), None)
-                .await
-                .unwrap(),
-            (
-                LogLevel::Info,
-                ResolvedDesktopLogLevel {
-                    effective_level: LogLevel::Info,
-                    startup_override: None,
-                    source: DesktopLogLevelSource::Preference,
-                },
-            )
-        );
-        first
-            .settings()
-            .set_preferred_log_level(LogLevel::Warn)
-            .await
-            .unwrap();
-        drop(first);
-
-        let restarted = Backend::open(test_backend_paths(temp_dir.path())).unwrap();
-        assert_eq!(
-            load_desktop_log_level(restarted.settings(), Some(LogLevel::Trace))
-                .await
-                .unwrap(),
-            (
-                LogLevel::Warn,
-                ResolvedDesktopLogLevel {
-                    effective_level: LogLevel::Trace,
-                    startup_override: Some(LogLevel::Trace),
-                    source: DesktopLogLevelSource::Environment,
-                },
-            )
-        );
-        assert_eq!(
-            (
-                DesktopLogLevelSource::Environment.as_str(),
-                DesktopLogLevelSource::Preference.as_str(),
-            ),
-            ("environment", "preference")
-        );
-    }
-
-    /// Verifies malformed SQLite log-level text aborts Desktop preference resolution.
-    #[tokio::test]
-    async fn rejects_malformed_persisted_desktop_log_level() {
-        let temp_dir = TempDir::new().unwrap();
-        let backend = Backend::open(test_backend_paths(temp_dir.path())).unwrap();
-        drop(backend);
-        rusqlite::Connection::open(temp_dir.path().join("ora.sqlite3"))
+    #[ignore = "run only by the parent test in an isolated subprocess"]
+    fn desktop_logging_startup_child() {
+        let directory =
+            std::path::PathBuf::from(std::env::var_os("ORA_TEST_LOGGING_DIRECTORY").unwrap());
+        let expected = std::env::var("ORA_TEST_EXPECTED_LOG_LEVEL")
             .unwrap()
-            .execute(
-                "INSERT INTO user_config(key, value) VALUES ('log_level', 'verbose')",
-                [],
-            )
+            .parse::<LogLevel>()
             .unwrap();
-        let reopened = Backend::open(test_backend_paths(temp_dir.path())).unwrap();
+        // This child runs only this test. Its real global subscriber must remain active so
+        // neither a test clock nor a scoped test dispatcher bypasses production initialization.
+        let logging = initialize_desktop_logging(&directory, chrono_tz::Asia::Shanghai).unwrap();
+        let (_guard, control) = logging.into_parts();
+        assert_eq!(control.current_level().unwrap(), LogLevel::Info);
 
-        assert!(
-            load_desktop_log_level(reopened.settings(), None)
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let backend = Backend::open(test_backend_paths(&directory)).unwrap();
+            let restored = restore_desktop_log_level(backend.settings(), &control)
                 .await
-                .is_err()
-        );
+                .unwrap();
+            assert_eq!(
+                (restored, control.current_level().unwrap()),
+                (expected, expected)
+            );
+            let manager = ora_runtime_settings::RuntimeLogLevelManager::new(
+                control.clone(),
+                backend.settings().preferred_log_level_store(),
+                restored,
+            );
+            assert_eq!(
+                manager.set_level(LogLevel::Warn).await.unwrap(),
+                ora_runtime_settings::RuntimeLogLevelState {
+                    configured_level: LogLevel::Warn,
+                    effective_level: LogLevel::Warn,
+                },
+            );
+            assert_eq!(control.current_level().unwrap(), LogLevel::Warn);
+        });
+    }
+
+    /// Distinguishes invalid preferences and real storage failures from an unset preference.
+    #[test]
+    fn rejects_unreadable_persisted_desktop_log_level() {
+        ora_logging::with_trace_logging(|| {
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                for statement in [
+                    "INSERT INTO user_config(key, value) VALUES ('log_level', 'verbose')",
+                    "DROP TABLE user_config",
+                ] {
+                    let temp_dir = TempDir::new().unwrap();
+                    let backend = Backend::open(test_backend_paths(temp_dir.path())).unwrap();
+                    rusqlite::Connection::open(temp_dir.path().join("ora.sqlite3"))
+                        .unwrap()
+                        .execute(statement, [])
+                        .unwrap();
+                    let control = ora_logging::test_log_level_control(DEFAULT_DESKTOP_LOG_LEVEL);
+                    assert!(matches!(
+                        restore_desktop_log_level(backend.settings(), &control).await,
+                        Err(super::DesktopBootstrapError::RuntimePreference(_))
+                    ));
+                    assert_eq!(control.current_level().unwrap(), LogLevel::Info);
+                }
+            })
+        });
     }
 
     /// Verifies the resolved level is preserved in Desktop's fixed output topology.

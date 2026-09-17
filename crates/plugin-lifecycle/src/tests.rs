@@ -824,7 +824,7 @@ fn expected_skill_plugin() -> InstalledPlugin {
         homepage: None,
         license: None,
         contribution: InstalledPluginContribution::Skill,
-        logo: Some(PACKAGE_LOGO.to_string()),
+        logo: Some(universal_logo("official/ora.skill-pack")),
         installation_validity: PluginInstallationValidity::Valid,
         configuration: PluginConfigurationSummary::NotDeclared,
         runtime: PluginRuntimeStatus::Stopped,
@@ -848,7 +848,7 @@ fn expected_hook_plugin() -> InstalledPlugin {
             target: Some("x86_64-pc-windows-msvc".to_string()),
             tool_version: "0.45.0".to_string(),
         },
-        logo: Some(PACKAGE_LOGO.to_string()),
+        logo: Some(universal_logo("official/rtk-ai.rtk")),
         installation_validity: PluginInstallationValidity::Valid,
         configuration: PluginConfigurationSummary::NotDeclared,
         runtime: PluginRuntimeStatus::Stopped,
@@ -869,7 +869,7 @@ fn expected_plugin_with_runtime(runtime: PluginRuntimeStatus) -> InstalledPlugin
         contribution: InstalledPluginContribution::Agent {
             agent_display_name: "ora.example".to_string(),
         },
-        logo: Some(PACKAGE_LOGO.to_string()),
+        logo: Some(universal_logo("official/ora.example")),
         installation_validity: PluginInstallationValidity::Valid,
         configuration: PluginConfigurationSummary::NotDeclared,
         runtime,
@@ -1183,8 +1183,18 @@ impl PluginStatusPublisher for RecordingStatusPublisher {
 }
 
 /// The icon shipped by the shared package fixture, which proves a discovered logo reaches the
-/// wire contract unchanged.
+/// wire contract as a host-local asset URL.
 const PACKAGE_LOGO: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="8"/></svg>"#;
+
+/// Returns the contract icon a package whose only candidate is `logo.svg` must produce.
+fn universal_logo(plugin_id: &str) -> ora_contracts::PluginLogo {
+    ora_contracts::PluginLogo::Universal {
+        url: format!(
+            "{}logo/installed/{plugin_id}/universal.svg",
+            ora_plugin_asset::AssetUrlForm::CURRENT.origin()
+        ),
+    }
+}
 
 /// Returns the installed package directory of the shared `official/ora.example` fixture.
 pub(super) fn example_package_root(data_dir: &std::path::Path) -> std::path::PathBuf {

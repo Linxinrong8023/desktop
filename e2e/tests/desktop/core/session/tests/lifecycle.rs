@@ -52,6 +52,7 @@ async fn first_update(stream: &mut SessionEventStream<PromptSessionEvent>) -> Te
     while let Some(event) = stream.recv().await {
         if let PromptSessionEvent::SessionUpdate {
             update: SessionUpdate::AgentMessageChunk(_),
+            ..
         } = event?
         {
             return Ok(());
@@ -250,10 +251,10 @@ fn workflow_cancellation_stops_the_live_node_session() -> TestResult {
     })
 }
 
-/// Dropping a human follow-up stream cancels the actor and restores awaiting status; manual
-/// completion then uses that same coordination state and stops the session after its commit.
+/// Confirmed cancellation restores durable workflow state before returning and preserves other
+/// consumers; a later drop still provides best-effort cleanup before manual completion.
 #[test]
-fn dropping_a_workflow_follow_up_restores_awaiting_status_for_completion() -> TestResult {
+fn confirmed_and_dropped_workflow_follow_ups_restore_awaiting_status() -> TestResult {
     run_case(async {
         let (setup, backend, workspace_id) = fixture()?;
         let run = start_interactive_workflow(&backend, workspace_id, "Settle the first turn")?;
@@ -282,6 +283,35 @@ fn dropping_a_workflow_follow_up_restores_awaiting_status_for_completion() -> Te
             .status,
             WorkflowRunStatus::Running
         );
+        // A load owns only its relay. Confirming its cancellation must leave the prompt active.
+        let mut follower = sessions
+            .load(LoadSessionRequest {
+                session_id: session_id.clone(),
+            })
+            .await?;
+        follower.cancel_and_wait().await?;
+        assert_eq!(
+            runs.get(GetWorkflowRunRequest {
+                run_id: run.id.clone()
+            })?
+            .run
+            .status,
+            WorkflowRunStatus::Running
+        );
+
+        stream.cancel_and_wait().await?;
+        stream.cancel_and_wait().await?;
+        // No polling here: success itself certifies the database transition has completed.
+        assert_eq!(
+            runs.get(GetWorkflowRunRequest {
+                run_id: run.id.clone()
+            })?
+            .run
+            .status,
+            WorkflowRunStatus::AwaitingInput
+        );
+        let mut stream = sessions.prompt(held_prompt(&session_id)).await?;
+        first_update(&mut stream).await?;
         drop(stream);
         let history_root = setup.backend_paths().app_data_directory.join("sessions");
         cancelled_history(&history_root, &session_id).await?;

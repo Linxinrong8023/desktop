@@ -96,28 +96,38 @@ impl Settings {
         })
         .await
     }
-    /// Loads the optional configured network proxy settings.
-    pub fn network_proxy_settings(&self) -> Result<Option<NetworkProxySettings>, BackendError> {
-        self.service
-            .network_proxy_settings()
-            .map_err(BackendError::from)
+    /// Loads the optional proxy without blocking an async worker on SQLite.
+    pub async fn network_proxy_settings(
+        &self,
+    ) -> Result<Option<NetworkProxySettings>, BackendError> {
+        let service = self.service.clone();
+        spawn_repository_work(move || service.network_proxy_settings().map_err(BackendError::from))
+            .await
     }
 
-    /// Persists and returns the network proxy settings.
-    pub fn set_network_proxy_settings(
+    /// Persists and returns the proxy without blocking an async worker on SQLite.
+    pub async fn set_network_proxy_settings(
         &self,
         settings: NetworkProxySettings,
     ) -> Result<NetworkProxySettings, BackendError> {
-        self.service
-            .set_network_proxy_settings(settings)
-            .map_err(BackendError::from)
+        let service = self.service.clone();
+        spawn_repository_work(move || {
+            service
+                .set_network_proxy_settings(settings)
+                .map_err(BackendError::from)
+        })
+        .await
     }
 
-    /// Removes the configured network proxy.
-    pub fn clear_network_proxy_settings(&self) -> Result<(), BackendError> {
-        self.service
-            .clear_network_proxy_settings()
-            .map_err(BackendError::from)
+    /// Removes the configured proxy without blocking an async worker on SQLite.
+    pub async fn clear_network_proxy_settings(&self) -> Result<(), BackendError> {
+        let service = self.service.clone();
+        spawn_repository_work(move || {
+            service
+                .clear_network_proxy_settings()
+                .map_err(BackendError::from)
+        })
+        .await
     }
 
     /// Probes `url` through the supplied proxy without persisting form edits.

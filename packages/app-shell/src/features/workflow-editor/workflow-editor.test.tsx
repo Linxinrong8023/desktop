@@ -13,6 +13,7 @@ import type { ReactElement } from "react";
 import { createChatStore } from "@ora/chat";
 import { PlatformProvider } from "../../platform";
 import {
+  createMockWorkflow,
   createMockWorkflowVersions,
   createMockWorkflows,
 } from "@ora/workflow-mock";
@@ -330,6 +331,7 @@ describe("WorkflowEditor", () => {
       selectedWorkflowId: null,
       managerError: null,
       actions: null,
+      importedWorkflowIds: [],
     });
     useUiStore.setState({
       sidebarCollapsed: false,
@@ -376,9 +378,7 @@ describe("WorkflowEditor", () => {
     expect(
       screen.queryByRole("button", { name: "部署到项目" }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "导出工作流" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "打开代码审查工作流的操作菜单" }),
     ).toHaveClass("opacity-100");
@@ -964,7 +964,7 @@ describe("WorkflowEditor", () => {
 
     expect(screen.getByLabelText("Agent 模型")).toBeInTheDocument();
     expect(screen.getByLabelText("角色")).toHaveTextContent("Reviewer");
-    expect(screen.getAllByText("Skills")).toHaveLength(2);
+    expect(screen.getAllByText("必需 Skill")).toHaveLength(2);
     expect(screen.getByLabelText("自定义 Prompt")).toHaveTextContent(
       "按严重程度整理问题，并给出定位与修复建议。",
     );
@@ -984,7 +984,9 @@ describe("WorkflowEditor", () => {
     expect(configuredParameters).toHaveTextContent(
       `${AGENT_REF.codeagentcli} · opencode/big-pickle`,
     );
-    expect(configuredParameters).toHaveTextContent("Skillscode-defect-scan");
+    expect(configuredParameters).toHaveTextContent(
+      "必需 Skillcode-defect-scan",
+    );
     expect(configuredParameters).not.toHaveTextContent(
       "按严重程度整理问题，并给出定位与修复建议。",
     );
@@ -1277,7 +1279,11 @@ describe("WorkflowEditor", () => {
 
     await screen.findByText("代码审查工作流");
     await screen.findByLabelText("工作流画布");
-    await user.click(screen.getByLabelText("新建工作流"));
+    // Match the row-menu helper: open the Base UI menu with a single click event.
+    fireEvent.click(screen.getByRole("button", { name: "新建或导入工作流" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: /新建工作流/ }),
+    );
     const createDialog = await screen.findByRole("alertdialog", {
       name: "新建工作流",
     });
@@ -1333,7 +1339,11 @@ describe("WorkflowEditor", () => {
       screen.queryByRole("button", { name: "错开并行演示" }),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByLabelText("新建工作流"));
+    // Match the row-menu helper: open the Base UI menu with a single click event.
+    fireEvent.click(screen.getByRole("button", { name: "新建或导入工作流" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: /新建工作流/ }),
+    );
     const createDialog = await screen.findByRole("alertdialog", {
       name: "新建工作流",
     });
@@ -1364,7 +1374,11 @@ describe("WorkflowEditor", () => {
     });
 
     await screen.findByText("代码审查工作流");
-    await user.click(screen.getByLabelText("新建工作流"));
+    // Match the row-menu helper: open the Base UI menu with a single click event.
+    fireEvent.click(screen.getByRole("button", { name: "新建或导入工作流" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: /新建工作流/ }),
+    );
     const createDialog = await screen.findByRole("alertdialog", {
       name: "新建工作流",
     });
@@ -1608,9 +1622,11 @@ describe("WorkflowEditor", () => {
   it("shows the empty-library action only after the library loads with no workflows", async () => {
     renderEditor(undefined, createFixtureState(), undefined, false);
 
-    expect(screen.queryByText("还没有工作流")).not.toBeInTheDocument();
-    expect(await screen.findByText("还没有工作流")).toBeInTheDocument();
+    expect(screen.queryAllByText("还没有工作流")).toHaveLength(0);
+    // Both the main pane and the sidebar list offer first-run actions.
+    expect(await screen.findAllByText("还没有工作流")).toHaveLength(2);
     expect(screen.queryByLabelText("工作流画布")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导入" })).toBeInTheDocument();
   });
 
   it("shows a retryable error when the workflow library fails to load", async () => {
@@ -1653,6 +1669,163 @@ describe("WorkflowEditor", () => {
     renderEditor();
 
     expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
+  });
+
+  it("previews imported plugin dependencies before creating and publishing", async () => {
+    const user = userEvent.setup();
+    const state = createFixtureState();
+    renderEditor(undefined, state);
+    await screen.findByLabelText("工作流画布");
+
+    const imported = createMockWorkflow("zh-CN");
+    imported.name = "导入的审查";
+    const agent = imported.nodes.find((node) => node.data.kind === "agent");
+    if (agent?.data.agentConfig === undefined) {
+      throw new Error("fixture must contain an Agent node");
+    }
+    agent.data.agentConfig = {
+      ...agent.data.agentConfig,
+      mcps: [{ mcpId: "acme/missing-mcp", enabled: true }],
+      skills: [{ skillId: "openspec-explore", enabled: true }],
+    };
+
+    // Match the row-menu helper: open the Base UI menu with a single click event.
+    fireEvent.click(screen.getByRole("button", { name: "新建或导入工作流" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "导入工作流…" }),
+    );
+    const pickDialog = await screen.findByRole("dialog");
+    expect(
+      within(pickDialog).getByText("支持 .json / .reactflow.json"),
+    ).toBeInTheDocument();
+    await user.upload(
+      within(pickDialog).getByLabelText("拖入文件，或点击选择"),
+      new File([JSON.stringify(imported)], "导入的审查.v9.reactflow.json", {
+        type: "application/json",
+      }),
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("确认导入")).toBeInTheDocument();
+    expect(
+      within(dialog).getAllByText("acme/missing-mcp").length,
+    ).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText("未安装").length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText("已安装").length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText("去安装").length).toBeGreaterThan(0);
+    expect(within(dialog).getByDisplayValue("v9")).toBeInTheDocument();
+
+    // A missing dependency deep-links to the marketplace, searching for its identity.
+    const missingRow = within(dialog)
+      .getAllByText("acme/missing-mcp")[0]
+      .closest("li");
+    if (missingRow === null) {
+      throw new Error("missing dependency row not rendered");
+    }
+    await user.click(
+      within(missingRow).getByRole("button", { name: "去安装" }),
+    );
+    expect(useUiStore.getState()).toMatchObject({
+      settingsOpen: true,
+      settingsCategory: "plugins",
+      pluginSettingsRequest: {
+        kind: "marketplaceSearch",
+        query: "acme/missing-mcp",
+      },
+    });
+    act(() =>
+      useUiStore.setState({
+        settingsOpen: false,
+        pluginSettingsRequest: null,
+      }),
+    );
+    // Nothing is persisted while the preview is open.
+    expect(
+      state.workflows.some((record) => record.workflow.name === "导入的审查"),
+    ).toBe(false);
+
+    await user.click(within(dialog).getByRole("button", { name: "仍然导入" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      const record = state.workflows.find(
+        (item) => item.workflow.name === "导入的审查",
+      );
+      expect(record?.published.map((snapshot) => snapshot.version)).toEqual([
+        "v9",
+      ]);
+    });
+    expect(await screen.findByDisplayValue("导入的审查")).toBeInTheDocument();
+    expect(screen.getByText("新导入")).toBeInTheDocument();
+  });
+
+  it("explains an unreadable import file without creating a workflow", async () => {
+    const user = userEvent.setup();
+    const state = createFixtureState();
+    renderEditor(undefined, state);
+    await screen.findByLabelText("工作流画布");
+    const workflowCount = state.workflows.length;
+
+    // Match the row-menu helper: open the Base UI menu with a single click event.
+    fireEvent.click(screen.getByRole("button", { name: "新建或导入工作流" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "导入工作流…" }),
+    );
+    const pickDialog = await screen.findByRole("dialog");
+    await user.upload(
+      within(pickDialog).getByLabelText("拖入文件，或点击选择"),
+      new File(["{ nope"], "broken.json", { type: "application/json" }),
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "文件不是有效的 JSON。",
+    );
+    expect(within(dialog).getByText("无法导入")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "关闭" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(state.workflows).toHaveLength(workflowCount);
+  });
+
+  it("exports the draft or a chosen published version", async () => {
+    const user = userEvent.setup();
+    renderEditor();
+    await screen.findByLabelText("工作流画布");
+
+    await user.click(screen.getByRole("button", { name: "导出" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("radio", { name: /当前草稿/ }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(
+      within(dialog).getByDisplayValue("代码审查工作流.reactflow.json"),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("随文件记录的插件引用"),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText("预览文件结构")).toBeInTheDocument();
+
+    const [, publishedVersion] = within(dialog).getAllByRole("radio");
+    await user.click(publishedVersion);
+
+    expect(publishedVersion).toHaveAttribute("aria-checked", "true");
+    expect(
+      await within(dialog).findByText("随文件记录的插件引用"),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).queryByDisplayValue("代码审查工作流.reactflow.json"),
+    ).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
   });
 });
 

@@ -1,3 +1,4 @@
+import { onMarketplaceAutoSyncChanged } from "./marketplace-sync.generated";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -107,13 +108,14 @@ function createTauriUpdates(): DesktopUpdateCapability {
   };
 }
 
-/** Wires marketplace package transfer progress into the shared settings UI. */
+/** Wires marketplace package transfer progress and automatic refreshes into the settings UI. */
 function createTauriPluginMarketplace(): PluginMarketplaceCapability {
   return {
     onInstallProgress: (listener) =>
       listen<PluginInstallProgress>(PLUGIN_INSTALL_PROGRESS_EVENT, (event) => {
         listener(event.payload);
       }),
+    onAutoSyncChanged: onMarketplaceAutoSyncChanged,
   };
 }
 

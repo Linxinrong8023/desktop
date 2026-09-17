@@ -41,8 +41,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useContractsClient } from "../../contracts-client-context";
 import { localizeContractError } from "../../i18n/contract-error";
-import { invalidateWorkspaceDiffs } from "../../state/data/diff";
-import { invalidateWorkspaceStatus } from "../../state/data/workspace-status";
+import { refreshWorkspaceReview } from "../../state/data/workspace-review";
 import { useWorkspaceDiff } from "../../state/hooks/use-workspace-diff";
 import { useWorkspaceStatus } from "../../state/hooks/use-workspace-status";
 import {
@@ -531,17 +530,21 @@ export function TaskDiffView({
   }, [filePaths, isFocusMode, notifyPreviewPath]);
 
   const commitChanges = useMutation({
-    mutationFn: (message: string) =>
-      client.workspace.commitChanges({ workspaceId, message }),
-    onSuccess: async (response) => {
+    mutationFn: async (message: string) => {
+      const response = await client.workspace.commitChanges({
+        workspaceId,
+        message,
+      });
+      await refreshWorkspaceReview(queryClient, workspaceId);
+      return response;
+    },
+    onSuccess: (response) => {
       setGitActionsOpen(false);
       setCommitMessage("");
       setGitNotice(t("diff.commitSucceeded", { summary: response.summary }));
       // A baseline-less workspace has no fixed "committed" comparison to show;
       // its remaining uncommitted changes are still the most useful view.
       setScope(hasBaseline ? "committed" : "unstaged");
-      await invalidateWorkspaceDiffs(queryClient, workspaceId);
-      await invalidateWorkspaceStatus(queryClient, workspaceId);
     },
   });
   const pushBranch = useMutation({
@@ -564,33 +567,34 @@ export function TaskDiffView({
     await commitChanges.mutateAsync(message);
     await pushBranch.mutateAsync();
   };
-  /** Refreshes both the diff scopes and staging status after an index mutation. */
-  const refreshStaging = useCallback(() => {
-    void invalidateWorkspaceDiffs(queryClient, workspaceId);
-    void invalidateWorkspaceStatus(queryClient, workspaceId);
-  }, [queryClient, workspaceId]);
-
+  // Keep refresh inside each operation so a workspace switch cannot retarget an
+  // in-flight write's cache refresh through updated mutation observer callbacks.
   const stageOne = useMutation({
-    mutationFn: (path: string) =>
-      client.workspace.stageChanges({ workspaceId, paths: [path] }),
-    onSuccess: refreshStaging,
+    mutationFn: async (path: string) => {
+      await client.workspace.stageChanges({ workspaceId, paths: [path] });
+      await refreshWorkspaceReview(queryClient, workspaceId);
+    },
   });
   const unstageOne = useMutation({
-    mutationFn: (path: string) =>
-      client.workspace.unstageChanges({ workspaceId, paths: [path] }),
-    onSuccess: refreshStaging,
+    mutationFn: async (path: string) => {
+      await client.workspace.unstageChanges({ workspaceId, paths: [path] });
+      await refreshWorkspaceReview(queryClient, workspaceId);
+    },
   });
   const stageAll = useMutation({
-    mutationFn: () => client.workspace.stageChanges({ workspaceId, paths: [] }),
-    onSuccess: refreshStaging,
+    mutationFn: async () => {
+      await client.workspace.stageChanges({ workspaceId, paths: [] });
+      await refreshWorkspaceReview(queryClient, workspaceId);
+    },
   });
   const unstageAll = useMutation({
-    mutationFn: () =>
-      client.workspace.unstageChanges({
+    mutationFn: async () => {
+      await client.workspace.unstageChanges({
         workspaceId,
         paths: [...stagedByPath],
-      }),
-    onSuccess: refreshStaging,
+      });
+      await refreshWorkspaceReview(queryClient, workspaceId);
+    },
   });
   const diff = diffQuery.data;
 
@@ -616,8 +620,8 @@ export function TaskDiffView({
         setGitActionsOpen(open);
       }}
       onMessageChange={setCommitMessage}
-      onStageAll={() => void stageAll.mutateAsync()}
-      onUnstageAll={() => void unstageAll.mutateAsync()}
+      onStageAll={() => stageAll.mutate()}
+      onUnstageAll={() => unstageAll.mutate()}
       onCommit={() => {
         setGitNotice(null);
         void commitChanges.mutateAsync(commitMessage.trim());
@@ -633,7 +637,7 @@ export function TaskDiffView({
   );
 
   const refresh = async () => {
-    await diffQuery.refetch();
+    await refreshWorkspaceReview(queryClient, workspaceId);
   };
 
   if (diffQuery.isLoading) {
@@ -658,7 +662,14 @@ export function TaskDiffView({
 
   if (diff === undefined) return null;
 
-  const mutationError = commitChanges.error ?? pushBranch.error;
+  const reviewError =
+    commitChanges.error ??
+    pushBranch.error ??
+    stageOne.error ??
+    unstageOne.error ??
+    stageAll.error ??
+    unstageAll.error ??
+    statusQuery.error;
 
   return (
     <section
@@ -739,12 +750,12 @@ export function TaskDiffView({
           <span className="ora-diff-progress absolute inset-x-0 top-0 block h-px w-1/3 bg-primary/70" />
         </div>
       )}
-      {mutationError !== null && (
+      {reviewError !== null && (
         <div
           role="alert"
           className="border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-xs text-destructive"
         >
-          {localizeContractError(mutationError, t)}
+          {localizeContractError(reviewError, t)}
         </div>
       )}
       {gitNotice !== null && (
@@ -929,9 +940,9 @@ export function TaskDiffView({
                   stagedByPath={stagedByPath}
                   onToggleStage={(path) => {
                     if (stagedByPath.has(path)) {
-                      void unstageOne.mutateAsync(path);
+                      unstageOne.mutate(path);
                     } else {
-                      void stageOne.mutateAsync(path);
+                      stageOne.mutate(path);
                     }
                   }}
                   stagingPending={stageOne.isPending || unstageOne.isPending}

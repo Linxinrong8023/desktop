@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type {
@@ -32,6 +32,7 @@ import { useUpdatePlugin } from "../../state/hooks/use-update-plugin";
 import { useInstalledPlugins } from "../../state/hooks/use-installed-plugins";
 import { usePluginImport } from "../../state/hooks/use-plugin-import";
 import { usePluginRegistrySync } from "../../state/hooks/use-plugin-registry-sync";
+import { useMarketplaceSyncStore } from "../../state/stores/marketplace-sync-store";
 import { PluginLogo } from "./plugin-logo";
 import { PluginSourcesManager } from "./plugin-sources-manager";
 import { PluginManager } from "./plugin-manager";
@@ -39,6 +40,7 @@ import { PluginReadmeView } from "./plugin-readme-view";
 import { PluginConfigurationEditor } from "./plugin-configuration-editor";
 import type { PluginConfigurationNavigationGuard } from "./plugin-configuration-editor";
 import { PluginDownloadProgress } from "./plugin-download-progress";
+import { useUiStore } from "../../state/stores/ui-store";
 
 /** The registry kind order shown in the marketplace, mirroring the contracts docs. */
 const MARKETPLACE_KIND_ORDER = [
@@ -67,20 +69,46 @@ const MARKETPLACE_KIND_LABELS: Record<string, string> = {
  */
 export function PluginsSettings({
   onNavigationGuardChange,
+  detailPluginId = null,
+  onDetailClose,
 }: {
   onNavigationGuardChange?: (
     guard: PluginConfigurationNavigationGuard | null,
   ) => void;
+  detailPluginId?: string | null;
+  onDetailClose?: () => void;
 }) {
   const { t } = useTranslation();
   const showContractError = useContractErrorToast();
-  const [query, setQuery] = useState("");
-  const [managing, setManaging] = useState(false);
+  // Another surface may deep-link here (e.g. a workflow dependency to install or
+  // configure). Adopt the request once so later visits start from the default view.
+  const [initialRequest] = useState(
+    () => useUiStore.getState().pluginSettingsRequest,
+  );
+  const clearPluginSettingsRequest = useUiStore(
+    (state) => state.clearPluginSettingsRequest,
+  );
+  useEffect(() => {
+    clearPluginSettingsRequest();
+  }, [clearPluginSettingsRequest]);
+  const [query, setQuery] = useState(
+    initialRequest?.kind === "marketplaceSearch" ? initialRequest.query : "",
+  );
+  const [managing, setManaging] = useState(
+    initialRequest?.kind === "manage" || initialRequest?.kind === "configure",
+  );
   const [managingSources, setManagingSources] = useState(false);
   const [configurationPlugin, setConfigurationPlugin] = useState<{
     id: string;
     displayName: string;
-  } | null>(null);
+  } | null>(
+    initialRequest?.kind === "configure"
+      ? {
+          id: initialRequest.pluginId,
+          displayName: initialRequest.displayName,
+        }
+      : null,
+  );
   const [selecting, setSelecting] = useState(false);
   const [readmePlugin, setReadmePlugin] = useState<AvailablePlugin | null>(
     null,
@@ -91,6 +119,14 @@ export function PluginsSettings({
   const installed = useInstalledPlugins();
   const sync = usePluginRegistrySync();
   const importPlugin = usePluginImport();
+  // The host admits one rebuild at a time and discards the rest, so a click made while its own
+  // refresh is running would be dropped rather than served. The action stands down instead.
+  // `sync.isPending` covers the user's own sync and, unlike the mutation, survives this page
+  // being left and reopened mid-sync.
+  const hostRefreshing = useMarketplaceSyncStore(
+    (state) => state.hostRefreshing,
+  );
+  const syncing = sync.isPending || hostRefreshing;
 
   const installedById = useMemo(() => {
     const byId = new Map<string, InstalledPlugin>();
@@ -181,11 +217,19 @@ export function PluginsSettings({
     }
   };
 
-  if (readmePlugin !== null) {
+  const detailPlugin =
+    (detailPluginId === null ? undefined : availableById.get(detailPluginId)) ??
+    readmePlugin;
+
+  if (detailPlugin !== null && detailPlugin !== undefined) {
     return (
       <PluginReadmeView
-        plugin={readmePlugin}
-        onBack={() => setReadmePlugin(null)}
+        plugin={detailPlugin}
+        installed={installedById.get(detailPlugin.id)}
+        onBack={() => {
+          setReadmePlugin(null);
+          onDetailClose?.();
+        }}
       />
     );
   }
@@ -264,7 +308,7 @@ export function PluginsSettings({
             variant="ghost"
             size="sm"
             className="shrink-0 min-w-32"
-            disabled={sync.isPending}
+            disabled={syncing}
             onClick={() =>
               sync.mutate(undefined, {
                 onError: (cause) => {
@@ -274,13 +318,15 @@ export function PluginsSettings({
             }
             aria-label={t("settings.plugins.syncMarketplace")}
           >
-            {sync.isPending ? (
+            {syncing ? (
               <IconLoader2 className="animate-spin" />
             ) : (
               <IconRefresh />
             )}
             <span className="hidden sm:inline">
-              {t("settings.plugins.syncMarketplace")}
+              {syncing
+                ? t("settings.plugins.syncingMarketplace")
+                : t("settings.plugins.syncMarketplace")}
             </span>
           </Button>
         </div>

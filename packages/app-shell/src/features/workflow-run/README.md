@@ -112,6 +112,12 @@ Keep these stacks separate — shared chrome only where noted.
   task diff. Stage-scoped Diff is deferred until a session-level Git Diff API
   (or turn-level filter) exists; `nodeStates.sessionId` is projected for that
   follow-up.
+- **Iteration rounds**: persisted runs project region-node states grouped by
+  `(nodeId, iteration)` into `run.roundStates` — one state per executed round —
+  while `run.nodeStates` keeps each region node's latest round for existing
+  consumers. Overview marks member nodes with a round badge (`R2`), and the
+  Theater act inspector offers a per-round strip (with a per-round status dot)
+  to view each round's session output.
 - **Open location**: the run header reuses `LocationActionsButton`
   (File Manager / Terminal / VS Code / Copy Path). It resolves the run's
   Workspace location directly; non-local Workspace adapters remain responsible
@@ -221,9 +227,12 @@ Keep these stacks separate — shared chrome only where noted.
   release and artifact reveal cannot steal the stage, and Theater always shows
   the session node until the reader closes the dock, picks another path node, or
   an automatic node finishes and advances the dock to its first active successor.
-  Node conversation reuses `MessageBubble` / `MarkdownMessage` **outside**
-  task `MessageList`, so it does not receive chat inline artifact links. Those
-  links belong to the task review chat, not the Theater card.
+  Node conversation uses the ordinary `ChatView` / `MessageList` transcript, so a
+  long node session is row-windowed the same way as task chat. Off-screen turns
+  (and live tool rows) unmount; chat inline artifact links stay on task review
+  chat, not the Theater card. A failed session load (plugin crash, unavailable
+  agent) is shown once and not retried, so Theater does not jitter between the
+  loading placeholder and the transcript.
 
 ## Demo path checklist
 

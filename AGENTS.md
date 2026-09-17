@@ -4,6 +4,31 @@
 changing its contents. It primarily contains ADRs, core test cases, and domain documentation; see
 `specs/AGENTS.md` for its detailed conventions.
 
+## Documentation
+
+- Every new document under `docs/` must have an English version and a Chinese version. Place
+  bidirectional links to the two versions immediately below the title at the top of each document;
+  use `English | [中文](sibling.zh.md)` in the English version and `[English](sibling.md) | 中文`
+  in the Chinese version. When updating a document, update both language versions in the same change.
+
+## Feature changes
+
+Before adding or removing a feature, read and follow [the feature change guide](docs/feature-change-guide.zh.md).
+
+- **Single source of truth**: Keep contracts, logical operations, Desktop bindings, and business
+  implementations in their respective owners. Derive generated wiring from those declarations rather
+  than maintaining parallel handwritten copies.
+- **Domain ownership**: Keep business rules, cache policies, and translations with their domain owners.
+  Callers use those owners' interfaces instead of reconstructing their policies.
+- **Minimal interfaces and explicit composition**: Expose only capabilities needed by actual cross-feature
+  consumers. Compose owners explicitly; introduce shared abstractions only for demonstrated needs.
+- **Lifecycle and isolation**: Reuse shared request/stream lifecycle helpers. Release owned resources on
+  scope changes and shutdown; when removing features, remove their obsolete wiring and owned state while
+  preserving shared responsibilities, other workspaces' state, and user files.
+- **Behavioral verification**: Test through production interfaces, using typed operation handlers for
+  frontend test behavior. Cover relevant failure, cancellation, cleanup, and isolation outcomes;
+  generated-artifact checks do not replace behavior or host-integration tests.
+
 # Rust/crates
 
 1. **Code Documentation**: Unless it is a standard, self-explanatory method (e.g., `new()`), every function must include a comment above the signature describing its purpose. Provide inline comments for any complex logic, non-trivial algorithms, or specialized branching within function bodies. Write comments in English.

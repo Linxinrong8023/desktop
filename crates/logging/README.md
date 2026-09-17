@@ -20,7 +20,7 @@
 
 ## Boundaries
 
-Initialization is process-wide and the timezone can be set only once. Runtime composition roots must parse environment configuration, call initialization before clock access, retain `LoggingGuard` for the process lifetime, and inject only cloned `LogLevelControl` values into runtime state that needs hot reload. Reloading changes eligibility for future events without rebuilding sinks or recovering events that were already filtered.
+Initialization is process-wide and the timezone can be set only once. Runtime composition roots must supply explicit logging configuration, call initialization before clock access, retain `LoggingGuard` for the process lifetime, and inject only cloned `LogLevelControl` values into runtime state that needs hot reload. Reloading changes eligibility for future events without rebuilding sinks or recovering events that were already filtered.
 
 This crate does not decide business log messages, public error classification, field allowlists, or
 read environment variables. Callers remain responsible for excluding sensitive structured fields

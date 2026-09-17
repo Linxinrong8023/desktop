@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconCopy,
   IconDotsVertical,
+  IconDownload,
   IconFileImport,
   IconPencil,
   IconPlus,
@@ -25,21 +26,23 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
   Input,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
   cn,
 } from "@ora/ui";
 /** Sidebar row identity; the canvas hydrates the full graph separately. */
 export interface WorkflowLibraryItem {
   id: string;
   name: string;
+  /** Imported during this session; marked so users can find the new row. */
+  imported?: boolean;
 }
 
 interface WorkflowManagerProps {
   workflows: WorkflowLibraryItem[];
+  /** False until the library has loaded, so a pending or failed load never reads as empty. */
+  libraryLoaded: boolean;
   selectedWorkflowId: string | null;
   error: string | null;
   /** True until the open editor has registered flush-before-switch actions. */
@@ -49,12 +52,14 @@ interface WorkflowManagerProps {
   onCopy: (workflowId: string) => Promise<boolean>;
   onRename: (workflowId: string, name: string) => Promise<boolean>;
   onDelete: (workflowId: string) => void;
-  onImport: (file: File) => Promise<boolean>;
+  onImport: () => void;
+  onExport: (workflowId: string) => void;
 }
 
 /** Keeps workflow-level actions in the app sidebar, separate from graph construction. */
 export function WorkflowManager({
   workflows,
+  libraryLoaded,
   selectedWorkflowId,
   error,
   disabled = false,
@@ -64,6 +69,7 @@ export function WorkflowManager({
   onRename,
   onDelete,
   onImport,
+  onExport,
 }: WorkflowManagerProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -79,7 +85,6 @@ export function WorkflowManager({
   const [createBusy, setCreateBusy] = useState(false);
   const [renameBusy, setRenameBusy] = useState(false);
   const [copyBusy, setCopyBusy] = useState(false);
-  const importInputRef = useRef<HTMLInputElement>(null);
   const visibleWorkflows = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     if (normalizedQuery === "") {
@@ -89,23 +94,6 @@ export function WorkflowManager({
       workflow.name.toLocaleLowerCase().includes(normalizedQuery),
     );
   }, [query, workflows]);
-
-  /** Forwards one selected JSON file and clears the native input so it can be chosen again. */
-  function handleImport(event: ChangeEvent<HTMLInputElement>): void {
-    if (disabled) {
-      return;
-    }
-    const [file] = Array.from(event.target.files ?? []);
-    if (file !== undefined) {
-      void (async () => {
-        const imported = await onImport(file);
-        if (imported) {
-          setQuery("");
-        }
-      })();
-    }
-    event.target.value = "";
-  }
 
   /** Opens workflow creation with an empty name so the user must choose one. */
   function openCreateDialog(): void {
@@ -229,24 +217,39 @@ export function WorkflowManager({
       </div>
       <div className="flex h-8 items-center pl-4 pr-3 text-xs font-medium text-muted-foreground">
         <span>{t("sidebar.workflows")}</span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="ml-auto"
-                disabled={disabled}
-                onClick={openCreateDialog}
-                aria-label={t("settings.workflow.newWorkflow")}
-              />
-            }
+        {/* Adding a workflow is one intent with two sources, so create and import share
+            the + menu; Ctrl/Cmd+N still opens create directly without the menu. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            disabled={disabled}
+            aria-label={t("settings.workflow.transfer.addMenu")}
+            className="ml-auto flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-sidebar-accent data-popup-open:text-foreground disabled:opacity-60"
           >
-            <IconPlus />
-          </TooltipTrigger>
-          <TooltipContent>{t("settings.workflow.newWorkflow")}</TooltipContent>
-        </Tooltip>
+            <IconPlus className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem disabled={disabled} onClick={openCreateDialog}>
+              <IconPlus className="size-3.5" />
+              {t("settings.workflow.newWorkflow")}
+              <DropdownMenuShortcut>
+                {t("settings.workflow.transfer.newWorkflowShortcut")}
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={disabled} onClick={onImport}>
+              <IconFileImport className="size-3.5" />
+              {t("settings.workflow.transfer.importMenuItem")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
+      {error !== null && (
+        <p
+          role="alert"
+          className="mx-2 mb-2 rounded-md bg-destructive/10 px-2 py-1.5 text-[11px] leading-4 text-destructive"
+        >
+          {error}
+        </p>
+      )}
       <div className="min-h-0 min-w-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
         {visibleWorkflows.map((workflow) => {
           const selected = workflow.id === selectedWorkflowId;
@@ -270,6 +273,11 @@ export function WorkflowManager({
                 <span className="min-w-0 flex-1 truncate font-medium">
                   {workflow.name}
                 </span>
+                {workflow.imported === true && (
+                  <span className="shrink-0 rounded-full bg-blue-500/10 px-1.5 py-px text-[10px] font-medium text-blue-700 dark:text-blue-300">
+                    {t("settings.workflow.transfer.importedBadge")}
+                  </span>
+                )}
               </button>
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -301,6 +309,13 @@ export function WorkflowManager({
                     <IconPencil className="size-3.5" />
                     {t("settings.workflow.renameWorkflow")}
                   </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={disabled}
+                    onClick={() => onExport(workflow.id)}
+                  >
+                    <IconDownload className="size-3.5" />
+                    {t("settings.workflow.transfer.exportMenuItem")}
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     disabled={disabled}
@@ -315,38 +330,39 @@ export function WorkflowManager({
             </div>
           );
         })}
-        {visibleWorkflows.length === 0 && (
-          <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">
-            {t("settings.workflow.noWorkflows")}
-          </p>
-        )}
-      </div>
-      <div className="border-t border-sidebar-border px-2 py-2">
-        {error !== null && (
-          <p
-            role="alert"
-            className="mb-2 px-1 text-[11px] leading-4 text-destructive"
-          >
-            {error}
-          </p>
-        )}
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".json,application/json"
-          className="hidden"
-          onChange={handleImport}
-        />
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={disabled}
-          className="h-8 w-full justify-start gap-2 px-2 text-[13px] font-medium"
-          onClick={() => importInputRef.current?.click()}
-        >
-          <IconFileImport className="size-4 text-muted-foreground" />
-          {t("settings.workflow.importWorkflow")}
-        </Button>
+        {visibleWorkflows.length === 0 &&
+          libraryLoaded &&
+          (workflows.length === 0 ? (
+            <div className="grid justify-items-center gap-2.5 px-2 py-7 text-center">
+              <p className="text-[13px] text-muted-foreground">
+                {t("settings.workflow.emptyTitle")}
+              </p>
+              <div className="flex flex-wrap justify-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={disabled}
+                  onClick={openCreateDialog}
+                >
+                  <IconPlus />
+                  {t("settings.workflow.transfer.emptyCreate")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={disabled}
+                  onClick={onImport}
+                >
+                  <IconFileImport />
+                  {t("settings.workflow.transfer.emptyImport")}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="px-2 py-6 text-center text-[13px] text-muted-foreground">
+              {t("settings.workflow.noWorkflows")}
+            </p>
+          ))}
       </div>
       <AlertDialog
         open={createDialogOpen}

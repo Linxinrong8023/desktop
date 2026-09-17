@@ -2,27 +2,32 @@
 //! webview instance that owns them. Authorization is the caller label resolved through the
 //! registry, never the URL: the URL names only the instance, and the file root comes from that
 //! instance's registry record.
+//!
+//! The scheme carries a second, separately authorised branch for plugin icons, in
+//! `logo_assets.rs`. The two are told apart by the first path segment before either
+//! authorisation chain runs: an instance is a number, so the icon prefix can never name one.
 
 use crate::surface::gateway::SurfacePluginGateway;
+use crate::surface::logo_assets::resolve_logo_asset;
 use crate::surface::service::SurfaceService;
 use ora_logging::{ora_debug, ora_info};
-use ora_surface::{
-    ASSET_SCHEME, AssetRequest, AssetUrlForm, SurfaceRegistry, SurfaceSource, asset_base,
-    asset_content_type, workbench_csp,
-};
+use ora_plugin_asset::{ASSET_SCHEME, AssetUrlForm, LOGO_URL_PREFIX, asset_content_type};
+use ora_surface::{AssetRequest, SurfaceRegistry, SurfaceSource, asset_base, workbench_csp};
 use ora_utils::path::{CanonicalPathRoot, PortableRelativePath};
 use std::borrow::Cow;
-use tauri::http::{Request, Response, StatusCode, header};
+use tauri::http::{Response, StatusCode, header};
 use tauri::{Manager, Runtime};
+use url::Url;
 
 /// Outcome of resolving one asset request, kept separate from the HTTP shape for testing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AssetOutcome {
-    /// The file may be served; `document` marks the HTML entry, which gets the CSP.
+    /// The file may be served; `csp_base` is present only for a workbench entry document, and
+    /// carries the instance base its policy pins every resource to.
     Serve {
         content_type: &'static str,
         body: Vec<u8>,
-        document: bool,
+        csp_base: Option<Url>,
     },
     /// Every refusal is a 404: the page learns nothing about why.
     NotFound(&'static str),
@@ -80,38 +85,33 @@ pub fn resolve_asset(registry: &SurfaceRegistry, label: &str, request_path: &str
         Ok(body) => AssetOutcome::Serve {
             content_type: asset_content_type(&extension),
             body,
-            document: extension == "html",
+            // The instance was resolved from the caller's label above, so an entry document's
+            // policy is pinned to that instance's own base and to no other.
+            csp_base: (extension == "html")
+                .then(|| asset_base(AssetUrlForm::CURRENT, record.instance).ok())
+                .flatten(),
         },
         Err(_) => AssetOutcome::NotFound("file could not be read"),
     }
 }
 
 /// Turns an outcome into the HTTP response handed to the webview runtime.
-pub fn asset_response(
-    registry: &SurfaceRegistry,
-    label: &str,
-    request_path: &str,
-) -> Response<Vec<u8>> {
-    match resolve_asset(registry, label, request_path) {
+pub fn asset_response(outcome: AssetOutcome, label: &str, request_path: &str) -> Response<Vec<u8>> {
+    match outcome {
         AssetOutcome::Serve {
             content_type,
             body,
-            document,
+            csp_base,
         } => {
             let mut builder = Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, content_type)
                 .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff");
-            if document {
-                // The label was already resolved to a workbench instance above, so the CSP base
-                // is that instance's own asset base; documents are never cached so a package
-                // update after reopen always reloads the policy.
-                let base = registry
-                    .resolve_label(label)
-                    .and_then(|record| asset_base(AssetUrlForm::CURRENT, record.instance).ok());
-                if let Some(base) = base {
-                    builder = builder.header(header::CONTENT_SECURITY_POLICY, workbench_csp(&base));
-                }
+            if let Some(base) = csp_base {
+                // Only a workbench entry document carries a policy, and it is that instance's own
+                // asset base; documents are never cached so a package update after reopen always
+                // reloads the policy.
+                builder = builder.header(header::CONTENT_SECURITY_POLICY, workbench_csp(&base));
                 builder = builder.header(header::CACHE_CONTROL, "no-store");
             } else {
                 // Asset URLs carry no content hash and the profile is persistent, so an
@@ -139,32 +139,39 @@ pub fn asset_response(
 }
 
 impl<G: SurfacePluginGateway, R: Runtime> SurfaceService<G, R> {
-    /// Serves one `ora-plugin://` request issued by the webview `label`.
-    pub fn serve_workbench_asset(
-        &self,
-        label: &str,
-        request: &Request<Vec<u8>>,
-    ) -> Response<Vec<u8>> {
-        let path = request.uri().path();
+    /// Resolves one instance-scoped `ora-plugin://` request issued by the webview `label`.
+    pub fn resolve_workbench_asset(&self, label: &str, path: &str) -> AssetOutcome {
         ora_debug!(message = "workbench asset requested", label, path);
-        asset_response(&self.registry, label, path)
+        resolve_asset(&self.registry, label, path)
     }
 }
 
 /// Registers the `ora-plugin` scheme on the application builder.
 ///
-/// The handler looks the service up per request because the state is managed only after
-/// `setup`; a request arriving before that (impossible for a page the service creates) is
-/// refused like any other unknown label.
+/// The scheme carries two branches with two different authorisation chains, and the first path
+/// segment picks between them before either chain runs: a surface instance is addressed by a
+/// number, so the icon prefix can never be mistaken for one. The handler looks the state up per
+/// request because it is managed only after `setup`; a request arriving before that (impossible
+/// for a page the service creates) is refused like any other unknown label.
 pub fn register_protocol(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.register_uri_scheme_protocol(ASSET_SCHEME, |context, request| {
         let label = context.webview_label();
-        match context
+        let path = request.uri().path();
+        let Some(state) = context
             .app_handle()
             .try_state::<crate::state::DesktopState>()
-        {
-            Some(state) => state.surfaces.serve_workbench_asset(label, &request),
-            None => asset_response(&SurfaceRegistry::default(), label, request.uri().path()),
-        }
+        else {
+            return asset_response(
+                AssetOutcome::NotFound("host state is not ready"),
+                label,
+                path,
+            );
+        };
+        let outcome = if path.trim_start_matches('/').starts_with(LOGO_URL_PREFIX) {
+            resolve_logo_asset(&state.backend.plugins(), label, path)
+        } else {
+            state.surfaces.resolve_workbench_asset(label, path)
+        };
+        asset_response(outcome, label, path)
     })
 }

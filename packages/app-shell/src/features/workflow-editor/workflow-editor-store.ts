@@ -10,7 +10,10 @@ export interface WorkflowEditorLibraryActions {
   copy: (workflowId: string) => Promise<boolean>;
   rename: (workflowId: string, name: string) => Promise<boolean>;
   delete: (workflowId: string) => Promise<void>;
-  importFile: (file: File) => Promise<boolean>;
+  /** Opens the import dialog; file selection and preview live in the editor. */
+  openImport: () => void;
+  /** Selects the workflow (flushing the open draft) and opens its export dialog. */
+  exportFile: (workflowId: string) => Promise<void>;
   leave: () => Promise<void>;
 }
 
@@ -18,6 +21,9 @@ interface WorkflowEditorState {
   selectedWorkflowId: string | null;
   managerError: string | null;
   actions: WorkflowEditorLibraryActions | null;
+  /** Workflows imported in this session, marked in the library until reload. */
+  importedWorkflowIds: readonly string[];
+  markImported: (workflowId: string) => void;
   setSelectedWorkflowId: (selectedWorkflowId: string | null) => void;
   setManagerError: (managerError: string | null) => void;
   registerActions: (actions: WorkflowEditorLibraryActions | null) => void;
@@ -31,6 +37,13 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>((set) => ({
   selectedWorkflowId: null,
   managerError: null,
   actions: null,
+  importedWorkflowIds: [],
+  markImported: (workflowId) =>
+    set((state) => ({
+      importedWorkflowIds: state.importedWorkflowIds.includes(workflowId)
+        ? state.importedWorkflowIds
+        : [...state.importedWorkflowIds, workflowId],
+    })),
   setSelectedWorkflowId: (selectedWorkflowId) => set({ selectedWorkflowId }),
   setManagerError: (managerError) => set({ managerError }),
   registerActions: (actions) => set({ actions }),

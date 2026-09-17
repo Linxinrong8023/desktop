@@ -3,6 +3,7 @@ use ora_contracts::{
     PluginConfigurationSummary, PluginInstallationValidity, PluginRuntimeStatus,
 };
 use ora_domain::PluginId;
+use ora_plugin_asset::{AssetUrlForm, LogoAssetRoot, plugin_logo};
 use ora_plugin_config::{ConfigurationCompleteness, ConfigurationService, ConfigurationSummary};
 use ora_plugin_manager::InstalledPlugin as DiscoveredPlugin;
 use ora_plugin_manager::{PluginConfigurationDeclarationValidity, PluginContribution};
@@ -203,7 +204,17 @@ pub(super) fn discovered_plugin_contract<Runtime>(
         homepage: plugin.homepage.clone(),
         license: plugin.license.clone(),
         contribution,
-        logo: plugin.logo.clone(),
+        logo: plugin.logo.and_then(|variants| {
+            // Discovery resolved these variants from the package root, so the URL names
+            // it: a locally imported plugin has no marketplace entry at all, and an
+            // installed one may lag whatever its source publishes today.
+            plugin_logo(
+                AssetUrlForm::CURRENT,
+                LogoAssetRoot::Installed,
+                &plugin.id,
+                &variants,
+            )
+        }),
         installation_validity,
         configuration,
         runtime,

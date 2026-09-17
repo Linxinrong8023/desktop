@@ -5,12 +5,12 @@ use ora_contracts::{
     WorkspaceSearchResult,
 };
 use ora_fs::{
-    DirectoryEntryKind, SearchKind, SearchResult, WorkspaceFileSystem, WorkspaceFileSystemError,
-    WorkspaceWatcher,
+    DirectoryEntry, DirectoryEntryKind, SearchKind, SearchResult, WorkspaceFileSystem,
+    WorkspaceFileSystemError, WorkspaceWatcher,
 };
 use std::path::{Path, PathBuf};
 
-/// Adapts the reusable read-only workspace filesystem to Desktop transport values.
+/// Adapts the reusable workspace filesystem to Desktop transport values.
 pub(crate) struct WorkspaceFileApi {
     file_system: WorkspaceFileSystem,
 }
@@ -23,7 +23,58 @@ impl WorkspaceFileApi {
         }
     }
 
-    /// Lists one immediate directory while keeping the task root owned by Desktop.
+    /// Creates one empty file or directory under a workspace-relative path.
+    pub(crate) fn create_entry(
+        &self,
+        root: &Path,
+        path: &Path,
+        kind: WorkspaceEntryKind,
+    ) -> Result<WorkspaceEntry, WorkspaceFileSystemError> {
+        let entry = self.file_system.create_entry(
+            root,
+            path,
+            match kind {
+                WorkspaceEntryKind::File => DirectoryEntryKind::File,
+                WorkspaceEntryKind::Directory => DirectoryEntryKind::Directory,
+            },
+        )?;
+        Ok(map_workspace_entry(entry))
+    }
+
+    /// Copies one contained path onto a missing destination.
+    pub(crate) fn copy_entry(
+        &self,
+        root: &Path,
+        from: &Path,
+        path: &Path,
+    ) -> Result<WorkspaceEntry, WorkspaceFileSystemError> {
+        Ok(map_workspace_entry(
+            self.file_system.copy_entry(root, from, path)?,
+        ))
+    }
+
+    /// Moves or renames one contained path onto a missing destination.
+    pub(crate) fn move_entry(
+        &self,
+        root: &Path,
+        from: &Path,
+        path: &Path,
+    ) -> Result<WorkspaceEntry, WorkspaceFileSystemError> {
+        Ok(map_workspace_entry(
+            self.file_system.move_entry(root, from, path)?,
+        ))
+    }
+
+    /// Deletes one contained file, directory tree, or symlink.
+    pub(crate) fn delete_entry(
+        &self,
+        root: &Path,
+        path: &Path,
+    ) -> Result<(), WorkspaceFileSystemError> {
+        self.file_system.delete_entry(root, path)
+    }
+
+    /// Lists one workspace-relative directory after the path has been contained.
     pub(crate) fn list_directory(
         &self,
         root: &Path,
@@ -35,15 +86,7 @@ impl WorkspaceFileApi {
             entries: listing
                 .entries
                 .into_iter()
-                .map(|entry| WorkspaceEntry {
-                    name: entry.name,
-                    path: entry.path,
-                    kind: match entry.kind {
-                        DirectoryEntryKind::File => WorkspaceEntryKind::File,
-                        DirectoryEntryKind::Directory => WorkspaceEntryKind::Directory,
-                    },
-                    is_symbolic_link: entry.is_symbolic_link,
-                })
+                .map(map_workspace_entry)
                 .collect(),
         })
     }
@@ -106,6 +149,19 @@ impl WorkspaceFileApi {
     }
 }
 
+/// Projects one crate-native listing row onto the Desktop contract value.
+fn map_workspace_entry(entry: DirectoryEntry) -> WorkspaceEntry {
+    WorkspaceEntry {
+        name: entry.name,
+        path: entry.path,
+        kind: match entry.kind {
+            DirectoryEntryKind::File => WorkspaceEntryKind::File,
+            DirectoryEntryKind::Directory => WorkspaceEntryKind::Directory,
+        },
+        is_symbolic_link: entry.is_symbolic_link,
+    }
+}
+
 /// Projects filesystem failures into stable transport-neutral error classifications.
 pub(crate) fn workspace_file_backend_error(error: WorkspaceFileSystemError) -> BackendError {
     let (classification, public_error, context) = match &error {
@@ -113,6 +169,16 @@ pub(crate) fn workspace_file_backend_error(error: WorkspaceFileSystemError) -> B
             ErrorClassification::NotFound,
             PublicError::FileSystemPathNotFound(EmptyErrorParams {}),
             "workspace path was not found",
+        ),
+        WorkspaceFileSystemError::AlreadyExists { .. } => (
+            ErrorClassification::Conflict,
+            PublicError::FileSystemPathAlreadyExists(EmptyErrorParams {}),
+            "workspace path already exists",
+        ),
+        WorkspaceFileSystemError::PermissionDenied { .. } => (
+            ErrorClassification::Forbidden,
+            PublicError::FileSystemPathPermissionDenied(EmptyErrorParams {}),
+            "workspace path access was denied",
         ),
         WorkspaceFileSystemError::PathNotRelative { .. }
         | WorkspaceFileSystemError::PathOutsideWorkspace { .. }
@@ -147,4 +213,59 @@ pub(crate) fn workspace_file_backend_error(error: WorkspaceFileSystemError) -> B
         ),
     };
     BackendError::with_source(classification, public_error, context, error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use std::io;
+    use std::path::PathBuf;
+
+    /// A denial is a user-visible access refusal, so it must not surface as an internal fault.
+    #[test]
+    fn maps_permission_denials_to_a_forbidden_public_error() {
+        let error = workspace_file_backend_error(WorkspaceFileSystemError::PermissionDenied {
+            path: PathBuf::from("workspace/secret"),
+            source: io::Error::from(io::ErrorKind::PermissionDenied),
+        });
+
+        assert_eq!(
+            (error.classification(), error.public_error().code()),
+            (
+                ErrorClassification::Forbidden,
+                "file_system_path_permission_denied"
+            )
+        );
+    }
+
+    /// Opaque I/O faults stay internal so a denial's dedicated code keeps its meaning.
+    #[test]
+    fn keeps_other_io_faults_internal() {
+        let error = workspace_file_backend_error(WorkspaceFileSystemError::Io {
+            path: PathBuf::from("workspace/file"),
+            source: io::Error::from(io::ErrorKind::NotADirectory),
+        });
+
+        assert_eq!(
+            (error.classification(), error.public_error().code()),
+            (ErrorClassification::Internal, "internal_error")
+        );
+    }
+
+    /// A create that collides with an existing name is a conflict the tree can show.
+    #[test]
+    fn maps_already_exists_to_a_conflict_public_error() {
+        let error = workspace_file_backend_error(WorkspaceFileSystemError::AlreadyExists {
+            path: PathBuf::from("workspace/README.md"),
+        });
+
+        assert_eq!(
+            (error.classification(), error.public_error().code()),
+            (
+                ErrorClassification::Conflict,
+                "file_system_path_already_exists"
+            )
+        );
+    }
 }

@@ -47,6 +47,29 @@ export function useWorkflowVersions(workflowId: string | null | undefined) {
   });
 }
 
+/**
+ * Loads one published snapshot (with its graph) by version string. Published snapshots are
+ * immutable, so the cached graph never goes stale while the version exists.
+ */
+export function useWorkflowVersionSnapshot(
+  workflowId: string | null | undefined,
+  version: string | null,
+) {
+  const client = useContractsClient();
+  return useQuery({
+    queryKey: ["workflow", "version", workflowId ?? "", version ?? ""] as const,
+    queryFn: async () =>
+      (
+        await client.workflow.getVersion({
+          workflowId: workflowId!,
+          version: version!,
+        })
+      ).snapshot,
+    enabled: workflowId != null && workflowId !== "" && version !== null,
+    staleTime: Infinity,
+  });
+}
+
 /** Creates a new workflow with an optional initial graph. */
 export function useCreateWorkflow() {
   const client = useContractsClient();

@@ -19,6 +19,8 @@ pub mod hash;
 pub mod html;
 #[cfg(feature = "http")]
 pub mod http;
+#[cfg(feature = "validation")]
+pub mod image;
 pub mod jsonc;
 pub mod path;
 pub mod process;

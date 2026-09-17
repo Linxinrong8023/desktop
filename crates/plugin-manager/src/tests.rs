@@ -3,6 +3,7 @@ use super::{
     PluginDiscoveryIssueKind, PluginManager,
 };
 use ora_domain::PluginId;
+use ora_plugin_asset::{LogoCandidate, LogoExtension, LogoRole, PluginLogoVariants};
 use ora_utils::path::PortableRelativePath;
 use pretty_assertions::assert_eq;
 use semver::Version;
@@ -832,7 +833,7 @@ fn manifest_string<'a>(toml: &'a str, field: &str) -> Option<&'a str> {
     })
 }
 
-/// Verifies a package's `logo.svg` is discovered as trusted icon source text.
+/// Verifies a package's `logo.svg` is discovered as the composition it resolves to.
 #[test]
 fn discovers_package_logo() {
     let temp_dir = TempDir::new().unwrap();
@@ -843,7 +844,15 @@ fn discovers_package_logo() {
     let manager = PluginManager::discover(temp_dir.path());
 
     assert_eq!(manager.discovery_issues(), &[]);
-    assert_eq!(manager.installed_plugins()[0].logo, Some(logo.to_string()));
+    assert_eq!(
+        manager.installed_plugins()[0].logo,
+        Some(PluginLogoVariants::Universal {
+            universal: LogoCandidate {
+                role: LogoRole::Universal,
+                extension: LogoExtension::Svg,
+            },
+        })
+    );
 }
 
 /// Verifies a package without an icon is discovered cleanly instead of reporting a problem.
@@ -858,20 +867,24 @@ fn discovers_package_without_a_logo() {
     assert_eq!(manager.installed_plugins()[0].logo, None);
 }
 
-/// Verifies an unsafe icon is reported and dropped while the plugin itself stays discovered.
+/// Verifies an unsafe icon leaves the plugin discovered, with no icon and no discovery issue.
+///
+/// An icon that cannot be served is treated as one that was never shipped, so it produces a
+/// warning rather than an issue: a package with a broken icon is not a package with a problem
+/// the user has to resolve before it will run.
 #[test]
-fn reports_an_unsafe_logo_without_hiding_the_plugin() {
+fn an_unsafe_logo_neither_hides_the_plugin_nor_reports_an_issue() {
     let temp_dir = TempDir::new().unwrap();
     let package_root = write_manifest(temp_dir.path(), NAME, agent_manifest());
-    let logo_path = package_root.join("logo.svg");
-    fs::write(&logo_path, "<svg><script>evil()</script></svg>").unwrap();
+    fs::write(
+        package_root.join("logo.svg"),
+        "<svg><script>evil()</script></svg>",
+    )
+    .unwrap();
 
-    let manager = PluginManager::discover(temp_dir.path());
+    let manager = ora_logging::with_trace_logging(|| PluginManager::discover(temp_dir.path()));
 
-    assert_eq!(manager.discovery_issues().len(), 1);
-    let issue = &manager.discovery_issues()[0];
-    assert_eq!(issue.path(), logo_path);
-    assert_eq!(issue.kind(), PluginDiscoveryIssueKind::UnusableLogo);
+    assert_eq!(manager.discovery_issues(), &[]);
     assert_eq!(manager.installed_plugins().len(), 1);
     assert_eq!(manager.installed_plugins()[0].logo, None);
 }

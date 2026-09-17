@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { activeLocale, appI18n } from "./i18n-instance";
+import { activeLocale, appI18n, translationResources } from "./i18n-instance";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -13,6 +13,27 @@ describe("single synchronous application i18n instance", () => {
     expect(appI18n.t("common.cancel", { lng: "zh-CN" })).toBe("取消");
     expect(appI18n.t("common.cancel", { lng: "en-US" })).toBe("Cancel");
   });
+
+  it.each([
+    { locale: "zh-CN", labels: ["剪切", "复制", "粘贴", "全选"] },
+    { locale: "en-US", labels: ["Cut", "Copy", "Paste", "Select All"] },
+  ] as const)(
+    "exposes shared editing copy synchronously through the public resource entry in $locale",
+    ({ locale, labels }) => {
+      const keys = [
+        "chat.cut",
+        "chat.copy",
+        "chat.paste",
+        "chat.selectAll",
+      ] as const;
+      expect(keys.map((key) => appI18n.t(key, { lng: locale }))).toEqual(
+        labels,
+      );
+      expect(keys.map((key) => translationResources[locale][key])).toEqual(
+        labels,
+      );
+    },
+  );
 
   it("switches locale, document language, storage, and plural resolution together", async () => {
     await appI18n.changeLanguage("en-US");

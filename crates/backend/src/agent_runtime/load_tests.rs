@@ -111,6 +111,7 @@ fn seed_session(root: &Path, pool: &RepositoryPool) -> Session {
             AgentRef::parse(AGENT).expect("agent identity"),
             "provider-session-1",
             SessionStatus::Stopped,
+            ora_domain::SessionMcpSelection::Automatic,
             AuditFields::new(2, 2, false),
         ))
         .expect("create session")
@@ -180,12 +181,14 @@ fn a_session_whose_agent_is_unreachable_still_serves_its_transcript() {
                                 ContentBlock::Text(TextContent::new("hello"))
                             )),
                             recorded_at: Some(history_recorded_at()),
+                            tool_timing: None,
                         },
                         LoadSessionEvent::SessionUpdate {
                             update: SessionUpdate::AgentMessageChunk(ContentChunk::new(
                                 ContentBlock::Text(TextContent::new("hi"))
                             )),
                             recorded_at: Some(history_recorded_at()),
+                            tool_timing: None,
                         },
                         LoadSessionEvent::TurnEnded {
                             stop_reason: StopReason::EndTurn,

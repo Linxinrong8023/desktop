@@ -14,6 +14,8 @@ members = [
     "crates/gitlancer",
     "crates/history",
     "crates/logging",
+    "crates/node-protocol",
+    "crates/plugin-asset",
     "crates/plugin-config",
     "crates/plugin-manifest",
     "crates/plugin-lifecycle",
@@ -47,6 +49,8 @@ default-members = [
     "crates/gitlancer",
     "crates/history",
     "crates/logging",
+    "crates/node-protocol",
+    "crates/plugin-asset",
     "crates/plugin-config",
     "crates/plugin-manifest",
     "crates/plugin-lifecycle",
@@ -92,6 +96,8 @@ ora-fs = { path = "crates/fs" }
 gitlancer = { path = "crates/gitlancer" }
 ora-history = { path = "crates/history" }
 ora-logging = { path = "crates/logging" }
+ora-node-protocol = { path = "crates/node-protocol" }
+ora-plugin-asset = { path = "crates/plugin-asset" }
 ora-plugin-config = { path = "crates/plugin-config" }
 ora-plugin-manifest = { path = "crates/plugin-manifest" }
 ora-plugin-lifecycle = { path = "crates/plugin-lifecycle" }
@@ -110,7 +116,7 @@ ora-utils = { path = "crates/utils" }
 ora-user-config = { path = "crates/user-config" }
 
 # External
-agent-client-protocol-schema = "=1.6.0"
+agent-client-protocol-schema = { version = "=1.6.0", features = ["unstable_end_turn_token_usage"] }
 chrono = "0.4"
 chrono-tz = "0.10"
 cron = "0.12"
@@ -122,7 +128,8 @@ futures-util = { version = "0.3", features = ["sink"] }
 gray_matter = { version = "0.3", default-features = false, features = ["yaml"] }
 libc = "0.2"
 log = "0.4"
-notify = "8.2"
+# ora-fs native release receipts audit notify backend destruction order; see crates/fs/src/watch/retirement.rs.
+notify = "=8.2.0"
 petgraph = "0.7"
 portable-pty = "0.9"
 pretty_assertions = "1"

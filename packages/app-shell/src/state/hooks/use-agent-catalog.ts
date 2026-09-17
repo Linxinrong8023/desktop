@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import type { PluginLogo } from "@ora/contracts";
 import { useInstalledPlugins } from "./use-installed-plugins";
 
 /**
@@ -16,8 +17,8 @@ export interface AgentEntry {
   agentRef: string;
   /** Plugin title shown in the pickers. */
   label: string;
-  /** Inline SVG source for the package's brand mark, absent when it ships none. */
-  logo: string | null;
+  /** Host-local asset URLs for the package's brand mark, absent when it ships none. */
+  logo: PluginLogo | null;
 }
 
 /**

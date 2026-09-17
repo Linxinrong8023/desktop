@@ -13,7 +13,6 @@ import {
 } from "@ora/ui";
 import {
   IconCheck,
-  IconChevronDown,
   IconChevronRight,
   IconLoader2,
   IconPlug,
@@ -374,14 +373,9 @@ export function ModelSelector({
           </span>
         </span>
         <span className="whitespace-nowrap">{activeLabel}</span>
-        {setSessionConfig.isPending || isSettling ? (
+        {(setSessionConfig.isPending || isSettling) && (
           <IconLoader2
             className="size-3 shrink-0 animate-spin opacity-50"
-            aria-hidden="true"
-          />
-        ) : (
-          <IconChevronDown
-            className="size-3 shrink-0 opacity-50"
             aria-hidden="true"
           />
         )}

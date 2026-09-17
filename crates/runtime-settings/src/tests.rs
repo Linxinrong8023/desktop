@@ -16,19 +16,13 @@ use crate::{
 async fn updates_effective_and_preferred_levels_together() {
     let control = FakeControl::new(LogLevel::Info);
     let store = FakeStore::new(LogLevel::Info);
-    let manager = RuntimeLogLevelManager::new(
-        control.clone(),
-        store.clone(),
-        LogLevel::Info,
-        Some(LogLevel::Trace),
-    );
+    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info);
 
     assert_eq!(
         manager.set_level(LogLevel::Warn).await.unwrap(),
         RuntimeLogLevelState {
             configured_level: LogLevel::Warn,
             effective_level: LogLevel::Warn,
-            startup_override: Some(LogLevel::Trace),
         }
     );
     assert_eq!(control.level(), LogLevel::Warn);
@@ -41,7 +35,7 @@ async fn leaves_persistence_unchanged_when_reload_fails() {
     let control = FakeControl::new(LogLevel::Info);
     control.fail_next_set();
     let store = FakeStore::new(LogLevel::Info);
-    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info, None);
+    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info);
 
     let error = manager.set_level(LogLevel::Debug).await.unwrap_err();
 
@@ -56,7 +50,7 @@ async fn rolls_back_effective_level_when_persistence_fails() {
     let control = FakeControl::new(LogLevel::Info);
     let store = FakeStore::new(LogLevel::Info);
     store.fail_next_save();
-    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info, None);
+    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info);
 
     let error = manager.set_level(LogLevel::Debug).await.unwrap_err();
 
@@ -78,7 +72,7 @@ async fn reports_rollback_failure_separately() {
     control.set_failures([false, true]);
     let store = FakeStore::new(LogLevel::Info);
     store.fail_next_save();
-    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info, None);
+    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info);
 
     let error = manager.set_level(LogLevel::Trace).await.unwrap_err();
 
@@ -99,7 +93,7 @@ async fn reports_rollback_failure_separately() {
 async fn serializes_concurrent_updates() {
     let control = FakeControl::new(LogLevel::Info);
     let store = FakeStore::new(LogLevel::Info);
-    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info, None);
+    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info);
     let handles = [LogLevel::Debug, LogLevel::Warn, LogLevel::Error]
         .into_iter()
         .map(|level| {
@@ -118,7 +112,6 @@ async fn serializes_concurrent_updates() {
         RuntimeLogLevelState {
             configured_level: last_level,
             effective_level: last_level,
-            startup_override: None,
         }
     );
     assert_eq!(control.level(), last_level);
@@ -131,7 +124,7 @@ async fn serializes_concurrent_updates() {
 async fn completes_successful_update_after_waiting_caller_is_cancelled() {
     let control = FakeControl::new(LogLevel::Info);
     let store = GatedStore::new(LogLevel::Info, SaveOutcome::Succeed);
-    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info, None);
+    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info);
     let update = tokio::spawn({
         let manager = manager.clone();
         async move { manager.set_level(LogLevel::Debug).await }
@@ -147,7 +140,6 @@ async fn completes_successful_update_after_waiting_caller_is_cancelled() {
         RuntimeLogLevelState {
             configured_level: LogLevel::Debug,
             effective_level: LogLevel::Debug,
-            startup_override: None,
         }
     );
     assert_eq!(control.level(), LogLevel::Debug);
@@ -159,7 +151,7 @@ async fn completes_successful_update_after_waiting_caller_is_cancelled() {
 async fn completes_failed_update_rollback_after_waiting_caller_is_cancelled() {
     let control = FakeControl::new(LogLevel::Info);
     let store = GatedStore::new(LogLevel::Info, SaveOutcome::Fail);
-    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info, None);
+    let manager = RuntimeLogLevelManager::new(control.clone(), store.clone(), LogLevel::Info);
     let update = tokio::spawn({
         let manager = manager.clone();
         async move { manager.set_level(LogLevel::Debug).await }
@@ -175,7 +167,6 @@ async fn completes_failed_update_rollback_after_waiting_caller_is_cancelled() {
         RuntimeLogLevelState {
             configured_level: LogLevel::Info,
             effective_level: LogLevel::Info,
-            startup_override: None,
         }
     );
     assert_eq!(control.level(), LogLevel::Info);

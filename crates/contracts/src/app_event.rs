@@ -4,7 +4,7 @@ use ts_rs::TS;
 /// Describes an application-level invalidation or stream lifecycle event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[ts(export_to = "app_event.ts")]
+#[ts(export_to = "app-event.ts")]
 pub enum AppEvent {
     /// Confirms that the application stream is subscribed and may be consumed.
     Ready,
@@ -14,12 +14,18 @@ pub enum AppEvent {
     PluginStatusChanged { plugin_id: String },
     /// Tells clients that a replaced agent process may expose a different model catalog.
     AgentModelsInvalidated { agent_ref: String },
+    /// Tells clients that the persisted workflow run state should be queried again.
+    ///
+    /// The event carries no workflow state: the run, node, and variable rows remain the only
+    /// source of truth, and a lost or reordered event only leaves a stale view until the next
+    /// event or refresh re-queries persistence.
+    WorkflowRunInvalidated { run_id: String },
 }
 
 /// Opens the application event stream without filtering or ownership metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "app_event.ts")]
+#[ts(export_to = "app-event.ts")]
 pub struct WatchAppEventsRequest {}
 
 /// Exports the application event contract family for the generated frontend package.
@@ -59,6 +65,17 @@ mod tests {
             serde_json::json!({
                 "type": "session_title_updated",
                 "session_id": "session-1",
+            }),
+        );
+        // A run invalidation carries only the run id — never node states, outputs, or variables.
+        assert_eq!(
+            serde_json::to_value(AppEvent::WorkflowRunInvalidated {
+                run_id: "run-1".to_string(),
+            })
+            .expect("run invalidation serializes"),
+            serde_json::json!({
+                "type": "workflow_run_invalidated",
+                "run_id": "run-1",
             }),
         );
     }

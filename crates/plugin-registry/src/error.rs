@@ -32,6 +32,14 @@ pub enum RegistryError {
     #[error("registry index JSON failed: {0}")]
     Json(#[from] serde_json::Error),
 
+    /// Returned when a cached index was written under a different schema version.
+    ///
+    /// The version field has always been written; reading it is what makes a shape change
+    /// survivable, because a `logo` that used to be SVG source and is now an object is a type
+    /// mismatch rather than a missing field, and serde defaults do not rescue those.
+    #[error("registry index schema is {found:?}, expected {expected:?}")]
+    UnsupportedIndexVersion { found: String, expected: String },
+
     /// Returned when a sync target has no usable parent directory to clone into.
     #[error("registry source clone destination has no parent directory: {0}")]
     MissingCloneParent(PathBuf),

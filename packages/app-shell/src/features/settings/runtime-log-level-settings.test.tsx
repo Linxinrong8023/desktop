@@ -78,12 +78,11 @@ describe("RuntimeLogLevelSettings", () => {
     },
   );
 
-  it("displays an effective startup override as the selected level without exposing its source", async () => {
+  it("displays the authoritative effective level and its volume warning", async () => {
     const state = createFixtureState();
     state.runtimeLogLevel = {
       configuredLevel: "info",
       effectiveLevel: "trace",
-      startupOverride: "trace",
     };
 
     renderSettings(createTestClient(createFixtureHandlers(state)));
@@ -92,7 +91,6 @@ describe("RuntimeLogLevelSettings", () => {
     await waitFor(() =>
       expect(selector).toHaveTextContent("Trace (most detailed)"),
     );
-    expect(screen.queryByText(/ORA_LOG_LEVEL/)).not.toBeInTheDocument();
     expect(screen.getByText(/substantially more logs/)).toBeInTheDocument();
   });
 
@@ -123,7 +121,6 @@ describe("RuntimeLogLevelSettings", () => {
     resolveUpdate?.({
       configuredLevel: "debug",
       effectiveLevel: "debug",
-      startupOverride: null,
     });
     await waitFor(() => expect(selector).toBeEnabled());
   });

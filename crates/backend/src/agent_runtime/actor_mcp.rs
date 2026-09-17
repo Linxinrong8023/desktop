@@ -6,8 +6,10 @@ use super::super::SessionChannel;
 use super::super::events::settle_idle_event;
 use super::super::routing::SessionEvent;
 use super::super::scheduling::{ActiveInput, ActiveInputState};
+use super::super::start::log_session_mcp_request;
 use super::super::support::{
-    contract_session, map_acp_error, runtime_internal, runtime_unavailable, session_stopped,
+    agent_timed_out, contract_session, map_acp_error, protocol_violation, runtime_unavailable,
+    session_event_overflow, session_stopped,
 };
 use super::{RuntimeActor, permission_not_pending, session_busy};
 use crate::BackendError;
@@ -43,6 +45,7 @@ impl RuntimeActor {
         let desired = crate::session_setup::resolve_session_mcp_revision(
             &self.session_mcp,
             &self.session_mcp,
+            &self.session_mcp.selection,
         )
         .map_err(SessionMcpError::into_backend)?;
         let (state, refresh_now) = self
@@ -82,6 +85,7 @@ impl RuntimeActor {
         let desired = crate::session_setup::resolve_session_mcp_revision(
             &self.session_mcp,
             &self.session_mcp,
+            &self.session_mcp.selection,
         )
         .map_err(SessionMcpError::into_backend)?;
         match self.live_mcp.prompt_admission(&desired) {
@@ -216,6 +220,14 @@ impl RuntimeActor {
         let request =
             AcpLoadSessionRequest::new(AcpSessionId::new(agent_session_id.clone()), &self.cwd)
                 .mcp_servers(snapshot.servers().to_vec());
+        log_session_mcp_request(
+            &self.session.id,
+            &self.session.agent_ref,
+            Some(&agent_session_id),
+            AGENT_METHOD_NAMES.session_load,
+            &self.session_mcp.selection,
+            &snapshot,
+        );
         ora_debug!(session_id = %self.session.id, "session/load MCP refresh sent");
         let pending = match client
             .start_session_request::<_, LoadSessionResponse>(
@@ -245,10 +257,7 @@ impl RuntimeActor {
                 _ = &mut deadline => {
                     self.cancel(&client, &HashMap::new()).await;
                     self.isolate_channel(channel).await;
-                    return Err(runtime_internal(
-                        "agent_load_timeout",
-                        "agent CLI session load timed out",
-                    ));
+                    return Err(agent_timed_out("agent CLI session load timed out"));
                 }
             };
             match input {
@@ -267,8 +276,7 @@ impl RuntimeActor {
                         )
                         .await;
                     self.isolate_channel(channel).await;
-                    return Err(runtime_internal(
-                        "agent_protocol_error",
+                    return Err(protocol_violation(
                         "permission request during session/load is unsupported",
                     ));
                 }
@@ -294,10 +302,7 @@ impl RuntimeActor {
                 }
                 ActiveInput::Control(super::routing::SessionControl::QueueOverflow) => {
                     self.isolate_channel(channel).await;
-                    return Err(runtime_internal(
-                        "agent_event_overflow",
-                        "session event queue overflowed",
-                    ));
+                    return Err(session_event_overflow("session event queue overflowed"));
                 }
                 ActiveInput::EventsClosed | ActiveInput::ControlsClosed => {
                     self.isolate_channel(channel).await;
@@ -333,8 +338,15 @@ impl RuntimeActor {
                     self.adopt_user_title(title);
                     let _ = response.send(());
                 }
-                ActiveInput::Command(RuntimeCommand::Cancel { .. })
-                | ActiveInput::Command(RuntimeCommand::CancelActivePrompt)
+                ActiveInput::Command(RuntimeCommand::Cancel {
+                    operation_id,
+                    completion,
+                }) => {
+                    if let Some(completion) = completion {
+                        let _ = completion.send(self.cleanup_outcome(operation_id));
+                    }
+                }
+                ActiveInput::Command(RuntimeCommand::CancelActivePrompt)
                 | ActiveInput::Command(RuntimeCommand::TitlePoll { .. }) => {}
                 ActiveInput::Command(RuntimeCommand::TitleUpdate { update }) => {
                     self.observe_session_update(&update);

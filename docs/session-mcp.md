@@ -1,5 +1,7 @@
 # Session MCP
 
+English | [中文](session-mcp.zh.md)
+
 Ora delivers configured MCP plugins as **Session Runtime Input**, not as Effect Resources and not
 as Workspace files. Every ACP `session/new` and `session/load` — `startSession`, the attach a prompt performs, the
 rebuild that replaces a provider session Ora could not restore, agent switch, workflow start, and
@@ -7,8 +9,12 @@ live refresh — shares one Session Setup snapshot.
 
 ## ACP injection
 
-The Effective MCP Set is every currently installed, statically valid MCP plugin whose
-configuration is complete. Incomplete plugins are omitted without failing the rest of the set.
+Ordinary chats automatically select every currently installed, statically valid MCP plugin whose
+configuration is complete. Incomplete plugins are omitted without failing the rest of that set.
+Workflow Agent nodes instead use their frozen `mcps` bindings as an explicit allowlist: only
+`enabled: true` IDs are delivered, and an empty list delivers no MCP servers. Missing, invalid,
+or incompletely configured selected plugins fail setup; unselected plugins are filtered before
+configuration and capability checks. Old graphs without `mcps` use an empty allowlist.
 Server names are canonical Plugin IDs (`<namespace>/<identifier>`), sorted by that ID. A snapshot
 is all-or-nothing: the runtime never sends a partial `mcpServers` list.
 
@@ -32,17 +38,48 @@ Success advances Active revision; a newer Desired that arrives during load stays
 blocks only that Session, and the next prompt retries instead of using the old configuration.
 Stopped Sessions do not refresh in the background.
 
+A workflow Session persists its node-local selection on the Session row at creation and retains it
+through restore, provider rebuild, Agent switching, and live refresh. Recovery reads that owned
+value directly; it never reconstructs authority from a node-run relationship, so missing or
+orphaned workflow metadata cannot widen an explicit selection to automatic discovery. Migration
+`0011` gives all existing Sessions an empty explicit selection without consulting workflow metadata,
+since MCP authorization has not yet been used by users. Existing ordinary chats therefore do not
+automatically discover MCPs either. New ordinary Sessions explicitly select automatic discovery;
+new workflow Sessions persist their node's explicit selection. Editing a draft cannot change an
+existing run's selection.
+Plugin package versions and configuration values remain live inputs;
+changes outside the allowlist do not change that Session's Desired revision. The editor switches
+configure later runs; they are not controls for changing a running Session.
+
 MCP refresh, Skill Effect mutation, and Agent replacement share one Agent Session Barrier so new
 prompts wait for a safe point. They do not share Effect state: MCP never becomes an Effect
 Resource, Desired, or readiness signal.
+
+## Diagnostics and agent conformance
+
+Immediately before each ACP `session/new` or `session/load`, Ora emits an INFO event named
+`sending ACP session configuration`. It includes the Ora Session ID, Agent, provider Session ID
+when one exists, ACP method, selection mode, server count, and the selected Plugin IDs with package
+version, configuration revision, and transport. It deliberately excludes commands, arguments,
+environment variables, HTTP URLs, headers, and Setting values.
+
+Agent adapters are expected to treat the supplied `mcpServers` list as the complete set for that
+Session. Ora keeps the shared Agent process model and does not create one OpenCode process per
+Session. OpenCode through version 1.18.30 retains ACP-supplied MCP registrations at process scope,
+so an empty list is delivered correctly but may not remove a server registered by an earlier
+Session in the same OpenCode process. This provider conformance gap is tracked upstream in
+[OpenCode issue #32371](https://github.com/anomalyco/opencode/issues/32371).
 
 ## Security and compatibility
 
 Setting values may exist in the Configuration Store, a short-lived in-memory Snapshot, and the
 ACP frame sent to a trusted Agent. They must not enter Effect, SQLite, Workspace files, logs,
-errors, UI DTOs, revision digests, or Agent environment variables. Errors name Plugin ID, Setting
-ID, transport, and a stable code only.
+errors, UI DTOs, revision digests, or Agent environment variables. Logs may contain only the
+secret-free revision identity described above. Errors name Plugin ID, Setting ID, transport, and a
+stable code only.
 
 Ora does not create, modify, or delete `.mcp.json`, OpenCode JSON/JSONC, ownership sidecars, Git
 exclude files, or any other Workspace path for MCP. Existing user-authored MCP configuration is
 left untouched. There is no runtime migration off the unpublished file-materialization design.
+Installing an MCP therefore adds it to the global catalog only; a workflow node's explicit
+selection is the Session-level authorization decision.

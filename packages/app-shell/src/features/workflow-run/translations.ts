@@ -68,6 +68,7 @@ export const workflowRunTranslations = {
     "workflowRun.conversation.agentReply": "Agent",
     "workflowRun.conversation.inputPending":
       "节点开始运行后，输入会显示在这里。",
+    "workflowRun.conversation.idle": "Agent 尚未启动",
     "workflowRun.conversation.waiting": "Agent 正在处理",
     "workflowRun.theater.outputPending": "等待输出结果",
     "workflowRun.conversation.empty": "尚无消息",
@@ -125,6 +126,8 @@ export const workflowRunTranslations = {
     "workflowRun.artifacts.kind.file": "文件",
     "workflowRun.artifacts.kind.diff": "Diff",
     "workflowRun.overview.label": "工作流全图俯瞰",
+    "workflowRun.overview.roundBadge": "第 {{round}} 轮",
+    "workflowRun.inspector.rounds": "迭代轮次",
     "workflowRun.overview.hint": "点击节点回到舞台并聚焦该步骤",
     "workflowRun.nodeStatus.idle": "未执行",
     "workflowRun.nodeStatus.inactive": "未激活分支",
@@ -267,6 +270,7 @@ export const workflowRunTranslations = {
     "workflowRun.conversation.agentReply": "Agent",
     "workflowRun.conversation.inputPending":
       "Input appears here after this node starts.",
+    "workflowRun.conversation.idle": "Agent has not started",
     "workflowRun.conversation.waiting": "Agent is working",
     "workflowRun.theater.outputPending": "Waiting for output",
     "workflowRun.conversation.empty": "No messages yet",
@@ -328,6 +332,8 @@ export const workflowRunTranslations = {
     "workflowRun.artifacts.kind.file": "File",
     "workflowRun.artifacts.kind.diff": "Diff",
     "workflowRun.overview.label": "Workflow run overview",
+    "workflowRun.overview.roundBadge": "Round {{round}}",
+    "workflowRun.inspector.rounds": "Iteration rounds",
     "workflowRun.overview.hint":
       "Click a node to return to Theater focused on that step",
     "workflowRun.nodeStatus.idle": "Idle",

@@ -5,7 +5,8 @@ This module owns the transport- and storage-independent use cases behind Git cha
 ## Responsibilities
 
 - Expose a Git-backed `WorkspaceDiffReader` that returns a workspace-scoped unified patch for backend composition.
-- Read per-file staging status, stage and unstage workspace changes by path (or\n all), and commit only the currently staged change set.\n- Commit and push changes for any workspace checkout, verifying the caller's persisted branch identity when one is recorded, and trusting the current checkout otherwise.
+- Read per-file staging status; stage and unstage selected workspace changes by path, with an empty path list staging all changes; and commit only the currently staged change set.
+- Commit and push changes for any workspace checkout, verifying the caller's persisted branch identity when one is recorded, and trusting the current checkout otherwise.
 
 ## Ports and adapters
 

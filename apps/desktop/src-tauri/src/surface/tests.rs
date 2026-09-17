@@ -327,8 +327,14 @@ fn workbench_assets_serve_by_instance_and_refuse_other_instances() {
 
     assert_eq!(
         (
-            matches!(entry, AssetOutcome::Serve { document: true, .. }),
-            matches!(script, AssetOutcome::Serve { document: false, content_type, .. } if content_type.starts_with("text/javascript")),
+            matches!(
+                entry,
+                AssetOutcome::Serve {
+                    csp_base: Some(_),
+                    ..
+                }
+            ),
+            matches!(script, AssetOutcome::Serve { csp_base: None, content_type, .. } if content_type.starts_with("text/javascript")),
             other,
             escape,
         ),

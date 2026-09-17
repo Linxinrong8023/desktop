@@ -144,7 +144,10 @@ describe("SurfaceLauncher", () => {
       [
         {
           ...webviewPlugin("ora.hub", "Hub", "Example Hub"),
-          logo: "<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+          logo: {
+            variant: "universal" as const,
+            url: "ora-plugin://localhost/logo/official/ora.hub/universal.svg",
+          },
         },
         webviewPlugin("ora.docs", "Docs", "Docs Home"),
       ],
@@ -185,7 +188,7 @@ describe("SurfaceLauncher", () => {
     const docsItem = await screen.findByRole("menuitem", {
       name: /Docs Home/,
     });
-    // The logo ships as inline SVG source, rendered through an inert <img>.
+    // The logo arrives as a host-local asset URL, rendered through an inert <img>.
     expect(hubItem.querySelector("img")).not.toBeNull();
     const hubDot = hubItem.querySelector(".rounded-full");
     const docsDot = docsItem.querySelector(".rounded-full");

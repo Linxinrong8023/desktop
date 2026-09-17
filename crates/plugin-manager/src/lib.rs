@@ -6,7 +6,6 @@ mod hook;
 mod install;
 mod issue;
 mod limits;
-mod logo;
 mod mcp;
 mod skill;
 mod validation;

@@ -67,9 +67,11 @@ existing domain does not change it. No legacy root-operation forwarding interfac
   log level, and network proxy use cases. Runtime logging receives only
   `settings.preferred_log_level_store()`. Settings hides construction, repositories, raw keys,
   and worktree configuration; Desktop never receives the whole runtime just to execute a preference
-  operation. Async preference calls dispatch SQLite work to the blocking pool. Internal synchronous
-  proxy reads also serve plugin retrieval policy. The settings tests open only SQLite and exercise
-  persistence/reopening and injected storage faults through this interface.
+  operation. Async preference calls, including proxy reads, writes, and clears, dispatch SQLite work
+  to the blocking pool. Plugin downloads await Settings; synchronous Git/cache rebuilds retain the
+  underlying application settings service on the host blocking executor. The settings tests open
+  only SQLite and exercise persistence/reopening, injected storage faults, and async progress while
+  the sole pooled connection is held. The connection fixture is gated by `ora-db/test-support`.
 - `WorkspaceApi` composes the workspace-diff handlers with SQLite and Gitlancer, keyed by `WorkspaceId` for either an isolated task worktree or a project's main checkout. It resolves the workspace's live cwd and, when a `Worktree` row is recorded for it, uses the persisted creation commit as the stable diff baseline; a workspace with no such row has no baseline (only the `Unstaged`/`Staged` scopes apply) and its writes go through unverified.
 - Tauri remains a transport-only adapter.
 - Workspace diff reads, commits, and pushes preserve the same public error projection as the rest of the backend. Git and SQLite sources remain internal diagnostics and are rendered once by the adapter-owned request lifecycle.

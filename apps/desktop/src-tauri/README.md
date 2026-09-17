@@ -29,7 +29,7 @@ generates one `allow-<command>` / `deny-<command>` permission per registered com
 are git-ignored (`permissions/.gitignore`, `.gitignore`) because they are derived from the registry
 and regenerate on every build.
 
-Desktop installs provisional logging from `ORA_LOG_LEVEL` or `info` before Backend migration, then resolves the runtime-ready level from the shared SQLite `user_config.log_level` preference when no environment override exists. It retains the logging writer guard for the process lifetime and shares a cancellation-safe runtime settings manager through Tauri state.
+Desktop installs provisional logging at explicit `info` before Backend migration, then restores the shared SQLite `user_config.log_level` preference (unset means `info`). Storage read failures abort startup; legacy `ORA_LOG_LEVEL` values have no effect. It retains the logging writer guard for the process lifetime and shares a cancellation-safe runtime settings manager through Tauri state.
 
 The shared developer preferences are exposed through `get_developer_mode`, `set_developer_mode`, `get_runtime_log_level`, and `set_runtime_log_level`. The Desktop-only worktree setting uses `get_worktree_root` and `set_worktree_root`. These commands enter a request-correlated span before reading or persisting; SQLite ownership remains in Backend rather than this crate. A startup-only compatibility step moves a valid legacy `config.json` worktree root into SQLite and removes the file.
 

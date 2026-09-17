@@ -4,13 +4,13 @@ use ts_rs::TS;
 /// Requests the shared developer-mode preference without additional parameters.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "developerMode.ts")]
+#[ts(export_to = "developer-mode.ts")]
 pub struct GetDeveloperModeRequest {}
 
 /// Requests a new shared developer-mode preference.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "developerMode.ts")]
+#[ts(export_to = "developer-mode.ts")]
 pub struct SetDeveloperModeRequest {
     pub enabled: bool,
 }
@@ -18,7 +18,7 @@ pub struct SetDeveloperModeRequest {
 /// Returns the authoritative shared developer-mode preference.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "developerMode.ts")]
+#[ts(export_to = "developer-mode.ts")]
 pub struct DeveloperModeResponse {
     pub enabled: bool,
 }

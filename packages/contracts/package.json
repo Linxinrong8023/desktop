@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "generate:error-schema": "ts-to-zod src/error.ts src/error.schema.ts",
+    "generate:error-schema": "ts-to-zod src/dto/error.ts src/error.schema.ts",
     "lint": "tsc -p tsconfig.json --noEmit && eslint src tests --max-warnings 0",
     "test": "deno run -A ../../scripts/run-with-clean-stderr.ts \"tsc -p tsconfig.json --noEmit && deno test --no-check -A tests/*.test.ts\""
   },

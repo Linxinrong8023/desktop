@@ -63,7 +63,10 @@ fn preferences_round_trip_without_opening_the_application_runtime() {
                     .preferred_log_level()
                     .await
                     .expect("default log level"),
-                settings.network_proxy_settings().expect("default proxy"),
+                settings
+                    .network_proxy_settings()
+                    .await
+                    .expect("default proxy"),
             ),
             (DeveloperMode::Disabled, LogLevel::Info, None)
         );
@@ -95,6 +98,7 @@ fn preferences_round_trip_without_opening_the_application_runtime() {
         assert_eq!(
             settings
                 .set_network_proxy_settings(proxy.clone())
+                .await
                 .expect("save proxy"),
             proxy
         );
@@ -113,15 +117,22 @@ fn preferences_round_trip_without_opening_the_application_runtime() {
                     .preferred_log_level()
                     .await
                     .expect("reopened log level"),
-                reopened.network_proxy_settings().expect("reopened proxy"),
+                reopened
+                    .network_proxy_settings()
+                    .await
+                    .expect("reopened proxy"),
             ),
             (DeveloperMode::Enabled, LogLevel::Debug, Some(proxy))
         );
         reopened
             .clear_network_proxy_settings()
+            .await
             .expect("clear proxy");
         assert_eq!(
-            reopened.network_proxy_settings().expect("cleared proxy"),
+            reopened
+                .network_proxy_settings()
+                .await
+                .expect("cleared proxy"),
             None
         );
     });
@@ -174,6 +185,115 @@ fn failed_preference_write_preserves_the_stored_value() {
     });
 }
 
+/// A rejected proxy replacement preserves every persisted field, including after reopening.
+#[test]
+fn failed_proxy_write_preserves_the_stored_value_after_reopening() {
+    run_test(async {
+        let temporary = TempDir::new().expect("settings fixture");
+        let path = temporary.path().join("ora.sqlite3");
+        let (pool, settings) = open_settings(&path);
+        let original = NetworkProxySettings {
+            host: "proxy.example.test".to_string(),
+            port: 8080,
+            username: Some("fixture".to_string()),
+            password: Some("fixture-secret".to_string()),
+        };
+        settings
+            .set_network_proxy_settings(original.clone())
+            .await
+            .expect("seed proxy");
+        rusqlite::Connection::open(&path)
+            .expect("fixture fault-injection connection")
+            .execute_batch(
+                "CREATE TRIGGER reject_proxy_write BEFORE INSERT ON user_config
+                 WHEN NEW.key = 'network_proxy_settings'
+                 BEGIN SELECT RAISE(FAIL, 'fixture storage failure'); END;",
+            )
+            .expect("inject proxy write failure in fixture database");
+        assert_storage_failure(
+            settings
+                .set_network_proxy_settings(NetworkProxySettings {
+                    host: "replacement.example.test".to_string(),
+                    port: 9090,
+                    username: None,
+                    password: None,
+                })
+                .await
+                .expect_err("proxy write must fail"),
+        );
+        assert_eq!(
+            settings
+                .network_proxy_settings()
+                .await
+                .expect("unchanged proxy"),
+            Some(original.clone())
+        );
+        drop(settings);
+        drop(pool);
+
+        let (_pool, reopened) = open_settings(&path);
+        assert_eq!(
+            reopened
+                .network_proxy_settings()
+                .await
+                .expect("reopened proxy"),
+            Some(original)
+        );
+    });
+}
+
+/// A rejected proxy deletion cannot erase the durable settings or hide the storage error.
+#[test]
+fn failed_proxy_clear_preserves_the_stored_value_after_reopening() {
+    run_test(async {
+        let temporary = TempDir::new().expect("settings fixture");
+        let path = temporary.path().join("ora.sqlite3");
+        let (pool, settings) = open_settings(&path);
+        let original = NetworkProxySettings {
+            host: "proxy.example.test".to_string(),
+            port: 8080,
+            username: Some("fixture".to_string()),
+            password: Some("fixture-secret".to_string()),
+        };
+        settings
+            .set_network_proxy_settings(original.clone())
+            .await
+            .expect("seed proxy");
+        rusqlite::Connection::open(&path)
+            .expect("fixture fault-injection connection")
+            .execute_batch(
+                "CREATE TRIGGER reject_proxy_clear BEFORE DELETE ON user_config
+                 WHEN OLD.key = 'network_proxy_settings'
+                 BEGIN SELECT RAISE(FAIL, 'fixture storage failure'); END;",
+            )
+            .expect("inject proxy clear failure in fixture database");
+        assert_storage_failure(
+            settings
+                .clear_network_proxy_settings()
+                .await
+                .expect_err("proxy clear must fail"),
+        );
+        assert_eq!(
+            settings
+                .network_proxy_settings()
+                .await
+                .expect("unchanged proxy"),
+            Some(original.clone())
+        );
+        drop(settings);
+        drop(pool);
+
+        let (_pool, reopened) = open_settings(&path);
+        assert_eq!(
+            reopened
+                .network_proxy_settings()
+                .await
+                .expect("reopened proxy"),
+            Some(original)
+        );
+    });
+}
+
 /// Storage faults do not silently turn into defaults or empty proxy settings.
 #[test]
 fn failed_reads_are_not_reported_as_default_preferences() {
@@ -200,7 +320,148 @@ fn failed_reads_are_not_reported_as_default_preferences() {
         assert_storage_failure(
             settings
                 .network_proxy_settings()
+                .await
                 .expect_err("proxy read fails"),
+        );
+    });
+}
+
+/// Holds the sole pooled connection until an async heartbeat releases it.
+async fn while_connection_held<T>(pool: RepositoryPool, operation: impl Future<Output = T>) -> T {
+    let (release, wait_for_release) = std::sync::mpsc::channel();
+    let (acquired, wait_for_acquisition) = tokio::sync::oneshot::channel();
+    let lock_holder = std::thread::spawn(move || {
+        with_trace_logging(|| {
+            pool.with_held_connection(|| {
+                acquired.send(()).expect("notify connection acquired");
+                // A blocking regression must fail instead of hanging the test runtime forever.
+                wait_for_release
+                    .recv_timeout(std::time::Duration::from_secs(/*secs*/ 3))
+                    .is_ok()
+            })
+            .expect("hold pooled connection")
+        })
+    });
+    wait_for_acquisition.await.expect("connection acquired");
+    let mut operation = std::pin::pin!(operation);
+    let initially_pending = std::future::poll_fn(|context| {
+        std::task::Poll::Ready(operation.as_mut().poll(context).is_pending())
+    })
+    .await;
+    // On a current-thread runtime this timer cannot advance if the settings call blocks it.
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(/*millis*/ 50)).await;
+    })
+    .await
+    .expect("independent async heartbeat");
+    let still_pending = if initially_pending {
+        std::future::poll_fn(|context| {
+            std::task::Poll::Ready(operation.as_mut().poll(context).is_pending())
+        })
+        .await
+    } else {
+        false
+    };
+    let released_by_heartbeat = release.send(()).is_ok();
+    let heartbeat_progressed = lock_holder.join().expect("lock holder");
+    assert_eq!(
+        (
+            initially_pending,
+            still_pending,
+            released_by_heartbeat,
+            heartbeat_progressed
+        ),
+        (true, true, true, true),
+        "settings must yield while SQLite waits for the async heartbeat"
+    );
+    operation.await
+}
+
+/// Proxy reads yield the only async worker while SQLite waits, then return the stored value.
+#[test]
+fn proxy_read_does_not_block_async_progress() {
+    run_test(async {
+        let pool = DatabaseBootstrapper::system()
+            .bootstrap_repository_pool(
+                &DatabaseLocation::in_memory(),
+                &default_migration_catalog().expect("migration catalog"),
+            )
+            .expect("single-connection database");
+        let settings = Settings::new(pool.clone());
+        assert_eq!(
+            while_connection_held(pool.clone(), settings.network_proxy_settings())
+                .await
+                .expect("read after lock release"),
+            None
+        );
+    });
+}
+
+/// Proxy writes yield during database contention and retain their authoritative response.
+#[test]
+fn proxy_write_does_not_block_async_progress() {
+    run_test(async {
+        let pool = DatabaseBootstrapper::system()
+            .bootstrap_repository_pool(
+                &DatabaseLocation::in_memory(),
+                &default_migration_catalog().expect("migration catalog"),
+            )
+            .expect("single-connection database");
+        let settings = Settings::new(pool.clone());
+        let proxy = NetworkProxySettings {
+            host: "proxy.example.test".to_string(),
+            port: 8080,
+            username: None,
+            password: None,
+        };
+        assert_eq!(
+            while_connection_held(
+                pool.clone(),
+                settings.set_network_proxy_settings(proxy.clone())
+            )
+            .await
+            .expect("write after lock release"),
+            proxy
+        );
+        assert_eq!(
+            settings
+                .network_proxy_settings()
+                .await
+                .expect("stored proxy"),
+            Some(proxy)
+        );
+    });
+}
+
+/// Proxy deletion yields during database contention and removes the durable preference.
+#[test]
+fn proxy_clear_does_not_block_async_progress() {
+    run_test(async {
+        let pool = DatabaseBootstrapper::system()
+            .bootstrap_repository_pool(
+                &DatabaseLocation::in_memory(),
+                &default_migration_catalog().expect("migration catalog"),
+            )
+            .expect("single-connection database");
+        let settings = Settings::new(pool.clone());
+        settings
+            .set_network_proxy_settings(NetworkProxySettings {
+                host: "proxy.example.test".to_string(),
+                port: 8080,
+                username: None,
+                password: None,
+            })
+            .await
+            .expect("seed proxy");
+        while_connection_held(pool.clone(), settings.clear_network_proxy_settings())
+            .await
+            .expect("clear after lock release");
+        assert_eq!(
+            settings
+                .network_proxy_settings()
+                .await
+                .expect("cleared proxy"),
+            None
         );
     });
 }

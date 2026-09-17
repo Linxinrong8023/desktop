@@ -10,6 +10,9 @@ path = "src/lib.rs"
 [lints]
 workspace = true
 
+[features]
+test-support = []
+
 [dependencies]
 ora-application = { workspace = true }
 ora-domain = { workspace = true }

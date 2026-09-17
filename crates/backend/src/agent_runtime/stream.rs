@@ -1,19 +1,28 @@
-use crate::BackendError;
-use ora_logging::ora_debug;
-use tokio::sync::mpsc;
-
 use super::RuntimeCommand;
+use crate::BackendError;
+use std::{future::Future, pin::Pin};
+use tokio::sync::{mpsc, oneshot};
 
-/// Owns one finite business-event stream and cancels its operation when consumption stops early.
+type Cleanup =
+    Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = Result<(), BackendError>> + Send>> + Send>;
+
+/// Owns one operation; explicit cancellation waits for the owner and workflow cleanup.
 pub struct SessionEventStream<Event> {
-    receiver: mpsc::Receiver<Result<Event, BackendError>>,
-    commands: Option<mpsc::UnboundedSender<RuntimeCommand>>,
-    operation_id: Option<u64>,
-    cleanup: Option<Box<dyn FnOnce() + Send + 'static>>,
-    completed: bool,
+    state: StreamState<Event>,
 }
 
-impl<Event> SessionEventStream<Event> {
+/// Cleanup ownership moves once from the receiver to a worker, then to a retained receipt.
+enum StreamState<Event> {
+    Active {
+        receiver: mpsc::Receiver<Result<Event, BackendError>>,
+        commands: Option<(mpsc::UnboundedSender<RuntimeCommand>, u64)>,
+        cleanup: Option<Cleanup>,
+    },
+    Stopping(tokio::task::JoinHandle<Result<(), BackendError>>),
+    Completed(Result<(), BackendError>),
+}
+
+impl<Event: Send + 'static> SessionEventStream<Event> {
     /// Builds a stream tied to one actor operation generation.
     pub(super) fn new(
         receiver: mpsc::Receiver<Result<Event, BackendError>>,
@@ -21,90 +30,174 @@ impl<Event> SessionEventStream<Event> {
         operation_id: u64,
     ) -> Self {
         Self {
-            receiver,
-            commands: Some(commands),
-            operation_id: Some(operation_id),
-            cleanup: None,
-            completed: false,
+            state: StreamState::Active {
+                receiver,
+                commands: Some((commands, operation_id)),
+                cleanup: None,
+            },
         }
     }
 
-    /// Chains one cleanup callback into the stream's drop, preserving the cancel-on-drop behavior
-    /// and any existing cleanup. Used by the workflow prompt hook to flip an interactive node back
-    /// to `Pending` when a human turn ends or the stream is abandoned.
-    pub(crate) fn attach_cleanup<F>(mut self, cleanup: F) -> Self
+    /// Runs workflow restoration after the operation owner has settled, retaining the first failure.
+    pub(crate) fn attach_cleanup<F, Fut>(mut self, cleanup: F) -> Self
     where
-        F: FnOnce() + Send + 'static,
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), BackendError>> + Send + 'static,
     {
-        let existing = self.cleanup.take();
-        self.cleanup = Some(Box::new(move || {
-            if let Some(existing) = existing {
-                existing();
-            }
-            cleanup();
+        let StreamState::Active {
+            cleanup: attached, ..
+        } = &mut self.state
+        else {
+            return self;
+        };
+        let existing = attached.take();
+        *attached = Some(Box::new(move || {
+            Box::pin(async move {
+                let previous = match existing {
+                    Some(existing) => existing().await,
+                    None => Ok(()),
+                };
+                let result = cleanup().await;
+                previous.and(result)
+            })
         }));
         self
     }
 
-    /// Builds a stream owned by a non-actor publisher, such as the application event hub.
-    pub(crate) fn with_cleanup<F>(
+    /// Uses the publisher's cleanup future to confirm its owned worker has exited.
+    pub(crate) fn with_cleanup<F, Fut>(
         receiver: mpsc::Receiver<Result<Event, BackendError>>,
         cleanup: F,
     ) -> Self
     where
-        F: FnOnce() + Send + 'static,
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), BackendError>> + Send + 'static,
     {
         Self {
-            receiver,
-            commands: None,
-            operation_id: None,
-            cleanup: Some(Box::new(cleanup)),
-            completed: false,
+            state: StreamState::Active {
+                receiver,
+                commands: None,
+                cleanup: Some(Box::new(move || Box::pin(cleanup()))),
+            },
         }
     }
 
-    /// Receives the next ordered event or terminal error from the backend actor.
+    /// Receives the next ordered backend event.
     pub async fn recv(&mut self) -> Option<Result<Event, BackendError>> {
-        let event = self.receiver.recv().await;
-        if matches!(&event, Some(Err(_)) | None) {
-            self.completed = true;
+        match &mut self.state {
+            StreamState::Active { receiver, .. } => receiver.recv().await,
+            StreamState::Stopping(_) | StreamState::Completed(_) => None,
         }
-        event
     }
 
-    /// Returns a buffered item without waiting so HTTP shutdown can surface a terminal error.
+    /// Returns a buffered item without waiting during HTTP shutdown.
     pub fn try_recv(&mut self) -> Option<Result<Event, BackendError>> {
-        match self.receiver.try_recv() {
-            Ok(event) => {
-                if event.is_err() {
-                    self.completed = true;
-                }
-                Some(event)
-            }
-            Err(mpsc::error::TryRecvError::Empty) => None,
-            Err(mpsc::error::TryRecvError::Disconnected) => {
-                self.completed = true;
-                None
+        match &mut self.state {
+            StreamState::Active { receiver, .. } => receiver.try_recv().ok(),
+            StreamState::Stopping(_) | StreamState::Completed(_) => None,
+        }
+    }
+
+    /// Requests cancellation once and waits for owner cleanup followed by workflow restoration.
+    /// Dropping this wait does not abort cleanup; a later call observes the same result.
+    /// Callers may bound their wait with a timeout, which never means cleanup succeeded.
+    pub async fn cancel_and_wait(&mut self) -> Result<(), BackendError> {
+        if matches!(self.state, StreamState::Active { .. }) {
+            // If starting the worker unwinds, retain an explicit failure instead of a false receipt.
+            let previous = std::mem::replace(
+                &mut self.state,
+                StreamState::Completed(Err(super::support::runtime_unavailable())),
+            );
+            if let StreamState::Active {
+                receiver,
+                commands,
+                cleanup,
+            } = previous
+            {
+                self.state = StreamState::Stopping(start_cleanup(receiver, commands, cleanup));
             }
         }
+        let result = match &mut self.state {
+            StreamState::Stopping(worker) => match worker.await {
+                Ok(result) => result,
+                Err(error) => Err(BackendError::internal(
+                    "stream cleanup task did not confirm completion",
+                    error,
+                )),
+            },
+            StreamState::Completed(result) => return result.clone(),
+            StreamState::Active { .. } => return Err(super::support::runtime_unavailable()),
+        };
+        self.state = StreamState::Completed(result.clone());
+        result
     }
 }
 
-impl<Event> Drop for SessionEventStream<Event> {
-    fn drop(&mut self) {
-        if !self.completed && self.commands.is_some() {
-            ora_debug!(
-                operation_id = self.operation_id.unwrap_or_default(),
-                "stream dropped, sending cancel"
-            );
-            if let (Some(commands), Some(operation_id)) =
-                (self.commands.as_ref(), self.operation_id)
+/// Keeps cancellation and cleanup alive even when the consumer abandons its waiter.
+fn start_cleanup<Event: Send + 'static>(
+    mut receiver: mpsc::Receiver<Result<Event, BackendError>>,
+    commands: Option<(mpsc::UnboundedSender<RuntimeCommand>, u64)>,
+    cleanup: Option<Cleanup>,
+) -> tokio::task::JoinHandle<Result<(), BackendError>> {
+    tokio::spawn(async move {
+        let owner = if let Some((commands, operation_id)) = commands {
+            let (completion, confirmed) = oneshot::channel();
+            if commands
+                .send(RuntimeCommand::Cancel {
+                    operation_id,
+                    completion: Some(completion),
+                })
+                .is_err()
             {
-                let _ = commands.send(RuntimeCommand::Cancel { operation_id });
+                Err(super::support::runtime_unavailable())
+            } else {
+                // Keep draining while the actor settles; a full event queue must not deadlock it.
+                let drain = async { while receiver.recv().await.is_some() {} };
+                let (confirmed, ()) = tokio::join!(confirmed, drain);
+                confirmed.unwrap_or_else(|error| {
+                    Err(BackendError::internal(
+                        "stream owner did not confirm cleanup",
+                        error,
+                    ))
+                })
             }
+        } else {
+            Ok(())
+        };
+        drop(receiver);
+        let restored = match cleanup {
+            Some(cleanup) => cleanup().await,
+            None => Ok(()),
+        };
+        match (owner, restored) {
+            (Err(owner), Err(restoration)) => Err(BackendError::new(
+                owner.classification(),
+                owner.public_error().clone(),
+                format!("{owner}; workflow restoration also failed: {restoration}"),
+            )),
+            (owner, restored) => owner.and(restored),
         }
-        if let Some(cleanup) = self.cleanup.take() {
-            cleanup();
+    })
+}
+
+impl<Event> Drop for SessionEventStream<Event> {
+    /// Drop is best effort only; consumers needing confirmation must use cancel_and_wait.
+    fn drop(&mut self) {
+        if let StreamState::Active {
+            commands, cleanup, ..
+        } = &mut self.state
+        {
+            if let Some((commands, operation_id)) = commands.take() {
+                let _ = commands.send(RuntimeCommand::Cancel {
+                    operation_id,
+                    completion: None,
+                });
+            }
+            if let Some(cleanup) = cleanup.take()
+                && let Ok(runtime) = tokio::runtime::Handle::try_current()
+            {
+                runtime.spawn(cleanup());
+            }
         }
     }
 }
@@ -119,7 +212,7 @@ mod tests {
     #[tokio::test]
     async fn try_recv_returns_a_buffered_error_without_waiting() {
         let (sender, receiver) = mpsc::channel::<Result<(), BackendError>>(1);
-        let mut stream = SessionEventStream::with_cleanup(receiver, || {});
+        let mut stream = SessionEventStream::with_cleanup(receiver, || async { Ok(()) });
         sender
             .try_send(Err(BackendError::internal(
                 "stream interrupted",
@@ -129,5 +222,142 @@ mod tests {
 
         assert!(matches!(stream.try_recv(), Some(Err(_))));
         assert!(stream.try_recv().is_none());
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    /// An actor receipt cannot bypass blocked workflow restoration, and retries share its result.
+    #[tokio::test]
+    async fn cancellation_waits_for_owner_and_restoration_once() {
+        let (events, receiver) = mpsc::channel::<Result<(), BackendError>>(1);
+        let (commands, mut requests) = mpsc::unbounded_channel();
+        let (entered, entering) = oneshot::channel();
+        let (release, blocked) = oneshot::channel();
+        let mut stream = SessionEventStream::new(receiver, commands, /*operation_id*/ 17)
+            .attach_cleanup(move || async move {
+                entered.send(()).expect("restoration entered");
+                blocked.await.expect("release restoration");
+                Ok(())
+            });
+        let mut waiter = tokio::spawn(async move {
+            let first = stream.cancel_and_wait().await;
+            let second = stream.cancel_and_wait().await;
+            (first.is_ok(), second.is_ok())
+        });
+        let RuntimeCommand::Cancel {
+            operation_id,
+            completion: Some(completion),
+        } = requests.recv().await.expect("cancel requested")
+        else {
+            panic!("expected acknowledged cancellation")
+        };
+        assert_eq!(operation_id, 17);
+        assert!(!waiter.is_finished());
+        completion.send(Ok(())).expect("owner confirms");
+        // Even the actor receipt cannot stand in for release of its event publisher.
+        assert!(!waiter.is_finished());
+        drop(events);
+        entering.await.expect("restoration started");
+        tokio::select! {
+            biased;
+            _ = &mut waiter => panic!("returned before restoration"),
+            () = std::future::ready(()) => {}
+        }
+        release.send(()).expect("release cleanup");
+        assert_eq!(waiter.await.expect("waiter joined"), (true, true));
+        assert!(requests.recv().await.is_none());
+    }
+
+    /// Cleanup failures and missing actor receipts stay failures on every subsequent wait.
+    #[tokio::test]
+    async fn cancellation_preserves_failure_and_missing_confirmation() {
+        for confirm in [true, false] {
+            let (events, receiver) = mpsc::channel::<Result<(), BackendError>>(1);
+            let (commands, mut requests) = mpsc::unbounded_channel();
+            let mut stream = SessionEventStream::new(receiver, commands, /*operation_id*/ 19)
+                .attach_cleanup(|| async {
+                    Err(BackendError::internal(
+                        "restoration failed",
+                        std::io::Error::other("fixture"),
+                    ))
+                });
+            let waiter = tokio::spawn(async move {
+                let first = stream
+                    .cancel_and_wait()
+                    .await
+                    .expect_err("must fail")
+                    .to_string();
+                let second = stream
+                    .cancel_and_wait()
+                    .await
+                    .expect_err("retry must fail")
+                    .to_string();
+                assert_eq!(first, second);
+                first
+            });
+            let RuntimeCommand::Cancel {
+                completion: Some(completion),
+                ..
+            } = requests.recv().await.expect("cancel")
+            else {
+                panic!("expected cancellation")
+            };
+            if confirm {
+                completion.send(Ok(())).expect("confirm owner");
+            } else {
+                drop(completion);
+            }
+            drop(events);
+            let error = waiter.await.expect("join waiter");
+            assert!(error.contains(if confirm {
+                "restoration failed"
+            } else {
+                "did not confirm"
+            }));
+        }
+    }
+
+    /// Abandoning a wait keeps the owned task alive and allows a later wait to observe completion.
+    #[tokio::test]
+    async fn abandoned_wait_does_not_abort_cleanup() {
+        let (events, receiver) = mpsc::channel::<Result<(), BackendError>>(1);
+        drop(events);
+        let (release, blocked) = oneshot::channel();
+        let mut stream = SessionEventStream::with_cleanup(receiver, move || async move {
+            blocked.await.expect("release cleanup");
+            Ok(())
+        });
+        {
+            let wait = stream.cancel_and_wait();
+            tokio::pin!(wait);
+            tokio::select! { biased; _ = &mut wait => panic!("premature confirmation"), () = std::future::ready(()) => {} }
+        }
+        release.send(()).expect("cleanup still alive");
+        stream.cancel_and_wait().await.expect("confirmed cleanup");
+    }
+    /// A cleanup worker panic is an unconfirmed failure and stays failed on repeated waits.
+    #[tokio::test]
+    async fn cleanup_panic_cannot_report_success() {
+        let (events, receiver) = mpsc::channel::<Result<(), BackendError>>(1);
+        drop(events);
+        let mut stream = SessionEventStream::with_cleanup(receiver, || async {
+            panic!("fixture cleanup panic");
+        });
+        let first = stream
+            .cancel_and_wait()
+            .await
+            .expect_err("panic must fail")
+            .to_string();
+        let second = stream
+            .cancel_and_wait()
+            .await
+            .expect_err("repeat must fail")
+            .to_string();
+        assert_eq!(first, second);
+        assert!(first.contains("did not confirm completion"));
     }
 }

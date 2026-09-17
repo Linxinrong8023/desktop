@@ -31,9 +31,23 @@ impl StreamStart {
         self,
         source: impl Future<Output = Result<SessionEventStream<T>, BackendError>>,
     ) -> Result<(), CommandError> {
-        match settle_startup(source, self.registration.cancellation(), &self.lifecycle).await? {
-            Startup::Cancelled => {}
-            Startup::Ready(stream) => {
+        match settle_startup(
+            source,
+            self.registration.cancellation(),
+            &self.lifecycle,
+            |mut stream: SessionEventStream<T>| async move { stream.cancel_and_wait().await },
+        )
+        .await
+        {
+            Ok(Startup::Cancelled) => self.registration.finish(Ok(())),
+            Err(error) => {
+                self.registration.finish(Err(error.clone()));
+                return Err(CommandError::from_backend_with_lifecycle(
+                    error,
+                    &self.lifecycle,
+                ));
+            }
+            Ok(Startup::Ready(stream)) => {
                 tauri::async_runtime::spawn(forward_contract_stream(
                     stream,
                     self.registration,
@@ -50,9 +64,28 @@ impl StreamStart {
         self,
         source: impl Future<Output = Result<ora_fs::WorkspaceWatcher, BackendError>>,
     ) -> Result<(), CommandError> {
-        match settle_startup(source, self.registration.cancellation(), &self.lifecycle).await? {
-            Startup::Cancelled => {}
-            Startup::Ready(watcher) => {
+        match settle_startup(
+            source,
+            self.registration.cancellation(),
+            &self.lifecycle,
+            |watcher| async move {
+                watcher
+                    .close()
+                    .await
+                    .map_err(crate::workspace_files::workspace_file_backend_error)
+            },
+        )
+        .await
+        {
+            Ok(Startup::Cancelled) => self.registration.finish(Ok(())),
+            Err(error) => {
+                self.registration.finish(Err(error.clone()));
+                return Err(CommandError::from_backend_with_lifecycle(
+                    error,
+                    &self.lifecycle,
+                ));
+            }
+            Ok(Startup::Ready(watcher)) => {
                 tauri::async_runtime::spawn(forward_workspace_watch(
                     watcher,
                     self.registration,
@@ -67,20 +100,19 @@ impl StreamStart {
 
 /// Lets started domain work settle before dropping its resource; arbitrary startup futures may
 /// already have committed actor side effects and are not safe to abandon midway through creation.
-async fn settle_startup<T>(
+async fn settle_startup<T, F: Future<Output = Result<(), BackendError>>>(
     source: impl Future<Output = Result<T, BackendError>>,
     cancellation: &CancellationToken,
     lifecycle: &RequestLifecycle,
-) -> Result<Startup<T>, CommandError> {
+    cleanup: impl FnOnce(T) -> F,
+) -> Result<Startup<T>, BackendError> {
     if cancellation.is_cancelled() {
         lifecycle.complete_cancellation();
         return Ok(Startup::Cancelled);
     }
-    let resource = source
-        .await
-        .map_err(|error| CommandError::from_backend_with_lifecycle(error, lifecycle))?;
+    let resource = source.await?;
     if cancellation.is_cancelled() {
-        drop(resource);
+        cleanup(resource).await?;
         lifecycle.complete_cancellation();
         Ok(Startup::Cancelled)
     } else {
@@ -138,16 +170,13 @@ pub async fn cancel_contract_stream(
     stream_call_id: String,
 ) -> Result<(), CommandError> {
     let lifecycle = RequestLifecycle::start("cancel_contract_stream", &UuidRequestIdGenerator);
-    let request_span =
-        ora_logging::span_with_request_id("tauri_command", &lifecycle.request_id().to_string());
-    request_span.in_scope(|| {
-        state
-            .streams
-            .cancel(&stream_call_id)
-            .map_err(|error| CommandError::from_backend_with_lifecycle(error, &lifecycle))?;
-        lifecycle.complete_success();
-        Ok(())
-    })
+    state
+        .streams
+        .cancel_and_wait(&stream_call_id)
+        .await
+        .map_err(|error| CommandError::from_backend_with_lifecycle(error, &lifecycle))?;
+    lifecycle.complete_success();
+    Ok(())
 }
 
 #[cfg(test)]
@@ -188,6 +217,7 @@ mod tests {
                     },
                     &token,
                     &lifecycle,
+                    |_resource| async move { Ok(()) },
                 )
                 .await
                 .expect("pre-cancel succeeds");
@@ -205,12 +235,114 @@ mod tests {
                     },
                     &token,
                     &lifecycle,
+                    |resource| async move {
+                        drop(resource);
+                        Ok(())
+                    },
                 )
                 .await
                 .expect("creation settles");
                 assert!(matches!(result, Startup::Cancelled));
                 assert_eq!(drops.load(Ordering::SeqCst), 1);
             });
+        });
+    }
+
+    /// Creation and asynchronous cleanup each hold cancellation open until their own gate releases.
+    #[test]
+    fn startup_cancellation_waits_for_creation_and_cleanup() {
+        with_trace_logging(|| {
+            tauri::async_runtime::block_on(async {
+                for succeeds in [true, false] {
+                    let token = CancellationToken::new();
+                    let lifecycle =
+                        RequestLifecycle::start("blocked_startup", &UuidRequestIdGenerator);
+                    let (created, creating) = tokio::sync::oneshot::channel();
+                    let (cleaned, cleaning) = tokio::sync::oneshot::channel();
+                    let result = settle_startup(
+                        async {
+                            creating.await.expect("creation released");
+                            Ok(())
+                        },
+                        &token,
+                        &lifecycle,
+                        |()| async {
+                            cleaning.await.expect("cleanup released");
+                            if succeeds {
+                                Ok(())
+                            } else {
+                                Err(BackendError::internal(
+                                    "cleanup failed",
+                                    std::io::Error::other("fixture"),
+                                ))
+                            }
+                        },
+                    );
+                    tokio::pin!(result);
+                    tokio::select! { biased; _ = &mut result => panic!("creation returned early"), () = std::future::ready(()) => {} }
+                    token.cancel();
+                    tokio::select! { biased; _ = &mut result => panic!("cancel abandoned creation"), () = std::future::ready(()) => {} }
+                    created.send(()).expect("release creation");
+                    tokio::select! { biased; _ = &mut result => panic!("cleanup returned early"), () = std::future::ready(()) => {} }
+                    cleaned.send(()).expect("release cleanup");
+                    assert_eq!(matches!(result.await, Ok(Startup::Cancelled)), succeeds);
+                }
+            })
+        });
+    }
+
+    /// Startup cancellation must wait for the native callback and watcher resources to retire.
+    #[test]
+    fn startup_watch_cancellation_waits_for_native_release() {
+        with_trace_logging(|| {
+            tauri::async_runtime::block_on(async {
+                let workspace = tempfile::TempDir::new().unwrap();
+                let (watcher, gate) =
+                    ora_fs::watch_test_support::blocked_watcher(workspace.path()).unwrap();
+                std::fs::write(workspace.path().join("trigger"), "event").unwrap();
+                gate.wait_until_entered().unwrap();
+                let registry = crate::stream_registry::StreamRegistry::default();
+                let registration = registry
+                    .register("blocked-native-start".to_string())
+                    .unwrap();
+                let token = registration.cancellation().clone();
+                let started = super::StreamStart {
+                    registration,
+                    channel: tauri::ipc::Channel::new(|_| Ok(())),
+                    lifecycle: RequestLifecycle::start(
+                        "blocked_native_start",
+                        &UuidRequestIdGenerator,
+                    ),
+                }
+                .watch(async {
+                    token.cancel();
+                    Ok(watcher)
+                });
+                tokio::pin!(started);
+                let early =
+                    tokio::time::timeout(std::time::Duration::from_millis(100), &mut started).await;
+                assert!(
+                    early.is_err(),
+                    "startup confirmed while native callback was still blocked"
+                );
+                assert!(
+                    tokio::time::timeout(
+                        std::time::Duration::from_millis(100),
+                        registry.cancel_and_wait("blocked-native-start")
+                    )
+                    .await
+                    .is_err()
+                );
+                gate.release();
+                tokio::time::timeout(std::time::Duration::from_secs(10), &mut started)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                registry
+                    .cancel_and_wait("blocked-native-start")
+                    .await
+                    .unwrap();
+            })
         });
     }
 
@@ -231,13 +363,17 @@ mod tests {
                     },
                     &token,
                     &lifecycle,
+                    |_resource| async move { Ok(()) },
                 )
                 .await;
                 let Err(error) = result else {
                     panic!("startup must fail");
                 };
                 assert_eq!(
-                    serde_json::to_value(error).expect("serialize public error"),
+                    serde_json::to_value(super::CommandError::from_backend_with_lifecycle(
+                        error, &lifecycle
+                    ))
+                    .expect("serialize public error"),
                     serde_json::json!({
                         "code": "internal_error",
                         "params": {},

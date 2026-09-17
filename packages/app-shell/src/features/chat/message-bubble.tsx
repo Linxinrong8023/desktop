@@ -9,7 +9,7 @@ import { Button } from "@ora/ui";
 import { useTranslation } from "react-i18next";
 import type { ChatMessage } from "@ora/chat";
 import type * as acp from "@agentclientprotocol/sdk";
-import { formatClock } from "../../lib/format";
+import { formatClock, formatElapsedDuration } from "../../lib/format";
 import { AnchorHighlight } from "./anchor-highlight";
 import { ContentBlock } from "./content-block";
 import { MarkdownDocument, MarkdownMessage } from "./markdown-message";
@@ -17,12 +17,16 @@ import { MarkdownDocument, MarkdownMessage } from "./markdown-message";
 interface MessageBubbleProps {
   message: ChatMessage;
   userName: string;
+  availableCommands?: acp.AvailableCommand[];
   embeddedAssistant?: boolean;
   streaming?: boolean;
   /** Tighter rhythm for read-only embedded conversations such as workflow cards. */
   compact?: boolean;
   /** Lets an embedding surface own the highlight geometry for the whole message row. */
   showAnchorHighlight?: boolean;
+  durationMs?: number;
+  /** Completion clock for assistant output; omitted while the response is still open. */
+  completedAt?: number;
 }
 
 /**
@@ -33,6 +37,7 @@ type UserMessageBodyMode = "view" | "edit";
 
 interface UserMessageBodyProps {
   content: string;
+  availableCommands: acp.AvailableCommand[];
   structuredContent?: Array<Exclude<acp.ContentBlock, { type: "text" }>>;
   messageId: string;
   showAnchorHighlight: boolean;
@@ -46,6 +51,7 @@ interface UserMessageBodyProps {
  */
 function UserMessageBody({
   content,
+  availableCommands,
   structuredContent,
   messageId,
   showAnchorHighlight,
@@ -60,7 +66,11 @@ function UserMessageBody({
         <div className="relative w-fit max-w-full overflow-visible rounded-2xl rounded-br-md bg-secondary px-4 py-2.5">
           {showAnchorHighlight && <AnchorHighlight />}
           <div className="relative">
-            <MarkdownDocument content={content} density="compact" />
+            <MarkdownDocument
+              content={content}
+              density="compact"
+              availableCommands={availableCommands}
+            />
           </div>
         </div>
       )}
@@ -87,15 +97,19 @@ function useCopyMessage(content: string) {
 export function MessageBubble({
   message,
   userName,
+  availableCommands = [],
   embeddedAssistant = false,
   streaming = false,
   compact = false,
   showAnchorHighlight = true,
+  durationMs,
+  completedAt,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const { copied, copy } = useCopyMessage(message.content);
   const isUser = message.role === "user";
   const canCopy = message.content.length > 0;
+  const duration = formatElapsedDuration(durationMs);
 
   return (
     <div
@@ -107,6 +121,7 @@ export function MessageBubble({
         {isUser ? (
           <UserMessageBody
             content={message.content}
+            availableCommands={availableCommands}
             structuredContent={message.structuredContent}
             messageId={message.id}
             showAnchorHighlight={showAnchorHighlight}
@@ -123,7 +138,14 @@ export function MessageBubble({
             className={`flex min-h-6 items-center gap-2 ${isUser ? "flex-row-reverse pr-1" : ""}`}
           >
             <span className="text-xs text-muted-foreground">
-              {formatClock(message.createdAt)}
+              {isUser
+                ? formatClock(message.createdAt)
+                : completedAt === undefined
+                  ? null
+                  : formatClock(completedAt)}
+              {!isUser &&
+                duration !== null &&
+                ` · ${t("chat.totalTime")} ${duration}`}
             </span>
             <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100 group-focus-within/message:opacity-100">
               {canCopy && (

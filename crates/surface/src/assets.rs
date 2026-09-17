@@ -1,33 +1,13 @@
-//! Host-served workbench assets: URL shape, request parsing, content types, and the CSP handed
-//! to workbench documents. Everything here is pure so the desktop protocol handler only does
-//! I/O.
+//! Host-served workbench assets: URL shape, request parsing, and the CSP handed to workbench
+//! documents. Everything here is pure so the desktop protocol handler only does I/O.
+//!
+//! The scheme itself and the extension-to-content-type table live in `ora-plugin-asset`, because
+//! plugin icons are served over the same protocol and must answer with the same content types.
 
 use crate::definition::WorkbenchDefinition;
 use crate::ids::SurfaceInstanceId;
+use ora_plugin_asset::AssetUrlForm;
 use url::{ParseError, Url};
-
-/// Custom URI scheme under which the host serves workbench assets.
-pub const ASSET_SCHEME: &str = "ora-plugin";
-
-/// How the webview runtime spells a custom scheme URL on this platform.
-///
-/// Tauri serves custom protocols as `<scheme>://localhost/...` except on Windows and Android,
-/// where they become `http://<scheme>.localhost/...`; the policy and CSP must use the spelling
-/// the page actually sees.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AssetUrlForm {
-    CustomScheme,
-    HttpLocalhost,
-}
-
-impl AssetUrlForm {
-    /// The form used by the running host.
-    pub const CURRENT: Self = if cfg!(any(windows, target_os = "android")) {
-        Self::HttpLocalhost
-    } else {
-        Self::CustomScheme
-    };
-}
 
 /// Returns `<scheme>://localhost/<instance>/`, the base every asset of one instance lives under.
 ///
@@ -35,12 +15,7 @@ impl AssetUrlForm {
 /// its registry record (and from there to the package root) and refuses a page that asks for
 /// another instance's files. No plugin id or disk path ever appears in a URL.
 pub fn asset_base(form: AssetUrlForm, instance: SurfaceInstanceId) -> Result<Url, ParseError> {
-    let instance = instance.value();
-    let text = match form {
-        AssetUrlForm::CustomScheme => format!("{ASSET_SCHEME}://localhost/{instance}/"),
-        AssetUrlForm::HttpLocalhost => format!("http://{ASSET_SCHEME}.localhost/{instance}/"),
-    };
-    Url::parse(&text)
+    Url::parse(&format!("{}{}/", form.origin(), instance.value()))
 }
 
 /// Returns the URL of the instance's entry document below its asset base.
@@ -81,29 +56,6 @@ impl AssetRequest {
     }
 }
 
-/// Maps a file extension to the content type the handler may serve; anything else is served as
-/// `application/octet-stream` and never sniffed.
-///
-/// The list is the build-capability contract of workbench pages: a template that emits another
-/// extension must extend this table (and the documentation) rather than relying on sniffing.
-pub fn asset_content_type(extension: &str) -> &'static str {
-    match extension {
-        "html" => "text/html; charset=utf-8",
-        "js" | "mjs" => "text/javascript; charset=utf-8",
-        "css" => "text/css; charset=utf-8",
-        "json" => "application/json; charset=utf-8",
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "webp" => "image/webp",
-        "woff" => "font/woff",
-        "woff2" => "font/woff2",
-        "wasm" => "application/wasm",
-        "map" if cfg!(debug_assertions) => "application/json; charset=utf-8",
-        _ => "application/octet-stream",
-    }
-}
-
 /// Builds the Content-Security-Policy of a workbench document.
 ///
 /// Inline script and style are forbidden (no nonce can reach a static page), every resource must
@@ -122,9 +74,7 @@ pub fn workbench_csp(base: &Url) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AssetRequest, AssetUrlForm, asset_base, asset_content_type, entry_url, workbench_csp,
-    };
+    use super::{AssetRequest, AssetUrlForm, asset_base, entry_url, workbench_csp};
     use crate::definition::WorkbenchDefinition;
     use crate::ids::SurfaceInstanceId;
     use ora_utils::path::PortableRelativePath;
@@ -186,25 +136,6 @@ mod tests {
                 }),
                 None,
                 None,
-            )
-        );
-    }
-
-    /// Known extensions get their type; unknown ones are octet-stream, never sniffed.
-    #[test]
-    fn content_types_are_a_closed_table() {
-        assert_eq!(
-            (
-                asset_content_type("html"),
-                asset_content_type("mjs"),
-                asset_content_type("wasm"),
-                asset_content_type("exe"),
-            ),
-            (
-                "text/html; charset=utf-8",
-                "text/javascript; charset=utf-8",
-                "application/wasm",
-                "application/octet-stream",
             )
         );
     }

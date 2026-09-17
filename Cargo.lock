@@ -3120,6 +3120,7 @@ dependencies = [
  "ora-fs",
  "ora-history",
  "ora-logging",
+ "ora-plugin-asset",
  "ora-plugin-config",
  "ora-plugin-lifecycle",
  "ora-plugin-manager",
@@ -3205,6 +3206,7 @@ dependencies = [
  "ora-domain",
  "ora-fs",
  "ora-logging",
+ "ora-plugin-asset",
  "ora-plugin-lifecycle",
  "ora-plugin-manager",
  "ora-plugin-manifest",
@@ -3343,6 +3345,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "ora-node-protocol"
+version = "0.0.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
+name = "ora-plugin-asset"
+version = "0.0.0"
+dependencies = [
+ "ora-contracts",
+ "ora-domain",
+ "ora-logging",
+ "ora-utils",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "ora-plugin-config"
 version = "0.0.0"
 dependencies = [
@@ -3366,6 +3397,7 @@ dependencies = [
  "ora-contracts",
  "ora-domain",
  "ora-logging",
+ "ora-plugin-asset",
  "ora-plugin-config",
  "ora-plugin-manager",
  "ora-plugin-manifest",
@@ -3388,6 +3420,8 @@ version = "0.0.0"
 dependencies = [
  "futures",
  "ora-domain",
+ "ora-logging",
+ "ora-plugin-asset",
  "ora-plugin-config",
  "ora-plugin-manifest",
  "ora-skill-package",
@@ -3434,6 +3468,7 @@ dependencies = [
  "gitlancer",
  "ora-domain",
  "ora-logging",
+ "ora-plugin-asset",
  "ora-plugin-manifest",
  "ora-utils",
  "pretty_assertions",
@@ -3538,6 +3573,7 @@ version = "0.0.0"
 dependencies = [
  "ora-domain",
  "ora-logging",
+ "ora-plugin-asset",
  "ora-plugin-config",
  "ora-plugin-manager",
  "ora-plugin-manifest",

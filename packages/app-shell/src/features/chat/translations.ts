@@ -4,6 +4,10 @@ export const chatTranslations = {
     "errors.session_not_found": "未找到该会话。",
     "errors.agent_not_installed": "未安装提供该 Agent 的插件。",
     "errors.agent_runtime_unavailable": "Agent 运行时当前不可用。",
+    "errors.agent_start_failed":
+      "无法启动该 Agent，请检查其插件与本机安装是否正常。",
+    "errors.agent_timed_out": "Agent 响应超时，请稍后重试。",
+    "errors.agent_model_discovery_failed": "无法获取该 Agent 的模型列表。",
     "errors.session_busy": "会话正在处理其他操作。",
     "errors.session_stopped": "会话与 Agent 的连接已断开，请重试。",
     "errors.session_load_unsupported": "所选 Agent 不支持加载会话。",
@@ -45,6 +49,50 @@ export const chatTranslations = {
     "chat.contextBar.searchProjects": "搜索项目",
     "chat.contextBar.noProjectsFound": "未找到项目。",
     "chat.contextBar.defaultBranch": "main",
+    "chat.usage.waiting": "等待用量",
+    "chat.usage.awaiting": "正在等待用量",
+    "chat.usage.unavailable": "用量不可用",
+    "chat.usage.referenceInfo": "用量统计说明",
+    "chat.usage.disclaimer":
+      "统计仅供参考。数据不会随历史记录保存，更新可能存在延迟；完整性、准确性和统计口径取决于 Agent 本身的实现。",
+    "chat.usage.contextTitle": "当前上下文用量",
+    "chat.usage.reloadEmpty":
+      "用量数据不会随历史记录保存。发送一条消息后，如果当前 Agent 支持 ACP 用量上报，这里会显示最新数据。",
+    "chat.usage.awaitingDetails":
+      "正在等待 Agent 上报用量；数据可能在响应过程中或响应结束后更新。",
+    "chat.usage.contextUnavailable":
+      "当前 Agent 在上一轮交互后仍未上报上下文用量。",
+    "chat.usage.lastTurnTitle": "上一轮对话 Token 使用",
+    "chat.usage.tokenAwaiting": "正在等待上一轮响应完成并提供 Token 数据。",
+    "chat.usage.tokenUnavailable":
+      "当前 Agent 未提供上一轮对话的 Token 使用明细。",
+    "chat.usage.tokenNeedsInteraction":
+      "完成一轮对话后，如果 Agent 支持上报，这里会显示该轮 Token 使用。",
+    "chat.usage.used": "已用",
+    "chat.usage.limit": "上限",
+    "chat.usage.remaining": "剩余",
+    "chat.usage.percent": "占比",
+    "chat.usage.total": "总计",
+    "chat.usage.updated": "{{time}}更新",
+    "chat.usage.justNow": "刚刚",
+    "chat.usage.minutesAgo_one": "{{count}} 分钟前",
+    "chat.usage.minutesAgo_other": "{{count}} 分钟前",
+    "chat.usage.contextSummary": "上下文 {{percent}}% · {{used}} / {{size}}",
+    "chat.usage.composition": "上一轮 Token 构成",
+    "chat.usage.segment.input": "Input",
+    "chat.usage.segment.output": "Output",
+    "chat.usage.segment.thought": "Thought",
+    "chat.usage.segment.cachedRead": "Cache read",
+    "chat.usage.segment.cachedWrite": "Cache write",
+    "chat.usage.segment.unclassified": "未分类",
+    "chat.usage.segmentTooltip": "{{name}}：{{value}}（{{percent}}%）",
+    "chat.usage.formulaExact": "总计 {{total}} = {{parts}}",
+    "chat.usage.formulaGap":
+      "总计 {{total}} = 已上报分项 {{known}} + 未分类 {{gap}}。未分类表示 Agent 的总计中包含未单独提供的 Token 类别。",
+    "chat.usage.formulaOverlap":
+      "已上报分项合计 {{known}}，大于 Agent 上报的总计 {{total}}。部分字段可能存在包含或重叠关系，因此无法可靠相加。",
+    "chat.usage.zeroTotal":
+      "Agent 上报的总计为 0，因此不绘制构成图；上方仍保留其原始字段。",
     "chat.moreActions": "更多对话操作",
     "chat.permission.label": "权限模式",
     "chat.permission.always": "每次询问",
@@ -61,6 +109,10 @@ export const chatTranslations = {
     "chat.modelSelector.search": "搜索模型",
     "chat.modelSelector.noResults": "未找到匹配的模型",
     "chat.modelSelector.noAgentPackage": "从插件市场安装 Agent",
+    "chat.thoughtLevel.label": "选择思考强度",
+    "chat.thoughtLevel.title": "思考强度",
+    "chat.thoughtLevel.faster": "更快",
+    "chat.thoughtLevel.smarter": "更强",
     "chat.agentUnavailable.title": "当前 Agent 不可用",
     "chat.agentUnavailable.uninstalled":
       "当前 Agent 不可用，请切换 Agent 继续对话。",
@@ -73,6 +125,8 @@ export const chatTranslations = {
     "chat.historyNotice.unrecordedContent": "部分对话未能记录：{{reason}}",
     "chat.send": "发送消息",
     "chat.starting": "正在启动…",
+    "chat.unsupportedCommand":
+      "当前 Agent 插件不支持命令 {{command}}。继续发送可能会导致未知行为，但你仍可以发送。",
     "chat.commands.available": "可用命令",
     "chat.mode": "Agent 模式",
     "chat.actionMenu.label": "快捷操作",
@@ -107,6 +161,11 @@ export const chatTranslations = {
     "chat.loadingHistory": "正在加载历史记录…",
     "chat.emptyHistory": "尚无消息",
     "chat.typing": "助手正在运行",
+    "chat.elapsedTime": "耗时",
+    "chat.totalTime": "用时",
+    "chat.sessionSetup.connecting": "正在建立 Agent 会话",
+    "chat.sessionSetup.connected": "Agent 会话已建立",
+    "chat.sessionSetup.failed": "Agent 会话建立失败",
     "chat.runningWords":
       "思考中…|冥思中…|构思中…|酝酿中…|推演中…|琢磨中…|捣鼓中…|开动脑筋…|苦思冥想…|灵光闪现…|运转中…|加载脑洞…|盘算中…|推敲中…|排查中…|摸索中…|绞尽脑汁…|拼命运转…|一顿操作…|正在思索…|脑力全开…|深度思考…",
     "chat.thinking": "正在分析",
@@ -212,6 +271,9 @@ export const chatTranslations = {
     "chat.content.binaryResource": "二进制资源",
     "chat.content.download": "下载 {{name}}",
     "chat.turnCancelled": "本轮已停止",
+    "chat.turnRetrying": "正在重试 {{retry}}/{{maxRetries}}",
+    "chat.turnRetryUnreachable": "Agent 无响应",
+    "chat.turnRetriesExhausted": "Agent 仍无响应，已重试 {{maxRetries}} 次",
     "chat.turnFailed": "本轮执行失败",
     "chat.turnIncomplete": "响应可能不完整",
     "chat.turnRefused": "Agent 未执行此请求",
@@ -222,7 +284,6 @@ export const chatTranslations = {
     "chat.pickAgent": "请先选择一个 Agent，然后开始对话",
     "chat.pickAvailableAgent": "请先选择一个可用的Agent模型",
     "chat.agentEffectsNotReady": "Agent 正在同步项目技能，完成后即可发送",
-    "chat.copy": "复制",
     "chat.copyCode": "复制代码",
     "chat.codeCopied": "代码已复制",
     "chat.collapseCode": "收起代码",
@@ -252,6 +313,11 @@ export const chatTranslations = {
     "errors.agent_not_installed":
       "The plugin that supplies this agent is not installed.",
     "errors.agent_runtime_unavailable": "The agent runtime is unavailable.",
+    "errors.agent_start_failed":
+      "This agent could not be started. Check its plugin and local installation.",
+    "errors.agent_timed_out": "The agent did not respond in time. Try again.",
+    "errors.agent_model_discovery_failed":
+      "The models for this agent could not be listed.",
     "errors.session_busy": "The session is busy with another operation.",
     "errors.session_stopped":
       "The session lost its connection to the agent. Try again.",
@@ -302,6 +368,51 @@ export const chatTranslations = {
     "chat.contextBar.searchProjects": "Search projects",
     "chat.contextBar.noProjectsFound": "No projects found.",
     "chat.contextBar.defaultBranch": "main",
+    "chat.usage.waiting": "Waiting for usage",
+    "chat.usage.awaiting": "Awaiting usage",
+    "chat.usage.unavailable": "Usage unavailable",
+    "chat.usage.referenceInfo": "About usage statistics",
+    "chat.usage.disclaimer":
+      "Usage statistics are for reference only. They are not saved with conversation history and may update with a delay; completeness, accuracy, and accounting semantics depend on the agent's implementation.",
+    "chat.usage.contextTitle": "Current context usage",
+    "chat.usage.reloadEmpty":
+      "Usage data is not saved with conversation history. Send a message and, if the current agent supports ACP usage reporting, the latest data will appear here.",
+    "chat.usage.awaitingDetails":
+      "Waiting for the agent to report usage. Data may update during the response or after it finishes.",
+    "chat.usage.contextUnavailable":
+      "The current agent still did not report context usage after the previous interaction.",
+    "chat.usage.lastTurnTitle": "Previous-turn token usage",
+    "chat.usage.tokenAwaiting":
+      "Waiting for the previous response to finish and provide token data.",
+    "chat.usage.tokenUnavailable":
+      "The current agent did not provide token details for the previous turn.",
+    "chat.usage.tokenNeedsInteraction":
+      "After one turn completes, its token usage appears here if the agent reports it.",
+    "chat.usage.used": "Used",
+    "chat.usage.limit": "Limit",
+    "chat.usage.remaining": "Remaining",
+    "chat.usage.percent": "Percent",
+    "chat.usage.total": "Total",
+    "chat.usage.updated": "Updated {{time}}",
+    "chat.usage.justNow": "just now",
+    "chat.usage.minutesAgo_one": "{{count}} minute ago",
+    "chat.usage.minutesAgo_other": "{{count}} minutes ago",
+    "chat.usage.contextSummary": "Context {{percent}}% · {{used}} / {{size}}",
+    "chat.usage.composition": "Previous-turn token composition",
+    "chat.usage.segment.input": "Input",
+    "chat.usage.segment.output": "Output",
+    "chat.usage.segment.thought": "Thought",
+    "chat.usage.segment.cachedRead": "Cache read",
+    "chat.usage.segment.cachedWrite": "Cache write",
+    "chat.usage.segment.unclassified": "Unclassified",
+    "chat.usage.segmentTooltip": "{{name}}: {{value}} ({{percent}}%)",
+    "chat.usage.formulaExact": "Total {{total}} = {{parts}}",
+    "chat.usage.formulaGap":
+      "Total {{total}} = reported categories {{known}} + unclassified {{gap}}. Unclassified means the agent's total includes token categories it did not report separately.",
+    "chat.usage.formulaOverlap":
+      "Reported categories total {{known}}, which exceeds the agent-reported total of {{total}}. Some fields may include or overlap others, so they cannot be added reliably.",
+    "chat.usage.zeroTotal":
+      "The agent reported a total of zero, so no composition bar is shown; the raw fields remain above.",
     "chat.moreActions": "More conversation actions",
     "chat.permission.label": "Permission mode",
     "chat.permission.always": "Ask every time",
@@ -319,6 +430,10 @@ export const chatTranslations = {
     "chat.modelSelector.noResults": "No matching models",
     "chat.modelSelector.noAgentPackage":
       "Install an agent from the plugin marketplace",
+    "chat.thoughtLevel.label": "Select thought level",
+    "chat.thoughtLevel.title": "Thought level",
+    "chat.thoughtLevel.faster": "Faster",
+    "chat.thoughtLevel.smarter": "Smarter",
     "chat.agentUnavailable.title": "This session's agent is unavailable",
     "chat.agentUnavailable.uninstalled":
       "This session's agent is unavailable. Switch agents to continue the conversation.",
@@ -333,6 +448,8 @@ export const chatTranslations = {
       "Part of the conversation was not recorded: {{reason}}",
     "chat.send": "Send message",
     "chat.starting": "Starting…",
+    "chat.unsupportedCommand":
+      "The current Agent plugin does not support the command {{command}}. Sending it may lead to unexpected behavior, but you can still send it.",
     "chat.commands.available": "Available commands",
     "chat.mode": "Agent mode",
     "chat.actionMenu.label": "Quick actions",
@@ -373,6 +490,11 @@ export const chatTranslations = {
     "chat.loadingHistory": "Loading history…",
     "chat.emptyHistory": "No messages yet",
     "chat.typing": "Assistant is working",
+    "chat.elapsedTime": "Elapsed",
+    "chat.totalTime": "Took",
+    "chat.sessionSetup.connecting": "Establishing Agent session",
+    "chat.sessionSetup.connected": "Agent session established",
+    "chat.sessionSetup.failed": "Agent session setup failed",
     "chat.runningWords":
       "Thinking…|Pondering…|Imagining…|Conjuring…|Percolating…|Noodling…|Tinkering…|Brewing…|Musing…|Summoning…|Cooking…|Computing…|Ruminating…|Scheming…|Mulling…|Sifting…|Untangling…|Crunching…|Puzzling…|Deliberating…|Synthesizing…|Weighing options…",
     "chat.thinking": "Analyzing",
@@ -500,6 +622,10 @@ export const chatTranslations = {
     "chat.content.binaryResource": "Binary resource",
     "chat.content.download": "Download {{name}}",
     "chat.turnCancelled": "This turn was stopped",
+    "chat.turnRetrying": "Retrying {{retry}}/{{maxRetries}}",
+    "chat.turnRetryUnreachable": "The agent stopped responding",
+    "chat.turnRetriesExhausted":
+      "The agent never came back after {{maxRetries}} retries",
     "chat.turnFailed": "This turn failed",
     "chat.turnIncomplete": "The response may be incomplete",
     "chat.turnRefused": "The agent did not perform this request",
@@ -512,7 +638,6 @@ export const chatTranslations = {
     "chat.pickAvailableAgent":
       "Pick an available agent and model before starting a chat",
     "chat.agentEffectsNotReady": "The agent is syncing project Skills",
-    "chat.copy": "Copy",
     "chat.copyCode": "Copy code",
     "chat.codeCopied": "Code copied",
     "chat.collapseCode": "Collapse code",

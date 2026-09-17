@@ -8,9 +8,9 @@
 - Accepted updates run in internal tasks that retain the caller's request span and finish commit or rollback even when the transport request stops waiting.
 - Runtime updates reload the live filter before persisting the preferred level.
 - A persistence failure keeps the storage error primary and attempts to restore the previous effective level.
-- `RuntimeLogLevelState` reports the configured preference, current effective level, and immutable startup environment override.
+- `RuntimeLogLevelState` reports the configured preference and current effective level.
 - `RuntimeLogLevelControl` and asynchronous `PreferredLogLevelStore` define statically dispatched, testable boundaries for live filtering and Backend-owned persistence.
 
 ## Boundaries
 
-This crate does not read environment variables, define JSON schemas, initialize logging, expose HTTP or Tauri commands, or map failures into public contracts. Composition roots resolve startup precedence and runtime adapters own their storage formats. Callers must retain the logging writer guard separately for the process lifetime.
+This crate does not read environment variables, define JSON schemas, initialize logging, expose HTTP or Tauri commands, or map failures into public contracts. Composition roots restore startup preferences and runtime adapters own their storage formats. Callers must retain the logging writer guard separately for the process lifetime.

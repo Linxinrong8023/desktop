@@ -18,14 +18,18 @@ export function WorkflowEditorList() {
   );
   const managerError = useWorkflowEditorStore((state) => state.managerError);
   const actions = useWorkflowEditorStore((state) => state.actions);
+  const importedWorkflowIds = useWorkflowEditorStore(
+    (state) => state.importedWorkflowIds,
+  );
   const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed);
   const libraryWorkflows = useMemo(
     () =>
       (library.data ?? []).map((summary) => ({
         id: summary.id,
         name: summary.name,
+        imported: importedWorkflowIds.includes(summary.id),
       })),
-    [library.data],
+    [importedWorkflowIds, library.data],
   );
   const libraryError =
     library.error !== null ? localizeContractError(library.error, t) : null;
@@ -36,6 +40,7 @@ export function WorkflowEditorList() {
   return (
     <WorkflowManager
       workflows={libraryWorkflows}
+      libraryLoaded={library.data !== undefined}
       selectedWorkflowId={selectedWorkflowId}
       error={error}
       disabled={actions === null}
@@ -58,9 +63,10 @@ export function WorkflowEditorList() {
       onDelete={(workflowId) => {
         if (actions !== null) void actions.delete(workflowId);
       }}
-      onImport={(file) =>
-        actions === null ? Promise.resolve(false) : actions.importFile(file)
-      }
+      onImport={() => actions?.openImport()}
+      onExport={(workflowId) => {
+        if (actions !== null) void actions.exportFile(workflowId);
+      }}
     />
   );
 }

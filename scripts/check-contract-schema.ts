@@ -35,7 +35,7 @@ export async function checkContractSchema(): Promise<void> {
         `npm:ts-to-zod@${generatorVersion}`,
         path.relative(
           contractsDirectory,
-          path.join(sourceDirectory, "error.ts"),
+          path.join(sourceDirectory, "dto", "error.ts"),
         ),
         path.relative(contractsDirectory, output),
       ],

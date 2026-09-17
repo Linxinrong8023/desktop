@@ -1,3 +1,6 @@
+import type { MarketplaceAutoSyncEvent } from "@ora/contracts";
+export type { MarketplaceAutoSyncEvent } from "@ora/contracts";
+
 export type PathSelectionKind = "file" | "directory";
 
 export interface SelectPathOptions {
@@ -110,6 +113,9 @@ export interface PluginInstallProgress {
 export interface PluginMarketplaceCapability {
   onInstallProgress(
     listener: (progress: PluginInstallProgress) => void,
+  ): Promise<() => void>;
+  onAutoSyncChanged(
+    listener: (event: MarketplaceAutoSyncEvent) => void,
   ): Promise<() => void>;
 }
 

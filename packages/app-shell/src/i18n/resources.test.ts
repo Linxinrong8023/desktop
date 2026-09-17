@@ -20,6 +20,30 @@ describe("feature-owned translation resources", () => {
     );
   });
 
+  it.each(["zh-CN", "en-US"] as const)(
+    "assigns shared editing actions to Editor and retains Chat-specific copy in %s",
+    (locale) => {
+      for (const key of [
+        "chat.cut",
+        "chat.copy",
+        "chat.paste",
+        "chat.selectAll",
+      ] as const) {
+        expect(
+          Object.entries(featureTranslationResources)
+            .filter(([, bundle]) => key in bundle[locale])
+            .map(([owner]) => owner),
+        ).toEqual(["editor"]);
+        expect(translationResources[locale][key]).toBe(
+          featureTranslationResources.editor[locale][key],
+        );
+      }
+      expect(featureTranslationResources.chat[locale]["chat.copyCode"]).toBe(
+        locale === "zh-CN" ? "复制代码" : "Copy code",
+      );
+    },
+  );
+
   it("rejects duplicate ownership instead of letting a later feature overwrite copy", () => {
     const bundle = {
       "zh-CN": { "common.save": "保存" },

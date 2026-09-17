@@ -2,7 +2,11 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
-import type { ContractsClient, InstalledPlugin } from "@ora/contracts";
+import type {
+  ContractsClient,
+  InstalledPlugin,
+  PluginLogo,
+} from "@ora/contracts";
 import { toast } from "@ora/ui";
 import { AppI18nProvider } from "../../i18n/i18n";
 import { appI18n } from "../../i18n/i18n-instance";
@@ -10,6 +14,7 @@ import { ContractsClientContext } from "../../contracts-client-context";
 import { PlatformProvider, type PlatformAdapter } from "../../platform";
 import { createStubPlatform } from "../../test/stub-platform";
 import { usePluginOperationStore } from "../../state/stores/plugin-operation-store";
+import { useMarketplaceSyncStore } from "../../state/stores/marketplace-sync-store";
 import {
   createTestClient,
   type TestHandlers,
@@ -17,6 +22,7 @@ import {
 import { createPluginMemory, pluginHandlers } from "../../test/memory/plugins";
 import { PluginOperationEventBridge } from "./plugin-operation-event-bridge";
 import { PluginsSettings } from "./plugins-settings";
+import { useUiStore } from "../../state/stores/ui-store";
 
 /** State for this test surface; no unrelated domain fixtures are initialized. */
 function createFixtureState() {
@@ -37,6 +43,12 @@ void appI18n;
 
 afterEach(() => {
   act(() => usePluginOperationStore.setState({ activities: {} }));
+  act(() =>
+    useMarketplaceSyncStore.setState({
+      hostRefreshing: false,
+      userSyncing: false,
+    }),
+  );
 });
 
 /** Renders plugin settings with isolated query, contracts-client, and platform state. */
@@ -73,11 +85,13 @@ async function openManagePlugins(user: ReturnType<typeof userEvent.setup>) {
   );
 }
 
-/** The registry-supplied brand mark, already security-validated by the backend. */
-const WEATHER_LOGO =
-  '<svg xmlns="http://www.w3.org/2000/svg"><rect width="8"/></svg>';
+/** The host-local asset URL the backend hands out for a validated registry icon. */
+const WEATHER_LOGO: PluginLogo = {
+  variant: "universal",
+  url: "ora-plugin://localhost/logo/official/weather/universal.svg",
+};
 
-function clientWithWeather(logo: string | null = null) {
+function clientWithWeather(logo: PluginLogo | null = null) {
   const state = createFixtureState();
   // This file exercises install/import flows in isolation from the seeded agent
   // packages, so installed-plugin assertions can count exactly the fixture under test.
@@ -177,6 +191,77 @@ it("renders marketplace plugins from the registry index", async () => {
 });
 
 /** Installing goes through the backend and refreshes the installed surface. */
+it("adopts a deep-linked marketplace search once", async () => {
+  const { client } = clientWithWeather();
+  act(() =>
+    useUiStore
+      .getState()
+      .openPluginSettings({ kind: "marketplaceSearch", query: "weather" }),
+  );
+  renderSettings(client);
+
+  expect(await screen.findByText("Weather")).toBeInTheDocument();
+  expect(
+    screen.getByRole("textbox", { name: /搜索插件|Search plugins/ }),
+  ).toHaveValue("weather");
+  expect(useUiStore.getState().pluginSettingsRequest).toBeNull();
+  act(() => useUiStore.setState({ settingsOpen: false }));
+});
+
+it("opens a deep-linked plugin configuration inside plugin management", async () => {
+  const user = userEvent.setup();
+  const state = createFixtureState();
+  state.installedPlugins.push({
+    ...weatherInstalled(),
+    configuration: { state: "available", completeness: "incomplete" },
+  });
+  state.pluginConfigurations.set("official/weather", {
+    pluginId: "official/weather",
+    schemaVersion: 1,
+    revision: 0n,
+    declarationFingerprint: "declaration-1",
+    settings: [
+      {
+        declaration: {
+          id: "endpoint",
+          title: "Endpoint",
+          description: "Service URL",
+          type: "string",
+          required: true,
+          order: 1n,
+          default: null,
+        },
+        storedValue: null,
+        effectiveValue: null,
+        redacted: false,
+        source: "absent",
+        valueErrorCode: null,
+      },
+    ],
+    summary: { state: "available", completeness: "incomplete" },
+  });
+  act(() =>
+    useUiStore.getState().openPluginSettings({
+      kind: "configure",
+      pluginId: "official/weather",
+      displayName: "weather",
+    }),
+  );
+  renderSettings(createTestClient(createFixtureHandlers(state)));
+
+  expect(await screen.findByLabelText(/Endpoint/)).toBeInTheDocument();
+  expect(useUiStore.getState().pluginSettingsRequest).toBeNull();
+
+  // Leaving the editor returns to plugin management, not the marketplace grid.
+  await user.click(
+    screen.getByRole("button", { name: /管理插件|Manage plugins/ }),
+  );
+  expect(
+    await screen.findByRole("button", { name: /配置|Configure/ }),
+  ).toBeInTheDocument();
+  act(() => useUiStore.setState({ settingsOpen: false }));
+});
+
 it("installs a marketplace plugin through the backend", async () => {
   const user = userEvent.setup();
   const { state, client } = clientWithWeather();
@@ -227,6 +312,7 @@ it("shows marketplace plugin download progress", async () => {
         reportProgress = listener;
         return () => undefined;
       },
+      onAutoSyncChanged: async () => () => undefined,
     },
   };
   renderSettings(client, platform);
@@ -274,6 +360,7 @@ it("shows marketplace plugin update download progress", async () => {
         reportProgress = listener;
         return () => undefined;
       },
+      onAutoSyncChanged: async () => () => undefined,
     },
   };
   renderSettings(client, platform);
@@ -440,10 +527,7 @@ it("renders the brand mark shipped with a marketplace plugin", async () => {
 
   await screen.findByText("Weather");
   const logo = container.querySelector("img");
-  expect(logo).toHaveAttribute(
-    "src",
-    `data:image/svg+xml;charset=utf-8,${encodeURIComponent(WEATHER_LOGO)}`,
-  );
+  expect(logo).toHaveAttribute("src", WEATHER_LOGO.url);
 });
 
 /** Plugins that ship no mark keep the row shape by falling back to the generic plug icon. */
@@ -468,7 +552,7 @@ it("renders the brand mark of an installed plugin in the manager", async () => {
   await screen.findByText("official/weather");
   expect(container.querySelector("img")).toHaveAttribute(
     "src",
-    `data:image/svg+xml;charset=utf-8,${encodeURIComponent(WEATHER_LOGO)}`,
+    WEATHER_LOGO.url,
   );
   expect(
     screen.queryByRole("button", { name: /启动|Start/ }),
@@ -845,6 +929,59 @@ it("opens the README page when a marketplace card is clicked", async () => {
   ).toBeInTheDocument();
 });
 
+/** An uninstalled listing keeps the marketplace install command available on its detail page. */
+it("installs an uninstalled plugin from its detail header", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithWeather();
+  renderSettings(client);
+
+  await user.click(await screen.findByText("Weather"));
+  await user.click(await screen.findByRole("button", { name: /安装|Install/ }));
+
+  await waitFor(() => expect(state.installedPlugins).toHaveLength(1));
+  expect(
+    await screen.findByRole("button", { name: /卸载|Uninstall/ }),
+  ).toBeInTheDocument();
+});
+
+/** An older installed release exposes update, then changes to uninstall after refreshing. */
+it("updates an outdated plugin from its detail header", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithWeather();
+  state.installedPlugins.push({ ...weatherInstalled(), version: "1.1.0" });
+  renderSettings(client);
+
+  await user.click(await screen.findByText("Weather"));
+  await user.click(await screen.findByRole("button", { name: /更新|Update/ }));
+
+  await waitFor(() => expect(state.installedPlugins[0]?.version).toBe("1.2.0"));
+  expect(
+    await screen.findByRole("button", { name: /卸载|Uninstall/ }),
+  ).toBeInTheDocument();
+});
+
+/** A current installed release uses the existing confirmation flow before uninstalling. */
+it("uninstalls a current plugin from its detail header", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithWeather();
+  state.installedPlugins.push(weatherInstalled());
+  renderSettings(client);
+
+  await user.click(await screen.findByText("Weather"));
+  await user.click(
+    await screen.findByRole("button", { name: /卸载|Uninstall/ }),
+  );
+  const dialog = await screen.findByRole("alertdialog");
+  await user.click(
+    within(dialog).getByRole("button", { name: /卸载|Uninstall/ }),
+  );
+
+  await waitFor(() => expect(state.installedPlugins).toHaveLength(0));
+  expect(
+    await screen.findByRole("button", { name: /安装|Install/ }),
+  ).toBeInTheDocument();
+});
+
 /** The README page breadcrumb returns to the marketplace grid. */
 it("returns from the README page to the marketplace grid", async () => {
   const user = userEvent.setup();
@@ -880,4 +1017,73 @@ it("keeps marketplace descriptions to a single truncated line", async () => {
   const description = await screen.findByText("Weather plugin");
   expect(description).toHaveClass("truncate");
   expect(description).not.toHaveClass("line-clamp-2");
+});
+
+/**
+ * The rebuild outlives this page, so leaving it mid-sync and coming back must not restore a
+ * button that looks ready: pressing it again would start a second rebuild.
+ */
+it("keeps the sync action disabled across leaving and reopening the page", async () => {
+  const user = userEvent.setup();
+  const { client, handlers } = clientWithWeather();
+  let settle: (() => void) | undefined;
+  vi.spyOn(handlers, "syncAvailablePlugins").mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        settle = () => resolve({ updatedAt: 0n, plugins: [] });
+      }),
+  );
+  const view = renderSettings(client);
+
+  await user.click(
+    await screen.findByRole("button", {
+      name: /同步插件市场|Sync plugin marketplace/,
+    }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", {
+        name: /同步插件市场|Sync plugin marketplace/,
+      }),
+    ).toBeDisabled(),
+  );
+
+  // Leaving the settings page tears the mutation down; the rebuild behind it keeps going.
+  view.unmount();
+  renderSettings(client);
+
+  const reopened = await screen.findByRole("button", {
+    name: /同步插件市场|Sync plugin marketplace/,
+  });
+  expect(reopened).toBeDisabled();
+
+  await act(async () => {
+    settle?.();
+    await Promise.resolve();
+  });
+
+  await waitFor(() => expect(reopened).toBeEnabled());
+});
+
+/**
+ * The host admits one marketplace rebuild at a time and discards the rest, so the Sync action
+ * stands down while the host is refreshing on its own rather than letting a click be dropped.
+ */
+it("disables the sync action while the host is refreshing the marketplace", async () => {
+  const { client } = clientWithWeather();
+  renderSettings(client);
+
+  const sync = await screen.findByRole("button", {
+    name: /同步插件市场|Sync plugin marketplace/,
+  });
+  expect(sync).toBeEnabled();
+
+  act(() => useMarketplaceSyncStore.getState().setHostRefreshing(true));
+
+  await waitFor(() => expect(sync).toBeDisabled());
+  expect(within(sync).getByText(/正在同步…|Syncing…/)).toBeInTheDocument();
+
+  act(() => useMarketplaceSyncStore.getState().setHostRefreshing(false));
+
+  await waitFor(() => expect(sync).toBeEnabled());
 });

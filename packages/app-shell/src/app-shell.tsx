@@ -19,6 +19,7 @@ import { WorkspaceSidebar } from "./features/workspace/workspace-sidebar";
 import { WorkspaceView } from "./features/workspace/workspace-view";
 import { WorkspaceDialogs } from "./features/workspace/workspace-dialogs";
 import { SettingsDialog } from "./features/settings/settings-dialog";
+import { MarketplaceAutoSyncBridge } from "./features/settings/marketplace-auto-sync-bridge";
 import { PluginOperationEventBridge } from "./features/settings/plugin-operation-event-bridge";
 import { SurfaceDownloadPrompt } from "./features/surface/surface-download-prompt";
 import { SurfaceDownloadToaster } from "./features/surface/surface-download-toaster";
@@ -29,6 +30,7 @@ import type { CurrentUser } from "./lib/types";
 import { createAppQueryClient } from "./state/query-client";
 import { useGitIdentityUser } from "./state/hooks/use-git-identity";
 import { useGraphWorkflowRunLiveSync } from "./state/data/mock-workflow-runs";
+import { useDefaultAgentAdoption } from "./state/hooks/use-default-agent-adoption";
 import { useSessionUnreadSync } from "./state/hooks/use-session-unread-sync";
 import { useUiStore } from "./state/stores/ui-store";
 import { startThemeSubscription } from "./state/stores/settings-store";
@@ -78,6 +80,19 @@ export function AppShell({
       </AppI18nProvider>
     </QueryClientProvider>
   );
+}
+
+/**
+ * Points a first run at an agent, from inside the contracts client provider.
+ *
+ * A component rather than a call in `AppShellContent`: the provider this reads through is part of
+ * that component's own output, so a hook placed beside its other state hooks would run a render
+ * too early to reach a client. It is mounted next to the dialogs instead of inside a chat surface
+ * because the preference is app-wide — the session dialog reads it with no composer open.
+ */
+function DefaultAgentAdoption() {
+  useDefaultAgentAdoption();
+  return null;
 }
 
 /** Renders the shell inside providers so stateful hooks can consume the active locale. */
@@ -198,7 +213,9 @@ function AppShellContent({
                 </ResizablePanel>
               </ResizablePanelGroup>
               <SettingsDialog />
+              <DefaultAgentAdoption />
               <PluginOperationEventBridge />
+              <MarketplaceAutoSyncBridge />
               <SurfaceEventBridge />
               <SurfaceDownloadToaster />
               <SurfaceDownloadPrompt />

@@ -205,6 +205,7 @@ impl UpdateService {
             .inner
             .settings
             .network_proxy_settings()
+            .await
             .map_err(|error| UpdateError::ProxySettings(error.to_string()))?
         {
             updater_builder = updater_builder.proxy(proxy_url(&settings)?);

@@ -17,6 +17,8 @@ pub(crate) enum SessionMcpErrorCode {
     RevisionChanged,
     ConfigurationUnavailable,
     CatalogUnavailable,
+    SelectedPluginUnavailable,
+    ConfigurationIncomplete,
 }
 
 impl SessionMcpErrorCode {
@@ -32,6 +34,8 @@ impl SessionMcpErrorCode {
             Self::RevisionChanged => "mcp_revision_changed",
             Self::ConfigurationUnavailable => "mcp_configuration_unavailable",
             Self::CatalogUnavailable => "mcp_catalog_unavailable",
+            Self::SelectedPluginUnavailable => "mcp_selected_plugin_unavailable",
+            Self::ConfigurationIncomplete => "mcp_configuration_incomplete",
         }
     }
 }
@@ -85,6 +89,16 @@ pub(crate) enum SessionMcpError {
     ConfigurationUnavailable { plugin_id: PluginId },
     #[error("installed MCP catalog could not be read")]
     CatalogUnavailable,
+    #[error("selected MCP plugin `{plugin_id}` is not installed")]
+    SelectedPluginUnavailable { plugin_id: PluginId },
+    #[error(
+        "selected MCP plugin `{plugin_id}` configuration is incomplete (transport {transport})",
+        transport = transport.as_str()
+    )]
+    ConfigurationIncomplete {
+        plugin_id: PluginId,
+        transport: SessionMcpTransportKind,
+    },
 }
 
 impl SessionMcpError {
@@ -100,19 +114,25 @@ impl SessionMcpError {
             Self::RevisionChanged { .. } => SessionMcpErrorCode::RevisionChanged,
             Self::ConfigurationUnavailable { .. } => SessionMcpErrorCode::ConfigurationUnavailable,
             Self::CatalogUnavailable => SessionMcpErrorCode::CatalogUnavailable,
+            Self::SelectedPluginUnavailable { .. } => {
+                SessionMcpErrorCode::SelectedPluginUnavailable
+            }
+            Self::ConfigurationIncomplete { .. } => SessionMcpErrorCode::ConfigurationIncomplete,
         }
     }
 
-    fn plugin_id(&self) -> Option<&PluginId> {
+    fn plugin_id(&self) -> Option<String> {
         match self {
             Self::LoadCapabilityMissing | Self::CatalogUnavailable => None,
-            Self::HttpCapabilityMissing { plugin_id }
+            Self::SelectedPluginUnavailable { plugin_id }
+            | Self::ConfigurationIncomplete { plugin_id, .. }
+            | Self::HttpCapabilityMissing { plugin_id }
             | Self::SettingMissing { plugin_id, .. }
             | Self::IllegalRuntimeText { plugin_id, .. }
             | Self::CommandNotInPackage { plugin_id }
             | Self::WorkspaceCwdUnresolved { plugin_id }
-            | Self::ConfigurationUnavailable { plugin_id } => Some(plugin_id),
-            Self::RevisionChanged { plugin_id } => plugin_id.as_ref(),
+            | Self::ConfigurationUnavailable { plugin_id } => Some(plugin_id.canonical()),
+            Self::RevisionChanged { plugin_id } => plugin_id.as_ref().map(PluginId::canonical),
         }
     }
 
@@ -126,7 +146,9 @@ impl SessionMcpError {
             | Self::WorkspaceCwdUnresolved { .. }
             | Self::RevisionChanged { .. }
             | Self::ConfigurationUnavailable { .. }
-            | Self::CatalogUnavailable => None,
+            | Self::CatalogUnavailable
+            | Self::SelectedPluginUnavailable { .. }
+            | Self::ConfigurationIncomplete { .. } => None,
         }
     }
 
@@ -134,14 +156,15 @@ impl SessionMcpError {
         match self {
             Self::HttpCapabilityMissing { .. } => Some(SessionMcpTransportKind::Http),
             Self::CommandNotInPackage { .. } => Some(SessionMcpTransportKind::Stdio),
-            Self::SettingMissing { transport, .. } | Self::IllegalRuntimeText { transport, .. } => {
-                Some(*transport)
-            }
+            Self::SettingMissing { transport, .. }
+            | Self::IllegalRuntimeText { transport, .. }
+            | Self::ConfigurationIncomplete { transport, .. } => Some(*transport),
             Self::LoadCapabilityMissing
             | Self::WorkspaceCwdUnresolved { .. }
             | Self::RevisionChanged { .. }
             | Self::ConfigurationUnavailable { .. }
-            | Self::CatalogUnavailable => None,
+            | Self::CatalogUnavailable
+            | Self::SelectedPluginUnavailable { .. } => None,
         }
     }
 
@@ -152,7 +175,7 @@ impl SessionMcpError {
         }
         PublicError::SessionMcpSetupFailed(Box::new(SessionMcpSetupFailedParams {
             error_code: self.code().as_str().to_string(),
-            plugin_id: self.plugin_id().map(PluginId::canonical),
+            plugin_id: self.plugin_id(),
             setting_id: self.setting_id().map(str::to_string),
             transport: self.transport().map(|kind| kind.as_str().to_string()),
         }))

@@ -7,11 +7,14 @@ use ora_plugin_manifest::PluginManifest;
 
 use crate::entry::{RegistryEntry, entry_id};
 use crate::error::RegistryError;
-use crate::logo;
 use crate::source::RegistrySource;
 
 /// The index schema version reported in every built index file.
-const INDEX_VERSION: &str = "1.0";
+///
+/// It is bumped whenever a persisted field changes shape rather than merely appearing: a new
+/// field with a serde default is readable from an older cache, but `logo` turning from SVG
+/// source text into an object is a type mismatch that no default can absorb.
+const INDEX_VERSION: &str = "2.0";
 
 /// Holds one immutable registry index that lists every discoverable marketplace plugin.
 ///
@@ -45,7 +48,10 @@ impl RegistryIndex {
             for path in orax_manifest_paths(&source.registry_dir()) {
                 match parse_manifest(&path) {
                     Ok(manifest) => {
-                        let logo = logo::read_beside_manifest(&path);
+                        // The icon lives beside the manifest under one of the fixed candidate
+                        // names; the same scan runs against an installed package root, so a
+                        // listing and its install can never resolve to different icons.
+                        let logo = path.parent().and_then(ora_plugin_asset::resolve_logo);
                         entries.push(RegistryEntry::from_manifest(
                             &manifest,
                             source.namespace(),
@@ -107,6 +113,20 @@ impl RegistryIndex {
         crate::readme::read_beside_manifest(&path)
     }
 
+    /// Resolves the entry directory `id` is published from in `source`.
+    ///
+    /// This is what the icon protocol resolves a plugin id against for a listing that is not
+    /// installed: the entry directory is the only place a marketplace icon exists, and it is
+    /// already the directory `resolve_readme` reads by id, so no new part of the checkout becomes
+    /// reachable.
+    pub fn resolve_entry_directory(
+        source: &RegistrySource,
+        id: &PluginId,
+    ) -> Result<Option<PathBuf>, RegistryError> {
+        Ok(Self::find_manifest_path(source, id)?
+            .and_then(|path| path.parent().map(Path::to_path_buf)))
+    }
+
     /// Locates the manifest in `source` whose identity under that source's namespace equals `id`.
     fn find_manifest_path(
         source: &RegistrySource,
@@ -148,10 +168,40 @@ impl RegistryIndex {
         Ok(None)
     }
 
-    /// Loads an index from a previously written JSON file so consumers can read it without rescanning.
+    /// Loads an index from a previously written JSON file so consumers can read it without
+    /// rescanning, refusing one written under a different schema version.
+    ///
+    /// The version check is what the field was always for. Without it a host upgraded past a
+    /// shape change would try to deserialize a cache it cannot understand, and the failure would
+    /// surface as a broken marketplace rather than as an index that simply has to be rebuilt.
     pub fn load(path: &Path) -> Result<Self, RegistryError> {
         let bytes = fs::read(path)?;
-        Ok(serde_json::from_slice(&bytes)?)
+        let index: Self = serde_json::from_slice(&bytes)?;
+        if index.version != INDEX_VERSION {
+            return Err(RegistryError::UnsupportedIndexVersion {
+                found: index.version,
+                expected: INDEX_VERSION.to_owned(),
+            });
+        }
+        Ok(index)
+    }
+
+    /// Returns whether `error` means the cached index cannot be read and must be rebuilt.
+    ///
+    /// A cache is a derived artifact, so "written by another schema", "corrupt" and "not there
+    /// yet" are one situation with one remedy — sync again. Callers use this to fold all three
+    /// into the same not-yet-synced response instead of turning two of them into an error the
+    /// user cannot act on.
+    pub fn is_unusable_cache(error: &RegistryError) -> bool {
+        match error {
+            RegistryError::Io(error) => error.kind() == std::io::ErrorKind::NotFound,
+            RegistryError::Json(_) | RegistryError::UnsupportedIndexVersion { .. } => true,
+            RegistryError::Git(_)
+            | RegistryError::Manifest(_)
+            | RegistryError::SourceUrl(_)
+            | RegistryError::SourceBranch(_)
+            | RegistryError::MissingCloneParent(_) => false,
+        }
     }
 
     /// Atomically replaces `path` with this index's JSON serialization through a same-directory
@@ -253,6 +303,7 @@ mod tests {
     use super::*;
     use gitlancer::BranchName;
     use ora_domain::PluginNamespace;
+    use ora_plugin_asset::{LogoCandidate, LogoExtension, LogoRole, PluginLogoVariants};
     use pretty_assertions::assert_eq;
     use std::fs;
     use tempfile::TempDir;
@@ -432,6 +483,43 @@ mod tests {
         Ok(())
     }
 
+    /// Verifies an id resolves to an entry directory only in the source whose namespace owns it.
+    ///
+    /// This is what keeps the icon protocol's second root from becoming a way to address any
+    /// directory in any checkout: the namespace is part of the id, so a source that does not
+    /// publish that namespace answers nothing at all rather than searching its own tree.
+    #[test]
+    fn resolves_an_entry_directory_only_in_the_owning_source()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = TempDir::new()?;
+        let manifest_path = write_manifest(
+            root.path(),
+            "weather",
+            &valid_manifest("weather", "Weather plugin"),
+        )?;
+        let entry_dir = manifest_path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("no parent"))?
+            .to_path_buf();
+        let official = official_source(root.path());
+        let third_party = third_party_source(root.path());
+        let id = PluginId::new("official", "weather").expect("plugin id");
+
+        assert_eq!(
+            (
+                RegistryIndex::resolve_entry_directory(&official, &id)?,
+                // The same checkout, read through a source publishing another namespace.
+                RegistryIndex::resolve_entry_directory(&third_party, &id)?,
+                RegistryIndex::resolve_entry_directory(
+                    &official,
+                    &PluginId::new("official", "absent").expect("plugin id"),
+                )?,
+            ),
+            (Some(entry_dir), None, None)
+        );
+        Ok(())
+    }
+
     /// Verifies detail-page resolution reads the README beside the matching manifest.
     #[test]
     fn resolves_readme_beside_a_manifest() -> Result<(), Box<dyn std::error::Error>> {
@@ -462,9 +550,10 @@ mod tests {
         Ok(())
     }
 
-    /// Verifies the `logo.svg` beside a manifest is inlined into that entry's index record.
+    /// Verifies the icon beside a manifest is indexed as the composition it resolves to.
     #[test]
-    fn inlines_the_logo_beside_each_manifest() -> Result<(), Box<dyn std::error::Error>> {
+    fn indexes_the_logo_composition_beside_each_manifest() -> Result<(), Box<dyn std::error::Error>>
+    {
         let root = TempDir::new()?;
         let logo = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="8"/></svg>"#;
         let manifest_path = write_manifest(root.path(), "a", &valid_manifest("a", "A plugin"))?;
@@ -477,8 +566,21 @@ mod tests {
 
         let build = RegistryIndex::build_all(&[&source], UPDATED_AT);
 
-        assert_eq!(build.index().plugins()[0].logo(), Some(logo));
-        assert_eq!(build.index().plugins()[1].logo(), None);
+        assert_eq!(
+            (
+                build.index().plugins()[0].logo(),
+                build.index().plugins()[1].logo(),
+            ),
+            (
+                Some(PluginLogoVariants::Universal {
+                    universal: LogoCandidate {
+                        role: LogoRole::Universal,
+                        extension: LogoExtension::Svg,
+                    },
+                }),
+                None,
+            )
+        );
         Ok(())
     }
 
@@ -619,6 +721,94 @@ mod tests {
             .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp"))
             .count();
         assert_eq!(leftover_temps, 0);
+        Ok(())
+    }
+
+    /// Verifies a cache written under another schema version is refused rather than reinterpreted.
+    ///
+    /// The version field has always been written and never read. Reading it is what makes a shape
+    /// change survivable: `logo` turning from source text into an object is a type mismatch, so
+    /// deserializing the old file under the new schema would fail somewhere less specific — or,
+    /// for a field that happened to stay compatible, succeed and hand back a half-understood
+    /// index.
+    #[test]
+    fn refuses_a_cache_written_under_another_schema_version()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = TempDir::new()?;
+        write_manifest(root.path(), "a", &valid_manifest("a", "A plugin"))?;
+        let source = official_source(root.path());
+        let target = root.path().join("registry_index.json");
+        RegistryIndex::build_all(&[&source], UPDATED_AT)
+            .index()
+            .write(&target)?;
+
+        let mut stored: serde_json::Value = serde_json::from_str(&fs::read_to_string(&target)?)?;
+        stored["version"] = serde_json::Value::String("1.0".to_owned());
+        fs::write(&target, serde_json::to_string(&stored)?)?;
+
+        assert!(matches!(
+            RegistryIndex::load(&target),
+            Err(RegistryError::UnsupportedIndexVersion { .. })
+        ));
+        Ok(())
+    }
+
+    /// Verifies the three ways a cache can be unreadable are one situation with one remedy.
+    ///
+    /// Absent, corrupt and written-by-another-schema all mean the derived file has to be rebuilt
+    /// by a sync; a genuine failure such as an unparseable manifest does not, and must stay
+    /// distinguishable so it can still surface as an error.
+    #[test]
+    fn classifies_every_unreadable_cache_as_one_that_must_be_rebuilt()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = TempDir::new()?;
+        let corrupt = root.path().join("corrupt.json");
+        fs::write(&corrupt, "{ not json")?;
+        let stale = root.path().join("stale.json");
+        fs::write(&stale, r#"{"updated_at":1,"version":"0.9","plugins":[]}"#)?;
+
+        let missing = RegistryIndex::load(&root.path().join("absent.json"))
+            .expect_err("a missing cache does not load");
+        let corrupt = RegistryIndex::load(&corrupt).expect_err("a corrupt cache does not load");
+        let stale = RegistryIndex::load(&stale).expect_err("a stale cache does not load");
+        let unrelated = RegistryError::MissingCloneParent(root.path().to_path_buf());
+
+        assert_eq!(
+            [
+                RegistryIndex::is_unusable_cache(&missing),
+                RegistryIndex::is_unusable_cache(&corrupt),
+                RegistryIndex::is_unusable_cache(&stale),
+                RegistryIndex::is_unusable_cache(&unrelated),
+            ],
+            [true, true, true, false]
+        );
+        Ok(())
+    }
+
+    /// Verifies an index rewritten in the current shape reads back normally afterwards.
+    #[test]
+    fn a_rebuilt_index_reads_back_normally() -> Result<(), Box<dyn std::error::Error>> {
+        let root = TempDir::new()?;
+        let manifest_path = write_manifest(root.path(), "a", &valid_manifest("a", "A plugin"))?;
+        let entry_dir = manifest_path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("no parent"))?;
+        fs::write(
+            entry_dir.join("logo.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="8"/></svg>"#,
+        )?;
+        let source = official_source(root.path());
+        let target = root.path().join("registry_index.json");
+
+        // A cache from before the shape change, then the rewrite one sync performs.
+        fs::write(&target, r#"{"updated_at":1,"version":"1.0","plugins":[]}"#)?;
+        assert!(RegistryIndex::load(&target).is_err());
+        let rebuilt = RegistryIndex::build_all(&[&source], UPDATED_AT)
+            .index()
+            .clone();
+        rebuilt.write(&target)?;
+
+        assert_eq!(RegistryIndex::load(&target)?, rebuilt);
         Ok(())
     }
 

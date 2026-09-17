@@ -1,3 +1,4 @@
+import { marketplaceAutoSyncWire } from "./marketplace-sync-fixtures.generated";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -141,6 +142,32 @@ describe("TauriPlatformAdapter", () => {
       downloaded: 4,
       total: 10,
     });
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it("consumes Rust-serialized auto-sync events and releases the native listener", async () => {
+    const stop = vi.fn();
+    const listener = vi.fn();
+    let forward: ((event: { payload: unknown }) => void) | undefined;
+    listenMock.mockImplementation(async (_event, handler) => {
+      forward = handler as (event: { payload: unknown }) => void;
+      return stop;
+    });
+    const adapter = createTauriPlatformAdapter();
+    const unsubscribe =
+      await adapter.pluginMarketplace.onAutoSyncChanged(listener);
+    for (const payload of marketplaceAutoSyncWire.payloads)
+      forward?.({ payload });
+    unsubscribe();
+
+    expect(listenMock).toHaveBeenCalledWith(
+      marketplaceAutoSyncWire.route,
+      expect.any(Function),
+    );
+    expect(listener.mock.calls).toEqual([
+      [{ kind: "started" }],
+      [{ kind: "finished" }],
+    ]);
     expect(stop).toHaveBeenCalledOnce();
   });
 

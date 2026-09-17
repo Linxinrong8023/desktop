@@ -1,9 +1,9 @@
 //! Immutable build parameters of one surface webview, derived from the registry record.
 
 use crate::surface::web_data::ResolvedWebData;
+use ora_plugin_asset::AssetUrlForm;
 use ora_surface::{
-    AssetUrlForm, NavigationPolicy, SurfaceRecord, SurfaceSource, WebviewLabel, asset_base,
-    entry_url,
+    NavigationPolicy, SurfaceRecord, SurfaceSource, WebviewLabel, asset_base, entry_url,
 };
 
 /// Injected into every workbench webview; defines `window.ora`.

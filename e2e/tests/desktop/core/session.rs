@@ -2,6 +2,7 @@
 
 mod tests {
     mod lifecycle;
+    mod workflow_mcp;
 
     use crate::setup::DesktopTestSetup;
     use agent_client_protocol_schema::v1::{
@@ -419,7 +420,7 @@ mod tests {
         let mut stream = sending.await?;
         let mut updates = Vec::new();
         while let Some(event) = stream.recv().await {
-            if let PromptSessionEvent::SessionUpdate { update } = event? {
+            if let PromptSessionEvent::SessionUpdate { update, .. } = event? {
                 updates.push(update);
             }
         }

@@ -52,15 +52,22 @@ mod tests {
         );
     }
 
-    /// Verifies the response mode remains explicit for streaming operations.
+    /// Locks the complete stream operation set so response-mode changes require explicit review.
     #[test]
     fn identifies_stream_operations() {
         assert_eq!(
             frontend_endpoints()
                 .into_iter()
-                .find(|endpoint| endpoint.operation_name == "watchAppEvents")
-                .map(|endpoint| endpoint.response_mode),
-            Some(FrontendResponseMode::Stream)
+                .filter(|endpoint| endpoint.response_mode == FrontendResponseMode::Stream)
+                .map(|endpoint| endpoint.operation_name)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "loadSession",
+                "promptSession",
+                "watchWorkspace",
+                "watchProject",
+                "watchAppEvents",
+            ])
         );
     }
 

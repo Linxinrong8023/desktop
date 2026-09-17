@@ -1,6 +1,9 @@
+mod listing;
+mod logo_roots;
 mod marketplace;
 mod operations;
-pub use operations::Plugins;
+mod registry_sync;
+pub use operations::{AdmittedSync, Plugins};
 
 use crate::app_event::AppEventPublisher;
 use crate::clock::SystemClock;
@@ -11,19 +14,16 @@ use crate::marketplace_sources::{
 };
 use crate::proxy;
 use crate::settings::Settings;
-use gitlancer::{CliGitRunner, Git};
 use ora_application::Clock;
 use ora_contracts::{
     ActivatePluginRequest, ActivatePluginResponse, AddMarketplaceSourceRequest,
     AddMarketplaceSourceResponse, DeleteMarketplaceSourceRequest, DeleteMarketplaceSourceResponse,
     EmptyErrorParams, ImportPluginRequest, ImportPluginResponse, InstallOutcome,
-    ListAvailablePluginsRequest, ListAvailablePluginsResponse, ListInstalledPluginsRequest,
-    ListInstalledPluginsResponse, ListMarketplaceSourcesRequest, ListMarketplaceSourcesResponse,
-    MarketplaceArtifactRetrieval, PluginHostCompatibility, PublicError, ReadPluginReadmeRequest,
-    ReadPluginReadmeResponse, ScanPluginsRequest, ScanPluginsResponse, StopPluginRequest,
-    StopPluginResponse, SyncAvailablePluginsRequest, SyncAvailablePluginsResponse,
-    UninstallPluginRequest, UninstallPluginResponse, UpdateMarketplaceSourceRequest,
-    UpdateMarketplaceSourceResponse,
+    ListInstalledPluginsRequest, ListInstalledPluginsResponse, ListMarketplaceSourcesRequest,
+    ListMarketplaceSourcesResponse, MarketplaceArtifactRetrieval, PublicError,
+    ReadPluginReadmeRequest, ReadPluginReadmeResponse, ScanPluginsRequest, ScanPluginsResponse,
+    StopPluginRequest, StopPluginResponse, UninstallPluginRequest, UninstallPluginResponse,
+    UpdateMarketplaceSourceRequest, UpdateMarketplaceSourceResponse,
 };
 use ora_db::{
     PluginSkillProjection, RepositoryPool, SqliteEffectRepository,
@@ -40,10 +40,9 @@ use ora_plugin_lifecycle::{
     PluginLifecycleError, PluginNotificationSink, PluginRuntimeTimeouts,
 };
 use ora_plugin_manager::{Installer, PluginContribution, PluginManager};
-use ora_plugin_registry::{RegistryEntry, RegistryError, RegistryIndex, RegistrySync};
+use ora_plugin_registry::RegistryIndex;
 use ora_utils::http::{ProxyConfig, ReqwestDownloader, S3Config};
-use ora_utils::url::canonical_repository_url;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
@@ -166,6 +165,8 @@ pub(crate) struct PluginApi {
     pub(crate) lifecycle: BackendPluginLifecycle,
     marketplace_sources: MarketplaceSourceStore,
     settings: Arc<Settings>,
+    // Synchronous Git/cache rebuilds already run on the host blocking executor.
+    sync_settings: ora_application::UserConfigService<ora_db::SqliteUserConfigRepository>,
     registry_index_path: PathBuf,
     home_directory: PathBuf,
     installer: Installer<ReqwestDownloader>,
@@ -175,6 +176,12 @@ pub(crate) struct PluginApi {
     pub(crate) effect_repository: SqliteEffectRepository,
     workspace_repository: SqliteWorkspaceRepository,
     agent_effect_declarations: Mutex<BTreeMap<PluginId, ConsumerDeclaration>>,
+    /// Admits at most one marketplace index rebuild at a time.
+    ///
+    /// A rebuild drives the Git CLI over shared source checkouts and then replaces one cache
+    /// file, so two of them must never overlap. It guards no value of its own: holding it *is*
+    /// the rebuild slot.
+    rebuilding: Mutex<()>,
     /// Set once the Effect worker exists, which is after this API the worker itself borrows.
     ///
     /// Its absence only costs latency: a declaration change is already durable before the wake
@@ -227,6 +234,10 @@ impl PluginApi {
             lifecycle,
             marketplace_sources,
             settings,
+            // Synchronous Git/cache rebuilds already run on the host blocking executor.
+            sync_settings: ora_application::UserConfigService::new(
+                ora_db::SqliteUserConfigRepository::new(pool.clone()),
+            ),
             registry_index_path,
             home_directory,
             installer,
@@ -236,6 +247,7 @@ impl PluginApi {
             effect_repository: SqliteEffectRepository::new(pool.clone()),
             workspace_repository: SqliteWorkspaceRepository::new(pool),
             agent_effect_declarations: Mutex::new(BTreeMap::new()),
+            rebuilding: Mutex::new(()),
             effect_reconcile: OnceLock::new(),
             mcp_wakeup: OnceLock::new(),
             clock,
@@ -283,40 +295,6 @@ impl PluginApi {
             }
         }
         Ok(())
-    }
-
-    /// Returns the cached marketplace registry index, excluding listings from disabled sources.
-    pub(crate) fn list_available_plugins(
-        &self,
-        _request: ListAvailablePluginsRequest,
-    ) -> Result<ListAvailablePluginsResponse, BackendError> {
-        let mut response = match RegistryIndex::load(&self.registry_index_path) {
-            Ok(index) => ListAvailablePluginsResponse {
-                updated_at: index.updated_at(),
-                plugins: index.plugins().iter().map(available_plugin).collect(),
-            },
-            Err(RegistryError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                ListAvailablePluginsResponse {
-                    updated_at: 0,
-                    plugins: Vec::new(),
-                }
-            }
-            Err(error) => {
-                return Err(BackendError::internal(
-                    "failed to load plugin registry index",
-                    error,
-                ));
-            }
-        };
-        let enabled_urls: HashSet<String> = self
-            .enabled_marketplace_sources()?
-            .into_iter()
-            .map(|source| canonical_repository_url(&source.source().url))
-            .collect();
-        response
-            .plugins
-            .retain(|plugin| enabled_urls.contains(&canonical_repository_url(&plugin.source_url)));
-        Ok(response)
     }
 
     /// Returns the user-configured marketplace source repositories in precedence order.
@@ -378,46 +356,6 @@ impl PluginApi {
             .update(request, self.clock.now_timestamp_millis())
             .map_err(map_marketplace_source_error)?;
         Ok(UpdateMarketplaceSourceResponse { sources })
-    }
-
-    /// Pulls every marketplace source, merges their registry indexes, and atomically replaces the
-    /// cache.
-    pub(crate) fn sync_available_plugins(
-        &self,
-        _request: SyncAvailablePluginsRequest,
-    ) -> Result<SyncAvailablePluginsResponse, BackendError> {
-        let git = Git::new(CliGitRunner);
-        let registry_sources = self.prepared_registry_sources()?;
-        for (source, _, _) in &registry_sources {
-            RegistrySync::sync(&git, source)
-                .map_err(|error| BackendError::internal("failed to sync plugin registry", error))?;
-        }
-        let synced: Vec<&ora_plugin_registry::RegistrySource> = registry_sources
-            .iter()
-            .map(|(source, _use_proxy, _s3_config)| source)
-            .collect();
-        let build =
-            RegistryIndex::build_all(&synced, ora_logging::clock::now_local().unix_timestamp());
-        if let Some(cache_directory) = self.registry_index_path.parent() {
-            std::fs::create_dir_all(cache_directory).map_err(|error| {
-                BackendError::internal("failed to create registry cache directory", error)
-            })?;
-        }
-        build
-            .index()
-            .write(&self.registry_index_path)
-            .map_err(|error| {
-                BackendError::internal("failed to write plugin registry index", error)
-            })?;
-        Ok(SyncAvailablePluginsResponse {
-            updated_at: build.index().updated_at(),
-            plugins: build
-                .index()
-                .plugins()
-                .iter()
-                .map(available_plugin)
-                .collect(),
-        })
     }
 
     /// Returns the README a marketplace listing publishes, resolved from the source checkouts.
@@ -501,10 +439,10 @@ impl PluginApi {
     /// Binds every enabled marketplace source to a registry checkout, applying proxy policy.
     fn prepared_registry_sources(
         &self,
+        proxy_settings: Option<ora_application::NetworkProxySettings>,
     ) -> Result<Vec<(ora_plugin_registry::RegistrySource, bool, Option<S3Config>)>, BackendError>
     {
         let configured = self.enabled_marketplace_sources()?;
-        let proxy_settings = self.settings.network_proxy_settings()?;
         let mut registry_sources = Vec::with_capacity(configured.len());
 
         for (source, mut registry_source) in configured.iter().zip(self.registry_sources()?) {
@@ -838,25 +776,6 @@ impl PluginApi {
                 self.clock.now_timestamp_millis(),
             )
             .map_err(|error| BackendError::internal("failed to persist plugin Skills", error))
-    }
-}
-
-/// Converts one registry entry into the frontend-facing marketplace summary.
-fn available_plugin(entry: &RegistryEntry) -> ora_contracts::AvailablePlugin {
-    ora_contracts::AvailablePlugin {
-        id: entry.id().canonical(),
-        name: entry.identifier().to_owned(),
-        title: entry.title().to_owned(),
-        kind: entry.kind().to_owned(),
-        namespace: entry.namespace().to_owned(),
-        source_url: entry.source_url().to_owned(),
-        version: entry.version().to_string(),
-        description: entry.description().to_owned(),
-        logo: entry.logo().map(str::to_owned),
-        compatibility: match entry.host_compatibility() {
-            Ok(()) => PluginHostCompatibility::Compatible,
-            Err(reason) => PluginHostCompatibility::Incompatible { reason },
-        },
     }
 }
 

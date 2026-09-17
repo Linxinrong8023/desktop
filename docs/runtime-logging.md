@@ -1,5 +1,7 @@
 # Runtime Logging
 
+English | [中文](runtime-logging.zh.md)
+
 Ora Rust services initialize shared structured logging through `ora-logging`.
 
 ## Ownership boundary
@@ -12,9 +14,11 @@ Initialization is process-wide and the timezone can be set only once, so it must
 
 ## Desktop configuration
 
-Desktop reads an optional `ORA_LOG_LEVEL` value and otherwise restores `user_config.log_level`, defaulting to `info`. Accepted values are `trace`, `debug`, `info`, `warn`, and `error`, ignoring surrounding whitespace and ASCII case; an unsupported value is a startup error. The environment override controls the effective level for that process without changing the stored preference.
+Desktop initializes provisional logging at the explicit `info` level before opening storage, then restores `user_config.log_level`; an unset preference also means `info`. Storage read errors and malformed persisted values abort startup rather than being treated as an unset preference. Desktop does not read `ORA_LOG_LEVEL`, including invalid legacy values, and has no startup override.
 
-The `ora-runtime-settings` manager serializes live updates. It reloads the process filter before persisting the preference, rolls the filter back if persistence fails, and completes a started commit or compensation even if the requesting Tauri future is cancelled. The file sink remains `app_data_dir/logs/ora.log` with daily rotation and three retained days; debug builds also write to stdout, and the timezone comes from the operating system. Error toasts that expose a diagnostic request ID offer a **Download logs** action; Desktop copies the current daily log to the destination selected in the native save dialog without exposing the private application-data path to the frontend. See [Desktop Runtime](desktop-runtime.md).
+Eric's decision on 2026-09-12 makes in-app dynamic settings and persisted preferences the Desktop configuration entry points. Settings owns only persistence; the runtime manager owns the process filter, update coordination, and rollback. This decision is scoped to the current Desktop chain and does not define future Controller/Node configuration. The compile-time logging ceiling is unchanged.
+
+The `ora-runtime-settings` manager serializes live updates. It reloads the process filter before persisting the preference, rolls the filter back if persistence fails, and completes a started commit or compensation even if the requesting Tauri future is cancelled. The file sink remains `app_data_dir/logs/ora.log` with daily rotation and three retained days; debug builds also write to stdout, and the timezone comes from the operating system. Error toasts that expose a diagnostic request ID offer a **Download logs** action, and the same export is available as a button under Settings → Developer options while developer mode is enabled; Desktop copies the current daily log to the destination selected in the native save dialog without exposing the private application-data path to the frontend. See [Desktop Runtime](desktop-runtime.md).
 
 ## JSON event contract
 
@@ -58,7 +62,13 @@ Long-lived streams, including task workspace watching, mark the response as defe
 
 Ora frontend requests receive a canonical UUID v4 at the Tauri or stream entry seam. The same identifier correlates the request span, public error payload or stream error frame, and completion event. Client-provided request identifiers are never canonical.
 
-Each request records exactly one completion event with `operation`, `request_id`, `outcome`, and `duration_ms`. Failures additionally record the stable public `error.code` plus the original `error.message`, `error.chain`, and `error.chain_depth` produced by `ErrorReport::from_error`. Internal errors use `ERROR`, conflicts use `WARN`, `InvalidRequest` / `NotFound` / `PayloadTooLarge` / `Unprocessable` use `INFO`, and cancellation uses `DEBUG`. Successful health and readiness checks also use `DEBUG`.
+Each request records exactly one completion event with `operation`, `request_id`, `outcome`, and `duration_ms`. Failures additionally record the stable public `error.code` plus the original `error.message`, `error.chain`, and `error.chain_depth` produced by `ErrorReport::from_error`. Internal errors use `ERROR`, conflicts, `Forbidden` and `HostUnavailable` use `WARN`, `InvalidRequest` / `NotFound` / `PayloadTooLarge` / `Unprocessable` use `INFO`, and cancellation uses `DEBUG`. Successful health and readiness checks also use `DEBUG`.
+
+`Forbidden` covers access the host refused — a workspace file the user cannot read — and sits at `WARN` rather than `INFO` because successful requests already occupy `INFO`, so a refusal logged there would be buried in ordinary traffic; it stays out of `Conflict` so the conflict bucket keeps meaning contended state.
+
+`HostUnavailable` covers an action Ora delegated to the host environment that the host did not carry out — opening a location in an editor that is not installed, for example. It is the operator's environment rather than an Ora runtime fault, so it stays out of `ERROR` where it would compete with genuine backend failures.
+
+A store or Git failure encountered while routing a task is `Internal`, never `Conflict`: those mean the backend could not answer, and classifying them as task state would log an outage such as a locked SQLite file at `WARN` where operators alerting on `ERROR` would miss it. Only a worktree that Git confirms is absent is a genuine `Conflict`.
 
 `RequestLifecycle` guarantees that closing record structurally rather than by convention: when its last handle is dropped without any explicit completion, it emits `outcome = "abandoned"` at `DEBUG`. That covers a seam that forgets to complete and a deferred stream future that is dropped when its transport disappears, so a request can never leave only an opening record. The distinct outcome keeps those cases greppable instead of hiding them inside `cancelled`.
 
@@ -89,3 +99,5 @@ Both runtime roots call `register_gitlancer_logger()` immediately after `init_lo
 ## Testing
 
 `with_trace_logging` and `with_recorded_trace_logging` install a thread-scoped `TRACE` dispatcher. Use them for tests that assert on structured output _and_ for ordinary tests that merely touch the same callsites — `tracing` caches callsite interest, so an unscoped test running first can otherwise make a later log assertion fail intermittently.
+
+Desktop startup logging is tested in isolated subprocesses because `init_logging` owns a process-global clock and subscriber. Each child executes the same `initialize_desktop_logging` step as `bootstrap_desktop`, checks the real filter at `info` before opening storage, then restores the preference through the production startup path. For each legacy environment value (including invalid and empty values), a first process verifies the unset default and saves `warn` through the runtime manager; a second process verifies restoration from the same database. Only child environments are configured. The child-only test is ignored by the ordinary test runner and explicitly invoked by its parent regression test.

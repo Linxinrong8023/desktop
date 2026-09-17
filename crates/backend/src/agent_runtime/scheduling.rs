@@ -169,12 +169,18 @@ mod tests {
             ));
         }
         commands_sender
-            .send(RuntimeCommand::Cancel { operation_id: 7 })
+            .send(RuntimeCommand::Cancel {
+                operation_id: 7,
+                completion: None,
+            })
             .expect("queue cancel command");
 
         assert!(matches!(
             state.recv(&mut events, &mut controls, &mut commands).await,
-            ActiveInput::Command(RuntimeCommand::Cancel { operation_id: 7 })
+            ActiveInput::Command(RuntimeCommand::Cancel {
+                operation_id: 7,
+                completion: None
+            })
         ));
     }
 }

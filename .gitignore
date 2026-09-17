@@ -28,6 +28,9 @@ dist-ssr
 .tmp
 *.tsbuildinfo
 
+.worktrees
+
 /specs
 /memories
+REVIEW.md
 

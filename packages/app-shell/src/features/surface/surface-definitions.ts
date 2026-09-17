@@ -1,4 +1,4 @@
-import type { InstalledPlugin } from "@ora/contracts";
+import type { InstalledPlugin, PluginLogo } from "@ora/contracts";
 
 /**
  * One openable surface, carrying the plugin identity the host needs to address it and the kind
@@ -12,8 +12,8 @@ export type SurfaceDefinitionRef = {
   kind: "workbench" | "webview";
   title: string;
   pluginDisplayName: string;
-  /** The plugin package's own brand mark (inline SVG source), or null when it ships none. */
-  logo: string | null;
+  /** Host-local asset URLs for the package's own brand mark, or null when it ships none. */
+  logo: PluginLogo | null;
 };
 
 /**

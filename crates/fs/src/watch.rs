@@ -1,11 +1,19 @@
+mod retirement;
+
 use crate::WorkspaceFileSystemError;
 use crate::workspace::{canonical_root, relative_string};
 use notify::event::ModifyKind;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use ora_utils::path::CanonicalPathRoot;
+use retirement::NativeEvents;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
+use tokio::sync::oneshot;
 
 /// Identifies the cache invalidation implied by one native filesystem event.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -29,19 +37,38 @@ pub struct WorkspaceWatcher {
     _watcher: RecommendedWatcher,
     events: Receiver<notify::Result<Event>>,
     root: CanonicalPathRoot,
+    retired: oneshot::Receiver<Result<(), &'static str>>,
+    shutdown_requested: Arc<AtomicBool>,
 }
 
 impl WorkspaceWatcher {
     /// Starts watching one canonical workspace root recursively.
     pub fn start(root: &Path) -> Result<Self, WorkspaceFileSystemError> {
+        Self::start_with_event_hook(root, || {})
+    }
+
+    /// Keeps the native callback boundary injectable for blocked-release verification.
+    pub(crate) fn start_with_event_hook(
+        root: &Path,
+        mut before_event: impl FnMut() + Send + 'static,
+    ) -> Result<Self, WorkspaceFileSystemError> {
         let root = canonical_root(root)?;
         let (sender, events) = mpsc::channel();
-        let mut watcher = notify::recommended_watcher(move |event| {
-            let _ = sender.send(event);
-        })
-        .map_err(|error| WorkspaceFileSystemError::WatchFailed {
-            path: root.as_path().to_path_buf(),
-            message: error.to_string(),
+        let (retirement, retired) = oneshot::channel();
+        let shutdown_requested = Arc::new(AtomicBool::new(/*v*/ false));
+        let handler = NativeEvents::new(
+            move |event| {
+                before_event();
+                let _ = sender.send(event);
+            },
+            retirement,
+            shutdown_requested.clone(),
+        );
+        let mut watcher = notify::recommended_watcher(handler).map_err(|error| {
+            WorkspaceFileSystemError::WatchFailed {
+                path: root.as_path().to_path_buf(),
+                message: error.to_string(),
+            }
         })?;
         watcher
             .watch(root.as_path(), RecursiveMode::Recursive)
@@ -53,7 +80,36 @@ impl WorkspaceWatcher {
             _watcher: watcher,
             events,
             root,
+            retired,
+            shutdown_requested,
         })
+    }
+
+    /// Waits for native handles and the event callback to be released, not just Drop to return.
+    /// The caller may time out this wait; the blocking shutdown continues independently.
+    pub async fn close(self) -> Result<(), WorkspaceFileSystemError> {
+        let Self {
+            _watcher,
+            events,
+            root,
+            retired,
+            shutdown_requested,
+        } = self;
+        let failure = |message| WorkspaceFileSystemError::WatchFailed {
+            path: root.as_path().to_path_buf(),
+            message,
+        };
+        tokio::task::spawn_blocking(move || {
+            shutdown_requested.store(/*val*/ true, Ordering::SeqCst);
+            drop(_watcher);
+            drop(events);
+        })
+        .await
+        .map_err(|error| failure(format!("native watcher shutdown failed: {error}")))?;
+        retired
+            .await
+            .map_err(|error| failure(format!("native release was not confirmed: {error}")))?
+            .map_err(|message| failure(message.to_string()))
     }
 
     /// Waits for one event and coalesces follow-up events arriving within the debounce window.
@@ -133,35 +189,4 @@ impl WorkspaceWatcher {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::WorkspaceWatcher;
-    use pretty_assertions::assert_eq;
-    use std::collections::BTreeSet;
-    use std::fs;
-    use std::time::Duration;
-    use tempfile::TempDir;
-
-    /// Verifies native callbacks are normalized to workspace-relative paths.
-    #[test]
-    fn observes_workspace_file_changes() {
-        let workspace =
-            TempDir::new().unwrap_or_else(|error| panic!("create temp workspace: {error}"));
-        let watcher = WorkspaceWatcher::start(workspace.path())
-            .unwrap_or_else(|error| panic!("start workspace watcher: {error}"));
-
-        fs::write(workspace.path().join("watched.txt"), "changed")
-            .unwrap_or_else(|error| panic!("write watched fixture: {error}"));
-        let changes = watcher
-            .receive_batch(Duration::from_secs(2))
-            .unwrap_or_else(|error| panic!("receive native file event: {error}"))
-            .unwrap_or_else(|| panic!("expected a native file event"));
-
-        assert_eq!(
-            changes
-                .iter()
-                .map(|change| change.path.as_str())
-                .collect::<BTreeSet<_>>(),
-            BTreeSet::from(["watched.txt"])
-        );
-    }
-}
+mod tests;

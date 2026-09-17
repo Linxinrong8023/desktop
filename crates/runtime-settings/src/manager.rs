@@ -13,7 +13,6 @@ use crate::{PreferredLogLevelStore, RuntimeLogLevelControl};
 pub struct RuntimeLogLevelState {
     pub configured_level: LogLevel,
     pub effective_level: LogLevel,
-    pub startup_override: Option<LogLevel>,
 }
 
 /// Names the transactional update result shared by runtime adapters.
@@ -39,18 +38,12 @@ where
     S: PreferredLogLevelStore,
 {
     /// Creates a manager from the already initialized filter and resolved startup preference.
-    pub fn new(
-        control: C,
-        store: S,
-        configured_level: LogLevel,
-        startup_override: Option<LogLevel>,
-    ) -> Self {
+    pub fn new(control: C, store: S, configured_level: LogLevel) -> Self {
         Self {
             coordination: Arc::new(Mutex::new(CoordinatedRuntimeLogLevel {
                 control,
                 store,
                 configured_level,
-                startup_override,
             })),
         }
     }
@@ -63,7 +56,6 @@ where
         Ok(RuntimeLogLevelState {
             configured_level: coordination.configured_level,
             effective_level,
-            startup_override: coordination.startup_override,
         })
     }
 
@@ -101,7 +93,6 @@ where
                 Ok(RuntimeLogLevelState {
                     configured_level: level,
                     effective_level: level,
-                    startup_override: coordination.startup_override,
                 })
             }
             // A detached transaction can outlive its caller, so it must retain the request span
@@ -118,7 +109,6 @@ struct CoordinatedRuntimeLogLevel<C, S> {
     control: C,
     store: S,
     configured_level: LogLevel,
-    startup_override: Option<LogLevel>,
 }
 
 /// Preserves the primary stage that failed while exposing compensation failure independently.

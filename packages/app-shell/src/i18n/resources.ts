@@ -1,6 +1,7 @@
 import { composeTranslationResources } from "./resource-bundle";
 import { commonTranslations } from "./common-resources";
 import { chatTranslations } from "../features/chat/translations";
+import { editorTranslations } from "../features/editor/translations";
 import { diffTranslations } from "../features/diff/translations";
 import { filesTranslations } from "../features/files/translations";
 import { sidebarTranslations } from "../features/sidebar/translations";
@@ -20,6 +21,7 @@ import {
 export const featureTranslationResources = {
   common: commonTranslations,
   chat: chatTranslations,
+  editor: editorTranslations,
   diff: diffTranslations,
   files: filesTranslations,
   sidebar: sidebarTranslations,

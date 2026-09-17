@@ -12,7 +12,7 @@ pub(super) fn export(
     endpoints: &[FrontendEndpoint],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut dto_modules = BTreeSet::new();
-    for entry in fs::read_dir(directory)? {
+    for entry in fs::read_dir(directory.join("dto"))? {
         let entry = entry?;
         let path = entry.path();
         if entry.file_type()?.is_file()
@@ -29,7 +29,7 @@ pub(super) fn export(
     }
     let mut barrel = String::from(GENERATED_FILE_HEADER);
     for module in dto_modules {
-        barrel.push_str(&format!("export * from \"./{module}\";\n"));
+        barrel.push_str(&format!("export * from \"./dto/{module}\";\n"));
     }
     write_generated_file(&directory.join("dto.generated.ts"), &barrel)?;
     write_generated_file(
@@ -71,12 +71,13 @@ fn render_client(endpoints: &[FrontendEndpoint]) -> Result<String, String> {
         .collect::<Vec<_>>()
         .join(", ");
     let mut source = format!(
-        "{GENERATED_FILE_HEADER}\
-import {{ {executors} }} from \"./client-runtime.ts\";\n\
-import type {{ ContractTransport }} from \"./transport.ts\";\n\n\
-/** Binds every catalog member to the injected transport. */\n\
-export function createContractsClient(transport: ContractTransport): ContractsClient {{\n\
-  return {{\n"
+        r#"{GENERATED_FILE_HEADER}import {{ {executors} }} from "./client-runtime.ts";
+import type {{ ContractTransport }} from "./transport.ts";
+
+/** Binds every catalog member to the injected transport. */
+export function createContractsClient(transport: ContractTransport): ContractsClient {{
+  return {{
+"#
     );
     for (namespace, members) in namespaces {
         source.push_str(&format!("    {namespace}: {{\n"));

@@ -6,6 +6,9 @@ edition.workspace = true
 [lints]
 workspace = true
 
+[features]
+test-support = []
+
 [dependencies]
 notify = { workspace = true }
 ora-process = { workspace = true }
@@ -13,8 +16,9 @@ ora-utils = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "time"] }
+tokio = { workspace = true, features = ["io-util", "time", "rt", "sync"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }

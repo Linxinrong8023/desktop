@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -41,6 +42,7 @@ import {
   agentRuntimeHandlers,
 } from "../../test/memory/agent-runtime";
 import { createPluginMemory, pluginHandlers } from "../../test/memory/plugins";
+import { formatClock } from "../../lib/format";
 import { ChatView } from "./chat-view";
 import { Composer } from "./composer";
 import { ConversationNavigator } from "./conversation-navigator";
@@ -367,6 +369,70 @@ describe("Composer", () => {
     await waitFor(() => expect(textarea).toHaveFocus());
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("marks but still sends an unavailable leading slash command", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    renderWithI18n(
+      <Composer
+        onSend={onSend}
+        isResponding={false}
+        availableCommands={[{ name: "test", description: "Run tests" }]}
+      />,
+    );
+
+    const textarea = screen.getByRole("textbox");
+    await user.type(textarea, "/mcp");
+
+    const marker = textarea.querySelector(".composer-unsupported-command");
+    expect(marker).toHaveAttribute("data-unsupported-command", "mcp");
+    expect(marker?.getAttribute("title")).toMatch(
+      /Agent 插件不支持命令 \/mcp|Agent plugin does not support the command \/mcp/,
+    );
+
+    await user.keyboard("{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith("/mcp");
+    expect(composerText(textarea)).toBe("");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("refreshes the warning when the Agent command catalog changes", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const view = renderWithI18n(
+      <Composer onSend={onSend} isResponding={false} />,
+    );
+    const textarea = screen.getByRole("textbox");
+    await user.type(textarea, "/mcp");
+    expect(
+      textarea.querySelector("[data-unsupported-command='mcp']"),
+    ).not.toBeNull();
+
+    view.rerender(
+      <Composer
+        onSend={onSend}
+        isResponding={false}
+        availableCommands={[{ name: "mcp", description: "Manage MCP" }]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        textarea.querySelector("[data-unsupported-command='mcp']"),
+      ).toBeNull(),
+    );
+  });
+
+  it("does not mark a slash path as an unsupported command", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(<Composer onSend={vi.fn()} isResponding={false} />);
+    const textarea = screen.getByRole("textbox");
+
+    await user.type(textarea, "/usr/bin/parser");
+
+    expect(textarea.querySelector(".composer-unsupported-command")).toBeNull();
   });
 
   it("offers roles from the slash palette and inserts them as @ tokens", async () => {
@@ -2161,6 +2227,69 @@ describe("Structured ACP content", () => {
 });
 
 describe("ChatView", () => {
+  it("shows session setup separately before starting the response timer", () => {
+    const liveTurn = turn("turn-1", "hello", Date.now(), [], "streaming");
+    const view = renderWithI18n(
+      <ChatView
+        turns={[liveTurn]}
+        userName="Eric"
+        isResponding
+        sessionSetups={[
+          {
+            id: "setup-1",
+            turnIndex: 0,
+            status: "connecting",
+            startedAt: Date.now(),
+          },
+        ]}
+        error={null}
+        onSend={() => {}}
+      />,
+    );
+
+    expect(
+      screen.getByRole("status", {
+        name: /正在建立 Agent 会话|Establishing Agent session/,
+      }),
+    ).not.toHaveTextContent(formatClock(liveTurn.createdAt));
+    expect(
+      screen.queryByRole("status", {
+        name: /助手正在运行|Assistant is working/,
+      }),
+    ).toBeNull();
+
+    liveTurn.responseStartedAt = 3_000;
+    view.rerender(
+      <ChatView
+        turns={[liveTurn]}
+        userName="Eric"
+        isResponding
+        sessionSetups={[
+          {
+            id: "setup-1",
+            turnIndex: 0,
+            status: "connected",
+            startedAt: 1_000,
+            durationMs: 2_000,
+          },
+        ]}
+        error={null}
+        onSend={() => {}}
+      />,
+    );
+
+    expect(
+      screen.getByRole("status", {
+        name: /Agent 会话已建立|Agent session established/,
+      }),
+    ).toHaveTextContent(
+      `${formatClock(3_000)} · ${appI18n.t("chat.sessionSetup.connected")} · ${appI18n.t("chat.totalTime")} 2s`,
+    );
+    expect(
+      screen.getByRole("status", { name: /助手正在运行|Assistant is working/ }),
+    ).toBeInTheDocument();
+  });
+
   it("disables composition and shows the unavailable Agent session error", () => {
     renderWithI18n(
       <ChatView
@@ -2207,6 +2336,35 @@ describe("ChatView", () => {
     });
     fireEvent(pane, event);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("copies a selected transcript through the conversation context menu", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText, readText: vi.fn() },
+    });
+    renderWithI18n(
+      <ChatView
+        turns={[turn("t1", "hello from the user", 1)]}
+        userName="Eric"
+        isResponding={false}
+        error={null}
+        onSend={() => {}}
+      />,
+    );
+
+    const thread = screen.getByTestId("message-list");
+    fireEvent.contextMenu(thread);
+    await user.click(await screen.findByRole("menuitem", { name: "全选" }));
+    fireEvent.contextMenu(thread);
+    await user.click(await screen.findByRole("menuitem", { name: "复制" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    expect(String(writeText.mock.calls[0]?.[0] ?? "")).toMatch(
+      /hello from the user/,
+    );
   });
 
   it("keeps the disabled hint shut when the pointer never left the enabled composer", async () => {
@@ -2393,6 +2551,98 @@ describe("ChatView", () => {
 });
 
 describe("MessageList", () => {
+  it("shows assistant clock time only after completion and uses the completion time", () => {
+    const startedAt = new Date(2026, 0, 1, 10, 0).getTime();
+    const firstChunkAt = startedAt + 60_000;
+    const completedAt = startedAt + 180_000;
+    const liveTurn = turn(
+      "live-turn",
+      "go",
+      startedAt,
+      [assistantItem("live-answer", "working", firstChunkAt)],
+      "streaming",
+    );
+    const view = renderWithI18n(
+      <MessageList turns={[liveTurn]} userName="Eric" isResponding />,
+    );
+
+    expect(document.body).not.toHaveTextContent(formatClock(firstChunkAt));
+
+    view.rerender(
+      <MessageList
+        turns={[{ ...liveTurn, status: "completed", durationMs: 180_000 }]}
+        userName="Eric"
+        isResponding={false}
+      />,
+    );
+
+    expect(document.body).toHaveTextContent(formatClock(completedAt));
+    expect(document.body).not.toHaveTextContent(formatClock(firstChunkAt));
+  });
+
+  it("shows explicit turn and tool durations and omits missing timing labels", async () => {
+    const user = userEvent.setup();
+    const timedTurn: ChatTurn = {
+      id: "timed-turn",
+      userMessage: {
+        kind: "message",
+        id: "user-timed",
+        role: "user",
+        content: "run tests",
+        createdAt: 1_000,
+      },
+      items: [
+        {
+          kind: "toolCall",
+          id: "timed-tool",
+          title: "Tests",
+          status: "completed",
+          content: [],
+          locations: [],
+          createdAt: 2_000,
+          updatedAt: 6_000,
+          startedAt: 2_000,
+          durationMs: 4_000,
+        },
+        {
+          kind: "toolCall",
+          id: "untimed-tool",
+          title: "Legacy",
+          status: "completed",
+          content: [],
+          locations: [],
+          createdAt: 2_000,
+          updatedAt: 3_000,
+        },
+        {
+          kind: "message",
+          id: "assistant-timed",
+          role: "assistant",
+          content: "done",
+          createdAt: 7_000,
+        },
+      ],
+      status: "completed",
+      stopReason: "end_turn",
+      error: null,
+      createdAt: 1_000,
+      durationMs: 6_000,
+    };
+
+    renderWithI18n(
+      <MessageList turns={[timedTurn]} userName="Eric" isResponding={false} />,
+    );
+    await user.click(
+      screen.getByText(appI18n.t("chat.activityPhase.title.completed")),
+    );
+
+    const renderedText = document.body.textContent ?? "";
+    expect(renderedText).toContain(`${appI18n.t("chat.totalTime")} 4s`);
+    expect(renderedText).toContain(`${appI18n.t("chat.totalTime")} 6s`);
+    expect(
+      renderedText.match(new RegExp(appI18n.t("chat.totalTime"), "g")),
+    ).toHaveLength(2);
+  });
   it("keeps the ordinary conversation navigator at its viewport threshold", () => {
     renderWithI18n(
       <MessageList
@@ -2744,6 +2994,8 @@ describe("MessageList", () => {
   });
 
   it("shows the running indicator while working but hides it as the answer streams", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(32_100);
     const view = renderWithI18n(
       <MessageList
         turns={[turn("turn-1", "hello", 100, [], "streaming")]}
@@ -2753,6 +3005,13 @@ describe("MessageList", () => {
     );
     // Waiting for the first output: the indicator stands in for the empty turn.
     expect(screen.getByLabelText(/正在运行|is working/)).toBeInTheDocument();
+    expect(document.body).toHaveTextContent(
+      `${appI18n.t("chat.elapsedTime")} 32s`,
+    );
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(document.body).toHaveTextContent(
+      `${appI18n.t("chat.elapsedTime")} 33s`,
+    );
 
     // Answer body streaming in: the growing text is signal enough, so it hides.
     view.rerender(
@@ -2814,6 +3073,81 @@ describe("MessageList", () => {
     expect(
       screen.queryByLabelText(/正在运行|is working/),
     ).not.toBeInTheDocument();
+  });
+
+  it("reports the retry count in the running indicator, even under streamed text", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(65_100);
+    const retried: ChatTurn = {
+      ...turn(
+        "turn-1",
+        "hello",
+        100,
+        [assistantItem("assistant-1", "Half an answer", 200)],
+        "streaming",
+      ),
+      retry: { retry: 1, maxRetries: 3 },
+    };
+    const view = renderWithI18n(
+      <MessageList turns={[retried]} userName="Eric" isResponding />,
+    );
+    // The stalled attempt left an assistant message last, which would normally
+    // hide the indicator; the retry keeps it and replaces the rotating phrase.
+    const indicator = screen.getByLabelText(/正在运行|is working/);
+    expect(indicator).toHaveTextContent(
+      appI18n.t("chat.turnRetrying", { retry: 1, maxRetries: 3 }),
+    );
+    expect(indicator).toHaveTextContent(
+      `${appI18n.t("chat.elapsedTime")} 1m 05s`,
+    );
+    // The working dots give way to a slowly breathing Wi-Fi icon: the agent is
+    // unreachable, not busy.
+    const wifi = within(indicator).getByRole("img", {
+      name: appI18n.t("chat.turnRetryUnreachable"),
+    });
+    expect(wifi).toHaveClass("animate-retry-pulse");
+    expect(
+      within(indicator).queryByRole("img", { name: /正在运行|running/i }),
+    ).not.toBeInTheDocument();
+
+    // Settled: the indicator goes and the retry marker leaves no ending of its own.
+    view.rerender(
+      <MessageList
+        turns={[{ ...retried, status: "completed", stopReason: "end_turn" }]}
+        userName="Eric"
+        isResponding={false}
+      />,
+    );
+    expect(
+      screen.queryByLabelText(/正在运行|is working/),
+    ).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("1/3");
+  });
+
+  it("ends a turn whose every retry stalled with a slashed Wi-Fi icon", () => {
+    renderWithI18n(
+      <MessageList
+        turns={[
+          {
+            ...turn("turn-1", "hello", 100, [], "failed"),
+            error: appI18n.t("errors.agent_timed_out"),
+            retry: { retry: 3, maxRetries: 3, exhausted: true },
+          },
+        ]}
+        userName="Eric"
+        isResponding={false}
+      />,
+    );
+
+    const ending = screen
+      .getByRole("img", { name: appI18n.t("chat.turnRetryUnreachable") })
+      .closest("p");
+    expect(ending).toHaveClass("text-destructive");
+    expect(ending).toHaveTextContent(
+      appI18n.t("chat.turnRetriesExhausted", { maxRetries: 3 }),
+    );
+    // Nothing still breathes once the turn is over.
+    expect(document.querySelector(".animate-retry-pulse")).toBeNull();
   });
 
   it("renders streamed assistant text as markdown while keeping the thread responsive", () => {

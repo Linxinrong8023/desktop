@@ -153,6 +153,9 @@ pub enum PublicError {
     SessionNotFound(EmptyErrorParams),
     AgentNotInstalled(EmptyErrorParams),
     AgentRuntimeUnavailable(EmptyErrorParams),
+    AgentStartFailed(EmptyErrorParams),
+    AgentTimedOut(EmptyErrorParams),
+    AgentModelDiscoveryFailed(EmptyErrorParams),
     SessionBusy(EmptyErrorParams),
     SessionStopped(EmptyErrorParams),
     SessionLoadUnsupported(EmptyErrorParams),
@@ -166,6 +169,8 @@ pub enum PublicError {
     WorkspaceUnavailable(EmptyErrorParams),
     TaskWorktreeUnavailable(EmptyErrorParams),
     FileSystemPathNotFound(EmptyErrorParams),
+    FileSystemPathPermissionDenied(EmptyErrorParams),
+    FileSystemPathAlreadyExists(EmptyErrorParams),
     WorktreeRootNotAbsolute(EmptyErrorParams),
     WorktreeRootNotDirectory(EmptyErrorParams),
     OpenLocationFailed(OpenLocationFailedParams),
@@ -271,6 +276,9 @@ impl PublicError {
             Self::SessionNotFound(_) => "session_not_found",
             Self::AgentNotInstalled(_) => "agent_not_installed",
             Self::AgentRuntimeUnavailable(_) => "agent_runtime_unavailable",
+            Self::AgentStartFailed(_) => "agent_start_failed",
+            Self::AgentTimedOut(_) => "agent_timed_out",
+            Self::AgentModelDiscoveryFailed(_) => "agent_model_discovery_failed",
             Self::SessionBusy(_) => "session_busy",
             Self::SessionStopped(_) => "session_stopped",
             Self::SessionLoadUnsupported(_) => "session_load_unsupported",
@@ -284,6 +292,8 @@ impl PublicError {
             Self::WorkspaceUnavailable(_) => "workspace_unavailable",
             Self::TaskWorktreeUnavailable(_) => "task_worktree_unavailable",
             Self::FileSystemPathNotFound(_) => "file_system_path_not_found",
+            Self::FileSystemPathPermissionDenied(_) => "file_system_path_permission_denied",
+            Self::FileSystemPathAlreadyExists(_) => "file_system_path_already_exists",
             Self::WorktreeRootNotAbsolute(_) => "worktree_root_not_absolute",
             Self::WorktreeRootNotDirectory(_) => "worktree_root_not_directory",
             Self::OpenLocationFailed(_) => "open_location_failed",
@@ -450,6 +460,9 @@ mod tests {
             PublicError::SessionNotFound(empty),
             PublicError::AgentNotInstalled(empty),
             PublicError::AgentRuntimeUnavailable(empty),
+            PublicError::AgentStartFailed(empty),
+            PublicError::AgentTimedOut(empty),
+            PublicError::AgentModelDiscoveryFailed(empty),
             PublicError::SessionBusy(empty),
             PublicError::SessionStopped(empty),
             PublicError::SessionLoadUnsupported(empty),
@@ -468,6 +481,8 @@ mod tests {
             PublicError::WorkspaceUnavailable(empty),
             PublicError::TaskWorktreeUnavailable(empty),
             PublicError::FileSystemPathNotFound(empty),
+            PublicError::FileSystemPathPermissionDenied(empty),
+            PublicError::FileSystemPathAlreadyExists(empty),
             PublicError::WorktreeRootNotAbsolute(empty),
             PublicError::WorktreeRootNotDirectory(empty),
             PublicError::OpenLocationFailed(OpenLocationFailedParams {
@@ -560,6 +575,9 @@ mod tests {
                 | PublicError::SessionNotFound(_)
                 | PublicError::AgentNotInstalled(_)
                 | PublicError::AgentRuntimeUnavailable(_)
+                | PublicError::AgentStartFailed(_)
+                | PublicError::AgentTimedOut(_)
+                | PublicError::AgentModelDiscoveryFailed(_)
                 | PublicError::SessionBusy(_)
                 | PublicError::SessionStopped(_)
                 | PublicError::SessionLoadUnsupported(_)
@@ -573,6 +591,8 @@ mod tests {
                 | PublicError::WorkspaceUnavailable(_)
                 | PublicError::TaskWorktreeUnavailable(_)
                 | PublicError::FileSystemPathNotFound(_)
+                | PublicError::FileSystemPathPermissionDenied(_)
+                | PublicError::FileSystemPathAlreadyExists(_)
                 | PublicError::WorktreeRootNotAbsolute(_)
                 | PublicError::WorktreeRootNotDirectory(_)
                 | PublicError::OpenLocationFailed(_)
@@ -638,7 +658,7 @@ mod tests {
     #[test]
     fn public_error_codes_match_serde_tags_for_every_variant() {
         let samples = public_error_samples();
-        assert_eq!(samples.len(), 97);
+        assert_eq!(samples.len(), 102);
 
         for error in samples {
             let serialized = serde_json::to_value(&error).unwrap();

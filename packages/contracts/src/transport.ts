@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ContractError } from "./error.ts";
+import type { ContractError } from "./dto.generated.ts";
 import { contractErrorSchema, publicErrorSchema } from "./error.schema.ts";
 
 export type ContractTransportRequest = {
