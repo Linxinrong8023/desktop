@@ -170,7 +170,7 @@ pub(crate) fn prepare_completion(
     let graph = WorkflowGraph::parse(&context.graph_json)
         .map_err(ApplicationError::WorkflowRunGraphParse)?;
     let agent_config = graph
-        .node(&node_run.node_id)
+        .execution_node(&node_run.node_id)
         .and_then(|node| node.agent_config.as_ref());
     let interactive = agent_config.is_some_and(|config| config.interactive);
     if !interactive {

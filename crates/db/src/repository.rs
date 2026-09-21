@@ -4,6 +4,7 @@ mod connection;
 mod effect;
 mod git_cleanup_job;
 mod marketplace_source;
+mod pack_installation;
 mod project;
 mod session;
 mod skill;
@@ -14,6 +15,7 @@ mod user_config;
 mod workflow;
 mod workflow_run;
 mod workflow_run_engine;
+mod workflow_scope;
 mod workspace;
 mod worktree;
 mod worktree_provisioning_lease;
@@ -25,6 +27,10 @@ pub use effect::{SourceMutationOutcome, SqliteEffectRepository};
 pub use git_cleanup_job::SqliteGitCleanupJobRepository;
 pub use marketplace_source::{
     PluginMarketplaceSourceRecord, SqlitePluginMarketplaceSourceRepository,
+};
+pub use pack_installation::{
+    PackInstallationMemberRecord, PackInstallationRecord, PackMemberOwnership,
+    SqlitePackInstallationRepository,
 };
 pub use project::SqliteProjectRepository;
 pub use session::SqliteSessionRepository;

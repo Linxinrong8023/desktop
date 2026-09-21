@@ -150,6 +150,7 @@ tasks:
       - deno task check:tooling
       - task: check:features
       - deno task --filter @ora/desktop lint
+      - deno task --filter @ora/minicloud-client lint
       - deno task --filter @ora/contracts lint
       - deno task --filter @ora/chat lint
       - deno task --filter @ora/editor lint
@@ -199,12 +200,23 @@ tasks:
       - task: lint:frontend
       - deno task test:tooling
       - deno task --filter @ora/desktop test
+      - deno task --filter @ora/minicloud-client test
       - deno task --filter @ora/contracts test
       - deno task --filter @ora/chat test
       - deno task --filter @ora/editor test
       - deno task --filter @ora/workflow-runtime test
       - deno task --filter @ora/app-shell test
       - deno task --filter @ora-space/plugin-sdk test
+
+  test:minicloud:
+    desc: Verify the Linux minicloud UI and real HTTP/Vite proxy clone loop (requires deno install)
+    cmds:
+      - deno task --filter @ora/minicloud-client lint
+      - deno task --filter @ora/minicloud-client test
+      - deno task --filter @ora/minicloud-client build
+      - cargo build -p ora-minicloud-server -p ora-node -p ora-process-host -p ora-process-guardian
+      - cargo test -p ora-minicloud-server
+      - cargo test -p ora-node --test standalone minicloud -- --include-ignored
 
   test:crates:
     desc: Run all Rust workspace package test suites
@@ -238,6 +250,11 @@ tasks:
   ###################################################
   ############# Run Development Servers #############
   ###################################################
+
+  run:minicloud:
+    desc: Initialize and run the local minicloud stack; Ctrl+C stops all components
+    cmds:
+      - deno run -A scripts/run-minicloud.ts
 
   run:desktop:
     desc: Run the desktop Tauri app in development mode

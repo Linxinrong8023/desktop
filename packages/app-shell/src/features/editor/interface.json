@@ -17,7 +17,9 @@
     "./text-edit-context-menu": {
       "exports": [
         "TextEditContextMenu",
+        "forcePlainTextClipboard",
         "selectElementContents",
+        "serializeSelectionPlainText",
         "writeClipboardText"
       ],
       "purpose": "Reusable text and image editing context menu shared across chat, transcript, and composer."

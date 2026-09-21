@@ -1,6 +1,7 @@
-import { Fragment, memo } from "react";
+import { Fragment, memo, useState } from "react";
 import {
   Handle,
+  NodeResizer,
   Position,
   useReactFlow,
   type Node,
@@ -9,16 +10,13 @@ import {
 import { useTranslation } from "react-i18next";
 import { IconTrash } from "@tabler/icons-react";
 import { cn } from "@ora/ui";
-import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
 import {
   createMockWorkflowCapabilities,
   createMockWorkflowNodeType,
   isWorkflowConditionComparisonComplete,
   resolveConditionCases,
-  WORKFLOW_ITERATION_CARD_WIDTH,
-  WORKFLOW_ITERATION_ENTRY_HANDLE_Y,
-  WORKFLOW_ITERATION_NODE_HEIGHT,
-  WORKFLOW_ITERATION_NODE_WIDTH,
+  WORKFLOW_LOOP_NODE_HEIGHT,
+  WORKFLOW_LOOP_NODE_WIDTH,
   WORKFLOW_NODE_ANCHOR_Y,
   WORKFLOW_NODE_WIDTH,
   type WorkflowNodeData,
@@ -26,9 +24,15 @@ import {
 import {
   AgentExecutionModeMark,
   WorkflowNodeCardShell,
+  useWorkflowNodeUnused,
+  WorkflowUnusedBadge,
 } from "../../workflow-node-chrome";
 import { useWorkflowConnectionState } from "./use-connection-state";
 import { WorkflowNodeParameterSummary } from "./node-parameter-summary";
+import { IterationInsertMenu } from "./iteration-actions";
+import { useWorkflowIterationActions } from "./iteration-actions-context";
+import { IterationNodeFrame } from "./iteration-node";
+import type { IterationInsertion } from "../workflow-iteration-graph";
 
 const CONDITION_NODE_WIDTH = 320;
 const CONDITION_FIRST_HANDLE_Y = 82;
@@ -43,10 +47,15 @@ export const WorkflowFlowNodeView = memo(function WorkflowFlowNodeView({
   data,
   deletable,
   selected,
+  draggable,
+  width,
+  height,
+  parentId,
   positionAbsoluteX,
   positionAbsoluteY,
 }: NodeProps<Node<WorkflowNodeData, "workflow">>) {
   const { i18n, t } = useTranslation();
+  const unused = useWorkflowNodeUnused(id);
   const { deleteElements } = useReactFlow<Node<WorkflowNodeData, "workflow">>();
   const { connectionCandidateEndpoint, connectionCandidateNodeId } =
     useWorkflowConnectionState();
@@ -60,6 +69,7 @@ export const WorkflowFlowNodeView = memo(function WorkflowFlowNodeView({
     isConnectionCandidate && connectionCandidateEndpoint === "source";
   const conditionCases =
     data.kind === "condition" ? resolveConditionCases(data) : [];
+  const iterationActions = useWorkflowIterationActions();
 
   if (data.kind === "iteration") {
     return (
@@ -78,120 +88,144 @@ export const WorkflowFlowNodeView = memo(function WorkflowFlowNodeView({
   }
 
   return (
-    <WorkflowNodeCardShell
-      data-workflow-node=""
-      data-workflow-node-id={id}
-      data-x={String(Math.round(positionAbsoluteX))}
-      data-y={String(Math.round(positionAbsoluteY))}
-      kind={data.kind}
-      title={data.title}
-      description={data.description}
-      kindLabel={id}
-      density="editor"
-      selected={selected}
-      width={
-        data.kind === "condition" ? CONDITION_NODE_WIDTH : WORKFLOW_NODE_WIDTH
-      }
-      titleAccessory={
-        data.kind === "agent" ? (
-          <AgentExecutionModeMark
-            interactive={data.agentConfig?.interactive === true}
-          />
-        ) : undefined
-      }
-      ariaLabel={`${t("settings.workflow.nodeSuffix", { type: nodeKindLabel })}: ${data.title}`}
-      frameClassName={cn(
-        isConnectionCandidate && "border-ring/60 shadow-md ring-2 ring-ring/10",
-      )}
-      details={
-        data.kind === "condition" ? (
-          <ConditionNodeDetails data={data} locale={locale} />
-        ) : (
-          <WorkflowNodeParameterSummary data={data} />
-        )
-      }
-      detailsClassName={data.kind === "condition" ? "space-y-2" : undefined}
-      headerEnd={
-        selected && deletable ? (
-          <button
-            type="button"
-            className="nodrag nopan flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={t("settings.workflow.deleteNamed", {
-              name: data.title,
-            })}
-            onClick={() => {
-              void deleteElements({ nodes: [{ id }] });
-            }}
-          >
-            <IconTrash className="size-3.5" />
-          </button>
-        ) : undefined
-      }
-      targetHandle={
-        <Handle
-          type="target"
-          position={Position.Left}
-          data-workflow-input={id}
-          aria-label={t("settings.workflow.connectTo", { name: data.title })}
-          className={cn(
-            "workflow-port workflow-port-input !size-2.5 !border-0 !bg-transparent",
-            isInputCandidate && "workflow-port-candidate",
-          )}
-          style={{ top: WORKFLOW_NODE_ANCHOR_Y }}
+    <>
+      {data.kind === "loop" && (
+        <NodeResizer
+          isVisible={selected && draggable}
+          minWidth={480}
+          minHeight={260}
+          handleClassName="!size-2.5 !border !border-ring !bg-background"
+          lineClassName="!border-ring/60"
         />
-      }
-      sourceHandle={
-        data.kind === "condition" ? (
-          <>
-            {conditionCases.map((conditionCase, index) => (
-              <Handle
-                key={conditionCase.id}
-                id={conditionCase.id}
-                type="source"
-                position={Position.Right}
-                data-workflow-output={id}
-                aria-label={`${t("settings.workflow.connectFrom", { name: data.title })} · ${conditionCase.id}`}
-                className={cn(
-                  "workflow-port workflow-port-output !size-2.5 !border-0 !bg-transparent",
-                  isOutputCandidate && "workflow-port-candidate",
-                )}
-                style={{
-                  top: conditionHandleTop(conditionCases, index),
-                }}
-              />
-            ))}
-            <Handle
-              id="else"
-              type="source"
-              position={Position.Right}
-              data-workflow-output={id}
-              aria-label={`${t("settings.workflow.connectFrom", { name: data.title })} · else`}
-              className={cn(
-                "workflow-port workflow-port-output !size-2.5 !border-0 !bg-transparent",
-                isOutputCandidate && "workflow-port-candidate",
-              )}
-              style={{
-                top: conditionHandleTop(conditionCases, conditionCases.length),
-              }}
+      )}
+      <WorkflowNodeCardShell
+        data-workflow-node=""
+        data-workflow-node-id={id}
+        data-x={String(Math.round(positionAbsoluteX))}
+        data-y={String(Math.round(positionAbsoluteY))}
+        kind={data.kind}
+        title={data.title}
+        description={data.description}
+        kindLabel={id}
+        density="editor"
+        headerAccessory={unused ? <WorkflowUnusedBadge /> : undefined}
+        selected={selected}
+        width={
+          data.kind === "loop"
+            ? (width ?? WORKFLOW_LOOP_NODE_WIDTH)
+            : data.kind === "condition"
+              ? CONDITION_NODE_WIDTH
+              : WORKFLOW_NODE_WIDTH
+        }
+        style={
+          data.kind === "loop"
+            ? { height: height ?? WORKFLOW_LOOP_NODE_HEIGHT }
+            : undefined
+        }
+        titleAccessory={
+          data.kind === "agent" ? (
+            <AgentExecutionModeMark
+              interactive={data.agentConfig?.interactive === true}
             />
-          </>
-        ) : (
+          ) : undefined
+        }
+        ariaLabel={`${t("settings.workflow.nodeSuffix", { type: nodeKindLabel })}: ${data.title}`}
+        frameClassName={cn(
+          unused && "opacity-60",
+          parentId !== undefined && "group/iteration-member",
+          isConnectionCandidate &&
+            "border-ring/60 shadow-md ring-2 ring-ring/10",
+        )}
+        details={
+          data.kind === "condition" ? (
+            <ConditionNodeDetails data={data} locale={locale} />
+          ) : (
+            <WorkflowNodeParameterSummary data={data} />
+          )
+        }
+        detailsClassName={data.kind === "condition" ? "space-y-2" : undefined}
+        headerEnd={
+          selected && deletable ? (
+            <button
+              type="button"
+              className="nodrag nopan flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={t("settings.workflow.deleteNamed", {
+                name: data.title,
+              })}
+              onClick={() => {
+                void deleteElements({ nodes: [{ id }] });
+              }}
+            >
+              <IconTrash className="size-3.5" />
+            </button>
+          ) : undefined
+        }
+        targetHandle={
           <Handle
-            type="source"
-            position={Position.Right}
-            data-workflow-output={id}
-            aria-label={t("settings.workflow.connectFrom", {
-              name: data.title,
-            })}
+            type="target"
+            position={Position.Left}
+            data-workflow-input={id}
+            aria-label={t("settings.workflow.connectTo", { name: data.title })}
             className={cn(
-              "workflow-port workflow-port-output !size-2.5 !border-0 !bg-transparent",
-              isOutputCandidate && "workflow-port-candidate",
+              "workflow-port workflow-port-input !size-2.5 !border-0 !bg-transparent",
+              isInputCandidate && "workflow-port-candidate",
             )}
             style={{ top: WORKFLOW_NODE_ANCHOR_Y }}
           />
-        )
-      }
-    />
+        }
+        sourceHandle={
+          data.kind === "condition" ? (
+            <>
+              {conditionCases.map((conditionCase, index) => (
+                <IterationOutputPort
+                  key={conditionCase.id}
+                  nodeId={id}
+                  handleId={conditionCase.id}
+                  top={conditionHandleTop(conditionCases, index)}
+                  connectLabel={`${t("settings.workflow.connectFrom", { name: data.title })} · ${conditionCase.id}`}
+                  plusLabel={t("settings.workflow.iteration.appendBranch", {
+                    branch: conditionCase.id,
+                  })}
+                  insertion={iterationActions.outputInsertion(
+                    id,
+                    conditionCase.id,
+                  )}
+                  isOutputCandidate={isOutputCandidate}
+                />
+              ))}
+              <IterationOutputPort
+                nodeId={id}
+                handleId="else"
+                top={conditionHandleTop(conditionCases, conditionCases.length)}
+                connectLabel={`${t("settings.workflow.connectFrom", { name: data.title })} · else`}
+                plusLabel={t("settings.workflow.iteration.appendBranch", {
+                  branch: "ELSE",
+                })}
+                insertion={iterationActions.outputInsertion(id, "else")}
+                isOutputCandidate={isOutputCandidate}
+              />
+            </>
+          ) : (
+            <IterationOutputPort
+              nodeId={id}
+              top={WORKFLOW_NODE_ANCHOR_Y}
+              connectLabel={t("settings.workflow.connectFrom", {
+                name: data.title,
+              })}
+              plusLabel={t("settings.workflow.iteration.appendOutput", {
+                name: data.title,
+              })}
+              insertion={
+                parentId !== undefined
+                  ? iterationActions.outputInsertion(id)
+                  : null
+              }
+              isOutputCandidate={isOutputCandidate}
+            />
+          )
+        }
+      />
+    </>
   );
 });
 
@@ -277,166 +311,56 @@ function ConditionNodeDetails({
   );
 }
 
-/** Aligns each branch handle with its rendered IF / ELIF / ELSE label. */
-/** Renders the iteration composite as an embedded container frame (ADR D7).
- *
- * The card sits on top of a dashed region drop zone; nodes dragged into the zone become
- * region members (parentId containment) and execute once per round. The entry handle inside
- * the zone feeds the first round members; the right-side handle is the outer exit.
- */
-function IterationNodeFrame({
-  id,
-  data,
-  selected,
-  deletable,
-  isInputCandidate,
+/** One source port paired with its Dify-style append affordance. The plus badge is
+ * decorative (pointer-events-none) and centered on the port; clicking the port opens
+ * the node picker, while dragging from the port still starts a connection. */
+function IterationOutputPort({
+  nodeId,
+  handleId,
+  top,
+  connectLabel,
+  plusLabel,
+  insertion,
   isOutputCandidate,
-  positionAbsoluteX,
-  positionAbsoluteY,
-  nodeKindLabel,
 }: {
-  id: string;
-  data: WorkflowNodeData;
-  selected: boolean;
-  deletable?: boolean;
-  isInputCandidate: boolean;
+  nodeId: string;
+  handleId?: string;
+  top: number;
+  connectLabel: string;
+  plusLabel: string;
+  insertion: IterationInsertion | null;
   isOutputCandidate: boolean;
-  positionAbsoluteX: number;
-  positionAbsoluteY: number;
-  nodeKindLabel: string;
 }) {
-  const { t } = useTranslation();
-  const { deleteElements, updateNodeData } =
-    useReactFlow<Node<WorkflowNodeData, "workflow">>();
-  const collapsed = data.collapsed === true;
-  const memberCount =
-    typeof data.regionMemberCount === "number" ? data.regionMemberCount : 0;
+  const { readOnly } = useWorkflowIterationActions();
+  const [open, setOpen] = useState(false);
+  const offersInsert = insertion !== null && !readOnly;
   return (
-    <div
-      data-workflow-node=""
-      data-workflow-node-id={id}
-      data-x={String(Math.round(positionAbsoluteX))}
-      data-y={String(Math.round(positionAbsoluteY))}
-      data-workflow-iteration-frame=""
-      data-collapsed={collapsed}
-      className={cn(
-        "relative rounded-2xl border-2 border-dashed transition-colors",
-        selected
-          ? "border-ring/70 bg-ring/5"
-          : "border-violet-500/40 bg-violet-500/5",
-      )}
-      style={{
-        width: WORKFLOW_ITERATION_NODE_WIDTH,
-        height: collapsed ? 112 : WORKFLOW_ITERATION_NODE_HEIGHT,
-      }}
-    >
+    <>
       <Handle
-        type="target"
-        position={Position.Left}
-        data-workflow-input={id}
-        aria-label={t("settings.workflow.connectTo", { name: data.title })}
-        className={cn(
-          "workflow-port workflow-port-input !size-2.5 !border-0 !bg-transparent",
-          isInputCandidate && "workflow-port-candidate",
-        )}
-        style={{ top: WORKFLOW_NODE_ANCHOR_Y }}
-      />
-      <Handle
+        id={handleId}
         type="source"
         position={Position.Right}
-        data-workflow-output={id}
-        aria-label={t("settings.workflow.connectFrom", { name: data.title })}
+        data-workflow-output={nodeId}
+        aria-label={connectLabel}
         className={cn(
           "workflow-port workflow-port-output !size-2.5 !border-0 !bg-transparent",
           isOutputCandidate && "workflow-port-candidate",
         )}
-        style={{ top: WORKFLOW_NODE_ANCHOR_Y }}
+        style={{ top }}
+        onClick={offersInsert ? () => setOpen((open) => !open) : undefined}
       />
-      <div className="p-2">
-        <WorkflowNodeCardShell
-          kind={data.kind}
-          title={data.title}
-          description={data.description}
-          kindLabel={nodeKindLabel}
-          density="editor"
-          selected={selected}
-          width={WORKFLOW_ITERATION_CARD_WIDTH}
-          details={<WorkflowNodeParameterSummary data={data} />}
-          ariaLabel={`${data.title}: ${nodeKindLabel}`}
-          frameClassName={cn(
-            isOutputCandidate && "border-ring/60 shadow-md ring-2 ring-ring/10",
-          )}
-          headerEnd={
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                className="nodrag nopan flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={t(
-                  collapsed
-                    ? "settings.workflow.iteration.expand"
-                    : "settings.workflow.iteration.collapse",
-                )}
-                title={t(
-                  collapsed
-                    ? "settings.workflow.iteration.expand"
-                    : "settings.workflow.iteration.collapse",
-                )}
-                onClick={() => {
-                  // Collapse is presentation-only state on the node data: it hides
-                  // region members without touching the graph structure.
-                  updateNodeData(id, { collapsed: !collapsed });
-                }}
-              >
-                {collapsed ? (
-                  <IconChevronUp className="size-4" />
-                ) : (
-                  <IconChevronDown className="size-4" />
-                )}
-              </button>
-              {selected && deletable ? (
-                <button
-                  type="button"
-                  className="nodrag nopan flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
-                  aria-label={t("settings.workflow.deleteNamed", {
-                    name: data.title,
-                  })}
-                  onClick={() => {
-                    void deleteElements({ nodes: [{ id }] });
-                  }}
-                >
-                  <IconTrash className="size-3.5" />
-                </button>
-              ) : undefined}
-            </div>
-          }
+      {insertion !== null && (
+        <IterationInsertMenu
+          insertion={insertion}
+          label={plusLabel}
+          side="right"
+          open={open}
+          onOpenChange={setOpen}
+          style={{ top }}
+          className="pointer-events-none absolute -right-3 z-10 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/iteration-member:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
         />
-      </div>
-      {!collapsed && (
-        <div
-          className="pointer-events-none absolute inset-x-3 bottom-3 top-[116px] rounded-xl border border-dashed border-violet-500/30"
-          aria-hidden
-        >
-          <span className="absolute left-3 top-2 text-[11px] text-muted-foreground">
-            {memberCount > 0
-              ? t("settings.workflow.iteration.regionSummary", {
-                  total: memberCount,
-                })
-              : t("settings.workflow.iteration.dropHint")}
-          </span>
-        </div>
       )}
-      <Handle
-        id="iteration-entry"
-        type="source"
-        position={Position.Left}
-        data-workflow-iteration-entry={id}
-        aria-label={t("settings.workflow.iteration.entryHandle", {
-          name: data.title,
-        })}
-        className="workflow-port workflow-port-output !size-2.5 !border-0 !bg-transparent"
-        style={{ top: WORKFLOW_ITERATION_ENTRY_HANDLE_Y, left: 14 }}
-      />
-    </div>
+    </>
   );
 }
 

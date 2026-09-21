@@ -1,4 +1,5 @@
 pub mod app_event;
+pub mod minicloud;
 
 pub mod agent;
 pub mod agent_import;
@@ -7,6 +8,7 @@ pub mod effect;
 pub mod error;
 pub mod file_system;
 pub mod git;
+pub mod mcp_health;
 pub mod plugin;
 pub mod project;
 pub mod proxy;
@@ -28,6 +30,7 @@ pub use effect::*;
 pub use error::*;
 pub use file_system::*;
 pub use git::*;
+pub use mcp_health::*;
 pub use plugin::*;
 pub use project::*;
 pub use proxy::*;
@@ -52,6 +55,7 @@ pub fn export_typescript_bindings_to(
 ) -> Result<(), ExportError> {
     let config = Config::new().with_out_dir(output_directory.as_ref());
     agent_import::export(&config)?;
+    minicloud::export(&config)?;
 
     app_event::export(&config)?;
     agent::export(&config)?;
@@ -60,6 +64,7 @@ pub fn export_typescript_bindings_to(
     error::export(&config)?;
     file_system::export(&config)?;
     git::export(&config)?;
+    mcp_health::export(&config)?;
     plugin::export(&config)?;
     project::export(&config)?;
     proxy::export(&config)?;

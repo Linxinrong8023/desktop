@@ -134,4 +134,31 @@ describe("deriveWorkflowVariableCatalog iteration scope rules", () => {
       expect(bySelector.get("iter.failed_count")?.valueType).toBe("number");
     }
   });
+
+  it("resolves iterator item types from the complete global selector", () => {
+    const iter = node(
+      "iter",
+      iterationData(["vars", "rows"], ["fix", "output"]),
+    );
+    const entries = deriveWorkflowVariableCatalog(
+      [
+        node("start", {
+          kind: "start",
+          title: "Start",
+          description: "",
+          inputVariables: [{ name: "rows", valueType: "array[number]" }],
+        }),
+        iter,
+        FIX,
+        OUT,
+      ],
+      EDGES,
+      "fix",
+      [{ name: "vars.rows", valueType: "array[string]" }],
+    );
+    expect(
+      entries.find((entry) => entry.selector.join(".") === "iter.item")
+        ?.valueType,
+    ).toBe("string");
+  });
 });

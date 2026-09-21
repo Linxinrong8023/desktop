@@ -1,15 +1,22 @@
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import {
   BaseEdge,
   EdgeLabelRenderer,
-  getBezierPath,
   type EdgeProps,
+  getBezierPath,
 } from "@xyflow/react";
 import { cn } from "@ora/ui";
+import { IterationInsertMenu } from "./iteration-actions";
+import { useWorkflowIterationActions } from "./iteration-actions-context";
+import { WORKFLOW_EDGE_CONTROL_Z_INDEX } from "./z-index";
 
 /** Draws a selectable workflow edge with an accessible hit target and optional branch label. */
 export const WorkflowFlowEdgeView = memo(function WorkflowFlowEdgeView({
   id,
+  source,
+  sourceHandleId,
+  target,
   sourceX,
   sourceY,
   sourcePosition,
@@ -22,6 +29,14 @@ export const WorkflowFlowEdgeView = memo(function WorkflowFlowEdgeView({
   style,
   interactionWidth,
 }: EdgeProps) {
+  const { t } = useTranslation();
+  const { insertionForEdge } = useWorkflowIterationActions();
+  const insertion = insertionForEdge({
+    id,
+    source,
+    sourceHandle: sourceHandleId,
+    target,
+  });
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -73,6 +88,24 @@ export const WorkflowFlowEdgeView = memo(function WorkflowFlowEdgeView({
         </g>
       )}
       <EdgeLabelRenderer>
+        {insertion !== null && (
+          <div
+            className="nodrag nopan pointer-events-auto absolute"
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              // Edges that touch a parented member render above the node layer, so
+              // the insert control must explicitly stack above every edge and node
+              // elevation or the edge hit target swallows its clicks.
+              zIndex: WORKFLOW_EDGE_CONTROL_Z_INDEX,
+            }}
+          >
+            <IterationInsertMenu
+              insertion={insertion}
+              label={t("settings.workflow.iteration.insertOnEdge")}
+              side="top"
+            />
+          </div>
+        )}
         {label !== undefined && label !== null && label !== "" && (
           <div
             className={cn(
@@ -80,7 +113,9 @@ export const WorkflowFlowEdgeView = memo(function WorkflowFlowEdgeView({
               selected && "text-foreground",
             )}
             style={{
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY - 14}px)`,
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${
+                labelY - 14
+              }px)`,
             }}
           >
             {String(label)}

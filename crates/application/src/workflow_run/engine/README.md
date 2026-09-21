@@ -6,10 +6,18 @@ runtime registered for its node type.
 
 ## Responsibilities
 
+- **Execution membership** (`execution_document.rs`, `unused_references.rs`): validate document
+  identity and ownership, then derive the entry-reachable nodes before parsing executable
+  configuration. `WorkflowGraph::parse` always returns this projection; editor analysis uses
+  the same owner to report unused node IDs. Spare nodes and incoming edges from spare nodes
+  never enter prerequisites, scheduling, or variable pools. The original snapshot is retained.
 - **Graph parsing and topology** (`graph.rs`, `node_type.rs`): deserialize a frozen React Flow
   document into a validated `petgraph` DAG, validate structural invariants, and answer topology
   queries (full topological order, successors/predecessors, transitive closures, ready set,
   reachability).
+- **Loop graph and round model** (`loop_graph.rs`, `loop_config.rs`, `loop_round.rs`): partition
+  one-level container bodies, validate scoped bindings, and compute typed feedback, termination,
+  and exports without mutating the completed round pool.
 - **Node runtimes and registry** (`node_runtime.rs`, `node_runtime/control.rs`): the per-node-type
   execution strategies behind a registry. Swift runtimes (`Start`, `Condition`, `Output`) complete
   synchronously inside a scheduling wave; the async Agent runtime wraps the backend's
@@ -42,6 +50,10 @@ runtime registered for its node type.
 - **Skill delivery model** (`skill_delivery.rs`): Agent capability, non-empty validated discovery
   roots, frozen materialization bindings, and the typed workflow-run payload shared by deployment
   and node execution.
+- **Composite scheduler** (`engine/composite_scheduler.rs`): execute pure advance plans through
+  atomic repository operations, then dispatch newly started rows with their committed pool.
+- **Loop scheduler** (`engine/loop_scheduler.rs`): create or resume one durable round scope,
+  dispatch its ready Agent nodes, and atomically advance or complete the parent Loop.
 - **Branch projection** (`branch_projection.rs`): derives node states from persisted rows and
   Condition decisions. The outer projection treats composite regions as black boxes — members
   never enter the outer ready set and their per-round rows never seed outer states — while the
@@ -51,6 +63,11 @@ runtime registered for its node type.
   The scheduling core (`run_schedule`) recomputes state from persistence, hands in-flight nodes to
   their registered runtimes, advances composite nodes each wave, and finishes drained runs; it
   contains no node-type branching.
+- **Resume, failure detail, and snapshot switch** (`failure.rs`, `region.rs`,
+  `snapshot_switch.rs`): classified `payload.error_detail`, the composite-as-resume-unit
+  clear set (partial in-loop resume is out of scope), and compatibility planning when a failed
+  run takes over a newer published snapshot. Checkpoint, rollback, previous-failure injection,
+  and AI diagnosis adapters live in the backend.
 
 ## Non-responsibilities
 
@@ -95,6 +112,11 @@ node-run transition — engine or interactive — publishes one event. `ora-db` 
 - `WorkflowGraph` is immutable after `parse`; every topology query is deterministic.
 - The graph is acyclic (validated by `petgraph::algo::toposort`), has unique node ids, and at most
   one start node; all three are rejected at parse time with a `GraphError` variant.
+- A schema-v2 Loop and each child body are separate DAGs. Children declare one matching container
+  owner, bodies have exactly one reachable Start, and nested Loops or cross-scope edges fail before
+  execution.
+- Every Loop round owns a fresh variable pool and node-run scope. Feedback assignments read the
+  same completed pool, and the repository commits the next scope or parent completion atomically.
 - The scheduling core is type-agnostic: the engine module and the registry's scheduling-facing
   surface contain no node-type literals outside the documented policy seams (registry assembly,
   registry lookups by parsed type, runtime implementations, start-time graph-structural
@@ -130,7 +152,10 @@ node-run transition — engine or interactive — publishes one event. `ora-db` 
   (`item`/`index`) commit with the round's first rows in one transaction, ledger entries commit
   with their continuation in one transaction, and already-settled rounds are append-only. The
   exposed variables (`output: array[T]`, `entries: array[object]`, `failed_count: number`) are
-  derived from the ledger at completion and never change type with the error strategy.
+  derived from the ledger at completion and never change type with the error strategy. After a
+  round transaction commits, the scheduler reloads the execution context before dispatching async
+  nodes; this keeps prompt assembly and node placement aligned with the newly persisted round
+  bindings even when the repository returns snapshots by value.
 - An iteration node's own failures (non-array source, exceeded safety ceiling, exposed-variable
   write failures) always propagate to run failure; only failures inside the region can be
   absorbed by a `continue` strategy, and a branch that bypasses the collect target settles that

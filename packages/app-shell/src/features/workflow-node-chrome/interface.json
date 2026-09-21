@@ -4,6 +4,9 @@
     "./index": {
       "exports": [
         "WorkflowNodeCardShell",
+        "WorkflowMembershipProvider",
+        "useWorkflowNodeUnused",
+        "WorkflowUnusedBadge",
         "AgentExecutionModeMark",
         "WorkflowNodeCardDensity",
         "WorkflowNodeCardShellProps",

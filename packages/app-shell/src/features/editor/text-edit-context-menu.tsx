@@ -34,14 +34,156 @@ interface TextEditContextMenuProps {
 }
 
 /**
+ * Synchronously publishes plain text through `document.execCommand("copy")`.
+ *
+ * WebView2 selections that are mostly path link `<button>`s can leave the OS
+ * clipboard without usable `CF_UNICODETEXT`, so external apps paste empty while
+ * the same WebView can still read an internal/HTML payload. A temporary
+ * textarea write flushes real system text and restores the prior selection.
+ */
+export function writeClipboardTextSync(text: string): boolean {
+  const selection = window.getSelection();
+  const previous: Range[] = [];
+  if (selection !== null) {
+    for (let index = 0; index < selection.rangeCount; index += 1) {
+      previous.push(selection.getRangeAt(index));
+    }
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.cssText = "position:fixed;left:-9999px;top:0";
+  document.body.append(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+  let ok: boolean;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  } finally {
+    textarea.remove();
+    if (selection !== null) {
+      selection.removeAllRanges();
+      for (const range of previous) {
+        selection.addRange(range);
+      }
+    }
+  }
+  return ok;
+}
+
+const BLOCK_TAGS = new Set([
+  "P",
+  "DIV",
+  "LI",
+  "PRE",
+  "TR",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "BLOCKQUOTE",
+  "SECTION",
+  "ARTICLE",
+]);
+
+/**
+ * Serializes the live selection to plain text, including `user-select: none`
+ * controls such as chat path-link `<button>`s that `Selection#toString` skips.
+ */
+export function serializeSelectionPlainText(
+  selection: Selection | null = window.getSelection(),
+): string {
+  if (selection === null || selection.rangeCount === 0) {
+    return "";
+  }
+  const chunks: string[] = [];
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    chunks.push(serializeRangePlainText(selection.getRangeAt(index)));
+  }
+  return chunks.join("");
+}
+
+/** Walks a range clone so path buttons contribute text the way they render. */
+function serializeRangePlainText(range: Range): string {
+  if (range.collapsed) {
+    return "";
+  }
+  const parts: string[] = [];
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      parts.push(node.nodeValue ?? "");
+      return;
+    }
+    if (
+      node.nodeType !== Node.ELEMENT_NODE &&
+      node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE
+    ) {
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const tag = (node as Element).tagName;
+      if (tag === "BR") {
+        parts.push("\n");
+        return;
+      }
+      if (tag === "SCRIPT" || tag === "STYLE") {
+        return;
+      }
+    }
+    for (const child of node.childNodes) {
+      walk(child);
+    }
+    if (
+      node.nodeType === Node.ELEMENT_NODE &&
+      BLOCK_TAGS.has((node as Element).tagName)
+    ) {
+      parts.push("\n");
+    }
+  };
+  walk(range.cloneContents());
+  return parts.join("").replace(/\n+$/u, "");
+}
+
+/**
+ * Forces `text/plain` on a native Copy so path-link-heavy transcript selections
+ * do not leave external editors with an HTML-only clipboard.
+ */
+export function forcePlainTextClipboard(
+  event: {
+    clipboardData: DataTransfer | null;
+    preventDefault: () => void;
+  },
+  text: string = serializeSelectionPlainText(),
+): boolean {
+  if (text.length === 0 || event.clipboardData === null) {
+    return false;
+  }
+  event.clipboardData.setData("text/plain", text);
+  event.preventDefault();
+  return true;
+}
+
+/**
  * Writes plain text for Copy and Cut. Callers serialize their own selection
  * because a composer chip and a Markdown transcript are not the same payload.
+ * Prefer the synchronous OS write first so external pastes see real text.
+ * Returns whether either write path succeeded.
  */
-export async function writeClipboardText(text: string): Promise<void> {
+export async function writeClipboardText(text: string): Promise<boolean> {
+  if (writeClipboardTextSync(text)) {
+    return true;
+  }
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch {
     // WebView may deny clipboard write; Copy/Cut already closed the menu.
+    return false;
   }
 }
 

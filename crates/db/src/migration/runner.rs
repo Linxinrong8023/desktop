@@ -25,6 +25,8 @@ where
 {
     ensure_migrations_table(connection)?;
 
+    super::legacy_loop::adopt_legacy_loop(connection, catalog, timestamp_source)?;
+
     let applied_migrations = load_applied_migrations(connection)?;
     let target_versions = catalog.target_versions();
     validate_shared_history(&applied_migrations, target_versions, catalog)?;
@@ -70,6 +72,8 @@ where
     T: TimestampSource,
 {
     ensure_migrations_table(connection)?;
+
+    super::legacy_loop::adopt_legacy_loop(connection, catalog, timestamp_source)?;
 
     let applied_migrations = load_applied_migrations(connection)?;
     let target_versions = catalog.target_versions();

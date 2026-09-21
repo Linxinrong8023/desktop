@@ -101,6 +101,7 @@ export function deriveWorkflowVariableCatalog(
         nodes,
         consumerNodeId,
         visibleProducerIds,
+        globalVariables,
       );
       continue;
     }
@@ -155,6 +156,7 @@ function appendIterationVariables(
   nodes: Array<Node<WorkflowNodeData, "workflow">>,
   consumerNodeId: string | undefined,
   visibleProducerIds: Set<string>,
+  globalVariables: readonly WorkflowGlobalVariable[],
 ): void {
   const memberIds = new Set(
     nodes
@@ -169,17 +171,11 @@ function appendIterationVariables(
     const iteratorType =
       config === undefined
         ? "any"
-        : (nodes
-            .flatMap((candidate) =>
-              candidate.data.kind === "start"
-                ? (candidate.data.inputVariables ?? [])
-                : [],
-            )
-            .find(
-              (variable) =>
-                config.iteratorSelector.length === 2 &&
-                variable.name === config.iteratorSelector[1],
-            )?.valueType ?? "array");
+        : resolveDeclaredVariableType(
+            config.iteratorSelector,
+            nodes,
+            globalVariables,
+          );
     const itemType = arrayElementType(iteratorType);
     entries.push({
       ...nodeVariable(node, "item", itemType as WorkflowVariableValueType),
@@ -206,6 +202,41 @@ function appendIterationVariables(
   );
   entries.push(nodeVariable(node, "entries", "array[object]"));
   entries.push(nodeVariable(node, "failed_count", "number"));
+}
+
+/** Resolves a selector against its complete owner path so same-named declarations cannot collide. */
+function resolveDeclaredVariableType(
+  selector: readonly string[],
+  nodes: Array<Node<WorkflowNodeData, "workflow">>,
+  globalVariables: readonly WorkflowGlobalVariable[],
+): string {
+  const qualifiedName = selector.join(".");
+  const global = globalVariables.find(
+    (variable) => variable.name === qualifiedName,
+  );
+  if (global !== undefined) {
+    return global.valueType;
+  }
+  if (selector.length === 2) {
+    const [nodeId, variableName] = selector;
+    const owner = nodes.find((node) => node.id === nodeId);
+    if (owner?.data.kind === "start") {
+      return (
+        owner.data.inputVariables?.find(
+          (variable) => variable.name === variableName,
+        )?.valueType ?? "any"
+      );
+    }
+    if (owner?.data.kind === "iteration") {
+      if (variableName === "output") {
+        return "array[any]";
+      }
+      if (variableName === "entries") {
+        return "array[object]";
+      }
+    }
+  }
+  return "any";
 }
 
 /** Resolves the declared type of the collect target's root variable, defaulting to `any`. */

@@ -101,6 +101,27 @@ backend_command!(
     plugins.read_readme,
     "Reads one marketplace plugin's published README for its detail page."
 );
+backend_command!(
+    list_pack_installations,
+    ListPackInstallationsRequest,
+    ListPackInstallationsResponse,
+    plugins.list_pack_installations,
+    "Lists every recorded pack installation with its reconciled member states."
+);
+backend_command!(
+    pack_uninstall_plan,
+    PackUninstallPlanRequest,
+    PackUninstallPlanResponse,
+    plugins.pack_uninstall_plan,
+    "Computes the ownership-aware uninstall plan for one recorded pack."
+);
+backend_command!(
+    list_hook_lifecycle_reports,
+    ListHookLifecycleReportsRequest,
+    ListHookLifecycleReportsResponse,
+    plugins.list_hook_lifecycle_reports,
+    "Lists this session's Hook lifecycle results, keyed by plugin."
+);
 
 backend_command!(
     list_marketplace_sources,
@@ -158,6 +179,20 @@ async_backend_command!(
     plugins.uninstall,
     "Stops and removes one installed plugin."
 );
+backend_command!(
+    get_plugin_log_level,
+    GetPluginLogLevelRequest,
+    PluginLogLevelResponse,
+    plugins.get_log_level,
+    "Reads one plugin's host-owned log level."
+);
+async_backend_command!(
+    set_plugin_log_level,
+    SetPluginLogLevelRequest,
+    PluginLogLevelResponse,
+    plugins.set_log_level,
+    "Persists and applies one plugin's host-owned log level."
+);
 /// Installs one marketplace plugin and emits throttled byte-level download progress.
 #[tauri::command]
 pub async fn install_plugin(
@@ -201,4 +236,25 @@ async_backend_command!(
     ImportPluginResponse,
     plugins.import,
     "Imports one local .orax release archive; the installed plugin is immediately available."
+);
+async_backend_command!(
+    initialize_hook,
+    InitializeHookRequest,
+    InitializeHookResponse,
+    plugins.initialize_hook,
+    "Runs one installed Hook package's declared `init` command."
+);
+backend_command!(
+    list_mcp_health,
+    ListMcpHealthRequest,
+    ListMcpHealthResponse,
+    plugins.list_mcp_health,
+    "Lists Host MCP health for currently eligible installed members."
+);
+async_backend_command!(
+    probe_mcp_health,
+    ProbeMcpHealthRequest,
+    ProbeMcpHealthResponse,
+    plugins.probe_mcp_health,
+    "Awaits one Host MCP health probe for a currently eligible member."
 );

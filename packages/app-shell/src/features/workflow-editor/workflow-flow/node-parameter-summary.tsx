@@ -180,13 +180,16 @@ function configuredParameters(
   if (data.kind === "loop") {
     appendParameter(
       parameters,
-      t("settings.workflow.field.maxAttempts"),
-      data.maxAttempts?.toString(),
+      t("settings.workflow.field.maxIterations"),
+      data.loopConfig?.maxIterations.toString(),
     );
+    const carriedVariable = data.loopConfig?.variables[0];
     appendParameter(
       parameters,
-      t("settings.workflow.field.exitCondition"),
-      data.exitCondition,
+      t("settings.workflow.field.loopInitialValue"),
+      carriedVariable?.initial.kind === "constant"
+        ? String(carriedVariable.initial.value ?? "")
+        : carriedVariable?.initial.selector.join("."),
     );
     return parameters;
   }

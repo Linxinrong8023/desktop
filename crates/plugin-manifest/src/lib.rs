@@ -6,6 +6,8 @@ mod error;
 mod locator;
 mod manifest;
 mod name;
+mod pack;
+mod raw;
 mod sha256;
 mod target;
 mod urls;
@@ -20,6 +22,7 @@ pub use manifest::{
     PluginReleaseTarget,
 };
 pub use name::{PluginName, PluginNameError};
+pub use pack::{PackAgentRef, PackMember, PluginPack};
 pub use sha256::{Sha256Digest, Sha256DigestError};
 pub use target::{HookTarget, HookTargetError};
 pub use urls::{HomepageUrl, ReleaseUrl, RepositoryUrl, UrlError};

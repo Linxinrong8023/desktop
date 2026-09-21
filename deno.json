@@ -1,5 +1,6 @@
 {
   "workspace": [
+    "apps/minicloud/client",
     "apps/desktop",
     "packages/app-shell",
     "packages/chat",

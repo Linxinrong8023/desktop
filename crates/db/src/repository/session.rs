@@ -100,8 +100,10 @@ impl SessionRepository for SqliteSessionRepository {
             .map_err(session_repository_error_from_database)
     }
 
-    /// Lists visible sessions that are not bound to a visible workflow node run.
+    /// Lists visible sessions without workflow ownership, including retired node runs.
     fn list_standalone_sessions(&self) -> Result<Vec<Session>, RepositoryError> {
+        // Restart soft-deletes node runs while retaining their conversations and ownership.
+        // Filtering by node visibility would expose those historical sessions as ordinary chats.
         self.pool
             .with_connection(|connection| {
                 let mut statement = connection.prepare(
@@ -111,7 +113,7 @@ impl SessionRepository for SqliteSessionRepository {
                        AND NOT EXISTS (
                            SELECT 1
                            FROM workflow_node_runs nr
-                           WHERE nr.session_id = s.id AND nr.is_deleted = 0
+                           WHERE nr.session_id = s.id
                        )
                      ORDER BY s.created_at, s.id",
                 )?;

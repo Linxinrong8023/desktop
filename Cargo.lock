@@ -201,6 +201,54 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "axum"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
+dependencies = [
+ "axum-core",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "itoa",
+ "matchit",
+ "memchr",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde_core",
+ "serde_json",
+ "serde_path_to_error",
+ "sync_wrapper",
+ "tokio",
+ "tower",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "axum-core"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08c78f31d7b1291f7ee735c1c6780ccde7785daae9a9206026862dab7d8792d1"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "http",
+ "http-body",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
+ "sync_wrapper",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
 name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -469,7 +517,7 @@ dependencies = [
  "find-msvc-tools",
  "jobserver",
  "libc",
- "shlex",
+ "shlex 2.0.1",
 ]
 
 [[package]]
@@ -1838,9 +1886,21 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+dependencies = [
+ "foldhash 0.2.0",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "hashlink"
@@ -1849,6 +1909,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
 dependencies = [
  "hashbrown 0.15.5",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a596f1b20ed2cc5ecac41a164aaebc7258057060f06c0cf7a2ba3991ee7990fb"
+dependencies = [
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -1942,6 +2011,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
+name = "httpdate"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
 name = "hyper"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1954,6 +2029,7 @@ dependencies = [
  "http",
  "http-body",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -2520,9 +2596,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.35.0"
+version = "0.38.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "133c182a6a2c87864fe97778797e46c7e999672690dc9fa3ee8e241aa4a9c13f"
+checksum = "f1d20bef17f513b9b3004532233187769cd072d790971f4e4da0e346eb6401e8"
 dependencies = [
  "cc",
  "pkg-config",
@@ -2593,6 +2669,12 @@ dependencies = [
  "tendril",
  "web_atoms",
 ]
+
+[[package]]
+name = "matchit"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "memchr"
@@ -3109,6 +3191,7 @@ version = "0.0.0"
 dependencies = [
  "agent-client-protocol-schema",
  "chrono-tz",
+ "futures",
  "gitlancer",
  "ora-acp",
  "ora-application",
@@ -3164,6 +3247,25 @@ dependencies = [
  "serde_json",
  "serde_with",
  "ts-rs",
+ "uuid",
+]
+
+[[package]]
+name = "ora-controller"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "ora-logging",
+ "ora-node-protocol",
+ "ora-utils",
+ "pretty_assertions",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -3247,14 +3349,20 @@ dependencies = [
  "ora-backend",
  "ora-contracts",
  "ora-db",
+ "ora-domain",
  "ora-history",
  "ora-logging",
+ "ora-plugin-manager",
+ "ora-plugin-manifest",
  "ora-plugin-protocol",
+ "ora-plugin-registry",
+ "ora-utils",
  "pretty_assertions",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
+ "zip 2.4.2",
 ]
 
 [[package]]
@@ -3345,14 +3453,80 @@ dependencies = [
 ]
 
 [[package]]
+name = "ora-minicloud-server"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "ora-contracts",
+ "ora-controller",
+ "ora-logging",
+ "ora-node-protocol",
+ "pretty_assertions",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "ora-node"
+version = "0.0.0"
+dependencies = [
+ "gitlancer",
+ "libc",
+ "ora-contracts",
+ "ora-controller",
+ "ora-logging",
+ "ora-minicloud-server",
+ "ora-node-db",
+ "ora-node-protocol",
+ "ora-process-client",
+ "ora-process-protocol",
+ "ora-utils",
+ "pretty_assertions",
+ "rcgen",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "rustls",
+ "serde",
+ "serde_json",
+ "shlex 1.3.0",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "ora-node-db"
+version = "0.0.0"
+dependencies = [
+ "ora-node-protocol",
+ "ora-process-protocol",
+ "ora-utils",
+ "pretty_assertions",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "uuid",
+]
+
+[[package]]
 name = "ora-node-protocol"
 version = "0.0.0"
 dependencies = [
+ "ora-utils",
  "pretty_assertions",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -3380,7 +3554,6 @@ dependencies = [
  "ora-domain",
  "ora-utils",
  "pretty_assertions",
- "semver",
  "serde",
  "serde_json",
  "tempfile",
@@ -3412,6 +3585,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -3440,6 +3614,7 @@ dependencies = [
 name = "ora-plugin-manifest"
 version = "0.0.0"
 dependencies = [
+ "ora-domain",
  "ora-utils",
  "pretty_assertions",
  "semver",
@@ -3484,13 +3659,16 @@ dependencies = [
 name = "ora-plugin-runtime"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "ora-logging",
  "ora-plugin-protocol",
  "ora-process",
+ "ora-utils",
  "pretty_assertions",
  "serde_json",
  "tempfile",
  "thiserror 2.0.20",
+ "time",
  "tokio",
  "tracing",
 ]
@@ -3507,6 +3685,83 @@ dependencies = [
  "tokio",
  "tracing",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "ora-process-client"
+version = "0.0.0"
+dependencies = [
+ "ora-process-protocol",
+ "serde",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "ora-process-guardian"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "ora-process-client",
+ "ora-process-protocol",
+ "ora-process-runtime",
+ "ora-utils",
+ "pretty_assertions",
+ "rusqlite",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "ora-process-helper"
+version = "0.0.0"
+dependencies = [
+ "ora-process-runtime",
+ "pretty_assertions",
+ "tokio",
+]
+
+[[package]]
+name = "ora-process-host"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "ora-process-client",
+ "ora-process-protocol",
+ "ora-process-runtime",
+ "ora-utils",
+ "pretty_assertions",
+ "rusqlite",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "ora-process-protocol"
+version = "0.0.0"
+dependencies = [
+ "ora-utils",
+ "pretty_assertions",
+ "rmp-serde",
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "ora-process-runtime"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "ora-process-client",
+ "ora-process-protocol",
+ "ora-utils",
+ "pretty_assertions",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]
@@ -3613,6 +3868,7 @@ dependencies = [
  "flate2",
  "futures",
  "hmac",
+ "libc",
  "pretty_assertions",
  "proc-macro2",
  "quick-xml",
@@ -4384,17 +4640,47 @@ dependencies = [
 ]
 
 [[package]]
-name = "rusqlite"
-version = "0.37.0"
+name = "rmp"
+version = "0.8.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "165ca6e57b20e1351573e3729b958bc62f0e48025386970b6e4d29e7a7e71f3f"
+checksum = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f81bee8c8ef9b577d1681a70ebbc962c232461e397b22c208c43c04b67a155"
+dependencies = [
+ "rmp",
+ "serde",
+]
+
+[[package]]
+name = "rsqlite-vfs"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c51c9ae4df8a7fba42103df5c621fa3c37eccf3a3c650879e90fc48b11cc192c"
+dependencies = [
+ "hashbrown 0.16.1",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "rusqlite"
+version = "0.40.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23f2a97da3e3873c73cb2a2e71b35c40ff95e0b1eefa8d72d8499a6928c3b5b3"
 dependencies = [
  "bitflags 2.13.1",
  "fallible-iterator",
  "fallible-streaming-iterator",
- "hashlink",
+ "hashlink 0.12.2",
  "libsqlite3-sys",
  "smallvec",
+ "sqlite-wasm-rs",
 ]
 
 [[package]]
@@ -4954,6 +5240,12 @@ checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
 
 [[package]]
 name = "shlex"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
+name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
@@ -5087,6 +5379,18 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
+]
+
+[[package]]
+name = "sqlite-wasm-rs"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc3efc0da82635d7e1ced0053bbbfa8c7ab9645d0bf36ceb4f7127bb85315d75"
+dependencies = [
+ "cc",
+ "js-sys",
+ "rsqlite-vfs",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -7316,7 +7620,7 @@ checksum = "2462ea039c445496d8793d052e13787f2b90e750b833afee748e601c17621ed9"
 dependencies = [
  "arraydeque",
  "encoding_rs",
- "hashlink",
+ "hashlink 0.10.0",
 ]
 
 [[package]]

@@ -17,6 +17,9 @@ import {
   type WorkflowNodeData,
   type WorkflowNodeType,
   type WorkflowVariableCatalogEntry,
+  type WorkflowGlobalVariable,
+  deriveWorkflowVariableCatalog,
+  normalizeWorkflowGlobalVariables,
 } from "@ora/workflow-mock";
 import {
   Button,
@@ -46,6 +49,8 @@ interface WorkflowNodeDetailsLayoutProps {
   variableCatalog: WorkflowVariableCatalogEntry[];
   /** Whole-graph node list, for panels whose configuration reads graph structure. */
   graphNodes?: Node<WorkflowNodeData, "workflow">[];
+  /** Workflow-wide declarations used when resolving graph-owned selector types. */
+  globalVariables?: WorkflowGlobalVariable[];
 }
 
 /**
@@ -63,6 +68,7 @@ export function WorkflowNodeDetailsLayout({
   onClose,
   variableCatalog,
   graphNodes,
+  globalVariables,
 }: WorkflowNodeDetailsLayoutProps) {
   switch (node.data.kind) {
     case "start":
@@ -121,6 +127,7 @@ export function WorkflowNodeDetailsLayout({
         <IterationNodeDetails
           {...{ node, nodeType, onUpdate, onClose, variableCatalog }}
           graphNodes={graphNodes ?? [node]}
+          globalVariables={globalVariables ?? []}
         />
       );
     case "subflow":
@@ -1078,7 +1085,7 @@ function HumanNodeDetails({
   );
 }
 
-/** Loop panel: max attempts plus the exit condition that ends the loop early. */
+/** Loop panel: bounded execution and the carried value fed back between rounds. */
 function LoopNodeDetails({
   node,
   nodeType,
@@ -1086,6 +1093,12 @@ function LoopNodeDetails({
   onClose,
 }: Omit<WorkflowNodeDetailsLayoutProps, "capabilities">) {
   const { t } = useTranslation();
+  const loopConfig = node.data.loopConfig;
+  const carriedVariable = loopConfig?.variables[0];
+  const initialValue =
+    carriedVariable?.initial.kind === "constant"
+      ? String(carriedVariable.initial.value ?? "")
+      : "";
   return (
     <>
       <WorkflowNodeDetailsHeader
@@ -1096,45 +1109,76 @@ function LoopNodeDetails({
       />
       <WorkflowNodeBody>
         <InspectorField
-          label={t("settings.workflow.field.maxAttempts")}
-          htmlFor="workflow-node-max-attempts"
+          label={t("settings.workflow.field.maxIterations")}
+          htmlFor="workflow-node-max-iterations"
         >
           <Input
-            id="workflow-node-max-attempts"
+            id="workflow-node-max-iterations"
             type="number"
             min={1}
-            value={node.data.maxAttempts ?? 3}
+            max={100}
+            value={loopConfig?.maxIterations ?? 3}
+            disabled={loopConfig === undefined}
             onChange={(event) => {
               const parsed = Number(event.target.value);
+              if (loopConfig === undefined || !Number.isFinite(parsed)) {
+                return;
+              }
               onUpdate({
                 ...node,
                 data: {
                   ...node.data,
-                  maxAttempts:
-                    event.target.value !== "" && Number.isFinite(parsed)
-                      ? parsed
-                      : undefined,
+                  loopConfig: {
+                    ...loopConfig,
+                    maxIterations: Math.min(
+                      100,
+                      Math.max(1, Math.trunc(parsed)),
+                    ),
+                  },
                 },
               });
             }}
           />
         </InspectorField>
         <InspectorField
-          label={t("settings.workflow.field.exitCondition")}
-          htmlFor="workflow-node-exit-condition"
+          label={t("settings.workflow.field.loopInitialValue")}
+          htmlFor="workflow-node-loop-initial-value"
         >
           <Input
-            id="workflow-node-exit-condition"
-            value={node.data.exitCondition ?? ""}
-            placeholder={t("settings.workflow.loop.exitConditionPlaceholder")}
-            onChange={(event) =>
+            id="workflow-node-loop-initial-value"
+            value={initialValue}
+            disabled={loopConfig === undefined || carriedVariable === undefined}
+            onChange={(event) => {
+              if (loopConfig === undefined || carriedVariable === undefined) {
+                return;
+              }
               onUpdate({
                 ...node,
-                data: { ...node.data, exitCondition: event.target.value },
-              })
-            }
+                data: {
+                  ...node.data,
+                  loopConfig: {
+                    ...loopConfig,
+                    variables: [
+                      {
+                        ...carriedVariable,
+                        initial: {
+                          kind: "constant",
+                          value: event.target.value,
+                        },
+                      },
+                      ...loopConfig.variables.slice(1),
+                    ],
+                  },
+                },
+              });
+            }}
           />
         </InspectorField>
+        <p className="rounded-lg border border-border bg-muted/25 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
+          {loopConfig === undefined
+            ? t("settings.workflow.loop.legacyUnsupported")
+            : t("settings.workflow.loop.defaultBehavior")}
+        </p>
       </WorkflowNodeBody>
     </>
   );
@@ -1149,8 +1193,10 @@ function IterationNodeDetails({
   onClose,
   variableCatalog,
   graphNodes,
+  globalVariables,
 }: Omit<WorkflowNodeDetailsLayoutProps, "capabilities"> & {
   graphNodes: Node<WorkflowNodeData, "workflow">[];
+  globalVariables: WorkflowGlobalVariable[];
 }) {
   const { t } = useTranslation();
   const config: WorkflowIterationConfig = node.data.iterationConfig ?? {
@@ -1170,40 +1216,33 @@ function IterationNodeDetails({
   const iteratorChoices = variableCatalog.filter((variable) =>
     variable.valueType.startsWith("array"),
   );
-  // Collect choices: root variables declared by this region's members; conditions produce
-  // nothing, agents expose their raw output and an optional structured object.
+  // Collect choices are derived by the workflow-mock catalog owner, then restricted to direct
+  // region members. This keeps output and structured-output declarations in one source of truth.
   const memberIds = new Set(
     graphNodes
       .filter((candidate) => candidate.parentId === node.id)
       .map((candidate) => candidate.id),
   );
-  const collectChoices: WorkflowVariableCatalogEntry[] = graphNodes
-    .filter((candidate) => memberIds.has(candidate.id))
-    .flatMap((member) => {
-      const entries: WorkflowVariableCatalogEntry[] = [];
-      if (member.data.kind !== "condition") {
-        entries.push({
-          selector: [member.id, "output"],
-          sourceNodeId: member.id,
-          sourceNodeTitle: member.data.title,
-          variableName: "output",
-          valueType: "string",
-        });
-      }
-      if (
-        member.data.kind === "agent" &&
-        member.data.agentConfig?.outputContract?.type === "structured"
-      ) {
-        entries.push({
-          selector: [member.id, "structured_output"],
-          sourceNodeId: member.id,
-          sourceNodeTitle: member.data.title,
-          variableName: "structured_output",
-          valueType: "object",
-        });
-      }
-      return entries;
-    });
+  const collectChoices: WorkflowVariableCatalogEntry[] =
+    deriveWorkflowVariableCatalog(
+      graphNodes,
+      [],
+      undefined,
+      normalizeWorkflowGlobalVariables(globalVariables),
+    )
+      .filter(
+        (variable) =>
+          memberIds.has(variable.sourceNodeId) &&
+          variable.selector.length === 2 &&
+          (variable.variableName === "output" ||
+            variable.variableName === "structured_output"),
+      )
+      .map((variable) => ({
+        ...variable,
+        sourceNodeTitle:
+          graphNodes.find((candidate) => candidate.id === variable.sourceNodeId)
+            ?.data.title ?? variable.sourceNodeTitle,
+      }));
   const iteratorValue = config.iteratorSelector.join(".");
   const collectValue = config.collectSelector.join(".");
   const iteratorVariable = iteratorChoices.find(

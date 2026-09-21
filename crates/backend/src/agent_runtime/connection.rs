@@ -1,9 +1,10 @@
 use super::plugin_agent::{self, LaunchedPluginAgent, PluginAcpTransport, PluginAgentError};
 use super::restart_circuit::{RestartCircuit, RestartDecision};
 use super::routing::{RouteRegistry, SessionChannel, SessionEvent};
+use super::suspend::{AgentProcess, SuspendedAgents, is_agent_suspended, stop_plugin_runtime};
 use super::{
-    CANCELLATION_GRACE, CONTRACT_QUEUE_CAPACITY, INITIALIZE_TIMEOUT, agent_not_installed,
-    agent_start_failed, agent_timed_out, map_acp_error, runtime_unavailable_because,
+    CONTRACT_QUEUE_CAPACITY, INITIALIZE_TIMEOUT, agent_not_installed, agent_start_failed,
+    agent_timed_out, map_acp_error, runtime_unavailable_because,
 };
 use crate::BackendError;
 use crate::clock::SystemClock;
@@ -17,9 +18,7 @@ use agent_client_protocol_schema::v1::{
 use agent_client_protocol_schema::v1::{RequestPermissionOutcome, RequestPermissionResponse};
 use ora_acp::{AcpClient, AcpInboundEvent, AcpMessages, AcpPeer};
 use ora_application::{Clock, SessionRepository};
-use ora_contracts::{
-    InstalledPluginContribution, ListInstalledPluginsRequest, PublicError, StopPluginRequest,
-};
+use ora_contracts::{InstalledPluginContribution, ListInstalledPluginsRequest, PublicError};
 use ora_db::{RepositoryPool, SqliteSessionRepository};
 use ora_domain::{AgentRef, PluginId, SessionStatus};
 use ora_logging::{ora_error, ora_info, ora_warn};
@@ -29,7 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
 use tokio::time::timeout;
@@ -101,6 +100,7 @@ struct SupervisorContext {
     state: watch::Sender<ConnectionState>,
     active_generation: Arc<AtomicU64>,
     routes: Arc<RouteRegistry>,
+    suspended: SuspendedAgents,
     shutdown: mpsc::UnboundedReceiver<()>,
 }
 
@@ -125,6 +125,8 @@ pub(super) struct ConnectionSupervisor {
 #[derive(Clone)]
 pub(super) struct ConnectionSupervisors {
     supervisors: Arc<RwLock<BTreeMap<AgentRef, ConnectionSupervisor>>>,
+    /// Agent identities whose supervisor is temporarily barred from spawning.
+    suspended: SuspendedAgents,
     /// Retained so a package installed after startup can be supervised without restarting Ora.
     plugin_host: Arc<PluginApi>,
     pool: RepositoryPool,
@@ -147,6 +149,7 @@ impl ConnectionSupervisors {
     ) -> Self {
         let supervisors = Self {
             supervisors: Arc::new(RwLock::new(BTreeMap::new())),
+            suspended: Arc::new(Mutex::new(BTreeSet::new())),
             plugin_host,
             pool,
             home_directory,
@@ -154,6 +157,38 @@ impl ConnectionSupervisors {
         };
         supervisors.sync_plugin_agents();
         supervisors
+    }
+
+    /// Bars the plugin agent's supervisor from respawning its process.
+    ///
+    /// Package replacement needs the plugin process gone and gone for good: the supervisor's
+    /// normal restart loop would race the replacement by re-attaching to the version directory
+    /// that is about to be retired.
+    pub(super) fn suspend_plugin_agent(&self, plugin_id: &str) {
+        let Ok(plugin_id) = PluginId::parse(plugin_id) else {
+            return;
+        };
+        self.suspended
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(AgentRef::for_plugin(&plugin_id));
+    }
+
+    /// Lifts a suspension and drops the supervisor so the next reconciliation starts a fresh one
+    /// against the package version that is now installed.
+    pub(super) fn resume_plugin_agent(&self, plugin_id: &str) {
+        let Ok(plugin_id) = PluginId::parse(plugin_id) else {
+            return;
+        };
+        let agent_ref = AgentRef::for_plugin(&plugin_id);
+        self.suspended
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&agent_ref);
+        self.supervisors
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&agent_ref);
     }
 
     /// Reconciles the supervised agents with the packages currently installed.
@@ -180,8 +215,10 @@ impl ConnectionSupervisors {
             .filter_map(|plugin| PluginId::parse(&plugin.id).ok());
         // Every installed package has a distinct id, so no two agents can claim one identity and
         // there is nothing to arbitrate: the desired set is exactly the installed set.
+        let suspended = Arc::clone(&self.suspended);
         let desired = agent_plugins
             .map(|plugin_id| (AgentRef::for_plugin(&plugin_id), plugin_id))
+            .filter(|(agent_ref, _plugin_id)| !is_agent_suspended(&suspended, agent_ref))
             .collect::<Vec<_>>();
 
         let mut supervisors = self
@@ -202,6 +239,7 @@ impl ConnectionSupervisors {
             let supervisor = ConnectionSupervisor::start(
                 agent_ref.clone(),
                 plugin_id,
+                Arc::clone(&self.suspended),
                 self.plugin_host.clone(),
                 self.pool.clone(),
                 self.home_directory.clone(),
@@ -263,6 +301,7 @@ impl ConnectionSupervisor {
     pub(super) fn start(
         agent_ref: AgentRef,
         plugin_id: PluginId,
+        suspended: SuspendedAgents,
         plugin_host: Arc<PluginApi>,
         pool: RepositoryPool,
         home_directory: PathBuf,
@@ -279,6 +318,7 @@ impl ConnectionSupervisor {
             run_supervisor(SupervisorContext {
                 agent_ref,
                 plugin_id,
+                suspended,
                 plugin_host,
                 pool,
                 home_directory,
@@ -405,52 +445,6 @@ impl Drop for ConnectionSupervisor {
     }
 }
 
-/// Ends the plugin process backing one connection generation once that generation is over.
-///
-/// The process belongs to the plugin lifecycle rather than to this module: a connection only
-/// borrowed its ACP stream, so ending the generation means telling the lifecycle to stop it, which
-/// keeps the runtime state the settings surface reports honest and leaves the next attach to start
-/// a fresh process.
-struct AgentProcess {
-    plugin_id: PluginId,
-    runtime: PluginRuntime,
-    host: Arc<PluginApi>,
-}
-
-impl AgentProcess {
-    /// Reaps a failed generation before its replacement so two generations cannot overlap.
-    async fn terminate_and_reap(&self) {
-        // Stopping the agent is the plugin's chance to reap the agent process it owns before the
-        // lifecycle ends the plugin process itself.
-        plugin_agent::stop_agent(&self.runtime, &self.plugin_id.canonical()).await;
-        stop_plugin_runtime(&self.host, &self.plugin_id).await;
-    }
-
-    /// Bounds application shutdown even when the operating system does not promptly reap a child.
-    async fn stop_with_grace(&self) {
-        let _ = timeout(CANCELLATION_GRACE, self.terminate_and_reap()).await;
-    }
-}
-
-/// Asks the lifecycle to end one plugin process after its agent generation failed or shut down.
-///
-/// A stop that itself fails is logged rather than propagated: the caller is already tearing a
-/// generation down, and the next attach restarts the plugin regardless of what this left behind.
-async fn stop_plugin_runtime(host: &PluginApi, plugin_id: &PluginId) {
-    if let Err(error) = host
-        .stop(StopPluginRequest {
-            plugin_id: plugin_id.to_string(),
-        })
-        .await
-    {
-        ora_warn!(
-            plugin_id = %plugin_id,
-            error = %error,
-            "plugin runtime could not be stopped after its agent generation ended"
-        );
-    }
-}
-
 /// Separates a startup failure worth retrying from one that can never succeed.
 ///
 /// Almost every failure is retryable: an agent can be installed later, a crashed provider can come
@@ -491,6 +485,7 @@ async fn run_supervisor(context: SupervisorContext) {
     let SupervisorContext {
         agent_ref,
         plugin_id,
+        suspended,
         plugin_host,
         pool,
         home_directory,
@@ -505,6 +500,12 @@ async fn run_supervisor(context: SupervisorContext) {
     let mut generation = 0_u64;
     let mut restart_circuit = RestartCircuit::default();
     loop {
+        // A suspended supervisor never spawns: package replacement holds this flag while it
+        // retires the version directory the plugin process keeps open as its working directory.
+        if is_agent_suspended(&suspended, &agent_ref) {
+            let _ = state.send(ConnectionState::Unavailable);
+            return;
+        }
         let _ = state.send(ConnectionState::Starting);
         match spawn_initialized_process(&plugin_id, &plugin_host, &home_directory).await {
             Ok(mut process) => {
@@ -535,6 +536,13 @@ async fn run_supervisor(context: SupervisorContext) {
                     return;
                 }
                 process.process.terminate_and_reap().await;
+                // The generation lost its process while the supervisor is suspended (package
+                // replacement): exiting here is what lets the replacement retire the version
+                // directory without this supervisor racing it with a respawn.
+                if is_agent_suspended(&suspended, &agent_ref) {
+                    let _ = state.send(ConnectionState::Unavailable);
+                    return;
+                }
                 if restart_circuit.record_failure(Instant::now()) == RestartDecision::Stop {
                     let _ = state.send(ConnectionState::Failing);
                     ora_warn!(

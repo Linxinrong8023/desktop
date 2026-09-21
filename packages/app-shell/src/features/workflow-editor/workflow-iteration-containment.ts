@@ -1,125 +1,118 @@
-import type { Node } from "@xyflow/react";
+import type { Edge, Node } from "@xyflow/react";
 import {
-  WORKFLOW_ITERATION_NODE_HEIGHT,
-  WORKFLOW_ITERATION_NODE_WIDTH,
+  WORKFLOW_ITERATION_COLLAPSED_HEIGHT,
+  WORKFLOW_ITERATION_COLLAPSED_WIDTH,
+  WORKFLOW_NODE_INITIAL_HEIGHT,
+  WORKFLOW_NODE_WIDTH,
   type WorkflowNodeData,
 } from "@ora/workflow-mock";
+import {
+  expandIterationFrames,
+  iterationExpandedSize,
+} from "./workflow-iteration-graph";
 
-/** The editable workflow draft shape the containment helper works over. */
+/** The editable workflow draft shape the drag guard works over. */
 export interface ContainmentWorkflow {
   nodes: Node<WorkflowNodeData, "workflow">[];
+  edges: Edge[];
 }
 
-/** Frame geometry of one iteration node on the canvas. */
-interface IterationFrame {
-  id: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-const COLLAPSED_FRAME_HEIGHT = 112;
-
-/** Strips containment fields so a reassignment never carries stale values. */
-function withoutContainment(
-  node: Node<WorkflowNodeData, "workflow">,
-): Omit<Node<WorkflowNodeData, "workflow">, "parentId" | "extent"> {
-  const next: Record<string, unknown> = { ...node };
-  delete next.parentId;
-  delete next.extent;
-  return next as Omit<
-    Node<WorkflowNodeData, "workflow">,
-    "parentId" | "extent"
-  >;
+export interface IterationDragResult<TWorkflow extends ContainmentWorkflow> {
+  workflow: TWorkflow;
+  rejectedNodeIds: string[];
 }
 
 /**
- * Derives iteration containment from the dragged nodes' final positions.
+ * Enforces authored iteration membership after a drag.
  *
- * A node whose center lands inside an iteration frame becomes that frame's member
- * (`parentId` + `extent: "parent"`, position converted to frame-relative); a member whose
- * center lands outside its frame returns to the outer canvas (position converted back to
- * absolute). Output and nested iteration nodes never become members — the region boundary
- * rules forbid them — and frames themselves never nest. Returns the same workflow reference
- * when nothing changed so callers can skip a no-op history step.
+ * Membership is never inferred from geometry. Existing members keep their `parentId` and may
+ * expand their owner; outer nodes whose center was dropped over a region return to their drag
+ * start position so the canvas cannot imply membership that the graph does not contain.
  */
-export function applyIterationContainment(
-  workflow: ContainmentWorkflow,
-  draggedNodes: Node<WorkflowNodeData, "workflow">[],
-): ContainmentWorkflow {
-  const frames: IterationFrame[] = workflow.nodes
+export function applyIterationDragRules<TWorkflow extends ContainmentWorkflow>(
+  workflow: TWorkflow,
+  beforeDrag: ContainmentWorkflow,
+  draggedNodeIds: readonly string[],
+): IterationDragResult<TWorkflow> {
+  const draggedIds = new Set(draggedNodeIds);
+  const originalById = new Map(
+    beforeDrag.nodes.map((node) => [node.id, node] as const),
+  );
+  const frames = workflow.nodes
     .filter((node) => node.data.kind === "iteration")
     .map((node) => ({
-      id: node.id,
-      x: node.position.x,
-      y: node.position.y,
-      width: WORKFLOW_ITERATION_NODE_WIDTH,
-      height:
+      node,
+      ...iterationExpandedSize(node),
+      visibleWidth:
         node.data.collapsed === true
-          ? COLLAPSED_FRAME_HEIGHT
-          : WORKFLOW_ITERATION_NODE_HEIGHT,
+          ? WORKFLOW_ITERATION_COLLAPSED_WIDTH
+          : iterationExpandedSize(node).width,
+      visibleHeight:
+        node.data.collapsed === true
+          ? WORKFLOW_ITERATION_COLLAPSED_HEIGHT
+          : iterationExpandedSize(node).height,
     }));
-  if (frames.length === 0 && draggedNodes.length === 0) {
-    return workflow;
-  }
-  const frameById = new Map(frames.map((frame) => [frame.id, frame]));
-  const iterationIds = new Set(frames.map((frame) => frame.id));
-  const absolutePositionOf = (node: Node<WorkflowNodeData, "workflow">) => {
-    if (node.parentId === undefined || !iterationIds.has(node.parentId)) {
-      return { x: node.position.x, y: node.position.y };
-    }
-    const frame = frameById.get(node.parentId);
-    if (frame === undefined) {
-      return node.position;
-    }
-    return { x: node.position.x + frame.x, y: node.position.y + frame.y };
-  };
-
+  const rejectedNodeIds: string[] = [];
   let changed = false;
-  const nextNodes = workflow.nodes.map((node) => {
-    if (!draggedNodes.some((dragged) => dragged.id === node.id)) {
+  const nodes = workflow.nodes.map((node) => {
+    if (!draggedIds.has(node.id) || node.parentId !== undefined) {
       return node;
     }
-    // Frames and forbidden member kinds keep their containment untouched; the structural
-    // validation on publish stays the authoritative rejection path.
-    if (
-      node.data.kind === "iteration" ||
-      node.data.kind === "output" ||
-      node.data.kind === "start"
-    ) {
-      return node;
-    }
-    const absolute = absolutePositionOf(node);
-    const center = { x: absolute.x + 115, y: absolute.y + 49 };
-    const inside = frames.find(
+    const center = {
+      x: node.position.x + nodeWidth(node) / 2,
+      y: node.position.y + nodeHeight(node) / 2,
+    };
+    const overlapsRegion = frames.some(
       (frame) =>
-        center.x >= frame.x &&
-        center.x <= frame.x + frame.width &&
-        center.y >= frame.y &&
-        center.y <= frame.y + frame.height,
+        frame.node.id !== node.id &&
+        center.x >= frame.node.position.x &&
+        center.x <= frame.node.position.x + frame.visibleWidth &&
+        center.y >= frame.node.position.y &&
+        center.y <= frame.node.position.y + frame.visibleHeight,
     );
-    const currentParent =
-      node.parentId !== undefined && iterationIds.has(node.parentId)
-        ? node.parentId
-        : null;
-    if (inside !== undefined && inside.id !== currentParent) {
-      changed = true;
-      return {
-        ...withoutContainment(node),
-        parentId: inside.id,
-        extent: "parent" as const,
-        position: {
-          x: Math.max(0, absolute.x - inside.x),
-          y: Math.max(0, absolute.y - inside.y),
-        },
-      };
+    if (!overlapsRegion) {
+      return node;
     }
-    if (inside === undefined && currentParent !== null) {
-      changed = true;
-      return { ...withoutContainment(node), position: absolute };
+    const original = originalById.get(node.id);
+    if (original === undefined) {
+      return node;
     }
-    return node;
+    rejectedNodeIds.push(node.id);
+    changed = true;
+    return { ...node, position: { ...original.position } };
   });
-  return changed ? { ...workflow, nodes: nextNodes } : workflow;
+  const withRejectedDropsRestored = changed
+    ? ({ ...workflow, nodes } as TWorkflow)
+    : workflow;
+  const affectedIterationIds = workflow.nodes
+    .filter(
+      (node) =>
+        draggedIds.has(node.id) &&
+        node.parentId !== undefined &&
+        frames.some((frame) => frame.node.id === node.parentId),
+    )
+    .map((node) => node.parentId!);
+  return {
+    workflow: expandIterationFrames(
+      withRejectedDropsRestored,
+      affectedIterationIds,
+    ),
+    rejectedNodeIds,
+  };
+}
+
+/** Returns the measured member width used only for overlap rejection. */
+function nodeWidth(node: Node<WorkflowNodeData, "workflow">): number {
+  const width = node.measured?.width ?? node.width ?? node.initialWidth;
+  return width !== undefined && Number.isFinite(width) && width > 0
+    ? width
+    : WORKFLOW_NODE_WIDTH;
+}
+
+/** Returns the measured member height used only for overlap rejection. */
+function nodeHeight(node: Node<WorkflowNodeData, "workflow">): number {
+  const height = node.measured?.height ?? node.height ?? node.initialHeight;
+  return height !== undefined && Number.isFinite(height) && height > 0
+    ? height
+    : WORKFLOW_NODE_INITIAL_HEIGHT;
 }

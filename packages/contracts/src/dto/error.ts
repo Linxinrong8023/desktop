@@ -20,6 +20,11 @@ export type ContractError =
     | { "code": "agent_not_found"; "params": EmptyErrorParams }
     | { "code": "plugin_not_found"; "params": EmptyErrorParams }
     | { "code": "plugin_host_incompatible"; "params": EmptyErrorParams }
+    | { "code": "pack_member_duplicate"; "params": PackMemberParams }
+    | { "code": "pack_self_reference"; "params": PackMemberParams }
+    | { "code": "pack_member_not_found"; "params": PackMemberParams }
+    | { "code": "pack_member_nested"; "params": PackMemberParams }
+    | { "code": "pack_no_applicable_members"; "params": PackMemberParams }
     | {
       "code": "marketplace_s3_credentials_required";
       "params": EmptyErrorParams;
@@ -163,9 +168,15 @@ export type ContractError =
     | { "code": "workflow_role_not_found"; "params": EmptyErrorParams }
     | { "code": "workflow_run_start_failed"; "params": EmptyErrorParams }
     | { "code": "workflow_run_not_restartable"; "params": EmptyErrorParams }
+    | { "code": "workflow_run_not_resumable"; "params": EmptyErrorParams }
+    | {
+      "code": "workflow_snapshot_incompatible_with_resume";
+      "params": WorkflowSnapshotIncompatibleWithResumeParams;
+    }
     | { "code": "workflow_run_not_editable"; "params": EmptyErrorParams }
     | { "code": "workflow_node_not_found"; "params": EmptyErrorParams }
     | { "code": "workflow_node_not_awaiting_input"; "params": EmptyErrorParams }
+    | { "code": "workflow_node_not_diagnosable"; "params": EmptyErrorParams }
   );
 
 /**
@@ -187,6 +198,11 @@ export type OpenLocationFailedParams = { target: OpenLocationTarget };
  * Lists the finite Desktop targets that can fail to open.
  */
 export type OpenLocationTarget = "explorer" | "terminal" | "vscode";
+
+/**
+ * Names one extension pack member (or the pack itself) in a pack preflight failure.
+ */
+export type PackMemberParams = { pluginId: string };
 
 /**
  * Addresses one stable validation failure to its Setting ID.
@@ -221,6 +237,11 @@ export type PublicError =
   | { "code": "agent_not_found"; "params": EmptyErrorParams }
   | { "code": "plugin_not_found"; "params": EmptyErrorParams }
   | { "code": "plugin_host_incompatible"; "params": EmptyErrorParams }
+  | { "code": "pack_member_duplicate"; "params": PackMemberParams }
+  | { "code": "pack_self_reference"; "params": PackMemberParams }
+  | { "code": "pack_member_not_found"; "params": PackMemberParams }
+  | { "code": "pack_member_nested"; "params": PackMemberParams }
+  | { "code": "pack_no_applicable_members"; "params": PackMemberParams }
   | {
     "code": "marketplace_s3_credentials_required";
     "params": EmptyErrorParams;
@@ -349,9 +370,15 @@ export type PublicError =
   | { "code": "workflow_role_not_found"; "params": EmptyErrorParams }
   | { "code": "workflow_run_start_failed"; "params": EmptyErrorParams }
   | { "code": "workflow_run_not_restartable"; "params": EmptyErrorParams }
+  | { "code": "workflow_run_not_resumable"; "params": EmptyErrorParams }
+  | {
+    "code": "workflow_snapshot_incompatible_with_resume";
+    "params": WorkflowSnapshotIncompatibleWithResumeParams;
+  }
   | { "code": "workflow_run_not_editable"; "params": EmptyErrorParams }
   | { "code": "workflow_node_not_found"; "params": EmptyErrorParams }
-  | { "code": "workflow_node_not_awaiting_input"; "params": EmptyErrorParams };
+  | { "code": "workflow_node_not_awaiting_input"; "params": EmptyErrorParams }
+  | { "code": "workflow_node_not_diagnosable"; "params": EmptyErrorParams };
 
 /**
  * Identifies one Ora request across adapters, spans, responses, and completion events.
@@ -380,3 +407,8 @@ export type SkillFolderConflictParams = { name: string };
  * Carries the user-selected base branch name when Git cannot resolve it.
  */
 export type TaskBaseBranchNotFoundParams = { branchName: string };
+
+/**
+ * Explains why a published snapshot cannot take over an existing run on resume.
+ */
+export type WorkflowSnapshotIncompatibleWithResumeParams = { reason: string };

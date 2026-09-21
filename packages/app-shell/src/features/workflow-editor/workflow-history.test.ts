@@ -113,4 +113,46 @@ describe("workflow history", () => {
     expect(state.past).toHaveLength(50);
     expect(state.past[0]?.id).toBe("2");
   });
+
+  it("restores a cascaded iteration deletion as one undo step", () => {
+    const initial = createWorkflow();
+    initial.nodes = [
+      initial.nodes[0]!,
+      {
+        id: "iter",
+        type: "workflow",
+        position: { x: 200, y: 0 },
+        data: { kind: "iteration", title: "Iteration", description: "" },
+      },
+      {
+        id: "agent",
+        type: "workflow",
+        parentId: "iter",
+        position: { x: 96, y: 160 },
+        data: { kind: "agent", title: "Agent", description: "" },
+      },
+    ];
+    initial.edges = [
+      { id: "outer", source: "start", target: "iter" },
+      {
+        id: "entry",
+        source: "iter",
+        sourceHandle: "iteration-entry",
+        target: "agent",
+      },
+    ];
+    const deleted = createWorkflow();
+    const initialSnapshot = captureWorkflowHistorySnapshot(initial);
+    const deletedSnapshot = captureWorkflowHistorySnapshot(deleted);
+    const committed = commitWorkflowHistory(
+      createWorkflowHistoryState(),
+      initialSnapshot,
+      deletedSnapshot,
+      "node.delete",
+    );
+
+    expect(undoWorkflowHistory(committed, deletedSnapshot).snapshot).toEqual(
+      initialSnapshot,
+    );
+  });
 });

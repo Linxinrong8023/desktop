@@ -59,7 +59,7 @@ enum SweepDecision {
 }
 
 /// Applies the crash sweep to one recoverable run.
-fn sweep_one_run(
+pub(super) fn sweep_one_run(
     repository: &SqliteWorkflowRunEngineRepository,
     run_id: &WorkflowRunId,
     now: i64,
@@ -196,13 +196,15 @@ mod tests {
             ]}"#;
             let run_id = seeded_pending_run_with_source(&temp, &pool, graph);
             let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+            let executor = crate::workflow::run::test_fixture::RecordingExecutor::default();
             let engine = Arc::new(WorkflowRunEngine::new(
                 repository.clone(),
-                crate::workflow::run::test_fixture::NoopExecutor,
+                executor.clone(),
                 ora_application::UuidWorkflowNodeRunIdGenerator::new(),
                 crate::clock::SystemClock,
             ));
             engine.start(&run_id).unwrap();
+            assert_eq!(executor.records().len(), 1);
 
             // Round 0 completed before the crash; round 1's agent was still running.
             let round_zero = repository
@@ -221,10 +223,42 @@ mod tests {
                     Vec::new(),
                 )
                 .unwrap();
+            assert_eq!(executor.records().len(), 2);
             // The process "crashed" — run the real boot sweep and reconcile path.
             let locks = crate::workflow::run::test_fixture::locks().0;
             sweep_one_run(&repository, &run_id, 50).unwrap();
-            crate::workflow::run::engine::reconcile_running_workflow_runs(&engine, &locks, &pool);
+            drop(engine);
+            let restarted_engine = Arc::new(WorkflowRunEngine::new(
+                repository.clone(),
+                executor.clone(),
+                ora_application::UuidWorkflowNodeRunIdGenerator::new(),
+                crate::clock::SystemClock,
+            ));
+            crate::workflow::run::engine::reconcile_running_workflow_runs(
+                &restarted_engine,
+                &locks,
+                &pool,
+            );
+
+            // Reconcile starts the remaining round from persisted facts; finish that row to drive
+            // the composite through its terminal projection.
+            let round_two = repository
+                .list_node_runs(&run_id)
+                .unwrap()
+                .into_iter()
+                .find(|row| row.node_id == "fix" && row.iteration == Some(2))
+                .expect("round 2 row");
+            assert_eq!(executor.records().len(), 3);
+            restarted_engine
+                .complete_node(
+                    &run_id,
+                    &round_two.id,
+                    Some("fixed round two".to_string()),
+                    None,
+                    None,
+                    Vec::new(),
+                )
+                .unwrap();
 
             // The sweep failed only the interrupted round row; the composite row and the run
             // survived, and reconcile drove them to the settled outcome: the interrupted
@@ -246,6 +280,7 @@ mod tests {
                 vec![
                     (Some(0), WorkflowNodeStatus::Succeeded),
                     (Some(1), WorkflowNodeStatus::Failed),
+                    (Some(2), WorkflowNodeStatus::Succeeded),
                 ]
             );
             let iter_row = node_runs
@@ -258,7 +293,7 @@ mod tests {
                 serde_json::from_str(context.run.payload.as_deref().unwrap()).unwrap();
             assert_eq!(
                 payload.variable_pool.values.get("iter.output").unwrap(),
-                &serde_json::json!(["fixed round zero"])
+                &serde_json::json!(["fixed round zero", "fixed round two"])
             );
             assert_eq!(
                 payload
@@ -275,9 +310,96 @@ mod tests {
                 .unwrap()
                 .as_array()
                 .unwrap();
-            assert_eq!(entries.len(), 2);
+            assert_eq!(entries.len(), 3);
             assert_eq!(entries[0]["status"], serde_json::json!("succeeded"));
             assert_eq!(entries[1]["status"], serde_json::json!("failed"));
+            assert_eq!(entries[2]["status"], serde_json::json!("succeeded"));
+        });
+    }
+
+    /// A crashed round under `fail` is first recorded by the composite runtime, then stops the
+    /// iteration and run without starting any later round.
+    #[test]
+    fn a_crashed_round_inside_a_fail_iteration_fails_the_node_and_the_run() {
+        crate::workflow::run::test_fixture::run_test(async {
+            let (temp, pool) = bootstrap();
+            let graph = r#"{"nodes":[
+                {"id":"start","data":{"kind":"start","inputVariables":[{"name":"prs","valueType":"array[object]"}]}},
+                {"id":"iter","data":{"kind":"iteration","iterationConfig":{
+                    "iteratorSelector":["start","prs"],"collectSelector":["fix","output"],"errorStrategy":"fail","maxIterations":5}}},
+                {"id":"fix","parentId":"iter","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"open_code","modelId":"m"},"prompt":"fix"}}},
+                {"id":"out","data":{"kind":"output"}}
+            ],"edges":[
+                {"source":"start","target":"iter"},
+                {"source":"iter","target":"fix"},
+                {"source":"iter","target":"out"}
+            ]}"#;
+            let run_id = seeded_pending_run_with_source(&temp, &pool, graph);
+            let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+            let engine = Arc::new(WorkflowRunEngine::new(
+                repository.clone(),
+                crate::workflow::run::test_fixture::NoopExecutor,
+                ora_application::UuidWorkflowNodeRunIdGenerator::new(),
+                crate::clock::SystemClock,
+            ));
+            engine.start(&run_id).unwrap();
+            let round_zero = repository
+                .list_node_runs(&run_id)
+                .unwrap()
+                .into_iter()
+                .find(|row| row.node_id == "fix" && row.iteration == Some(0))
+                .expect("round 0 row");
+            engine
+                .complete_node(
+                    &run_id,
+                    &round_zero.id,
+                    Some("fixed round zero".to_string()),
+                    None,
+                    None,
+                    Vec::new(),
+                )
+                .unwrap();
+
+            let locks = crate::workflow::run::test_fixture::locks().0;
+            sweep_one_run(&repository, &run_id, 50).unwrap();
+            crate::workflow::run::engine::reconcile_running_workflow_runs(&engine, &locks, &pool);
+
+            let context = repository
+                .find_execution_context(&run_id)
+                .unwrap()
+                .expect("run context");
+            assert_eq!(context.run.status, ora_domain::WorkflowRunStatus::Failed);
+            let node_runs = repository.list_node_runs(&run_id).unwrap();
+            let fix_rounds: Vec<(Option<u32>, WorkflowNodeStatus)> = node_runs
+                .iter()
+                .filter(|row| row.node_id == "fix")
+                .map(|row| (row.iteration, row.status))
+                .collect();
+            assert_eq!(
+                fix_rounds,
+                vec![
+                    (Some(0), WorkflowNodeStatus::Succeeded),
+                    (Some(1), WorkflowNodeStatus::Failed),
+                ]
+            );
+            assert_eq!(
+                node_runs
+                    .iter()
+                    .find(|row| row.node_id == "iter")
+                    .expect("iteration row")
+                    .status,
+                WorkflowNodeStatus::Failed
+            );
+            assert!(
+                node_runs.iter().all(|row| row.iteration != Some(2)),
+                "fail strategy must not start a later round"
+            );
+            let payload: ora_application::WorkflowRunPayload =
+                serde_json::from_str(context.run.payload.as_deref().unwrap()).unwrap();
+            assert!(
+                payload.variable_pool.values.get("iter.output").is_none(),
+                "failed iteration must not expose a successful output projection"
+            );
         });
     }
 
@@ -313,7 +435,7 @@ mod tests {
         });
     }
 
-    /// Seeds a run whose Start variable `prs` carries a two-element array source.
+    /// Seeds a run whose Start variable `prs` carries a three-element array source.
     fn seeded_pending_run_with_source(
         temp: &tempfile::TempDir,
         pool: &ora_db::RepositoryPool,
@@ -324,7 +446,7 @@ mod tests {
         let mut variables = std::collections::BTreeMap::new();
         variables.insert(
             "prs".to_string(),
-            serde_json::json!([{ "id": 1 }, { "id": 2 }]),
+            serde_json::json!([{ "id": 1 }, { "id": 2 }, { "id": 3 }]),
         );
         repository
             .update_run_input(&run_id, Some("kickoff".to_string()), variables, 35)

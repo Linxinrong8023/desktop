@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import type { XYPosition } from "@xyflow/react";
 import { IconAdjustmentsAlt } from "@tabler/icons-react";
 import {
+  supportsWorkflowNodeScope,
   type WorkflowCapabilities,
   type WorkflowNodeKind,
 } from "@ora/workflow-mock";
@@ -28,6 +29,7 @@ const AVAILABLE_NODE_KINDS = new Set<WorkflowNodeKind>([
   "start",
   "agent",
   "condition",
+  "loop",
   "iteration",
   "output",
 ]);
@@ -58,8 +60,10 @@ export function WorkflowNodeCatalog({
   onDrop: (kind: WorkflowNodeKind, position: XYPosition) => void;
 }) {
   const { t } = useTranslation();
-  const nodeTypes = capabilities.nodeTypes.filter((nodeType) =>
-    AVAILABLE_NODE_KINDS.has(nodeType.kind),
+  const nodeTypes = capabilities.nodeTypes.filter(
+    (nodeType) =>
+      AVAILABLE_NODE_KINDS.has(nodeType.kind) &&
+      supportsWorkflowNodeScope(nodeType, "workflow"),
   );
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const returnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

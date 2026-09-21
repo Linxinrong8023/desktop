@@ -48,6 +48,14 @@ impl RegistryIndex {
             for path in orax_manifest_paths(&source.registry_dir()) {
                 match parse_manifest(&path) {
                     Ok(manifest) => {
+                        // A hidden listing never enters the derived index: the visibility filter
+                        // runs before an index entry exists, so no projection or consumer layer
+                        // can leak the listing back into discovery. Addressability is untouched —
+                        // `resolve_manifest` re-reads the checkout, so a hidden entry stays
+                        // resolvable and installable by its id.
+                        if !manifest.marketplace_visible() {
+                            continue;
+                        }
                         // The icon lives beside the manifest under one of the fixed candidate
                         // names; the same scan runs against an installed package root, so a
                         // listing and its install can never resolve to different icons.
@@ -933,6 +941,102 @@ mod tests {
                 true,
             ),
         );
+        Ok(())
+    }
+
+    /// Verifies a `kind = "pack"` listing is indexed like any other listing, carrying the pack
+    /// kind and no release targets of its own.
+    #[test]
+    fn indexes_a_pack_listing_without_release_targets() -> Result<(), Box<dyn std::error::Error>> {
+        let root = TempDir::new()?;
+        write_manifest(
+            root.path(),
+            "ora-space.python-extension-pack",
+            "resolver = 1\n\
+             identifier = \"ora-space.python-extension-pack\"\n\
+             title = \"Python Extension Pack\"\n\
+             kind = \"pack\"\n\
+             version = \"0.1.0\"\n\
+             description = \"Python development pack\"\n\
+             \n\
+             [[pack.members]]\n\
+             identifier = \"ora-space.python-core\"\n\
+             \n\
+             [[pack.members]]\n\
+             identifier = \"ora-space.claude-python-tools\"\n\
+             agents = [\"ora-space.claude\"]\n",
+        )?;
+        let source = official_source(root.path());
+
+        let build = RegistryIndex::build_all(&[&source], UPDATED_AT);
+
+        assert_eq!(build.skipped().len(), 0);
+        let entry = build
+            .index()
+            .plugins()
+            .first()
+            .ok_or_else(|| std::io::Error::other("expected the pack entry"))?;
+        assert_eq!(
+            entry.id().canonical(),
+            "official/ora-space.python-extension-pack"
+        );
+        assert_eq!(entry.kind(), "pack");
+        assert_eq!(
+            entry.release_targets(),
+            None,
+            "a pack declares no downloadable release of its own"
+        );
+        Ok(())
+    }
+
+    /// Verifies `marketplace_visible = false` removes a listing from discovery while the entry
+    /// stays resolvable by id from the same checkout.
+    ///
+    /// This is the visibility semantics the extension pack decision pins down: visibility only
+    /// affects discovery, never addressability — a hidden member is exactly what a pack
+    /// installation must be able to resolve and install later.
+    #[test]
+    fn excludes_hidden_listings_from_the_index_but_keeps_them_resolvable()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = TempDir::new()?;
+        write_manifest(
+            root.path(),
+            "ora-space.python-core",
+            "resolver = 1\n\
+             identifier = \"ora-space.python-core\"\n\
+             kind = \"skill\"\n\
+             version = \"1.0.0\"\n\
+             description = \"Hidden pack member\"\n\
+             marketplace_visible = false\n\
+             url = \"https://example.com/python-core.orax\"\n\
+             sha256 = \"abababababababababababababababababababababababababababababababab\"\n",
+        )?;
+        write_manifest(
+            root.path(),
+            "visible",
+            &valid_manifest("visible", "Visible"),
+        )?;
+        let source = official_source(root.path());
+
+        let build = RegistryIndex::build_all(&[&source], UPDATED_AT);
+
+        assert_eq!(
+            build
+                .index()
+                .plugins()
+                .iter()
+                .map(|entry| entry.id().canonical())
+                .collect::<Vec<_>>(),
+            vec!["official/visible".to_string()],
+            "the hidden listing does not reach discovery"
+        );
+        let resolved = RegistryIndex::resolve_manifest(
+            &source,
+            &PluginId::new("official", "ora-space.python-core").expect("plugin id"),
+        )?
+        .ok_or_else(|| std::io::Error::other("hidden entry stays resolvable"))?;
+        assert_eq!(resolved.name().as_str(), "ora-space.python-core");
+        assert!(!resolved.marketplace_visible());
         Ok(())
     }
 }

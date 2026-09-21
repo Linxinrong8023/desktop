@@ -2,11 +2,13 @@
 
 use super::connection::ConnectionSupervisors;
 use super::history::RecordOutcome;
-use super::routing::SessionChannel;
+use super::routing::{SessionChannel, SetupActivity};
 use super::support::{agent_timed_out, map_acp_error};
 use super::support::{contract_session, domain_agent_ref};
 use super::{ActorSetup, HandoffDebt, SessionVisibility, TitleAcquisition};
-use super::{AgentRuntimeManager, SESSION_SETUP_TIMEOUT, collect_setup_commands};
+use super::{
+    AgentRuntimeManager, SESSION_SETUP_TIMEOUT, collect_setup_commands, session_setup_window,
+};
 use crate::BackendError;
 use crate::session_setup::{
     AgentSessionMcpCapabilities, SessionMcpHost, SessionMcpRevision, SessionSetup,
@@ -14,11 +16,12 @@ use crate::session_setup::{
 use crate::session_setup::{LiveMcpState, SessionMcpSelection};
 use agent_client_protocol_schema::v1::{
     AGENT_METHOD_NAMES, AvailableCommand, CloseSessionRequest, CloseSessionResponse,
-    DeleteSessionRequest, DeleteSessionResponse, NewSessionRequest, NewSessionResponse,
+    DeleteSessionRequest, DeleteSessionResponse, McpServer, NewSessionRequest, NewSessionResponse,
     SessionConfigId, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigOptionValue, SessionConfigSelectOptions, SetSessionConfigOptionRequest,
     SetSessionConfigOptionResponse,
 };
+use ora_acp::{AcpClient, AcpTransport};
 use ora_application::{Clock, SessionIdGenerator, SessionRepository, UuidSessionIdGenerator};
 use ora_contracts::{StartSessionRequest, StartSessionResponse};
 use ora_db::SqliteSessionRepository;
@@ -233,26 +236,28 @@ pub(super) async fn create_provider_session(
         ),
     )
     .map_err(crate::session_setup::SessionMcpError::into_backend)?;
-    log_session_mcp_request(
+    record_session_mcp_boundary(
+        session_mcp,
         ora_session_id,
         agent_ref,
         /*agent_session_id*/ None,
         AGENT_METHOD_NAMES.session_new,
-        &session_mcp.selection,
         &setup.mcp,
+        cwd,
     );
     let mcp_revision = setup.mcp.revision().clone();
-    let _setup_registration = supervisor.begin_session_setup();
-    let response = timeout(
-        SESSION_SETUP_TIMEOUT,
-        connection.client.request::<_, NewSessionResponse>(
-            AGENT_METHOD_NAMES.session_new,
-            &NewSessionRequest::new(cwd).mcp_servers(setup.mcp.into_servers()),
-        ),
+    // Read before `into_servers` consumes the snapshot: the window depends on whether the
+    // request asks the agent to connect any MCP servers.
+    let setup_window = session_setup_window(&setup.mcp);
+    let setup_registration = supervisor.begin_session_setup();
+    let response = await_session_new(
+        &connection.client,
+        cwd,
+        setup.mcp.into_servers(),
+        setup_registration.activity(),
+        setup_window,
     )
-    .await
-    .map_err(|_| agent_timed_out("agent CLI session creation timed out"))?
-    .map_err(map_acp_error)?;
+    .await?;
     let agent_session_id = response.session_id.to_string();
     ora_debug!(
         agent = %agent_ref,
@@ -294,6 +299,39 @@ pub(super) async fn create_provider_session(
     })
 }
 
+/// Sends one `session/new` and waits under an inactivity deadline that setup traffic rearms.
+///
+/// The ACP session-setup sequence has the agent connect the delivered MCP servers before it
+/// answers, so the deadline is inactivity, not a total budget: notifications the agent emits
+/// while it works — buffered until the response reveals their provider session id — prove it is
+/// alive and rearm the window, while an agent that stays silent past the window fails with
+/// `agent_timed_out` instead of holding the create forever. A request that delivers servers gets
+/// a wider window, because connecting them is exactly the slow part of a conforming setup.
+async fn await_session_new<T: AcpTransport>(
+    client: &AcpClient<T>,
+    cwd: &Path,
+    servers: Vec<McpServer>,
+    activity: &SetupActivity,
+    window: Duration,
+) -> Result<NewSessionResponse, BackendError> {
+    let params = NewSessionRequest::new(cwd).mcp_servers(servers);
+    let request = client.request::<_, NewSessionResponse>(AGENT_METHOD_NAMES.session_new, &params);
+    tokio::pin!(request);
+    let inactivity = tokio::time::sleep_until(tokio::time::Instant::now() + window);
+    tokio::pin!(inactivity);
+    loop {
+        tokio::select! {
+            response = &mut request => return response.map_err(map_acp_error),
+            () = activity.wait() => {
+                inactivity.as_mut().reset(tokio::time::Instant::now() + window);
+            }
+            () = &mut inactivity => {
+                return Err(agent_timed_out("agent CLI session creation timed out"));
+            }
+        }
+    }
+}
+
 /// One selected MCP member rendered for logs without executable configuration or credentials.
 struct SessionMcpLogMember {
     plugin_id: String,
@@ -315,7 +353,7 @@ impl std::fmt::Debug for SessionMcpLogMember {
 }
 
 /// Logs the exact secret-free MCP identity sent at an ACP session boundary.
-pub(super) fn log_session_mcp_request(
+fn log_session_mcp_request(
     ora_session_id: &SessionId,
     agent_ref: &AgentRef,
     agent_session_id: Option<&str>,
@@ -348,6 +386,32 @@ pub(super) fn log_session_mcp_request(
         mcp_members = ?members,
         "sending ACP session configuration"
     );
+}
+
+/// Records one ACP MCP delivery boundary and pairs the Host health observation with it.
+///
+/// Every `session/new` and `session/load` that carries `mcpServers` reaches this function, and the
+/// raw send log stays private to it, so a delivery boundary can never be logged without also
+/// scheduling Host health observation. The send log is emitted synchronously first; the
+/// observation then reports on its own task with the same `session_id`.
+pub(crate) fn record_session_mcp_boundary(
+    host: &SessionMcpHost,
+    session_id: &SessionId,
+    agent_ref: &AgentRef,
+    agent_session_id: Option<&str>,
+    acp_method: &str,
+    snapshot: &crate::session_setup::SessionMcpSnapshot,
+    cwd: &Path,
+) {
+    log_session_mcp_request(
+        session_id,
+        agent_ref,
+        agent_session_id,
+        acp_method,
+        &host.selection,
+        snapshot,
+    );
+    crate::session_setup::observe_session_mcp_health(host, session_id, cwd);
 }
 
 /// Applies a model only when the session authoritatively offers that value.
@@ -478,7 +542,8 @@ async fn release_provider_session(
 
 #[cfg(test)]
 mod tests {
-    use super::{log_session_mcp_request, model_config_id};
+    use super::{await_session_new, log_session_mcp_request, model_config_id};
+    use crate::agent_runtime::routing::{RouteRegistry, SessionEvent};
     use crate::session_setup::{
         SessionMcpMemberRevision, SessionMcpRevision, SessionMcpSelection, SessionMcpSnapshot,
         SessionMcpTransportKind,
@@ -487,16 +552,144 @@ mod tests {
         HttpHeader, McpServer, McpServerHttp, SessionConfigGroupId, SessionConfigId,
         SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelect,
         SessionConfigSelectGroup, SessionConfigSelectOption, SessionConfigSelectOptions,
-        SessionConfigValueId,
+        SessionConfigValueId, SessionInfoUpdate, SessionNotification, SessionUpdate,
     };
+    use ora_acp::{AcpError, AcpPeer, AcpTransport};
+    use ora_contracts::PublicError;
     use ora_domain::{AgentRef, PluginId, SessionId};
     use ora_logging::with_recorded_trace_logging;
     use pretty_assertions::assert_eq;
     use semver::Version;
+    use serde_json::{Value, json};
     use std::collections::BTreeSet;
+    use std::path::Path;
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+    use tokio::sync::mpsc;
     use tracing::field::{Field, Visit};
     use tracing_subscriber::layer::{Context, Layer};
+
+    /// Transport that records every frame the client sends and answers nothing on its own.
+    struct StallingTransport {
+        sent: mpsc::UnboundedSender<Value>,
+    }
+
+    impl AcpTransport for StallingTransport {
+        async fn send(&self, message: Value) -> Result<(), AcpError> {
+            let _ = self.sent.send(message);
+            Ok(())
+        }
+    }
+
+    /// Spawns one peer whose agent side never speaks unless the test injects a frame.
+    ///
+    /// The peer is returned so its reader task stays owned: a direct request resolves through
+    /// the pending table, but letting the peer drop first would leave that resolution racing
+    /// the reader's own shutdown for no benefit.
+    fn stalling_peer() -> (
+        ora_acp::AcpClient<StallingTransport>,
+        mpsc::UnboundedSender<Result<Value, AcpError>>,
+        mpsc::UnboundedReceiver<Value>,
+    ) {
+        let (inbound, messages) = mpsc::unbounded_channel();
+        let (sent, outbound) = mpsc::unbounded_channel();
+        let peer = AcpPeer::spawn(messages, StallingTransport { sent });
+        (peer.into_parts().0, inbound, outbound)
+    }
+
+    /// A silent agent fails the create with `agent_timed_out` once the window elapses.
+    ///
+    /// The paused clock auto-advances through the deadline, so the window passing is what the
+    /// test observes rather than real waiting.
+    #[tokio::test(start_paused = true)]
+    async fn session_new_times_out_after_the_inactivity_window() {
+        let (client, _inbound, mut outbound) = stalling_peer();
+        let registry = Arc::new(RouteRegistry::default());
+        let registration = registry.begin_session_setup();
+        let started = tokio::time::Instant::now();
+
+        let create = await_session_new(
+            &client,
+            Path::new("C:\\work"),
+            Vec::new(),
+            registration.activity(),
+            Duration::from_millis(200),
+        );
+        tokio::pin!(create);
+
+        // The request must go out before the deadline is the only remaining timer.
+        tokio::select! {
+            frame = outbound.recv() => assert_eq!(frame.expect("session/new frame")["method"], "session/new"),
+            outcome = &mut create => panic!("create settled without an answer: {outcome:?}"),
+        }
+
+        match (&mut create).await {
+            Ok(response) => panic!("unexpected session response: {response:?}"),
+            Err(error) => {
+                assert!(matches!(
+                    error.public_error(),
+                    PublicError::AgentTimedOut(_)
+                ))
+            }
+        }
+        assert!(started.elapsed() >= Duration::from_millis(200));
+    }
+
+    /// Setup traffic observed while the create waits rearms the deadline past its first window.
+    ///
+    /// The agent answers only after the original window would already have expired, so the
+    /// create succeeding proves the buffered unrouted update kept the deadline alive.
+    #[tokio::test(start_paused = true)]
+    async fn setup_activity_rearms_the_session_new_deadline() {
+        let (client, inbound, mut outbound) = stalling_peer();
+        let registry = Arc::new(RouteRegistry::default());
+        let registration = registry.begin_session_setup();
+        let started = tokio::time::Instant::now();
+
+        let create = await_session_new(
+            &client,
+            Path::new("C:\\work"),
+            Vec::new(),
+            registration.activity(),
+            Duration::from_millis(200),
+        );
+        tokio::pin!(create);
+
+        let frame = tokio::select! {
+            frame = outbound.recv() => frame.expect("session/new frame"),
+            outcome = &mut create => panic!("create settled without an answer: {outcome:?}"),
+        };
+        // 150 ms pass with no answer, then the agent emits setup traffic for the session whose
+        // id the still-missing response has not revealed.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        registry
+            .route_event(SessionEvent::Update(SessionNotification::new(
+                "unrevealed-session",
+                SessionUpdate::SessionInfoUpdate(SessionInfoUpdate::new().title("Setting up")),
+            )))
+            .expect("buffer setup update");
+        // The woken create must rearm before the original window expires, exactly as a runtime
+        // scheduler would poll it promptly after the wake.
+        tokio::select! {
+            outcome = &mut create => panic!("create settled without an answer: {outcome:?}"),
+            () = tokio::time::sleep(Duration::from_millis(25)) => {}
+        }
+        // The original window expires here; without the rearm the create would already be dead.
+        tokio::time::sleep(Duration::from_millis(75)).await;
+        inbound
+            .send(Ok(json!({
+                "jsonrpc": "2.0",
+                "id": frame["id"],
+                "result": { "sessionId": "provider-1" },
+            })))
+            .expect("answer session/new");
+
+        let response = (&mut create)
+            .await
+            .expect("create survives past its first window");
+        assert_eq!(response.session_id.to_string(), "provider-1");
+        assert!(started.elapsed() >= Duration::from_millis(250));
+    }
 
     fn select_option(value: &str, name: &str) -> SessionConfigSelectOption {
         SessionConfigSelectOption::new(

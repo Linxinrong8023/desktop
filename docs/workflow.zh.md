@@ -2,6 +2,8 @@
 
 [English](workflow.md) | 中文
 
+已交付扩展：[工作流循环节点实现计划与证据](workflow-loop-plan.zh.md)。
+
 `ora-application` 负责工作流定义用例，`ora-db` 负责持久化，`ora-contracts` 定义公共契约。工作流管理可编辑的 Agent 编排图，以草稿作为编辑工作区，以不可变发布快照作为运行版本。
 
 ## 实体与数据表
@@ -34,6 +36,38 @@
 ## 图存储
 
 `graph` 字段保存完整 React Flow JSON。工作流定义 CRUD 将其视为不透明字符串；[工作流运行引擎](../crates/application/src/workflow_run/engine/README.md)在启动时解析和校验冻结快照。
+
+## 未参与运行的节点
+
+编辑器允许保留未接入执行路径的节点和备用节点组。草稿、发布快照、回滚及导入导出保留完整画布；运行时从冻结快照派生入口可达的执行子图，不修改原始文档。
+根图从 Start 计算有向可达性；活动 Loop 内从子 Start 计算，活动 Iteration 内从容器入口边计算。未使用容器的全部成员均不参与运行。
+Condition 的全部分支参与静态分析，运行时分支未命中与未参与运行是不同状态。
+
+备用节点及其边不会进入调度、变量池或角色和 Skill 准备，不创建 NodeRun 或 Session。备用节点指向活动节点的边被排除，活动节点不会等待它；活动节点引用备用节点输出时，运行前返回校验错误。重新连通节点后恢复正常执行校验。
+所有文档仍检查重复 ID、悬空边及非法容器归属或跨作用域边，配置和可执行性检查只针对执行子图。
+
+编辑器和运行全图通过后端分析显示“未参与运行”，编辑器显示节点数量提示。运行全图保留备用节点，Theater 执行路径排除这些节点，点击备用节点不会进入等待执行视图。该状态由拓扑推导，不持久化节点开关。分析结果绑定文档身份，切换文档或卸载会取消过期请求。
+
+## Loop 容器
+
+可执行 Loop 图使用 `schemaVersion: 2`。根 Loop 持有 `data.loopConfig`；每个子节点通过
+React Flow `parentId` 与 `data.containerId` 指向同一个 Loop。编辑器一次创建包含唯一子
+Start、子 Agent 和内部边的合法容器组。根图与子图禁止跨作用域连线；删除 Loop 会原子
+删除后代及相关边；根图自动布局保留子节点的相对位置。编辑器与运行全图都会把所属节点
+渲染在 Loop 体内；编辑器中的子节点受容器边界约束，选中 Loop 后可调整其大小，保存的
+尺寸会继续用于发布快照和运行全图。
+
+`loopConfig` 定义 1–100 的轮次上限、有类型跨轮变量、同时反馈选择器、有类型 `until`
+条件及命名输出。每个 Loop 体是独立 DAG，必须有且仅有一个可达 Start。嵌套 Loop、归属
+不一致、跨作用域边或选择器、活动节点的类型错误都会在创建 Session 前被拒绝。未从子 Start 可达的备用子节点保留在快照中，不参与执行。编辑器
+默认组把子 Agent 输出反馈为下一轮 `value`，输出非空时结束并导出为 `result`；作者可设置
+初始值与最大轮次。
+
+每次迭代拥有持久化 `WorkflowExecutionScope`。子 NodeRun 与 Session 归属于该作用域，重复的
+定义节点 ID 不会覆盖其他轮次。轮次完成后，从已完成变量池解析反馈和终止条件，并在同一
+仓储事务中创建下一作用域或完成父 Loop。取消与子节点失败会同时收束活跃作用域和父节点。
+重跑会轮换根执行身份，保留旧历史并使迟到回调失效。真实运行契约返回有序作用域身份，
+Theater 的 Loop 详情可切换轮次，查看各轮子节点状态与 Session ID。
 
 ## Agent 节点 MCP 绑定
 
@@ -108,22 +142,120 @@ Start 表单控件与变量类型分离：文本、段落、选择框、数字�
 总是传播为 run 失败；只有区域内部失败可被吸收，且区域内的 Condition 决策按轮记录，后一轮
 永远不会覆盖前一轮的分支选择。
 
-编辑器把迭代节点渲染为同一画布上的内嵌容器框：把节点拖入框内区域即成为成员，容器可折叠为
-摘要，检视器编辑四个配置字段。变量目录遵循区域作用域——成员可见 `item` / `index` 与区域内
-上游产物，但看不到节点自身暴露的结果；外层消费者可见三个暴露变量，但看不到轮内绑定。运行
-视图按 `(node_id, iteration)` 分组区域状态：总览为成员节点标注轮次徽标，剧场的 act 检视器
-提供按轮切换条，可逐轮查看每轮的会话与输出。
+编辑器把迭代节点渲染为同一画布上的内嵌复合区域：顶部是紧凑标题栏，参数仍在 Inspector 配置；
+区域左侧固定显示一个不可删除、不可配置的内部起点，样式参照 Dify 的迭代开始节点：44 像素
+白色圆角卡片内嵌蓝色家园徽标，右边缘带入口端口。参照 Dify，新增节点的入口是一个实心蓝色
+圆圈加号徽标，居中压在端口上：仅在作者悬浮节点时淡入（菜单展开或徽标获得键盘焦点期间保持
+可见），而起点卡片与端口本身就是选择器触发器——点击起点卡片或端口都会打开节点选择器，
+从端口拖动仍会发起新连线，装饰性徽标永远不会拦截拖动。作者既可从内部起点这样新增 Agent 或 Condition，也可从尚未连接
+的成员输出（包括指定的 Condition 分支）追加节点，还可从起点拖线连接已有成员并创建多个入口
+分支；内部连线上也可插入节点。入口边不再重复显示中点“+”，因为固定起点
+已经拥有该新增入口；内部画布只保留容器本身的一层边界，不再绘制第二层虚线框。选中区域仅
+重绘边框与阴影，背景填充在选中与未选中状态下保持不变。内部起点只属于
+编辑器呈现，冻结图仍把入口保存为 `iteration --iteration-entry--> member`，不会新增运行时节点。
+每次插入会在同一次撤销/自动
+保存操作中创建或重接连线。拖动永远不改写 `parentId`：成员只能在所属区域内移动；外层节点落到
+区域上时回到原位置，并提示使用区域内新增入口。React Flow 的父级约束只在渲染时从 `parentId`
+派生，不进入持久化图。
+
+展开区域以 560×340 为最小尺寸，通过 `initialWidth` / `initialHeight` 保存适配后的尺寸。作者
+也可以像 Dify 一样手动缩放展开的区域：右下角显示柔和的灰色弧线角标（悬浮区域或区域被选中时
+显现），光标移入该角落变为缩放指示，按住左键拖动即可按 20 像素网格步长调整尺寸；该手势是一次
+可撤销、自动保存的编辑，且永远不会低于最小尺寸或裁剪区域成员。折叠时
+内部起点、成员和内部连线仅在画布投影中隐藏，原始图不变；重新展开会恢复同一尺寸。新增、插入或
+移动成员时容器扩展；删除或自动整理时紧凑计算。由于新插入的卡片只有在渲染后才能测得真实尺寸，
+真实测量到达时会重新拟合容器，确保 React Flow 的父级约束不会把较高的成员钳回区域内部操作行之
+上；新成员堆叠在既有成员真实底部之下，并会被推到与其重叠的卡片下方，因为卡片高度随节点类型与
+内容变化。自动整理先分别
+排布每个区域内部 DAG，再使用容器的真实尺寸排布外层图。删除非空区域前会显示成员数量；确认后把
+容器、成员和相关边作为一次可撤销编辑级联删除。若删除当前 `collectSelector` 的目标，编辑器会清空
+该选择器并提示重新配置。区域内 Agent 默认 `interactive: false`；旧快照中的非法交互成员仍会显示，
+并提供直接关闭交互模式的修复操作，因为运行时仍会拒绝它们。
+
+变量目录遵循区域作用域——成员可见 `item` / `index` 与区域内上游产物，但看不到节点自身暴露的
+结果；外层消费者可见三个暴露变量，但看不到轮内绑定。运行视图按 `(node_id, iteration)` 分组区域
+状态。剧场的顶层路径只保留迭代容器，并在其下按冻结区域 DAG 展开内部结构：多个
+`iteration-entry` 目标始终显示为并行组，Condition 后继标为条件分支，存在依赖的节点进入后续阶段。
+整个区域共用一个轮次选择器；切换并行成员会保持当前轮次，成员未在该轮执行时明确显示“本轮未执行”，
+绝不借用其他轮次的结果。节点详情上方持续显示所属迭代、轮次和并行位置。缺少按轮投影的旧运行记录
+仍按冻结图分组，并使用节点级状态。总览会从冻结图的 `parentId`、`initialWidth`、`initialHeight` 与
+`iteration-entry` 边重建迭代父框，
+完成后的成员节点仍留在区域内，入口边也保持可见。总览支持鼠标滚轮、触控板捏合、加减按钮和
+“显示完整运行图”缩放操作。
+生产回归测试通过 SQLite 与 fake ACP provider 覆盖同一组边界：第二轮会获得新的会话，轮次绑定
+在提示词渲染时已经可用，同步失败在 `fail` 与 `continue` 两种策略下都会完成结算，不会留下卡住的 run。
+
+### 失败可见性与从失败处续跑
+
+失败节点保持可见。某个节点失败时，运行立即失败（D2），仍在执行的兄弟节点会跑完且仍可绑定；
+调度器随后不会再向 `Failed` / `Cancelled` 运行派发新节点。失败节点的
+`payload.error_detail` 记录 `kind`、`message`、`source_chain`、`attempt`、`resumable`、
+`injects_previous_failure`、`recorded_at`。`kind` 是机械分类，从不由模型推断。
+
+`resumable` 只表示「同一快照再跑一次是否像环境/瞬时问题」，不决定界面是否允许续跑——失败或
+已取消且空闲的运行始终可以续跑：
+
+| Kind                                                                                                                                                                                                    | `resumable` |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `workflow_model_not_found`、`missing_agent_config`、`session`、`session_ended_without_stop_reason`、`session_binding_rejected`、`interrupted_by_restart`、`repository`、`baseline_persist`              | true        |
+| `structured_output`、`agent_refusal`、`prompt_template`、`missing_agent_ref`、`missing_skill_materialization`、`invalid_run_payload`、`unknown_stop_reason`、`multiple_outputs`、`condition_evaluation` | false       |
+
+只有智能体自身行为导致的失败会注入后续提示词（`injects_previous_failure`）：
+`structured_output`、`agent_refusal`、`unknown_stop_reason`、`multiple_outputs`。
+
+续跑会软删除失败/取消的节点运行及其全部后继（`is_deleted = 1`），再从幸存状态重新调度。
+尝试次数按 `(run_id, node_id, iteration)` 统计软删除前驱（外层行为 `iteration IS NULL`）。
+`find_last_failed_attempt` 使用同一作用域。
+
+每个节点开始前会在 `refs/ora/checkpoints/<node_run_id>` 记录 git 检查点。回滚前先把工作树
+存成 `pre-rollback-<run>-<ts>`，方便反悔。节点 payload 保存 `checkpoint`、
+`checkpoint_error`、`file_changes`。三种回滚模式：`keep`（保留现状）、`node_files`
+（只还原失败节点记录过的路径）、`checkpoint`（把整棵工作树还原到续跑单元的检查点）。
+`node_files` 在失败节点没有检查点或文件改动时不可用（`nodeFilesUnavailableReason` 为
+`"no_file_changes"`），续跑单元是迭代复合节点时也不可用（`"composite_region"`）。
+`checkpoint` 不可用的原因是 `"no_checkpoint"`、`"siblings_ran_after_checkpoint"`（续跑单元
+最早开始之后，单元外仍有活着的节点在跑：`finished_at` 为空或更晚，或 `started_at` 更晚；
+在该时刻之前已结束的 Start/Condition/Output 行不算），或 `"not_resumable"`。
+
+运行级开关 `inject_last_failure`（默认开启）会在同一 `(node_id, iteration)` 的上次失败属于
+上述四种可注入 kind 时，把失败信息写入提示词，并保存在
+`payload.injected_failure_context`。
+
+失败或已取消的运行可以改用更新的已发布快照续跑，前提是两张图兼容：删除节点、改变节点类型、
+改变 Start 契约都不兼容（`node_missing:<id>`、`node_type_changed:<id>`、
+`start_node_changed`、`start_variables_changed`、`variable_type_changed:<selector>`、
+`variable_missing:<selector>`）。已成功且不在续跑单元内的迭代复合节点，若
+`iterationConfig` 或区域成员集合变了，也不兼容（`iteration node <id> changed after it
+completed`）；本身就是续跑单元的复合节点可以任意改，因为它会从第一轮重跑。节点上次实际运行
+的快照记在 `payload.snapshot_id`。
+
+按需 AI 诊断写入 `payload.ai_diagnosis`。它标明为推测，调度、续跑、回滚、快照切换都不会读取。
+
+区域内任何失败/取消行（`iteration IS NOT NULL`），或复合节点自身失败/取消，都以拥有该区域
+的复合节点为续跑单元：软删除复合行、每一轮的全部区域行、该复合节点写入的账本与池绑定
+（`{iter}.item`、`{iter}.index`，以及已暴露的 `{iter}.output` / `{iter}.entries` /
+`{iter}.failed_count`），以及复合节点的全部外层后继，然后重新调度；循环从第 1 轮重来。
+不支持循环内部分续跑。该单元不能使用 `node_files` 回滚（`composite_region`）；
+`checkpoint` 还原到循环开始前为复合节点记录的检查点。开机清扫仍感知区域：被打断的区域行
+记 `interrupted_by_restart`，复合行与运行存活，该轮按失败结算；非区域行仍走整次运行的
+`InterruptedByRestart` 处理。
+
+Loop 容器（`kind: "loop"`，见「Loop 容器」）按同样方式续跑：Loop 节点本身是续跑单元，清除它时
+会一并关闭其各轮作用域并软删除这些轮次创建的全部节点记录，因此重跑从第 1 轮开始、没有遗留的
+活跃轮次。轮次内部沿用 Loop 自己的失败语义（同一轮的兄弟节点被取消，失败上抬到 Loop 节点）；
+D2 的「兄弟节点继续跑完」只适用于根作用域。
 
 ### 实体与状态
 
-| 领域类型          | 数据表               |
-| ----------------- | -------------------- |
-| `WorkflowRun`     | `workflow_runs`      |
-| `WorkflowNodeRun` | `workflow_node_runs` |
+| 领域类型                 | 数据表                      |
+| ------------------------ | --------------------------- |
+| `WorkflowRun`            | `workflow_runs`             |
+| `WorkflowNodeRun`        | `workflow_node_runs`        |
+| `WorkflowExecutionScope` | `workflow_execution_scopes` |
 
-`WorkflowRun` 固定引用发布版本的 `snapshot_id`，保存运行名称与工作区。`WorkflowNodeRun` 只为实际开始的节点创建记录，未开始状态由前端对比图与记录推导。
+`WorkflowRun` 固定引用发布版本的 `snapshot_id`，保存运行名称与工作区。`WorkflowNodeRun` 只为实际开始的节点创建记录并保存作用域归属，未开始状态由前端对比图与记录推导。`WorkflowExecutionScope` 保存 Loop 父执行、轮次索引、生命周期与私有轮次状态。
 
-运行与节点均使用 `Pending | Running | Succeeded | Failed | Cancelled`。交互节点等待后续输入时持久化为 `Pending`；公共契约将存在等待节点的运行投影为 `AwaitingInput`。终态节点会话只读，后端拒绝新提示词。节点会话可按 ID 读取，但不会出现在普通聊天列表中。
+运行与节点均使用 `Pending | Running | Succeeded | Failed | Cancelled`。交互节点等待后续输入时持久化为 `Pending`；公共契约将存在等待节点的运行投影为 `AwaitingInput`。终态节点会话只读，后端拒绝新提示词。节点会话可按 ID 读取，但不会出现在普通聊天列表中。过滤依据包括重跑时被软删除的节点记录：工作流完成、重跑或应用重启都不会改变会话归属，保留的节点会话历史不会成为普通聊天。
 
 ### 创建与快照固定
 

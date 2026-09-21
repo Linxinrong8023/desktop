@@ -4,9 +4,11 @@ import type {
   WorkflowGlobalVariable,
   WorkflowViewport,
 } from "./types";
+import { workflowContainerNodes } from "./container-layout";
 
 /** The persisted graph envelope: editor geometry plus optional metadata. */
 export interface WorkflowGraphEnvelope {
+  schemaVersion?: number;
   nodes: WorkflowDefinitionNode[];
   edges: WorkflowDefinitionEdge[];
   viewport: WorkflowViewport;
@@ -52,7 +54,11 @@ export function serializeWorkflowGraph(input: {
   globalVariables?: readonly WorkflowGlobalVariable[];
   description?: string;
 }): string {
+  const usesLoopContainers = input.nodes.some(
+    (node) => node.data.kind === "loop" || node.data.containerId !== undefined,
+  );
   return JSON.stringify({
+    ...(usesLoopContainers ? { schemaVersion: 2 } : {}),
     nodes: input.nodes,
     edges: input.edges,
     viewport: input.viewport,
@@ -98,7 +104,9 @@ export function parseWorkflowGraph(graph: string): WorkflowGraphEnvelope {
   const envelope: WorkflowGraphEnvelope = {
     ...record,
     nodes: Array.isArray(record.nodes)
-      ? (record.nodes as WorkflowDefinitionNode[]).map(upgradeLegacyNodeKind)
+      ? workflowContainerNodes(
+          (record.nodes as WorkflowDefinitionNode[]).map(upgradeLegacyNodeKind),
+        )
       : [],
     edges: Array.isArray(record.edges)
       ? (record.edges as WorkflowDefinitionEdge[])

@@ -23,6 +23,7 @@ import type {
   WorkflowHistoryEvent,
   WorkflowHistoryStep,
 } from "../workflow-history";
+import type { IterationInsertion } from "../workflow-iteration-graph";
 
 export type WorkflowCanvasNode =
   Node<WorkflowNodeData, "workflow"> | WorkflowAnnotationNode;
@@ -37,6 +38,11 @@ export interface WorkflowCanvasProps {
   onNodesChange: OnNodesChange<WorkflowCanvasNode>;
   onEdgesChange: OnEdgesChange<Edge>;
   onAddNode: (kind: WorkflowNodeKind, position: XYPosition) => void;
+  onInsertIterationNode: (
+    kind: WorkflowNodeKind,
+    insertion: IterationInsertion,
+  ) => void;
+  onToggleIterationCollapsed: (iterationId: string) => void;
   onAddAnnotation: (position: XYPosition) => void;
   onUpdateAnnotation: (
     id: string,

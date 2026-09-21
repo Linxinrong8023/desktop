@@ -30,7 +30,8 @@ pub use git_cleanup::{
 };
 pub use ids::{
     AgentDefinitionId, GitCleanupJobId, ProjectId, SessionId, SkillId, TaskId, WorkflowId,
-    WorkflowNodeRunId, WorkflowRunId, WorkflowSnapshotId, WorkspaceId, WorktreeProvisioningLeaseId,
+    WorkflowNodeRunId, WorkflowRunId, WorkflowScopeId, WorkflowSnapshotId, WorkspaceId,
+    WorktreeProvisioningLeaseId,
 };
 pub use namespace::Namespace;
 pub use plugin_id::{PluginId, PluginIdError, PluginIdSegment};
@@ -47,8 +48,8 @@ pub use workflow::{
     CreatedWorkflow, Workflow, WorkflowDetail, WorkflowSnapshot, WorkflowSummary, WorkflowVersion,
 };
 pub use workflow_run::{
-    WorkflowNodeRun, WorkflowNodeStatus, WorkflowRun, WorkflowRunDetail, WorkflowRunStatus,
-    WorkflowRunSummary,
+    WorkflowExecutionScope, WorkflowNodeRun, WorkflowNodeStatus, WorkflowRun, WorkflowRunDetail,
+    WorkflowRunStatus, WorkflowRunSummary, WorkflowScopeStatus,
 };
 pub use workspace::{
     Workspace, WorkspaceKind, WorkspaceLifecycle, WorkspaceLocation, WorkspaceProvisionerKind,

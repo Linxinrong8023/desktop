@@ -35,8 +35,9 @@ ora-process = { workspace = true }
 ora-runtime-settings = { workspace = true }
 ora-scheduler = { workspace = true }
 ora-skill-package = { workspace = true }
-ora-utils = { workspace = true, features = ["http-reqwest"] }
+ora-utils = { workspace = true, features = ["http-reqwest", "mcp"] }
 ora-user-config = { workspace = true }
+futures = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -57,5 +58,6 @@ pretty_assertions = { workspace = true }
 ora-plugin-manifest = { workspace = true }
 ora-test-support = { workspace = true }
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
 zip = { workspace = true }

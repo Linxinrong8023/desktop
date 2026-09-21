@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { executableRun } from "./executable-run";
 import { createMockWorkflow as createMockWorkflowFixture } from "@ora/workflow-mock";
 import {
   resolveCompletionAdvanceNodeId,
@@ -38,6 +39,26 @@ function baseRun(overrides: Partial<GraphWorkflowRun> = {}): GraphWorkflowRun {
 }
 
 describe("resolveCompletionAdvanceNodeId", () => {
+  it("excludes backend-designated spare nodes from Theater without changing Overview's snapshot", () => {
+    const run = baseRun();
+    const before = structuredClone(run);
+    const unusedId = run.definitionSnapshot.nodes[1]!.id;
+    const projected = executableRun(run, [unusedId]);
+    expect(run).toEqual(before);
+    expect(projected.definitionSnapshot).toEqual({
+      ...run.definitionSnapshot,
+      nodes: run.definitionSnapshot.nodes.filter(
+        (node) => node.id !== unusedId,
+      ),
+      edges: run.definitionSnapshot.edges.filter(
+        (edge) => edge.source !== unusedId && edge.target !== unusedId,
+      ),
+    });
+    expect(projected.nodeStates).not.toHaveProperty(unusedId);
+    expect(resolveTheaterFocus(projected, unusedId).activeIds).not.toContain(
+      unusedId,
+    );
+  });
   it("waits for the completed node's refreshed terminal state", () => {
     const run = baseRun({
       nodeStates: {

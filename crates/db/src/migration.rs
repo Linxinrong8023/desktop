@@ -1,4 +1,5 @@
 mod catalog;
+mod legacy_loop;
 mod record;
 mod runner;
 mod schema;

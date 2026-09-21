@@ -1,8 +1,13 @@
+use crate::pack::compile_pack;
+use crate::raw::{
+    RawArtifact, RawHead, RawInstalledManifest, RawMetadata, RawPluginManifest, RawReleaseTarget,
+};
 use crate::webview::RawWebview;
 use crate::workbench::RawWorkbench;
 use crate::{
     HomepageUrl, HookTarget, InvalidFieldReason, ManifestError, ManifestField, PluginKind,
-    PluginName, PluginWebview, PluginWorkbench, ReleaseLocator, RepositoryUrl, Sha256Digest,
+    PluginName, PluginPack, PluginWebview, PluginWorkbench, ReleaseLocator, RepositoryUrl,
+    Sha256Digest,
 };
 use ora_utils::GitBranchName;
 use semver::{Version, VersionReq};
@@ -38,6 +43,8 @@ pub struct PluginManifest {
     pub(crate) webview: Option<PluginWebview>,
     pub(crate) release_source: Option<PluginReleaseSource>,
     pub(crate) artifact: Option<PluginArtifact>,
+    pub(crate) pack: Option<PluginPack>,
+    pub(crate) marketplace_visible: bool,
 }
 
 impl PluginManifest {
@@ -92,6 +99,15 @@ impl PluginManifest {
         };
         let kind = PluginKind::from_str(&metadata.kind)
             .map_err(|reason| invalid_field(ManifestField::Kind, reason.into()))?;
+        // A pack only exists as a marketplace listing: it is an orchestration entry the host
+        // resolves and expands, never a package that lands in `installed/`, so the installed
+        // form cannot express it at all.
+        if matches!(kind, PluginKind::Pack) && matches!(form, ManifestForm::Installed) {
+            return Err(invalid_field(
+                ManifestField::Kind,
+                InvalidFieldReason::PackNotAllowedOnInstalled,
+            ));
+        }
         let version = Version::parse(&metadata.version).map_err(|reason| {
             invalid_field(
                 ManifestField::Version,
@@ -170,6 +186,22 @@ impl PluginManifest {
             .artifact
             .map(PluginArtifact::try_from)
             .transpose()?;
+        let pack = compile_pack(kind, metadata.pack, ManifestField::PackMembers)?;
+        let marketplace_visible = match metadata.marketplace_visible {
+            None => true,
+            Some(visible) => {
+                // Visibility is a marketplace-listing attribute: an installed package has no
+                // discovery surface left to hide from, so carrying the flag there can only
+                // mean the listing and the package disagree about their own shape.
+                if matches!(form, ManifestForm::Installed) {
+                    return Err(invalid_field(
+                        ManifestField::MarketplaceVisible,
+                        InvalidFieldReason::MarketplaceVisibleNotAllowedOnInstalled,
+                    ));
+                }
+                visible
+            }
+        };
         let (workbench, webview) =
             validate_kind_sections(kind, metadata.workbench, metadata.webview)?;
 
@@ -190,6 +222,8 @@ impl PluginManifest {
             webview,
             release_source,
             artifact,
+            pack,
+            marketplace_visible,
         })
     }
 
@@ -287,6 +321,23 @@ impl PluginManifest {
     pub fn artifact(&self) -> Option<&PluginArtifact> {
         self.artifact.as_ref()
     }
+
+    /// Returns the validated pack membership when this manifest is `kind = "pack"`.
+    ///
+    /// The membership is display and orchestration data: it names the plugins a pack installation
+    /// expands into, and never turns the pack itself into an installed package.
+    pub fn pack(&self) -> Option<&PluginPack> {
+        self.pack.as_ref()
+    }
+
+    /// Returns whether this listing participates in marketplace discovery.
+    ///
+    /// The field is release-form only and defaults to `true`; a `false` listing stays resolvable
+    /// and installable by id but never enters the derived index (the registry decision carries
+    /// that filter). The flag is meaningless on an installed package, which the parser rejects.
+    pub fn marketplace_visible(&self) -> bool {
+        self.marketplace_visible
+    }
 }
 
 /// Deserializes one manifest form, keeping the TOML path of a structural failure.
@@ -319,7 +370,9 @@ fn deserialize<'de, T: Deserialize<'de>>(source: &'de str) -> Result<T, Manifest
 /// Pairs `kind` with the sections it may carry so a manifest cannot be half of two kinds.
 ///
 /// `[webview]` is required by, and exclusive to, `kind = "webview"`; `[workbench]` is exclusive
-/// to `kind = "workbench"` but optional there, because a static page needs no methods.
+/// to `kind = "workbench"` but optional there, because a static page needs no methods. Every
+/// other kind — including `workflow`, whose package contributes documents under `assets/`
+/// instead of declaring a section — carries neither.
 fn validate_kind_sections(
     kind: PluginKind,
     workbench: Option<RawWorkbench>,
@@ -333,7 +386,9 @@ fn validate_kind_sections(
             | PluginKind::Webview
             | PluginKind::Skill
             | PluginKind::Mcp
-            | PluginKind::Hook,
+            | PluginKind::Hook
+            | PluginKind::Pack
+            | PluginKind::Workflow,
             Some(_),
         ) => {
             return Err(invalid_field(
@@ -346,7 +401,9 @@ fn validate_kind_sections(
             | PluginKind::Webview
             | PluginKind::Skill
             | PluginKind::Mcp
-            | PluginKind::Hook,
+            | PluginKind::Hook
+            | PluginKind::Pack
+            | PluginKind::Workflow,
             None,
         ) => None,
     };
@@ -363,7 +420,9 @@ fn validate_kind_sections(
             | PluginKind::Workbench
             | PluginKind::Skill
             | PluginKind::Mcp
-            | PluginKind::Hook,
+            | PluginKind::Hook
+            | PluginKind::Pack
+            | PluginKind::Workflow,
             Some(_),
         ) => {
             return Err(invalid_field(
@@ -376,7 +435,9 @@ fn validate_kind_sections(
             | PluginKind::Workbench
             | PluginKind::Skill
             | PluginKind::Mcp
-            | PluginKind::Hook,
+            | PluginKind::Hook
+            | PluginKind::Pack
+            | PluginKind::Workflow,
             None,
         ) => None,
     };
@@ -479,6 +540,25 @@ fn validate_release_source(
             return Err(invalid_field(
                 ManifestField::Targets,
                 InvalidFieldReason::TargetsNotAllowedOnInstalled,
+            ));
+        }
+        return Ok(None);
+    }
+
+    // A pack is an orchestration entry, not a package: it carries no downloadable bytes of its
+    // own, so any release declaration on a pack listing is a schema violation rather than a
+    // selectable release source.
+    if matches!(kind, PluginKind::Pack) {
+        if has_universal {
+            return Err(invalid_field(
+                ManifestField::Url,
+                InvalidFieldReason::NotAllowedForKind { kind },
+            ));
+        }
+        if has_targets {
+            return Err(invalid_field(
+                ManifestField::Targets,
+                InvalidFieldReason::NotAllowedForKind { kind },
             ));
         }
         return Ok(None);
@@ -600,145 +680,6 @@ impl PluginDependencies {
     /// Returns the declared Ora host version requirement.
     pub fn ora(&self) -> &VersionReq {
         &self.ora
-    }
-}
-
-#[derive(Deserialize)]
-struct RawPluginManifest {
-    resolver: u64,
-    identifier: String,
-    title: Option<String>,
-    kind: String,
-    version: String,
-    description: String,
-    homepage: Option<String>,
-    license: Option<String>,
-    url: Option<String>,
-    sha256: Option<String>,
-    head: Option<RawHead>,
-    dependencies: Option<RawDependencies>,
-    workbench: Option<RawWorkbench>,
-    webview: Option<RawWebview>,
-    #[serde(default)]
-    targets: Option<Vec<RawReleaseTarget>>,
-    #[serde(default)]
-    artifact: Option<RawArtifact>,
-}
-
-#[derive(Deserialize)]
-struct RawInstalledManifest {
-    resolver: Option<u64>,
-    /// Identifier segment of the installed package, spelled `identifier` (not `name`) because an
-    /// installed manifest is only ever addressed by the full id the host resolves by pairing this
-    /// name with the namespace of the directory the package is installed under.
-    identifier: String,
-    title: Option<String>,
-    kind: String,
-    version: String,
-    description: String,
-    homepage: Option<String>,
-    license: Option<String>,
-    url: Option<String>,
-    sha256: Option<String>,
-    head: Option<RawHead>,
-    dependencies: Option<RawDependencies>,
-    workbench: Option<RawWorkbench>,
-    webview: Option<RawWebview>,
-    #[serde(default)]
-    targets: Option<Vec<RawReleaseTarget>>,
-    #[serde(default)]
-    artifact: Option<RawArtifact>,
-}
-
-#[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
-struct RawHead {
-    repository: String,
-    branch: String,
-}
-
-#[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
-struct RawDependencies {
-    ora: Option<String>,
-}
-
-/// Raw form of one `[[targets]]` release entry.
-#[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
-struct RawReleaseTarget {
-    target: String,
-    url: String,
-    sha256: String,
-}
-
-/// Raw form of the installed `[artifact]` self-declaration.
-#[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
-struct RawArtifact {
-    target: String,
-}
-
-/// Holds the descriptive metadata shared by both manifest forms.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct RawMetadata {
-    name: String,
-    title: Option<String>,
-    kind: String,
-    version: String,
-    description: String,
-    homepage: Option<String>,
-    license: Option<String>,
-    head: Option<RawHead>,
-    dependencies: Option<RawDependencies>,
-    workbench: Option<RawWorkbench>,
-    webview: Option<RawWebview>,
-    targets: Option<Vec<RawReleaseTarget>>,
-    artifact: Option<RawArtifact>,
-}
-
-impl RawPluginManifest {
-    /// Splits the release form into shared metadata and optional download fields.
-    fn into_parts(self) -> (RawMetadata, u64, Option<String>, Option<String>) {
-        let metadata = RawMetadata {
-            // The marketplace release form spells the name segment `identifier` like the
-            // installed form, and the download fields are optional now that the marketplace no
-            // longer publishes `.orax` release URLs.
-            name: self.identifier,
-            title: self.title,
-            kind: self.kind,
-            version: self.version,
-            description: self.description,
-            homepage: self.homepage,
-            license: self.license,
-            head: self.head,
-            dependencies: self.dependencies,
-            workbench: self.workbench,
-            webview: self.webview,
-            targets: self.targets,
-            artifact: self.artifact,
-        };
-        (metadata, self.resolver, self.url, self.sha256)
-    }
-}
-
-impl RawInstalledManifest {
-    /// Splits the installed form into shared metadata and optional download fields.
-    fn into_parts(self) -> (RawMetadata, Option<u64>, Option<String>, Option<String>) {
-        let metadata = RawMetadata {
-            // The installed manifest spells the name segment `identifier`, mapping it onto the
-            // shared metadata name so both forms converge on one validated domain model.
-            name: self.identifier,
-            title: self.title,
-            kind: self.kind,
-            version: self.version,
-            description: self.description,
-            homepage: self.homepage,
-            license: self.license,
-            head: self.head,
-            dependencies: self.dependencies,
-            workbench: self.workbench,
-            webview: self.webview,
-            targets: self.targets,
-            artifact: self.artifact,
-        };
-        (metadata, self.resolver, self.url, self.sha256)
     }
 }
 

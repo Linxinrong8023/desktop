@@ -1,0 +1,76 @@
+# 本机 Controller 运行时
+
+[English](local-runtime.md) | 中文
+
+`ora-controller` 负责本机 clone 意图的持久接受与结果接管，不执行 Git、不替换 Backend 写入入口、
+不提供 Client transport，也不充当 Cloud 权威存储。Linux 会话使用现有 [Node IPC](../node/local-ipc.zh.md)
+和长度前缀 JSON 消息，不增加应用凭据。
+
+## 接受与存储
+
+嵌入调用方通过 `Controller::open(home, controller_id)` 打开协调者，调用 `accept_clone(request_id, spec)`。
+返回的命令包含稳定 operation／execution。完整输入及目标 Node 落盘后才返回；相同请求返回原命令，
+改变输入则拒绝。`result(execution_id)` 查询持久终态，没有结果不表示失败。
+
+显式注入的私有目录保存 `ora-controller.sqlite3`，与 Node／process 状态独立。
+application ID 为 `0x4f524143`、schema version 为 1；精确结构／完整性校验和同级文件
+`ora-controller.sqlite3.lock` 上的 OS 租约保护重开。租约放在数据库旁边，避免在 macOS 或 Windows 上
+与 SQLite 自身的文件锁冲突。
+不同 ControllerId 或未知已有文件会被拒绝。不从 HOME 推导目录，不清库，不导入历史任务或自动重绑定。
+
+`clone_operations` 保存接受记录和不可变终态，`clone_receipts` 保存 Node 原事件精确身份与内容。
+查询完成和事件交付使用同一接管事务；只有实际收到的事件在回执提交后才产生 Ack。
+相同内容幂等，冲突输入／结果／请求关联不确认。历史结果保留原 Node incarnation，
+查询报告者和心跳则必须匹配当前会话。
+
+## 独立可执行入口
+
+`ControllerRuntime::open(RuntimeConfig)` 同时支持内嵌。`handle()` 提供持久 clone 接受、操作列表和查询；
+`run(shutdown)` 拥有重连循环，不安装进程信号。查询不存在与操作已接受但尚无终态明确区分。
+调用方停止受理、等待关闭并释放句柄后，数据库独占锁才释放。独立程序也使用同一运行时，只自行提供进程信号。
+
+构建 `cargo build -p ora-controller -p ora-node -p ora-process-host -p ora-process-guardian`。
+分别部署 host 和 Node，Node 配置的归属须匹配 ControllerId，然后运行
+`ora-controller /absolute/path/controller.json`：
+
+```json
+{
+  "home_directory": "/home/node/controller",
+  "controller_id": "deployment-controller",
+  "protected_state_directories": ["/home/node/state", "/home/node/process"],
+  "nodes": [
+    {
+      "node_id": "deployment-node",
+      "endpoint": "/home/node/state/control.sock"
+    }
+  ],
+  "session": { "io_timeout_ms": 10000, "query_interval_ms": 1000 },
+  "reconnect_ms": 1000,
+  "timezone": "Asia/Shanghai"
+}
+```
+
+`protected_state_directories` 须列出所有 Node／host／guardian 状态根；配置的 endpoint 父目录也受保护。
+Controller 数据目录与它们重叠时，在开库前拒绝。独立程序恢复已接受记录，配置文件和 stdin 不是业务命令通道。
+Client 入口接通前通过 Rust 接口受理，不直接修改 SQLite。
+
+每个配置 Node 有独立重连循环，共享同一持久 Controller 所有者。握手检查 Node 身份和 clone 能力。
+定期状态查询恢复原执行；Unknown 每条连接至多触发一次原命令重传，不新建执行。
+查询也用于保活，其间隔须小于 Node 的空闲帧期限。断连、不支持的对端或持久化错误不制造 clone 失败，
+也不丢弃记录。Controller 正常停止关闭会话，不取消 Node 已接受的执行。
+
+## 验证与保留范围
+
+真实 SQLite 测试覆盖接受、独占、事务失败、查询／事件乱序、重复接管和冲突事实；
+framed 会话测试覆盖 Unknown 重传有界，以及错误 Node 身份或缺少 clone 能力时在派发前拒绝。
+独立 Controller–Node–host／guardian 测试执行真实 HTTPS clone，
+截住 Ack 后在持久接管之后强杀 Controller，再离线重启，检查原结果、精确 Ack、Node outbox 清空和唯一变更 Run。
+Node 自身 IPC 测试另覆盖 Node 重启与事件重放。
+
+另有独立子进程运行生产 `run_session` 与真实 SQLite 所有者，仅注入提交前暂停点。
+父进程确认没有 Ack，在接管事务仍打开时发送 SIGKILL，再重开数据库验证回滚及原意图不变。
+随后由正常 Controller 可执行程序在 HTTPS 拒绝访问时接管 Node 重放的结果。
+暂停点是持久化测试依赖（`WritePoint::Commit`），不是部署选项或协议扩展。
+
+这不代表 Client／UI、Cloud、多 Controller 或恶意对端保证完成；全部队列压力、崩溃边界和部署组合
+仍在 approved ADR 核心用例中跟踪。既有 Backend 入口及 Worktree 协调保持不变。

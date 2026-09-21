@@ -3,11 +3,12 @@ import { useMemo, type RefObject } from "react";
 import { cn } from "@ora/ui";
 import { RunStatusMark } from "./run-status-mark";
 import { runStatusTone } from "./run-status-style";
+import { type GraphWorkflowRun, type HitlRequest } from "@ora/workflow-runtime";
 import {
-  workflowPathNodes,
-  type GraphWorkflowRun,
-  type HitlRequest,
-} from "@ora/workflow-runtime";
+  projectRunPathStructure,
+  type RunPathRegionStage,
+} from "./run-path-structure";
+import { RunTheaterRegionNavigator } from "./run-theater-region-navigator";
 import "./theater-motion.css";
 
 interface RunTheaterPathRailProps {
@@ -16,6 +17,8 @@ interface RunTheaterPathRailProps {
   activeIds: readonly string[];
   openHitls: readonly HitlRequest[];
   artifactCountByNode: Readonly<Record<string, number>>;
+  selectedRound?: number | null;
+  onRoundChange?: (round: number) => void;
   /** When true, no path chip is marked current (result act has the stage). */
   showResultAct: boolean;
   pathRailRef: RefObject<HTMLDivElement | null>;
@@ -26,9 +29,8 @@ interface RunTheaterPathRailProps {
 }
 
 /**
- * Theater header: progress track + horizontal path chips.
- * Waiting chips expand HITL; others only change focus.
- * Chip order follows {@link workflowPathNodes} (topo + canvas position).
+ * Theater header: outer progress path plus the selected iteration's nested phases.
+ * Waiting chips expand HITL; all other chips change the focused act.
  */
 export function RunTheaterPathRail({
   run,
@@ -36,6 +38,8 @@ export function RunTheaterPathRail({
   activeIds,
   openHitls,
   artifactCountByNode,
+  selectedRound = null,
+  onRoundChange,
   showResultAct,
   pathRailRef,
   onFocusNode,
@@ -43,23 +47,39 @@ export function RunTheaterPathRail({
   onShowResultAct,
 }: RunTheaterPathRailProps) {
   const { t } = useTranslation();
-  const pathNodes = useMemo(
+  const nodeById = useMemo(
+    () => new Map(run.definitionSnapshot.nodes.map((node) => [node.id, node])),
+    [run.definitionSnapshot.nodes],
+  );
+  const pathStages = useMemo(
     () =>
-      workflowPathNodes(run.definitionSnapshot).filter(
-        (node) => run.nodeStates[node.id]?.status !== "inactive",
+      projectRunPathStructure(run.definitionSnapshot).filter(
+        (stage) => run.nodeStates[stage.nodeId]?.status !== "inactive",
       ),
     [run.definitionSnapshot, run.nodeStates],
   );
+  const activeRegion = useMemo(
+    () =>
+      pathStages.find(
+        (stage): stage is RunPathRegionStage =>
+          stage.type === "region" &&
+          (stage.nodeId === primaryId ||
+            stage.phases.some((phase) =>
+              phase.nodeIds.includes(primaryId ?? ""),
+            )),
+      ) ?? null,
+    [pathStages, primaryId],
+  );
   const progress = useMemo(() => {
-    const total = Math.max(pathNodes.length, 1);
-    const done = pathNodes.filter((node) => {
-      const status = run.nodeStates[node.id]?.status;
+    const total = Math.max(pathStages.length, 1);
+    const done = pathStages.filter((stage) => {
+      const status = run.nodeStates[stage.nodeId]?.status;
       return (
         status === "succeeded" || status === "failed" || status === "cancelled"
       );
     }).length;
     return { done, total, percent: Math.round((done / total) * 100) };
-  }, [pathNodes, run.nodeStates]);
+  }, [pathStages, run.nodeStates]);
   const activeIdSet = useMemo(() => new Set(activeIds), [activeIds]);
   const hitlByNodeId = useMemo(
     () => new Map(openHitls.map((request) => [request.nodeId, request])),
@@ -68,7 +88,10 @@ export function RunTheaterPathRail({
   const terminal = onShowResultAct !== undefined;
 
   return (
-    <div className="shrink-0 border-b border-border/80 bg-muted/20 px-4 py-3">
+    <div
+      ref={pathRailRef}
+      className="shrink-0 border-b border-border/80 bg-muted/20 px-4 py-3"
+    >
       <div className="mx-auto flex max-w-3xl flex-col gap-2.5">
         <div className="flex items-center justify-between gap-3">
           <p className="text-[11px] font-medium uppercase tracking-[0.05em] text-muted-foreground">
@@ -108,34 +131,46 @@ export function RunTheaterPathRail({
             )}
           </div>
         </div>
-        <div
-          className="overflow-x-auto"
-          ref={pathRailRef}
-          data-slot="theater-path-rail"
-        >
-          <ol className="flex w-max gap-2 pb-0.5">
-            {pathNodes.map((node) => {
-              const state = run.nodeStates[node.id] ?? {
+        <div className="overflow-x-auto" data-slot="theater-path-rail">
+          <ol
+            className="flex w-max gap-2 pb-0.5"
+            aria-label={t("workflowRun.theater.topLevelPath")}
+            data-slot="theater-top-level-path"
+          >
+            {pathStages.map((stage) => {
+              const node = nodeById.get(stage.nodeId);
+              if (node === undefined) return null;
+              const state = run.nodeStates[stage.nodeId] ?? {
                 status: "idle" as const,
               };
               const tone = runStatusTone(state.status);
-              const selected = !showResultAct && node.id === primaryId;
+              const containsPrimary =
+                stage.type === "region" &&
+                stage.phases.some((phase) =>
+                  phase.nodeIds.includes(primaryId ?? ""),
+                );
+              const selected =
+                !showResultAct &&
+                (stage.nodeId === primaryId || containsPrimary);
               const waiting = state.status === "awaiting_input";
-              const active = activeIdSet.has(node.id);
-              const nodeArtifactCount = artifactCountByNode[node.id] ?? 0;
+              const active = activeIdSet.has(stage.nodeId);
+              const nodeArtifactCount = artifactCountByNode[stage.nodeId] ?? 0;
+              const roundCount =
+                stage.type === "region" ? countRegionRounds(run, stage) : 0;
               return (
-                <li key={node.id}>
+                <li key={stage.nodeId}>
                   <button
                     type="button"
-                    data-path-node={node.id}
+                    data-path-node={stage.nodeId}
+                    data-contains-current={containsPrimary ? "" : undefined}
                     data-waiting={waiting ? "" : undefined}
                     onClick={() => {
-                      const gate = hitlByNodeId.get(node.id);
+                      const gate = hitlByNodeId.get(stage.nodeId);
                       if (gate !== undefined) {
                         onExpandHitl(gate.id);
                         return;
                       }
-                      onFocusNode(node.id);
+                      onFocusNode(stage.nodeId);
                     }}
                     className={cn(
                       "inline-flex max-w-[11rem] cursor-pointer items-center gap-2 rounded-full border px-2.5 py-1.5 text-left transition-[transform,colors,box-shadow] duration-200",
@@ -156,6 +191,18 @@ export function RunTheaterPathRail({
                     <span className="truncate font-sans text-[11px] font-medium">
                       {node.data.title}
                     </span>
+                    {stage.type === "region" && (
+                      <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground">
+                        {roundCount > 0
+                          ? t("workflowRun.theater.iterationChipSummary", {
+                              members: stage.memberCount,
+                              rounds: roundCount,
+                            })
+                          : t("workflowRun.theater.iterationMembers", {
+                              members: stage.memberCount,
+                            })}
+                      </span>
+                    )}
                     {nodeArtifactCount > 0 && (
                       <span
                         className="shrink-0 tabular-nums text-[9px] text-muted-foreground"
@@ -207,7 +254,32 @@ export function RunTheaterPathRail({
             )}
           </ol>
         </div>
+        {activeRegion !== null && (
+          <RunTheaterRegionNavigator
+            run={run}
+            region={activeRegion}
+            primaryId={primaryId}
+            selectedRound={selectedRound}
+            artifactCountByNode={artifactCountByNode}
+            onRoundChange={onRoundChange}
+            onFocusNode={onFocusNode}
+          />
+        )}
       </div>
     </div>
   );
+}
+
+/** Counts distinct persisted rounds represented by an iteration's members. */
+function countRegionRounds(
+  run: GraphWorkflowRun,
+  region: RunPathRegionStage,
+): number {
+  const rounds = new Set<number>();
+  for (const nodeId of region.phases.flatMap((phase) => phase.nodeIds)) {
+    for (const state of run.roundStates?.[nodeId] ?? []) {
+      if (state.iteration !== undefined) rounds.add(state.iteration);
+    }
+  }
+  return rounds.size;
 }

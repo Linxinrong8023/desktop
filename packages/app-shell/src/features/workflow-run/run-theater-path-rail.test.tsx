@@ -1,7 +1,7 @@
 import { createRef } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockWorkflow } from "@ora/workflow-mock";
 import {
   normalizeWorkflowDefinition,
@@ -9,7 +9,12 @@ import {
   type HitlRequest,
 } from "@ora/workflow-runtime";
 import { AppI18nProvider } from "../../i18n/i18n";
+import { appI18n } from "../../i18n/i18n-instance";
 import { RunTheaterPathRail } from "./run-theater-path-rail";
+
+beforeEach(async () => {
+  await appI18n.changeLanguage("zh-CN");
+});
 
 /** Builds a finished mock run for path-rail Result chip coverage. */
 function terminalRun(
@@ -88,6 +93,192 @@ function waitingRun(): { run: GraphWorkflowRun; request: HitlRequest } {
 }
 
 describe("RunTheaterPathRail", () => {
+  it("nests completed iteration members in a persistent parallel round navigator", async () => {
+    const onFocusNode = vi.fn();
+    const onRoundChange = vi.fn();
+    const user = userEvent.setup();
+    const run: GraphWorkflowRun = {
+      id: "run-iteration",
+      projectId: "project",
+      definitionId: "definition",
+      definitionSnapshot: {
+        id: "snapshot",
+        name: "Iteration run",
+        description: "",
+        updatedAt: "2026-09-17T12:00:00+08:00",
+        viewport: { x: 0, y: 0, zoom: 1 },
+        nodes: [
+          {
+            id: "body-b",
+            type: "workflow",
+            parentId: "iter",
+            position: { x: 120, y: 240 },
+            data: {
+              kind: "agent",
+              title: "生成处理结果",
+              description: "",
+            },
+          },
+          {
+            id: "out",
+            type: "workflow",
+            position: { x: 1_200, y: 160 },
+            data: { kind: "output", title: "汇总输出", description: "" },
+          },
+          {
+            id: "iter",
+            type: "workflow",
+            position: { x: 300, y: 160 },
+            data: { kind: "iteration", title: "逐项处理", description: "" },
+          },
+          {
+            id: "body-a",
+            type: "workflow",
+            parentId: "iter",
+            position: { x: 120, y: 80 },
+            data: { kind: "agent", title: "Agent 1", description: "" },
+          },
+          {
+            id: "start",
+            type: "workflow",
+            position: { x: 0, y: 160 },
+            data: { kind: "start", title: "输入待处理项", description: "" },
+          },
+        ],
+        edges: [
+          { id: "start-iter", source: "start", target: "iter" },
+          {
+            id: "entry-a",
+            source: "iter",
+            sourceHandle: "iteration-entry",
+            target: "body-a",
+          },
+          {
+            id: "entry-b",
+            source: "iter",
+            sourceHandle: "iteration-entry",
+            target: "body-b",
+          },
+          { id: "iter-out", source: "iter", target: "out" },
+        ],
+      },
+      name: "Iteration run",
+      status: "succeeded",
+      nodeStates: {
+        start: { status: "succeeded" },
+        iter: { status: "succeeded" },
+        "body-a": { status: "succeeded", iteration: 2 },
+        "body-b": { status: "succeeded", iteration: 2 },
+        out: { status: "succeeded" },
+      },
+      roundStates: {
+        "body-a": [0, 1, 2].map((iteration) => ({
+          status: "succeeded" as const,
+          iteration,
+          ...(iteration === 1
+            ? {
+                startedAt: "2026-09-17T12:00:00+08:00",
+                finishedAt: "2026-09-17T12:00:05+08:00",
+              }
+            : {}),
+        })),
+        "body-b": [0, 2].map((iteration) => ({
+          status: "succeeded" as const,
+          iteration,
+        })),
+      },
+      openHitls: [],
+      createdAt: "2026-09-17T12:00:00+08:00",
+      updatedAt: "2026-09-17T12:00:10+08:00",
+      finishedAt: "2026-09-17T12:00:10+08:00",
+    };
+
+    const view = render(
+      <AppI18nProvider>
+        <RunTheaterPathRail
+          run={run}
+          primaryId="body-a"
+          activeIds={[]}
+          openHitls={[]}
+          artifactCountByNode={{}}
+          showResultAct={false}
+          selectedRound={1}
+          onRoundChange={onRoundChange}
+          pathRailRef={createRef()}
+          onFocusNode={onFocusNode}
+          onExpandHitl={vi.fn()}
+          onShowResultAct={vi.fn()}
+        />
+      </AppI18nProvider>,
+    );
+
+    const topLevelPath = screen.getByRole("list", {
+      name: "顶层执行路径",
+    });
+    expect(
+      within(topLevelPath)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("data-path-node")),
+    ).toEqual(["start", "iter", "out", null]);
+
+    const navigator = screen.getByRole("region", {
+      name: "逐项处理，第 2/3 轮",
+    });
+    expect(within(navigator).getByText("并行 2")).toBeInTheDocument();
+    expect(within(navigator).getByText("1/2 完成")).toBeInTheDocument();
+    expect(within(navigator).getByText("5s")).toBeInTheDocument();
+    expect(
+      within(navigator).getAllByRole("button", { name: /成功/ }),
+    ).toHaveLength(1);
+    expect(
+      within(navigator).getByRole("button", {
+        name: "生成处理结果: 本轮未执行",
+      }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(navigator).getByRole("button", { name: "选择迭代轮次" }),
+    );
+    const roundList = screen.getByRole("listbox", { name: "迭代轮次" });
+    await user.click(
+      within(roundList).getByRole("option", { name: "第 1 轮" }),
+    );
+    expect(onRoundChange).toHaveBeenCalledWith(0);
+
+    await user.click(
+      within(navigator).getByRole("button", { name: /生成处理结果/ }),
+    );
+    expect(onFocusNode).toHaveBeenCalledWith("body-b");
+
+    await user.click(within(navigator).getByRole("button", { name: "下一轮" }));
+    expect(onRoundChange).toHaveBeenCalledWith(2);
+
+    view.rerender(
+      <AppI18nProvider>
+        <RunTheaterPathRail
+          run={{ ...run, roundStates: undefined }}
+          primaryId="body-a"
+          activeIds={[]}
+          openHitls={[]}
+          artifactCountByNode={{}}
+          showResultAct={false}
+          selectedRound={null}
+          onRoundChange={onRoundChange}
+          pathRailRef={createRef()}
+          onFocusNode={onFocusNode}
+          onExpandHitl={vi.fn()}
+          onShowResultAct={vi.fn()}
+        />
+      </AppI18nProvider>,
+    );
+
+    const legacyNavigator = screen.getByRole("region", { name: "逐项处理" });
+    expect(within(legacyNavigator).getByText("2 个成员")).toBeInTheDocument();
+    expect(
+      within(legacyNavigator).queryByRole("button", { name: "选择迭代轮次" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("removes inactive branch nodes from the live path and progress total", () => {
     const definition = normalizeWorkflowDefinition(createMockWorkflow("zh-CN"));
     const inactiveIds = new Set(["quality", "tests", "review"]);

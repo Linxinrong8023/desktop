@@ -810,8 +810,9 @@ mod tests {
         AgentRef, AuditFields, PluginId, SessionId, SessionStatus, SessionTitle, WorkspaceId,
     };
     use ora_scheduler::Scheduler;
+    use std::collections::BTreeSet;
     use std::path::Path;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use tempfile::TempDir;
     use tokio::sync::{mpsc, oneshot};
@@ -870,6 +871,7 @@ mod tests {
         let connection = ConnectionSupervisor::start(
             agent_ref.clone(),
             agent_source,
+            Arc::new(Mutex::new(BTreeSet::new())),
             plugin_host.clone(),
             pool.clone(),
             temporary.path().to_path_buf(),
@@ -947,6 +949,7 @@ mod tests {
         let connection = ConnectionSupervisor::start(
             agent_ref.clone(),
             agent_source,
+            Arc::new(Mutex::new(BTreeSet::new())),
             plugin_host.clone(),
             pool.clone(),
             temporary.path().to_path_buf(),

@@ -1,9 +1,16 @@
+mod hook_lifecycle;
 mod listing;
 mod logo_roots;
 mod marketplace;
 mod operations;
+mod pack;
+mod pack_reconcile;
+mod pack_uninstall;
 mod registry_sync;
+mod workflow_documents;
 pub use operations::{AdmittedSync, Plugins};
+
+use hook_lifecycle::HookLifecycle;
 
 use crate::app_event::AppEventPublisher;
 use crate::clock::SystemClock;
@@ -13,22 +20,23 @@ use crate::marketplace_sources::{
     ConfiguredMarketplaceSource, MarketplaceSourceStore, map_marketplace_source_error,
 };
 use crate::proxy;
+use crate::session_setup::McpHealthStore;
 use crate::settings::Settings;
-use ora_application::Clock;
+use ora_application::{Clock, WorkflowDocument};
 use ora_contracts::{
     ActivatePluginRequest, ActivatePluginResponse, AddMarketplaceSourceRequest,
     AddMarketplaceSourceResponse, DeleteMarketplaceSourceRequest, DeleteMarketplaceSourceResponse,
-    EmptyErrorParams, ImportPluginRequest, ImportPluginResponse, InstallOutcome,
-    ListInstalledPluginsRequest, ListInstalledPluginsResponse, ListMarketplaceSourcesRequest,
-    ListMarketplaceSourcesResponse, MarketplaceArtifactRetrieval, PublicError,
-    ReadPluginReadmeRequest, ReadPluginReadmeResponse, ScanPluginsRequest, ScanPluginsResponse,
-    StopPluginRequest, StopPluginResponse, UninstallPluginRequest, UninstallPluginResponse,
-    UpdateMarketplaceSourceRequest, UpdateMarketplaceSourceResponse,
+    EmptyErrorParams, ImportPluginRequest, InstallOutcome, ListInstalledPluginsRequest,
+    ListInstalledPluginsResponse, ListMarketplaceSourcesRequest, ListMarketplaceSourcesResponse,
+    MarketplaceArtifactRetrieval, PublicError, ReadPluginReadmeRequest, ReadPluginReadmeResponse,
+    ScanPluginsRequest, ScanPluginsResponse, StopPluginRequest, StopPluginResponse,
+    UninstallPluginRequest, UninstallPluginResponse, UpdateMarketplaceSourceRequest,
+    UpdateMarketplaceSourceResponse,
 };
 use ora_db::{
     PluginSkillProjection, RepositoryPool, SqliteEffectRepository,
-    SqlitePluginMarketplaceSourceRepository, SqlitePluginSourceNamespaceRepository,
-    SqliteSkillRepository, SqliteWorkspaceRepository,
+    SqlitePackInstallationRepository, SqlitePluginMarketplaceSourceRepository,
+    SqlitePluginSourceNamespaceRepository, SqliteSkillRepository, SqliteWorkspaceRepository,
 };
 use ora_domain::PluginId;
 use ora_effect::{ConsumerDeclaration, ConsumerIdentity, ConsumerKind, Digest};
@@ -173,8 +181,10 @@ pub(crate) struct PluginApi {
     notifications: BroadcastNotificationSink,
     pub(crate) configuration: ConfigurationService,
     skill_repository: SqliteSkillRepository,
-    pub(crate) effect_repository: SqliteEffectRepository,
+    effect_repository: SqliteEffectRepository,
     workspace_repository: SqliteWorkspaceRepository,
+    /// Durable pack → member relationships recorded by pack installations (D3-A).
+    pack_installations: SqlitePackInstallationRepository,
     agent_effect_declarations: Mutex<BTreeMap<PluginId, ConsumerDeclaration>>,
     /// Admits at most one marketplace index rebuild at a time.
     ///
@@ -189,7 +199,28 @@ pub(crate) struct PluginApi {
     effect_reconcile: OnceLock<EffectWorkerHandle>,
     /// Secret-free wakeup that asks live Sessions to re-read Desired MCP.
     mcp_wakeup: OnceLock<Arc<dyn Fn() + Send + Sync>>,
+    /// Runs the lifecycle commands Hook packages declare, and holds this session's results.
+    hook_lifecycle: HookLifecycle,
+    /// Process-local Host MCP health, shared with the Session runtime and plugin queries.
+    pub(crate) mcp_health: McpHealthStore,
     clock: SystemClock,
+    /// Test-only transport substitution for production-entry marketplace qualification.
+    #[cfg(test)]
+    local_marketplace_releases: Mutex<BTreeMap<String, PathBuf>>,
+}
+
+/// Carries one installed package and the workflow documents it contributes, still uninterpreted.
+///
+/// The plugin layer stops at reading the document text: it has no business deciding what a
+/// workflow is, so the caller turns these into workflows through the workflow use case once the
+/// package itself is committed and the agent set is reconciled.
+pub(crate) struct ImportedPlugin {
+    /// Canonical identifier of the installed package.
+    pub plugin_id: String,
+    /// The typed installation outcome, identical in shape to a marketplace install.
+    pub outcome: InstallOutcome,
+    /// Every workflow document the package carries, in package order; empty for other kinds.
+    pub workflow_documents: Vec<WorkflowDocument>,
 }
 
 impl PluginApi {
@@ -219,6 +250,8 @@ impl PluginApi {
         let installer = Installer::new(ReqwestDownloader::new(ProxyConfig::default()));
         let notifications = BroadcastNotificationSink::new();
         let configuration = ConfigurationService::new(home_directory.clone());
+        let mcp_health =
+            McpHealthStore::new(publisher.clone(), ora_utils::mcp::DEFAULT_PROBE_TIMEOUT);
         let lifecycle = PluginLifecycle::open(
             PluginLifecycleConfig {
                 data_directory: home_directory.clone(),
@@ -229,6 +262,8 @@ impl PluginApi {
             notifications.clone(),
         )
         .map_err(BackendError::from)?;
+
+        let hook_lifecycle = HookLifecycle::new(home_directory.clone());
 
         Ok(Self {
             lifecycle,
@@ -245,13 +280,40 @@ impl PluginApi {
             configuration,
             skill_repository: SqliteSkillRepository::new(pool.clone()),
             effect_repository: SqliteEffectRepository::new(pool.clone()),
-            workspace_repository: SqliteWorkspaceRepository::new(pool),
+            workspace_repository: SqliteWorkspaceRepository::new(pool.clone()),
+            pack_installations: SqlitePackInstallationRepository::new(pool),
             agent_effect_declarations: Mutex::new(BTreeMap::new()),
             rebuilding: Mutex::new(()),
             effect_reconcile: OnceLock::new(),
             mcp_wakeup: OnceLock::new(),
+            hook_lifecycle,
+            mcp_health,
             clock,
+            #[cfg(test)]
+            local_marketplace_releases: Mutex::new(BTreeMap::new()),
         })
+    }
+
+    /// Substitutes one marketplace package's transfer source with a local artifact in tests.
+    ///
+    /// Resolution, host selection, digest verification, installation, finalization, and runtime
+    /// coordination remain on the production path; only the network transfer is kept offline.
+    #[cfg(test)]
+    pub(crate) fn use_local_marketplace_release(&self, plugin_id: &str, artifact: PathBuf) {
+        self.local_marketplace_releases
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(plugin_id.to_owned(), artifact);
+    }
+
+    /// Returns the local transfer override registered for one marketplace package in tests.
+    #[cfg(test)]
+    pub(crate) fn local_marketplace_release(&self, plugin_id: &PluginId) -> Option<PathBuf> {
+        self.local_marketplace_releases
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&plugin_id.canonical())
+            .cloned()
     }
 
     /// Connects the Effect worker's wake handle once it exists.
@@ -279,6 +341,11 @@ impl PluginApi {
         if let Some(wakeup) = self.mcp_wakeup.get() {
             wakeup();
         }
+    }
+
+    /// Returns the shared process-local Host MCP health store.
+    pub(crate) fn mcp_health(&self) -> McpHealthStore {
+        self.mcp_health.clone()
     }
 
     /// Returns the plugin data root used to rediscover installed packages.
@@ -611,11 +678,12 @@ impl PluginApi {
         Ok(response)
     }
     /// Imports a local `.orax` release archive: verifies and extracts it, refreshes the installed
-    /// snapshot so the plugin is immediately usable without a restart.
+    /// snapshot so the plugin is immediately usable without a restart, and returns the workflow
+    /// documents it carries for the caller to turn into workflows.
     pub(crate) async fn import(
         &self,
         request: ImportPluginRequest,
-    ) -> Result<ImportPluginResponse, BackendError> {
+    ) -> Result<ImportedPlugin, BackendError> {
         let archive_path = PathBuf::from(&request.path);
         ora_info!(path = %request.path, "importing plugin release from local archive");
         // Extracting and verifying the archive is CPU/IO bound, so it runs on the blocking
@@ -645,69 +713,37 @@ impl PluginApi {
             error => BackendError::internal("failed to import plugin archive", error),
         })?;
         let plugin_id = package.id.canonical();
-        let outcome = self.finalize_new_install(&plugin_id).await?;
-        ora_info!(plugin_id = %plugin_id, outcome = ?outcome, "imported plugin release from local archive");
-        Ok(ImportPluginResponse { plugin_id, outcome })
+        self.finalize_new_install(&plugin_id).await?;
+        let outcome = InstallOutcome::Installed;
+        // Read after the snapshot refresh, because the documents are located through the
+        // discovered contribution rather than guessed from the package layout.
+        let workflow_documents =
+            workflow_documents::read_workflow_documents(&self.home_directory, &plugin_id)?;
+        ora_info!(
+            plugin_id = %plugin_id,
+            outcome = ?outcome,
+            workflow_documents = workflow_documents.len(),
+            "imported plugin release from local archive"
+        );
+        Ok(ImportedPlugin {
+            plugin_id,
+            outcome,
+            workflow_documents,
+        })
     }
 
-    /// Refreshes the installed-plugin snapshot after a new package lands and reports the typed
-    /// installation outcome. Every installed package is available; a Hook command-alias conflict
-    /// still returns `InstalledWithCommandConflict` so callers can surface the colliding identity
-    /// instead of silently sharing a PATH alias. Both packages remain installed and available;
-    /// uniqueness is deferred to a future consumer.
-    async fn finalize_new_install(&self, plugin_id: &str) -> Result<InstallOutcome, BackendError> {
+    /// Refreshes the installed-plugin snapshot after a new package lands.
+    ///
+    /// Installing a Hook package performs no execution: a Hook's lifecycle commands run only on
+    /// an explicitly authorized single-plugin operation, never as a side effect of landing a
+    /// package.
+    async fn finalize_new_install(&self, plugin_id: &str) -> Result<(), BackendError> {
         self.sync_plugin_skills(plugin_id)?;
         if let Err(error) = self.lifecycle.scan_plugins(ScanPluginsRequest {}).await {
             ora_warn!(plugin_id = %plugin_id, %error, "installed the package but failed to refresh the installed-plugin snapshot");
         }
         self.notify_mcp_desired_changed();
-        // A second Hook with the same bare command still makes PATH resolution ambiguous, so the
-        // typed outcome carries the colliding identity instead of looking like an ordinary success.
-        if let Some(conflict) = self.detect_hook_command_conflict(plugin_id) {
-            ora_warn!(
-                plugin_id = %plugin_id,
-                conflict_plugin_id = %conflict,
-                "installed hook plugin reports a command conflict"
-            );
-            return Ok(InstallOutcome::InstalledWithCommandConflict {
-                conflict_plugin_id: conflict,
-            });
-        }
-        Ok(InstallOutcome::Installed)
-    }
-
-    /// Returns the canonical plugin id of another installed Hook that owns the same command
-    /// alias as the freshly installed Hook `plugin_id`, if any.
-    ///
-    /// The new Hook itself is excluded so a re-install of the same package does not conflict
-    /// with its own contribution.
-    fn detect_hook_command_conflict(&self, plugin_id: &str) -> Option<String> {
-        let manager = PluginManager::discover(&self.home_directory);
-        let installed = manager.installed_plugins();
-        let new_hook = installed
-            .iter()
-            .find(|plugin| plugin.id.canonical() == plugin_id)?;
-        let new_command = match &new_hook.contributes {
-            PluginContribution::Hook(descriptor) => descriptor.configuration.hook.command.as_str(),
-            PluginContribution::Agent(_)
-            | PluginContribution::Workbench(_)
-            | PluginContribution::Webview(_)
-            | PluginContribution::Skill(_)
-            | PluginContribution::Mcp(_) => return None,
-        };
-        let snapshot = self.lifecycle.list_installed_plugins();
-        for plugin in snapshot.plugins.iter() {
-            if plugin.id == plugin_id {
-                continue;
-            }
-            if let ora_contracts::InstalledPluginContribution::Hook { command, .. } =
-                &plugin.contribution
-                && command == new_command
-            {
-                return Some(plugin.id.clone());
-            }
-        }
-        None
+        Ok(())
     }
 
     /// Projects validated static Skill metadata into the shared catalog and Effect source tables.
@@ -985,29 +1021,30 @@ mod tests {
             .find(|p| p.id == "official/rtk-ai.rtk")
             .expect("installed RTK listed");
         let ora_contracts::InstalledPluginContribution::Hook {
-            protocol,
-            command,
+            executable,
+            supported_agents: _,
             target,
-            tool_version,
         } = &rtk.contribution
         else {
             panic!("expected a Hook contribution, got {:?}", rtk.contribution);
         };
-        assert_eq!(protocol, "rtk-rewrite-v1");
-        assert_eq!(command, "rtk");
+        // The advertised Agent list is author-provided display data, so this test asserts only the
+        // facts the host itself derives from the installed package.
+        assert!(
+            executable.starts_with("assets/"),
+            "a Hook executable must be a package-relative path, got {executable}"
+        );
         assert_eq!(target.as_deref(), Some("x86_64-pc-windows-msvc"));
-        assert_eq!(tool_version, "0.45.0");
         assert_eq!(
             rtk.runtime,
             ora_contracts::PluginRuntimeStatus::Stopped,
-            "a processless Hook reports stopped once discovered"
+            "a Hook never runs as an Ora plugin process, so discovery reports stopped"
         );
-        // Every installed valid Hook is available and processless. Command-alias uniqueness is
-        // not resolved here; a future consumer refuses ambiguous PATH resolution.
 
         // 7. Uninstall: removes the installed package so the Hook is no longer available.
         lifecycle
             .uninstall_plugin(ora_contracts::UninstallPluginRequest {
+                hook_execution_acknowledged: false,
                 plugin_id: "official/rtk-ai.rtk".to_string(),
                 data_disposition: ora_contracts::PluginDataDisposition::Delete,
             })

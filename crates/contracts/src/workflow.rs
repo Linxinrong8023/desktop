@@ -312,8 +312,26 @@ pub struct GetWorkflowSnapshotResponse {
     pub snapshot: WorkflowSnapshot,
 }
 
+/// Analyzes the supplied authoring document without persisting or executing it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflow.ts")]
+pub struct AnalyzeWorkflowRequest {
+    pub graph: String,
+}
+
+/// Participation is derived from the submitted document, never persisted on nodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "workflow.ts")]
+pub struct AnalyzeWorkflowResponse {
+    pub unused_node_ids: Vec<String>,
+}
+
 /// Exports every TypeScript binding declared in this module into the target directory.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
+    AnalyzeWorkflowRequest::export(config)?;
+    AnalyzeWorkflowResponse::export(config)?;
     Workflow::export(config)?;
     WorkflowSnapshot::export(config)?;
     WorkflowSummary::export(config)?;

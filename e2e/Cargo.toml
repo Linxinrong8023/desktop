@@ -14,6 +14,10 @@ bench = false
 name = "desktop"
 path = "tests/desktop/main.rs"
 
+[[test]]
+name = "plugin-marketplace"
+path = "tests/plugin_marketplace.rs"
+
 [lints]
 workspace = true
 
@@ -22,10 +26,16 @@ chrono-tz = { workspace = true }
 ora-backend = { workspace = true }
 ora-contracts = { workspace = true }
 ora-db = { workspace = true }
+ora-domain = { workspace = true }
 ora-history = { workspace = true }
 ora-logging = { workspace = true }
+ora-plugin-manifest = { workspace = true }
+ora-plugin-manager = { workspace = true }
+ora-plugin-registry = { workspace = true }
+ora-utils = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
+zip = { workspace = true }
 
 [dependencies]
 agent-client-protocol-schema = { workspace = true }

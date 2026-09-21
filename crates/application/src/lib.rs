@@ -58,10 +58,11 @@ pub use user_config::{DeveloperMode, NetworkProxySettings, UserConfigService};
 pub use workflow::{
     ActivateVersionResult, ActivateWorkflowHandler, CreateWorkflowHandler, DeleteSnapshotHandler,
     DeleteSnapshotResult, DeleteWorkflowHandler, DeleteWorkflowResult, GetDraftHandler,
-    GetVersionHandler, GetWorkflowHandler, GetWorkflowSnapshotHandler, ListVersionsHandler,
-    ListWorkflowsHandler, PublishSnapshotResult, PublishWorkflowHandler, RollbackDraftResult,
-    RollbackWorkflowHandler, UpdateDraftHandler, UpdateDraftResult, UpdateWorkflowHandler,
-    UpdateWorkflowResult, UuidWorkflowIdGenerator, WorkflowIdGenerator, WorkflowRepository,
+    GetVersionHandler, GetWorkflowHandler, GetWorkflowSnapshotHandler, ImportWorkflowsHandler,
+    ListVersionsHandler, ListWorkflowsHandler, PublishSnapshotResult, PublishWorkflowHandler,
+    RollbackDraftResult, RollbackWorkflowHandler, UpdateDraftHandler, UpdateDraftResult,
+    UpdateWorkflowHandler, UpdateWorkflowResult, UuidWorkflowIdGenerator, WorkflowDocument,
+    WorkflowIdGenerator, WorkflowRepository,
 };
 pub use workflow_run::{
     AdvanceWorkflowRunResult, AgentConfig, AgentExecutor, AgentMcp, AgentOutputContract,
@@ -71,9 +72,12 @@ pub use workflow_run::{
     ExecutionContext, FailurePropagation, FileChange, GetWorkflowRunHandler, GraphError,
     IterationConfig, IterationErrorStrategy, IterationLedger, IterationRoundContinuation,
     ListWorkflowNodeRunsHandler, ListWorkflowRunsByWorkflowHandler, ListWorkflowRunsHandler,
-    MaterializedSkillBinding, NoRunInvalidations, NodeExecutor, NodeRunToStart, NodeType,
-    RenameWorkflowRunHandler, RestartWorkflowRunResult, RoundOutcome, SkillDiscoveryRoots,
-    SkillMaterializationReceipt, StartPrerequisitesError, StartWorkflowRunResult,
+    LoopConfig, LoopInitialValue, LoopRoundAdvance, LoopRoundDecision, LoopRoundError,
+    LoopRoundExecutionState, LoopRoundToStart, LoopVariable, MaterializedSkillBinding,
+    NoRunInvalidations, NodeExecutor, NodeFailure, NodeFailureDetail, NodeFailureKind,
+    NodeRunToStart, NodeType, RenameWorkflowRunHandler, RestartWorkflowRunResult,
+    ResumeWorkflowRunResult, RoundOutcome, SkillDiscoveryRoots, SkillMaterializationReceipt,
+    SnapshotIncompatibility, SnapshotSwitchPlan, StartPrerequisitesError, StartWorkflowRunResult,
     StructuredOutputError, StructuredTextExposure, UnknownNodeType, UpdateWorkflowRunInputResult,
     UuidWorkflowNodeRunIdGenerator, UuidWorkflowRunIdGenerator, VariableTemplateError,
     WorkflowGraph, WorkflowGraphNode, WorkflowNodeRunIdGenerator, WorkflowRunCallback,
@@ -81,8 +85,9 @@ pub use workflow_run::{
     WorkflowRunEngineRepository, WorkflowRunIdGenerator, WorkflowRunInvalidationPublisher,
     WorkflowRunPayload, WorkflowRunPayloadError, WorkflowRunRepository,
     WorkflowRunWorkspaceInitializer, WorkflowValidationError, WorkflowVariablePool,
-    WorkflowVariablePoolError, WorkspaceRepository, extract_json_object, render_variable_template,
-    validate_against_schema,
+    WorkflowVariablePoolError, WorkspaceRepository, extract_json_object, plan_snapshot_switch,
+    render_variable_template, resume_clear_node_ids, resume_unit_owner_id,
+    running_row_blocks_resume, validate_against_schema,
 };
 pub use workspace_diff::{
     CommitWorkspaceChangesHandler, CommitWorkspaceGitRequest, GitWorkspaceDiffReader,

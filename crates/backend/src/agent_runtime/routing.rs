@@ -5,6 +5,7 @@ use ora_acp::{PermissionRequest, SessionResponse, SessionTraceRegistration};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 
@@ -49,6 +50,7 @@ pub(super) struct RouteRegistry {
     next_token: AtomicU64,
     setup_count: AtomicU64,
     pending_setup_updates: Mutex<VecDeque<SessionNotification>>,
+    setup_activity: SetupActivity,
 }
 
 struct RouteEntry {
@@ -138,6 +140,9 @@ impl RouteRegistry {
                         pending.pop_front();
                     }
                     pending.push_back(update);
+                    // The agent emitted traffic while a create is still waiting for its session
+                    // id, which is the only aliveness proof a `session/new` deadline can observe.
+                    self.setup_activity.record();
                     Ok(())
                 }
                 SessionEvent::Permission(_) | SessionEvent::Response(_) => Err(Box::new(event)),
@@ -197,6 +202,41 @@ pub(super) struct RouteRegistration {
 /// Bounds the lifetime in which an as-yet-unknown session id may emit setup updates.
 pub(super) struct SetupRegistration {
     registry: Arc<RouteRegistry>,
+}
+
+impl SetupRegistration {
+    /// The activity signal a `session/new` deadline waits on to distinguish a slow setup from a
+    /// hung agent.
+    ///
+    /// The signal covers every in-flight create on the connection, not only the caller's: a
+    /// provider session id is unknowable until its own response arrives, so setup traffic cannot
+    /// be attributed to one create. Any observed setup activity proves the agent is alive, which
+    /// is the fact an inactivity deadline needs.
+    pub(super) fn activity(&self) -> &SetupActivity {
+        &self.registry.setup_activity
+    }
+}
+
+/// Wakes session-create inactivity deadlines when unrouted setup traffic is observed.
+#[derive(Default)]
+pub(super) struct SetupActivity {
+    notify: Notify,
+}
+
+impl SetupActivity {
+    /// Records one unrouted setup notification and wakes one waiting deadline.
+    ///
+    /// `notify_one` stores a permit when no deadline is waiting, so activity recorded while a
+    /// deadline loop is between awaits still rearms it on the next poll instead of being lost;
+    /// a burst collapses to one stored permit, which is enough because one rearm is enough.
+    pub(super) fn record(&self) {
+        self.notify.notify_one();
+    }
+
+    /// Resolves once setup activity has been observed; the caller rearms its deadline.
+    pub(super) async fn wait(&self) {
+        self.notify.notified().await;
+    }
 }
 
 impl Drop for SetupRegistration {
@@ -394,6 +434,57 @@ mod tests {
                 panic!("expected setup update")
             }
         }
+    }
+
+    /// Verifies buffered setup traffic wakes a create deadline waiting on the activity signal.
+    ///
+    /// The permit is stored before anything waits, so the first `wait` observes it without a
+    /// race — exactly the ordering a `session/new` deadline depends on when the agent emits
+    /// updates between two deadline polls.
+    #[tokio::test]
+    async fn buffered_setup_updates_signal_activity() {
+        let routes = Arc::new(RouteRegistry::default());
+        let setup = routes.begin_session_setup();
+        let update = SessionNotification::new(
+            "new-session",
+            SessionUpdate::SessionInfoUpdate(SessionInfoUpdate::new().title("Created")),
+        );
+
+        routes
+            .route_event(SessionEvent::Update(update))
+            .expect("buffer setup update");
+
+        setup.activity().wait().await;
+    }
+
+    /// Verifies only unrouted setup traffic signals activity, never a routed session's updates.
+    ///
+    /// A live session streaming updates proves nothing about a create the agent has not
+    /// answered, so a busy neighbour must not keep a possibly-hung create's deadline alive.
+    #[tokio::test]
+    async fn routed_updates_do_not_signal_setup_activity() {
+        let routes = Arc::new(RouteRegistry::default());
+        let setup = routes.begin_session_setup();
+        let (updates, _updates_receiver) = mpsc::channel(1);
+        let (controls, _controls_receiver) = mpsc::unbounded_channel();
+        let _registration = routes.register("live-session", 1, updates, controls);
+        let update = SessionNotification::new(
+            "live-session",
+            SessionUpdate::SessionInfoUpdate(SessionInfoUpdate::new()),
+        );
+
+        routes
+            .route_event(SessionEvent::Update(update))
+            .expect("route live update");
+
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                setup.activity().wait()
+            )
+            .await
+            .is_err()
+        );
     }
 
     /// Verifies one slow session is detached without invalidating unrelated routes.

@@ -12,8 +12,11 @@ import { AppI18nProvider } from "../../i18n/i18n";
 import { appI18n } from "../../i18n/i18n-instance";
 import {
   copyImageElement,
+  forcePlainTextClipboard,
+  serializeSelectionPlainText,
   TextEditContextMenu,
   writeClipboardText,
+  writeClipboardTextSync,
 } from "./text-edit-context-menu";
 
 afterEach(async () => {
@@ -148,11 +151,127 @@ describe("TextEditContextMenu", () => {
   });
 
   it("swallows clipboard write denials so Copy does not reject", async () => {
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(false),
+    });
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
     });
-    await expect(writeClipboardText("hello")).resolves.toBeUndefined();
+    await expect(writeClipboardText("hello")).resolves.toBe(false);
+  });
+
+  it("prefers a synchronous execCommand write so external pastes get plain text", async () => {
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand,
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    await expect(writeClipboardText("AGENTS.md\nCargo.toml")).resolves.toBe(
+      true,
+    );
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("falls back to clipboard.writeText when execCommand fails", async () => {
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(false),
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    await expect(writeClipboardText("README.md")).resolves.toBe(true);
+    expect(writeText).toHaveBeenCalledWith("README.md");
+  });
+
+  it("forces text/plain onto a native Copy event", () => {
+    const setData = vi.fn();
+    const preventDefault = vi.fn();
+    expect(
+      forcePlainTextClipboard(
+        {
+          clipboardData: { setData } as unknown as DataTransfer,
+          preventDefault,
+        },
+        "crates/\npackages/\nAGENTS.md",
+      ),
+    ).toBe(true);
+    expect(setData).toHaveBeenCalledWith(
+      "text/plain",
+      "crates/\npackages/\nAGENTS.md",
+    );
+    expect(preventDefault).toHaveBeenCalled();
+  });
+
+  it("leaves native Copy alone when the selection is empty", () => {
+    const setData = vi.fn();
+    const preventDefault = vi.fn();
+    expect(
+      forcePlainTextClipboard(
+        {
+          clipboardData: { setData } as unknown as DataTransfer,
+          preventDefault,
+        },
+        "",
+      ),
+    ).toBe(false);
+    expect(setData).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("serializes path-link buttons that Selection#toString skips", () => {
+    const host = document.createElement("div");
+    host.innerHTML =
+      '<p>文件:</p><p><button style="user-select:none">AGENTS.md</button> - Agent文档</p>' +
+      '<p><button style="user-select:none">Cargo.lock</button> / ' +
+      '<button style="user-select:none">Cargo.toml</button> - Rust项目配置</p>';
+    document.body.append(host);
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(host);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const serialized = serializeSelectionPlainText(selection);
+    expect(serialized).toContain("AGENTS.md");
+    expect(serialized).toContain("Cargo.lock");
+    expect(serialized).toContain("Cargo.toml");
+    expect(serialized).toContain("Agent文档");
+    // Native toString drops user-select:none button text in WebView/Chromium.
+    expect(serialized.length).toBeGreaterThan(
+      (selection?.toString() ?? "").length,
+    );
+
+    host.remove();
+  });
+
+  it("restores the live selection after a sync clipboard write", () => {
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(true),
+    });
+    const host = document.createElement("div");
+    host.textContent = "path/to/file.rs";
+    document.body.append(host);
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(host);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    expect(writeClipboardTextSync("path/to/file.rs")).toBe(true);
+    expect(selection?.toString()).toBe("path/to/file.rs");
+    host.remove();
   });
 
   it("does not reject when both ClipboardItem construction paths throw", async () => {

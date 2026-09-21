@@ -21,7 +21,7 @@ interface WorkflowCanvasInspectorRestoreProps {
   onExpandInspector: () => void;
 }
 
-/** Renders React Flow viewport zoom and fit controls for the canvas chrome row. */
+/** Renders a compact Dify-style zoom group anchored to the canvas bottom-right. */
 export function WorkflowCanvasControls({
   defaultViewport,
 }: WorkflowCanvasControlsProps) {
@@ -32,7 +32,8 @@ export function WorkflowCanvasControls({
   return (
     <div
       data-workflow-controls
-      className="flex w-fit items-center rounded-lg border border-border/80 bg-background/95 p-px shadow-sm backdrop-blur"
+      data-workflow-viewport-controls
+      className="pointer-events-auto absolute bottom-3 right-3 z-40 flex w-fit items-center gap-0.5 rounded-xl border border-border bg-background/95 p-1 shadow-lg backdrop-blur"
       aria-label={t("settings.workflow.canvasControls")}
       aria-orientation="horizontal"
       role="toolbar"
@@ -40,7 +41,7 @@ export function WorkflowCanvasControls({
       <Button
         variant="ghost"
         size="icon-sm"
-        className="size-7 rounded-md"
+        className="size-8 rounded-lg"
         aria-label={t("settings.workflow.zoomOut")}
         disabled={zoom <= MIN_WORKFLOW_ZOOM}
         onClick={() => {
@@ -50,7 +51,7 @@ export function WorkflowCanvasControls({
         <IconMinus />
       </Button>
       <span
-        className="flex h-7 w-8 items-center justify-center text-[9px] font-medium tabular-nums text-muted-foreground"
+        className="flex h-8 min-w-11 items-center justify-center px-1 text-[10px] font-medium tabular-nums text-muted-foreground"
         aria-live="polite"
       >
         {Math.round(zoom * 100)}%
@@ -58,7 +59,7 @@ export function WorkflowCanvasControls({
       <Button
         variant="ghost"
         size="icon-sm"
-        className="size-7 rounded-md"
+        className="size-8 rounded-lg"
         aria-label={t("settings.workflow.zoomIn")}
         disabled={zoom >= MAX_WORKFLOW_ZOOM}
         onClick={() => {
@@ -70,7 +71,7 @@ export function WorkflowCanvasControls({
       <Button
         variant="ghost"
         size="icon-sm"
-        className="size-7 rounded-md"
+        className="size-8 rounded-lg"
         aria-label={t("settings.workflow.fitView")}
         onClick={() => {
           void fitView({
@@ -86,7 +87,7 @@ export function WorkflowCanvasControls({
       <Button
         variant="ghost"
         size="icon-sm"
-        className="size-7 rounded-md"
+        className="size-8 rounded-lg"
         aria-label={t("settings.workflow.resetView")}
         onClick={() => {
           void setViewport(defaultViewport, { duration: 180 });

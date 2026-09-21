@@ -4,9 +4,11 @@ use super::interactive::CompletingNodeRuns;
 use super::transitions::WorkflowRunTransitions;
 use crate::git_cleanup::KeyedResourceLocks;
 use ora_application::{
-    Clock, ExecutionContext, NodeExecutor, ProjectRepository, SessionRepository, WorkflowGraphNode,
-    WorkflowNodeRunIdGenerator, WorkflowRepository, WorkflowRunEngine, WorkflowRunEngineRepository,
+    Clock, ExecutionContext, NodeExecutor, ProjectRepository, SessionRepository,
+    SkillMaterializationReceipt, WorkflowGraph, WorkflowGraphNode, WorkflowNodeRunIdGenerator,
+    WorkflowRepository, WorkflowRunEngine, WorkflowRunEngineRepository,
     WorkflowRunInvalidationPublisher, WorkflowRunPayload, WorkflowRunRepository,
+    WorkflowVariablePool,
 };
 use ora_contracts::WorkflowRunLocale;
 use ora_db::{
@@ -20,9 +22,11 @@ use ora_domain::{
     Workflow, WorkflowId, WorkflowNodeRun, WorkflowNodeRunId, WorkflowNodeStatus, WorkflowRun,
     WorkflowRunId, WorkflowRunStatus, WorkflowSnapshot, WorkflowSnapshotId, WorkspaceLocation,
 };
-use std::cell::Cell;
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 pub(crate) const AGENT_GRAPH: &str = r#"{"nodes":[
@@ -59,20 +63,66 @@ impl NodeExecutor for NoopExecutor {
         &self,
         _node_run_id: &WorkflowNodeRunId,
         _node: &WorkflowGraphNode,
+        _graph: &WorkflowGraph,
         _context: &ExecutionContext,
+        _scope_id: &ora_domain::WorkflowScopeId,
+        _variable_pool: &ora_application::WorkflowVariablePool,
     ) {
+    }
+}
+
+/// Records production dispatch inputs while leaving completion under the test's control.
+#[derive(Clone, Default)]
+pub(crate) struct RecordingExecutor {
+    records: Arc<Mutex<Vec<DispatchRecord>>>,
+    /// Node ids in dispatch order, for tests that only care which nodes were started.
+    pub dispatches: Arc<Mutex<Vec<String>>>,
+}
+
+/// The immutable facts a background executor receives for one dispatch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DispatchRecord {
+    pub(crate) node_run_id: String,
+    pub(crate) node_id: String,
+    pub(crate) payload: Option<String>,
+}
+
+impl RecordingExecutor {
+    /// Shares a snapshot of all dispatches observed so far.
+    pub(crate) fn records(&self) -> Vec<DispatchRecord> {
+        self.records.lock().unwrap().clone()
+    }
+}
+
+impl NodeExecutor for RecordingExecutor {
+    fn dispatch(
+        &self,
+        node_run_id: &WorkflowNodeRunId,
+        node: &WorkflowGraphNode,
+        _graph: &WorkflowGraph,
+        context: &ExecutionContext,
+        _scope_id: &ora_domain::WorkflowScopeId,
+        _variable_pool: &WorkflowVariablePool,
+    ) {
+        self.records.lock().unwrap().push(DispatchRecord {
+            node_run_id: node_run_id.to_string(),
+            node_id: node.id.clone(),
+            payload: context.run.payload.clone(),
+        });
+        self.dispatches.lock().unwrap().push(node.id.clone());
     }
 }
 
 #[derive(Default)]
 pub(crate) struct SeqGen {
-    next: Cell<u64>,
+    // Atomic so a fixture engine can be shared across threads; a Mutex around resume would
+    // serialize the calls itself and hide whether the run lock is doing that work.
+    next: AtomicU64,
 }
 
 impl WorkflowNodeRunIdGenerator for SeqGen {
     fn generate_node_run_id(&self) -> WorkflowNodeRunId {
-        let current = self.next.get();
-        self.next.set(current + 1);
+        let current = self.next.fetch_add(1, Ordering::Relaxed);
         WorkflowNodeRunId::new(format!("node-{current}"))
     }
 }
@@ -84,6 +134,36 @@ impl Clock for ClockAt {
     fn now_timestamp_millis(&self) -> i64 {
         self.0
     }
+}
+
+/// Initializes a real git repository in the fixture workspace and returns that root.
+pub(crate) fn init_git_workspace(temp: &TempDir) -> PathBuf {
+    let root = temp.path().join("fixture-project");
+    std::fs::create_dir_all(&root).unwrap();
+    run_git(&root, &["init", "--initial-branch=main"]);
+    std::fs::write(root.join("README.md"), "seed\n").unwrap();
+    run_git(&root, &["add", "README.md"]);
+    run_git(&root, &["commit", "-m", "seed"]);
+    root
+}
+
+fn run_git(cwd: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .current_dir(cwd)
+        .args([
+            "-c",
+            "user.name=ora-test",
+            "-c",
+            "user.email=ora-test@example.com",
+        ])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// Opens a migrated SQLite fixture independent of a live backend runtime.
@@ -173,18 +253,13 @@ pub(crate) fn seeded_pending_run(
         ))
         .unwrap();
     let run_id = WorkflowRunId::new("run-1");
-    // Real runs are created through the deployment handler, which always freezes a typed
-    // payload; without one, private routing state such as Condition decisions would never
-    // persist, so the fixture seeds the graph-derived pool exactly like deployment does.
-    let parsed_graph = ora_application::WorkflowGraph::parse(graph).expect("fixture graph parses");
-    let start_node_id = parsed_graph.start_node().map(|node| node.id.clone());
-    let payload = serde_json::to_string(&WorkflowRunPayload::with_variable_pool(
+    let parsed_graph = WorkflowGraph::parse(graph).unwrap();
+    let payload = WorkflowRunPayload::with_variable_pool(
         WorkflowRunLocale::EnUs,
-        Default::default(),
-        start_node_id,
-        ora_application::WorkflowVariablePool::from_graph(&parsed_graph),
-    ))
-    .unwrap();
+        SkillMaterializationReceipt::default(),
+        parsed_graph.start_node().map(|node| node.id.clone()),
+        WorkflowVariablePool::from_graph(&parsed_graph),
+    );
     let run = WorkflowRun::new(
         run_id.clone(),
         workspace.id,
@@ -196,7 +271,7 @@ pub(crate) fn seeded_pending_run(
         Some("kickoff".to_string()),
         None,
         None,
-        Some(payload),
+        Some(serde_json::to_string(&payload).unwrap()),
         None,
         None,
         AuditFields::new(30, 30, false),
@@ -214,19 +289,33 @@ pub(crate) fn started_run(
     pool: &RepositoryPool,
     graph: &str,
 ) -> (WorkflowRunId, Vec<WorkflowNodeRun>) {
+    let (run_id, node_runs, _engine) = started_run_with(temp, pool, graph, NoopExecutor);
+    (run_id, node_runs)
+}
+
+/// Starts a run with a caller-supplied executor so tests can observe dispatches.
+pub(crate) fn started_run_with<E: NodeExecutor + 'static>(
+    temp: &TempDir,
+    pool: &RepositoryPool,
+    graph: &str,
+    executor: E,
+) -> (
+    WorkflowRunId,
+    Vec<WorkflowNodeRun>,
+    WorkflowRunEngine<SqliteWorkflowRunEngineRepository, SeqGen, ClockAt>,
+) {
     let run_id = seeded_pending_run(temp, pool, graph);
     let engine = WorkflowRunEngine::new(
         SqliteWorkflowRunEngineRepository::new(pool.clone()),
-        NoopExecutor,
+        executor,
         SeqGen::default(),
         ClockAt(40),
     );
     engine.start(&run_id).unwrap();
-
     let node_runs = SqliteWorkflowRunRepository::new(pool.clone())
         .list_node_runs(&run_id)
         .unwrap();
-    (run_id, node_runs)
+    (run_id, node_runs, engine)
 }
 
 /// Creates isolated coordination state for tests of the internal turn-policy interface.

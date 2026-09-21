@@ -15,6 +15,7 @@ export type WorkflowHistoryEvent =
   | "edge.connect"
   | "edge.reconnect"
   | "node.move"
+  | "iteration.resize"
   | "layout.organize"
   | "node.edit"
   | "annotation.edit"

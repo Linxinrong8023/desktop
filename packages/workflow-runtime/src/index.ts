@@ -2,6 +2,7 @@ export type {
   GraphWorkflowNodeIo,
   GraphWorkflowNodeState,
   GraphWorkflowNodeStatus,
+  GraphWorkflowRound,
   GraphWorkflowRun,
   GraphWorkflowRunStatus,
   GraphWorkflowSnapshotNodePatch,
@@ -30,6 +31,8 @@ export type {
   WorkflowNodeConversationItemStatus,
   WorkflowNodeConversationMessage,
   WorkflowNodeConversationMessageRole,
+  WorkflowNodeErrorDetail,
+  WorkflowNodeAiDiagnosis,
   WorkflowNodeFileChange,
   WorkflowRunEvent,
   WorkflowRunEventEnvelope,
@@ -40,6 +43,7 @@ export type {
 export { findOpenHitlForNode, listOpenHitls } from "./types";
 export {
   normalizeWorkflowDefinition,
+  normalizeWorkflowDocument,
   validateWorkflowDefinition,
   WorkflowDefinitionValidationError,
   type WorkflowDefinitionInput,
@@ -63,6 +67,7 @@ export {
 } from "./run-projection";
 export { workflowPathNodes, workflowPathOrder } from "./workflow-path-order";
 export { computeInactiveNodes } from "./branch-projection";
+export { workflowContainerNodes } from "./container-layout";
 
 export type {
   WorkflowHostRepository,

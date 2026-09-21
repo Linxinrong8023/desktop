@@ -5,8 +5,8 @@ use crate::app_event::AppEventPublisher;
 use crate::clock::SystemClock;
 use crate::git_cleanup::KeyedResourceLocks;
 use ora_application::{
-    FileChange, NodeType, UuidWorkflowNodeRunIdGenerator, WorkflowGraph, WorkflowRunCallback,
-    WorkflowRunControlHandler, WorkflowRunEngine, WorkflowRunEngineRepository,
+    FileChange, NodeFailure, NodeType, UuidWorkflowNodeRunIdGenerator, WorkflowGraph,
+    WorkflowRunCallback, WorkflowRunControlHandler, WorkflowRunEngine, WorkflowRunEngineRepository,
     WorkflowRunInvalidationPublisher,
 };
 use ora_contracts::AppEvent;
@@ -100,13 +100,12 @@ impl WorkflowRunCallback for WorkflowRunEngineCallback {
         &self,
         run_id: &WorkflowRunId,
         node_run_id: &WorkflowNodeRunId,
-        error: String,
-        output: Option<String>,
+        failure: NodeFailure,
     ) {
         let _gate = self.run_locks.acquire_exclusive(run_id.as_ref());
         if let Ok(guard) = self.engine.read()
             && let Some(engine) = guard.as_ref()
-            && let Err(callback_error) = engine.fail_node(run_id, node_run_id, error, output)
+            && let Err(callback_error) = engine.fail_node(run_id, node_run_id, failure)
         {
             ora_error!(run_id = %run_id, node_run_id = %node_run_id, error = %callback_error, "node fail callback failed");
         }
@@ -276,8 +275,10 @@ pub(crate) fn reconcile_running_workflow_runs(
                 if let Err(error) = engine.fail_node(
                     &run_id,
                     &node_run.id,
-                    "invalid pending node after restart".to_string(),
-                    None,
+                    ora_application::NodeFailure::new(
+                        ora_application::NodeFailureKind::InterruptedByRestart,
+                        "invalid pending node after restart",
+                    ),
                 ) {
                     ora_error!(run_id = %run_id, node_run_id = %node_run.id, error = %error, "failed to fail invalid pending node");
                 }
@@ -306,7 +307,7 @@ fn is_awaiting_input(node_run: &WorkflowNodeRun, graph: &WorkflowGraph) -> bool 
         && node_run.session_id.is_some()
         && node_run.node_type == "agent"
         && graph
-            .node(&node_run.node_id)
+            .execution_node(&node_run.node_id)
             .and_then(|node| node.agent_config.as_ref())
             .is_some_and(|config| config.interactive)
 }
@@ -320,7 +321,8 @@ mod tests {
     use super::{WorkflowRunInvalidations, is_awaiting_input};
     use crate::app_event::AppEventHub;
     use ora_application::{
-        WorkflowGraph, WorkflowRunEngine, WorkflowRunInvalidationPublisher, WorkflowRunRepository,
+        UuidWorkflowNodeRunIdGenerator, WorkflowGraph, WorkflowRunEngine,
+        WorkflowRunEngineRepository, WorkflowRunInvalidationPublisher, WorkflowRunRepository,
     };
     use ora_contracts::AppEvent;
     use ora_db::{SqliteWorkflowRunEngineRepository, SqliteWorkflowRunRepository};
@@ -335,6 +337,7 @@ mod tests {
         WorkflowNodeRun::new(
             WorkflowNodeRunId::new("node-1"),
             WorkflowRunId::new("run-1"),
+            ora_domain::WorkflowScopeId::new("root:run-1"),
             "a",
             "agent",
             session_id.map(SessionId::new),
@@ -351,6 +354,27 @@ mod tests {
 
     const INTERACTIVE_GRAPH: &str = r#"{"nodes":[{"id":"a","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"c","modelId":"m"},"interactive":true,"prompt":"p"}}}],"edges":[]}"#;
     const AUTO_GRAPH: &str = r#"{"nodes":[{"id":"a","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"c","modelId":"m"},"prompt":"p"}}}],"edges":[]}"#;
+
+    const LOOP_GRAPH: &str = r#"{
+        "schemaVersion":2,
+        "nodes":[
+            {"id":"start","data":{"kind":"start"}},
+            {"id":"loop","data":{"kind":"loop","loopConfig":{
+                "maxIterations":3,
+                "variables":[{"name":"draft","valueType":"string","initial":{"kind":"constant","value":""},"feedback":["writer","output"]}],
+                "until":{"logic":"and","conditions":[{"variableSelector":["writer","output"],"operator":"equals","value":"done"}]},
+                "outputs":[{"name":"result","variableSelector":["writer","output"]}]
+            }}},
+            {"id":"out","data":{"kind":"output","outputs":[{"name":"result","variableSelector":["loop","result"]}]}},
+            {"id":"entry","parentId":"loop","data":{"kind":"start","containerId":"loop"}},
+            {"id":"writer","data":{"kind":"agent","containerId":"loop","agentConfig":{"executor":{"agentCli":"c","modelId":"m"},"prompt":"Revise {{#loop.draft#}}"}}}
+        ],
+        "edges":[
+            {"source":"start","target":"loop"},
+            {"source":"loop","target":"out"},
+            {"source":"entry","target":"writer"}
+        ]
+    }"#;
 
     /// Only a `Pending` interactive node with a bound session is a genuine awaiting node.
     #[test]
@@ -379,6 +403,161 @@ mod tests {
             &node_run(WorkflowNodeStatus::Pending, Some("s")),
             &missing
         ));
+    }
+
+    /// The production repository and scheduler execute isolated rounds and publish only final output.
+    #[test]
+    fn loop_runs_until_the_condition_exports_its_result() {
+        let (temp, pool) = bootstrap();
+        let (run_id, first_nodes) = started_run(&temp, &pool, LOOP_GRAPH);
+        let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+        let first_writer = first_nodes
+            .iter()
+            .find(|node| node.node_id == "writer")
+            .unwrap();
+        assert_eq!(first_writer.status, WorkflowNodeStatus::Running);
+
+        let engine = WorkflowRunEngine::new(
+            repository.clone(),
+            NoopExecutor,
+            UuidWorkflowNodeRunIdGenerator,
+            ClockAt(50),
+        );
+        repository
+            .complete_node(
+                &first_writer.id,
+                Some("again".into()),
+                None,
+                None,
+                vec![],
+                45,
+            )
+            .unwrap();
+        // Simulate a process stop after the child commit but before its scheduling callback.
+        engine.resume(&run_id).unwrap();
+        let second_writer = repository
+            .list_node_runs(&run_id)
+            .unwrap()
+            .into_iter()
+            .find(|node| node.node_id == "writer" && node.status == WorkflowNodeStatus::Running)
+            .unwrap();
+        assert_ne!(second_writer.scope_id, first_writer.scope_id);
+
+        engine
+            .complete_node(
+                &run_id,
+                &second_writer.id,
+                Some("done".into()),
+                None,
+                None,
+                vec![],
+            )
+            .unwrap();
+        let run = SqliteWorkflowRunRepository::new(pool.clone())
+            .find_run(&run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (run.status, run.output),
+            (
+                WorkflowRunStatus::Succeeded,
+                Some(r#"{"result":"done"}"#.into())
+            )
+        );
+        let all_nodes = repository.list_node_runs(&run_id).unwrap();
+        let loop_parent = all_nodes
+            .iter()
+            .find(|node| node.node_id == "loop")
+            .unwrap();
+        assert_eq!(
+            repository.find_active_loop_round(&loop_parent.id).unwrap(),
+            None
+        );
+        assert_eq!(
+            all_nodes
+                .iter()
+                .filter(|node| {
+                    node.node_id == "writer" && node.status == WorkflowNodeStatus::Succeeded
+                })
+                .count(),
+            2
+        );
+    }
+
+    /// A false condition on the final permitted round terminalizes the scope, parent, and run.
+    #[test]
+    fn loop_iteration_limit_fails_the_run() {
+        let (temp, pool) = bootstrap();
+        let graph = LOOP_GRAPH.replacen("\"maxIterations\":3", "\"maxIterations\":1", 1);
+        let (run_id, nodes) = started_run(&temp, &pool, &graph);
+        let writer = nodes.iter().find(|node| node.node_id == "writer").unwrap();
+        let repository = SqliteWorkflowRunEngineRepository::new(pool.clone());
+        let engine = WorkflowRunEngine::new(
+            repository.clone(),
+            NoopExecutor,
+            UuidWorkflowNodeRunIdGenerator,
+            ClockAt(50),
+        );
+
+        engine
+            .complete_node(
+                &run_id,
+                &writer.id,
+                Some("again".into()),
+                None,
+                None,
+                vec![],
+            )
+            .unwrap();
+
+        let run = SqliteWorkflowRunRepository::new(pool)
+            .find_run(&run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(run.status, WorkflowRunStatus::Failed);
+        assert!(
+            run.error
+                .as_deref()
+                .is_some_and(|error| error.contains("did not terminate within 1 rounds"))
+        );
+        let parent = repository
+            .list_node_runs(&run_id)
+            .unwrap()
+            .into_iter()
+            .find(|node| node.node_id == "loop")
+            .unwrap();
+        assert_eq!(parent.status, WorkflowNodeStatus::Failed);
+        assert_eq!(repository.find_active_loop_round(&parent.id).unwrap(), None);
+    }
+
+    /// Cancelling a Loop run releases the active round and every child node together.
+    #[test]
+    fn cancelling_loop_settles_its_active_round() {
+        let (temp, pool) = bootstrap();
+        let (run_id, nodes) = started_run(&temp, &pool, LOOP_GRAPH);
+        let parent = nodes.iter().find(|node| node.node_id == "loop").unwrap();
+        let repository = SqliteWorkflowRunEngineRepository::new(pool);
+        let engine = WorkflowRunEngine::new(
+            repository.clone(),
+            NoopExecutor,
+            UuidWorkflowNodeRunIdGenerator,
+            ClockAt(50),
+        );
+
+        assert_eq!(
+            engine.cancel(&run_id).unwrap(),
+            ora_application::CancelWorkflowRunResult::Cancelled
+        );
+        assert_eq!(repository.find_active_loop_round(&parent.id).unwrap(), None);
+        assert!(
+            repository
+                .list_node_runs(&run_id)
+                .unwrap()
+                .iter()
+                .filter(|node| node.status == WorkflowNodeStatus::Cancelled)
+                .count()
+                >= 2
+        );
     }
 
     /// An engine assembled without an event bus drops every invalidation, so engines built by

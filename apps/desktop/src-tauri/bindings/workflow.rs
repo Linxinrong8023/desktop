@@ -4,6 +4,11 @@ use super::{Binding, Permission};
 
 pub(super) const BINDINGS: &[Binding] = &[
     Binding::Unary {
+        operation: "analyzeWorkflow",
+        handler: "commands::workflow::analyze_workflow",
+        permission: Permission::MainWebview,
+    },
+    Binding::Unary {
         operation: "createWorkflow",
         handler: "commands::workflow::create_workflow",
         permission: Permission::MainWebview,

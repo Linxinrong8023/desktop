@@ -89,6 +89,18 @@ pub enum ManifestField {
     Artifact,
     /// The `artifact.target` field.
     ArtifactTarget,
+    /// The whole `[[pack.members]]` array, used when its presence disagrees with `kind`.
+    PackMembers,
+    /// The `identifier` field of the member at `index` in `[[pack.members]]`.
+    PackMemberIdentifier {
+        index: usize,
+    },
+    /// The `agents` array of the member at `index` in `[[pack.members]]`.
+    PackMemberAgents {
+        index: usize,
+    },
+    /// The release-form `marketplace_visible` display-intent field.
+    MarketplaceVisible,
 }
 
 impl fmt::Display for ManifestField {
@@ -130,6 +142,14 @@ impl fmt::Display for ManifestField {
             }
             Self::Artifact => formatter.write_str("artifact"),
             Self::ArtifactTarget => formatter.write_str("artifact.target"),
+            Self::PackMembers => formatter.write_str("pack.members"),
+            Self::PackMemberIdentifier { index } => {
+                write!(formatter, "pack.members[{index}].identifier")
+            }
+            Self::PackMemberAgents { index } => {
+                write!(formatter, "pack.members[{index}].agents")
+            }
+            Self::MarketplaceVisible => formatter.write_str("marketplace_visible"),
         }
     }
 }
@@ -215,4 +235,12 @@ pub enum InvalidFieldReason {
     DuplicateReleaseSource,
     #[error(transparent)]
     InvalidHookTarget(#[from] HookTargetError),
+    #[error("a pack manifest only exists in the marketplace release form")]
+    PackNotAllowedOnInstalled,
+    #[error(
+        "marketplace visibility is a listing attribute and is not allowed on an installed manifest"
+    )]
+    MarketplaceVisibleNotAllowedOnInstalled,
+    #[error(transparent)]
+    InvalidPluginId(#[from] ora_domain::PluginIdError),
 }

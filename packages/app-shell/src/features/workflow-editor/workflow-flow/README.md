@@ -45,6 +45,11 @@ React Flow–based canvas for the workspace workflow editor.
 - Automatic organization moves executable nodes only; annotations retain their
   authored positions and is recorded as one semantic history step.
 - Catalog drops only commit inside canvas bounds and snap to the visible grid.
+- Canvas element layering is explicit: annotations sit below nodes, selected nodes
+  lift above everything unselected, and iteration edge insert controls (rendered
+  through `EdgeLabelRenderer`) sit above every node and edge elevation React Flow
+  computes, because edges that touch parented members otherwise cover their own
+  insert buttons.
 - Published versions open in a read-only canvas preview; activating a version
   copies that graph into the editable draft.
 - A muted caption beside the history icon shows unpublished vs the active

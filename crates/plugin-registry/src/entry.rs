@@ -50,6 +50,12 @@ pub struct RegistryEntry {
     /// compatible with every host. `Some(non-empty)` lists the exact target triples.
     #[serde(default)]
     release_targets: Option<Vec<String>>,
+    /// Declared member identifiers when this entry is a pack, absent for every other kind.
+    ///
+    /// Display data for the pack card's member presentation; the ownership journal stays the
+    /// authority for what a pack installation actually created.
+    #[serde(default)]
+    pack_members: Option<Vec<String>>,
 }
 
 impl RegistryEntry {
@@ -71,6 +77,12 @@ impl RegistryEntry {
             ),
             None => None,
         };
+        let pack_members = manifest.pack().map(|pack| {
+            pack.members()
+                .iter()
+                .map(|member| member.identifier().as_str().to_owned())
+                .collect::<Vec<_>>()
+        });
         Self {
             id: entry_id(manifest, namespace),
             identifier: manifest.name().as_str().to_owned(),
@@ -82,6 +94,7 @@ impl RegistryEntry {
             description: manifest.description().to_owned(),
             logo,
             release_targets,
+            pack_members,
         }
     }
 
@@ -138,6 +151,14 @@ impl RegistryEntry {
         self.release_targets.as_deref()
     }
 
+    /// Returns the declared member identifiers when this entry is a pack.
+    ///
+    /// Display data only: a pack installation is orchestrated by the host, and the ownership
+    /// journal — not this list — records what an installation actually created.
+    pub fn pack_members(&self) -> Option<&[String]> {
+        self.pack_members.as_deref()
+    }
+
     /// Returns whether the current host can install this release.
     pub fn is_compatible_with_host(&self) -> bool {
         self.host_compatibility().is_ok()
@@ -152,6 +173,11 @@ impl RegistryEntry {
     /// Computes host compatibility once so callers can take either the success or the reason
     /// without allocating a reason string just to discard it.
     pub fn host_compatibility(&self) -> Result<(), String> {
+        // A pack installs through orchestration rather than a release download: it never has
+        // release targets, and that absence must not render the pack uninstallable.
+        if self.kind == "pack" {
+            return Ok(());
+        }
         match &self.release_targets {
             None => Err("this listing has no downloadable release".to_string()),
             Some(targets) if targets.is_empty() => Ok(()),

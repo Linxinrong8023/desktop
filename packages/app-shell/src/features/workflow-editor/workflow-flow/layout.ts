@@ -1,10 +1,23 @@
-import type { Edge, Node, SnapGrid, XYPosition } from "@xyflow/react";
+import type {
+  Edge,
+  Node,
+  NodeChange,
+  SnapGrid,
+  XYPosition,
+} from "@xyflow/react";
 import {
+  WORKFLOW_ITERATION_MEMBER_LEFT,
+  WORKFLOW_ITERATION_MEMBER_TOP,
   WORKFLOW_NODE_ANCHOR_Y,
   WORKFLOW_NODE_INITIAL_HEIGHT,
   WORKFLOW_NODE_WIDTH,
   type WorkflowNodeData,
 } from "@ora/workflow-mock";
+import { workflowContainerNodes } from "@ora/workflow-runtime";
+import {
+  compactIterationFrames,
+  iterationExpandedSize,
+} from "../workflow-iteration-graph";
 
 export const WORKFLOW_FLOW_NODE_TYPE = "workflow" as const;
 export const WORKFLOW_FLOW_EDGE_TYPE = "workflow" as const;
@@ -26,17 +39,103 @@ export function snapNodePosition(position: XYPosition): XYPosition {
   };
 }
 
+/** Ignores measurement noise while persisting user-driven moves and resizes. */
+export function shouldPersistWorkflowNodeChanges(
+  changes: readonly NodeChange[],
+): boolean {
+  return changes.some(
+    (change) =>
+      change.type !== "select" &&
+      (change.type !== "dimensions" ||
+        change.setAttributes !== undefined ||
+        change.resizing === true ||
+        change.resizing === false),
+  );
+}
+
+/** Projects Loop children into bounded, auto-expanding React Flow containers. */
+export function containWorkflowCanvasNodes(
+  nodes: readonly Node<WorkflowNodeData, "workflow">[],
+): Node<WorkflowNodeData, "workflow">[] {
+  return workflowContainerNodes(nodes).map((node) =>
+    node.data.containerId === undefined
+      ? node
+      : { ...node, extent: "parent", expandParent: true },
+  );
+}
+
 const WORKFLOW_LAYOUT_COLUMN_GAP = 120;
 const WORKFLOW_LAYOUT_ROW_GAP = 80;
+const CONDITION_NODE_WIDTH = 320;
 
-/** Arranges executable DAG nodes left-to-right while leaving editor notes untouched. */
+/** Arranges each iteration DAG first, then the outer DAG using fitted container dimensions. */
 export function organizeWorkflowNodes(
   nodes: readonly Node<WorkflowNodeData, "workflow">[],
   edges: readonly Edge[],
 ): Node<WorkflowNodeData, "workflow">[] {
+  const iterationIds = new Set(
+    nodes
+      .filter((node) => node.data.kind === "iteration")
+      .map((node) => node.id),
+  );
+  let arranged = [...nodes];
+  for (const iterationId of iterationIds) {
+    const members = arranged.filter((node) => node.parentId === iterationId);
+    const memberIds = new Set(members.map((node) => node.id));
+    const internalEdges = edges.filter(
+      (edge) => memberIds.has(edge.source) && memberIds.has(edge.target),
+    );
+    const positions = layoutDag(members, internalEdges, {
+      x: WORKFLOW_ITERATION_MEMBER_LEFT,
+      y: WORKFLOW_ITERATION_MEMBER_TOP,
+      centerRows: false,
+    });
+    arranged = arranged.map((node) =>
+      positions.has(node.id)
+        ? { ...node, position: positions.get(node.id)! }
+        : node,
+    );
+  }
+
+  arranged = compactIterationFrames({
+    nodes: arranged,
+    edges: [...edges],
+  }).nodes;
+  const outerNodes = arranged.filter(
+    (node) =>
+      node.data.containerId === undefined &&
+      (node.parentId === undefined || !iterationIds.has(node.parentId)),
+  );
+  const outerIds = new Set(outerNodes.map((node) => node.id));
+  const outerEdges = edges.filter(
+    (edge) => outerIds.has(edge.source) && outerIds.has(edge.target),
+  );
+  const outerPositions = layoutDag(outerNodes, outerEdges, {
+    x: 0,
+    y: 0,
+    centerRows: true,
+  });
+  return arranged.map((node) =>
+    outerPositions.has(node.id)
+      ? { ...node, position: outerPositions.get(node.id)! }
+      : node,
+  );
+}
+
+interface LayoutOrigin extends XYPosition {
+  centerRows: boolean;
+}
+
+/** Computes deterministic positions for one isolated DAG scope. */
+function layoutDag(
+  nodes: readonly Node<WorkflowNodeData, "workflow">[],
+  edges: readonly Edge[],
+  origin: LayoutOrigin,
+): Map<string, XYPosition> {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]));
   const indegree = new Map(nodes.map((node) => [node.id, 0]));
+  const layoutNodes = nodes;
   for (const edge of edges) {
     if (!nodeById.has(edge.source) || !nodeById.has(edge.target)) {
       continue;
@@ -45,13 +144,13 @@ export function organizeWorkflowNodes(
     indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1);
   }
 
-  const rank = new Map(nodes.map((node) => [node.id, 0]));
+  const rank = new Map(layoutNodes.map((node) => [node.id, 0]));
   const compareNodes = (leftId: string, rightId: string): number => {
     const left = nodeById.get(leftId)!;
     const right = nodeById.get(rightId)!;
     return left.position.y - right.position.y || leftId.localeCompare(rightId);
   };
-  const queue = nodes
+  const queue = layoutNodes
     .filter((node) => indegree.get(node.id) === 0)
     .map((node) => node.id)
     .sort(compareNodes);
@@ -73,44 +172,72 @@ export function organizeWorkflowNodes(
     }
   }
 
-  // Invalid cyclic imports still receive a deterministic final column instead of blocking layout.
   const finalRank = Math.max(0, ...rank.values()) + 1;
-  for (const node of nodes) {
+  for (const node of layoutNodes) {
     if (!visited.has(node.id)) {
       rank.set(node.id, finalRank);
     }
   }
-
   const columns = new Map<number, Node<WorkflowNodeData, "workflow">[]>();
-  for (const node of nodes) {
+  for (const node of layoutNodes) {
     const column = rank.get(node.id) ?? 0;
     columns.set(column, [...(columns.get(column) ?? []), node]);
   }
-
-  const positions = new Map<string, XYPosition>();
-  for (const [column, columnNodes] of [...columns.entries()].sort(
+  const orderedColumns = [...columns.entries()].sort(
     ([left], [right]) => left - right,
-  )) {
-    columnNodes.sort((left, right) => compareNodes(left.id, right.id));
-    const heights = columnNodes.map(
-      (node) =>
-        node.measured?.height ?? node.height ?? WORKFLOW_NODE_INITIAL_HEIGHT,
+  );
+  const totalHeights = new Map<number, number>();
+  for (const [column, columnNodes] of orderedColumns) {
+    totalHeights.set(
+      column,
+      columnNodes.reduce((total, node) => total + nodeHeight(node), 0) +
+        Math.max(0, columnNodes.length - 1) * WORKFLOW_LAYOUT_ROW_GAP,
     );
-    const totalHeight =
-      heights.reduce((total, height) => total + height, 0) +
-      Math.max(0, columnNodes.length - 1) * WORKFLOW_LAYOUT_ROW_GAP;
-    let y = -totalHeight / 2;
-    for (const [index, node] of columnNodes.entries()) {
-      positions.set(
-        node.id,
-        snapNodePosition({
-          x: column * (WORKFLOW_NODE_WIDTH + WORKFLOW_LAYOUT_COLUMN_GAP),
-          y,
-        }),
-      );
-      y += heights[index]! + WORKFLOW_LAYOUT_ROW_GAP;
-    }
   }
+  const maximumColumnHeight = Math.max(0, ...totalHeights.values());
+  const positions = new Map<string, XYPosition>();
+  let x = origin.x;
+  for (const [column, columnNodes] of orderedColumns) {
+    columnNodes.sort((left, right) => compareNodes(left.id, right.id));
+    const totalHeight = totalHeights.get(column) ?? 0;
+    let y = origin.centerRows
+      ? origin.y - totalHeight / 2
+      : origin.y + (maximumColumnHeight - totalHeight) / 2;
+    let columnWidth = 0;
+    for (const node of columnNodes) {
+      positions.set(node.id, snapNodePosition({ x, y }));
+      y += nodeHeight(node) + WORKFLOW_LAYOUT_ROW_GAP;
+      columnWidth = Math.max(columnWidth, nodeWidth(node));
+    }
+    x += columnWidth + WORKFLOW_LAYOUT_COLUMN_GAP;
+  }
+  return positions;
+}
 
-  return nodes.map((node) => ({ ...node, position: positions.get(node.id)! }));
+/** Returns the current expanded width so outer layout reserves the full region. */
+function nodeWidth(node: Node<WorkflowNodeData, "workflow">): number {
+  if (node.data.kind === "iteration") {
+    return iterationExpandedSize(node).width;
+  }
+  return (
+    node.measured?.width ??
+    node.width ??
+    node.initialWidth ??
+    (node.data.kind === "condition"
+      ? CONDITION_NODE_WIDTH
+      : WORKFLOW_NODE_WIDTH)
+  );
+}
+
+/** Returns the current expanded height so rows cannot overlap iteration contents. */
+function nodeHeight(node: Node<WorkflowNodeData, "workflow">): number {
+  if (node.data.kind === "iteration") {
+    return iterationExpandedSize(node).height;
+  }
+  return (
+    node.measured?.height ??
+    node.height ??
+    node.initialHeight ??
+    WORKFLOW_NODE_INITIAL_HEIGHT
+  );
 }

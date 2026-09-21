@@ -23,6 +23,8 @@ pub enum DomainModelError {
     InvalidWorkflowRunStatus(i64),
     #[error("invalid workflow node status value: {0}")]
     InvalidWorkflowNodeStatus(i64),
+    #[error("invalid workflow scope status value: {0}")]
+    InvalidWorkflowScopeStatus(i64),
     #[error("invalid worktree activity value: {0}")]
     InvalidWorktreeActivity(i64),
     #[error("invalid git cleanup job state value: {0}")]

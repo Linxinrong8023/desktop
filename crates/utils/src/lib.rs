@@ -22,6 +22,10 @@ pub mod http;
 #[cfg(feature = "validation")]
 pub mod image;
 pub mod jsonc;
+#[cfg(all(unix, feature = "local-ipc"))]
+pub mod local_ipc;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod path;
 pub mod process;
 #[cfg(feature = "rust-source")]

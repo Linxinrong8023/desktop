@@ -249,6 +249,27 @@ export interface WorkflowOutputBinding {
   variableSelector: string[];
 }
 
+/** One carried Loop variable with its initial value and simultaneous feedback source. */
+export interface WorkflowLoopVariable {
+  name: string;
+  valueType: WorkflowVariableValueType;
+  initial:
+    | { kind: "constant"; value: unknown }
+    | { kind: "variable"; selector: string[] };
+  feedback: string[];
+}
+
+/** Executable bounded Loop configuration consumed by the workflow engine. */
+export interface WorkflowLoopConfig {
+  maxIterations: number;
+  variables: WorkflowLoopVariable[];
+  until: {
+    logic: WorkflowConditionLogic;
+    conditions: WorkflowConditionComparison[];
+  };
+  outputs: WorkflowOutputBinding[];
+}
+
 /** Which branches a Junction node waits for before it may proceed. */
 export type WorkflowJunctionWaitStrategy = "all" | "any" | "count";
 
@@ -298,6 +319,10 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   cases?: WorkflowConditionCase[];
   /** Named result bindings of an Output node, resolved from the variable pool at completion. */
   outputs?: WorkflowOutputBinding[];
+  /** Owning Loop id for one child node. */
+  containerId?: string;
+  /** Bounded feedback behavior for a Loop container. */
+  loopConfig?: WorkflowLoopConfig;
   operation?: string;
   toolParameters?: WorkflowToolParameter[];
   waitStrategy?: WorkflowJunctionWaitStrategy;

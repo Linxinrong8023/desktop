@@ -6,9 +6,9 @@ use crate::tests::{
 };
 use crate::{
     ConnectionError, InboundNotification, LaunchedRuntime, PluginCallError, PluginGenerationKey,
-    PluginLaunchRequest, PluginLifecycle, PluginLifecycleConfig, PluginNotification,
-    PluginNotificationSink, PluginRegistration, PluginRuntime, PluginRuntimeExit,
-    PluginRuntimeFailure, PluginRuntimeLauncher, SurfaceCloser,
+    PluginLaunchRequest, PluginLifecycle, PluginLifecycleConfig, PluginLogSetup,
+    PluginNotification, PluginNotificationSink, PluginRegistration, PluginRuntime,
+    PluginRuntimeExit, PluginRuntimeFailure, PluginRuntimeLauncher, SurfaceCloser,
 };
 use ora_contracts::{
     ActivatePluginRequest, PluginDataDisposition, PluginRuntimeStatus, StopPluginRequest,
@@ -85,6 +85,7 @@ impl PluginRuntimeLauncher for ScriptedLauncher {
     fn launch(
         &self,
         _request: PluginLaunchRequest,
+        _log: PluginLogSetup,
     ) -> impl Future<Output = Result<LaunchedRuntime<Self::Runtime>, PluginRuntimeFailure>> + Send
     {
         let this = self.clone();
@@ -611,6 +612,9 @@ async fn surfaces_close_before_the_runtime_stops() {
         .uninstall_plugin(UninstallPluginRequest {
             plugin_id: "official/ora.example".to_string(),
             data_disposition: PluginDataDisposition::Delete,
+            // This crate removes packages; it never runs a package program, so nothing here can
+            // be authorized by the flag.
+            hook_execution_acknowledged: false,
         })
         .await
         .expect("uninstall plugin");

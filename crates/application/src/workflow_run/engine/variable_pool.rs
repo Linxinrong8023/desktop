@@ -132,6 +132,11 @@ impl WorkflowVariablePool {
 
         for node in graph.nodes() {
             declare_base_node_variables(&mut pool, node);
+            if let Some((config, _)) = graph.loop_body(&node.id) {
+                for output in &config.outputs {
+                    pool.declare(&format!("{}.{}", node.id, output.name), "any", &node.id);
+                }
+            }
         }
 
         // Parsed graphs already passed `validate_iteration_declarations`, so declaration
@@ -545,7 +550,7 @@ mod tests {
                     {"id":"condition-1","data":{"kind":"condition"}},
                     {"id":"output-1","data":{"kind":"output"}}
                 ],
-                "edges": []
+                "edges": [{"source":"start","target":"agent-1"},{"source":"agent-1","target":"condition-1"},{"source":"condition-1","target":"output-1"}]
             }"#,
         )
         .unwrap();
@@ -602,6 +607,40 @@ mod tests {
                     },
                 ),
             ])
+        );
+    }
+
+    /// A Loop's named exports are declared in the outer pool for atomic publication at completion.
+    #[test]
+    fn graph_pool_declares_loop_outputs() {
+        let graph = WorkflowGraph::parse(
+            r#"{
+                "schemaVersion": 2,
+                "nodes": [
+                    {"id":"start","data":{"kind":"start"}},
+                    {"id":"loop","data":{"kind":"loop","loopConfig":{
+                        "maxIterations":2,
+                        "variables":[{"name":"draft","valueType":"string","initial":{"kind":"constant","value":""},"feedback":["writer","output"]}],
+                        "until":{"logic":"and","conditions":[{"variableSelector":["writer","output"],"operator":"equals","value":"done"}]},
+                        "outputs":[{"name":"result","variableSelector":["writer","output"]}]
+                    }}},
+                    {"id":"entry","parentId":"loop","data":{"kind":"start","containerId":"loop"}},
+                    {"id":"writer","data":{"kind":"agent","containerId":"loop","agentConfig":{"executor":{"agentCli":"claude","modelId":"model"},"prompt":"Write"}}}
+                ],
+                "edges":[{"source":"start","target":"loop"},{"source":"entry","target":"writer"}]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            WorkflowVariablePool::from_graph(&graph)
+                .catalog
+                .get("loop.result"),
+            Some(&WorkflowVariableDefinition {
+                value_type: "any".into(),
+                writer: "loop".into(),
+                max_length: None,
+            })
         );
     }
 }

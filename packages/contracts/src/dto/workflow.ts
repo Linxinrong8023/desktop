@@ -14,6 +14,16 @@ export type ActivateWorkflowRequest = {
 export type ActivateWorkflowResponse = { snapshot: WorkflowSnapshot };
 
 /**
+ * Analyzes the supplied authoring document without persisting or executing it.
+ */
+export type AnalyzeWorkflowRequest = { graph: string };
+
+/**
+ * Participation is derived from the submitted document, never persisted on nodes.
+ */
+export type AnalyzeWorkflowResponse = { unusedNodeIds: Array<string> };
+
+/**
  * Carries the fields required to create a workflow with an optional initial graph.
  */
 export type CreateWorkflowRequest = { name: string; graph: string | null };

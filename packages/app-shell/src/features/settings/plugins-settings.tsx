@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
   AvailablePlugin,
+  ImportedWorkflowOutcome,
   InstalledPlugin,
-  InstallOutcome,
+  PackInstallationStatus,
+  PackMemberReconciliationState,
 } from "@ora/contracts";
 import {
+  Badge,
   Button,
   DropdownMenu,
   DropdownMenuContent,
@@ -25,8 +28,15 @@ import {
   IconSettings,
 } from "@tabler/icons-react";
 import { useContractErrorToast } from "../../i18n/use-contract-error-toast";
+import { useContractsClient } from "../../contracts-client-context";
+import {
+  invalidateInstalledPlugins,
+  invalidatePackInstallations,
+} from "../../state/data/plugins";
 import { usePlatform } from "../../platform";
 import { useAvailablePlugins } from "../../state/hooks/use-available-plugins";
+import { PackUninstallConfirm } from "./pack-uninstall-confirm";
+import { usePackInstallations } from "../../state/hooks/use-pack-installations";
 import { useInstallPlugin } from "../../state/hooks/use-install-plugin";
 import { useUpdatePlugin } from "../../state/hooks/use-update-plugin";
 import { useInstalledPlugins } from "../../state/hooks/use-installed-plugins";
@@ -40,7 +50,13 @@ import { PluginReadmeView } from "./plugin-readme-view";
 import { PluginConfigurationEditor } from "./plugin-configuration-editor";
 import type { PluginConfigurationNavigationGuard } from "./plugin-configuration-editor";
 import { PluginDownloadProgress } from "./plugin-download-progress";
+import { showPluginInstallOutcome } from "./plugin-install-feedback";
+import {
+  HookExecutionConfirm,
+  type HookExecutionAction,
+} from "./hook-execution-confirm";
 import { useUiStore } from "../../state/stores/ui-store";
+import type { TFunction } from "i18next";
 
 /** The registry kind order shown in the marketplace, mirroring the contracts docs. */
 const MARKETPLACE_KIND_ORDER = [
@@ -113,6 +129,31 @@ export function PluginsSettings({
   const [readmePlugin, setReadmePlugin] = useState<AvailablePlugin | null>(
     null,
   );
+  const [uninstallingPack, setUninstallingPack] = useState<string | null>(null);
+  const packInstallations = usePackInstallations();
+  const queryClient = useQueryClient();
+  const client = useContractsClient();
+  const uninstallPackMutation = useMutation({
+    // A pack removal never runs a member's lifecycle commands, so it authorizes nothing: the
+    // declaration stays false even though the user did confirm the removal.
+    mutationFn: (packId: string) =>
+      client.plugin.uninstall({
+        pluginId: packId,
+        dataDisposition: "delete" as const,
+        hookExecutionAcknowledged: false,
+      }),
+    onSuccess: () => {
+      toast.success(t("settings.plugins.packUninstallSuccess"));
+      setUninstallingPack(null);
+    },
+    onError: (cause) => {
+      showContractError(cause, t("settings.plugins.uninstallFailed"));
+    },
+    onSettled: async () => {
+      await invalidatePackInstallations(queryClient);
+      await invalidateInstalledPlugins(queryClient);
+    },
+  });
 
   const platform = usePlatform();
   const available = useAvailablePlugins();
@@ -194,14 +235,21 @@ export function PluginsSettings({
       importPlugin.mutate(
         { path },
         {
-          onSuccess: (response) =>
-            toast.success(
-              installOutcomeMessage(
-                response.outcome,
-                t,
-                "settings.plugins.importSuccess",
-              ),
-            ),
+          onSuccess: (response) => {
+            // Only a package that carried workflow documents says anything about workflows.
+            // Every other kind leaves the description unset, so an ordinary plugin import still
+            // produces the one-argument success toast its callers already match against.
+            const description =
+              response.workflows.length === 0
+                ? undefined
+                : workflowImportSummary(response.workflows, t);
+            showPluginInstallOutcome(
+              response.outcome,
+              t,
+              "settings.plugins.importSuccess",
+              description,
+            );
+          },
           onError: (cause) =>
             showContractError(cause, t("settings.plugins.importFailed")),
         },
@@ -361,7 +409,120 @@ export function PluginsSettings({
           ))}
         </div>
       )}
+
+      <InstalledPacksSection
+        packs={packInstallations.data ?? []}
+        availableById={availableById}
+        onUninstall={(packId) => setUninstallingPack(packId)}
+      />
+
+      {uninstallingPack !== null && (
+        <PackUninstallConfirm
+          packId={uninstallingPack}
+          open
+          onOpenChange={(open) => {
+            if (!open) setUninstallingPack(null);
+          }}
+          onConfirm={() => {
+            uninstallPackMutation.mutate(uninstallingPack);
+          }}
+          busy={uninstallPackMutation.isPending}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * The installed-packs presentation is sourced from the ownership journal plus its
+ * reconciliation — packs are never faked into the installed-plugin directory (extension-pack
+ * decision D7 / D3-A).
+ */
+function InstalledPacksSection({
+  packs,
+  availableById,
+  onUninstall,
+}: {
+  packs: PackInstallationStatus[];
+  availableById: Map<string, AvailablePlugin>;
+  onUninstall: (packId: string) => void;
+}) {
+  const { t } = useTranslation();
+  if (packs.length === 0) return null;
+
+  return (
+    <section>
+      <h3 className="mb-2 text-sm font-semibold">
+        {t("settings.plugins.packsSection")}
+      </h3>
+      <div className="space-y-3">
+        {packs.map((pack) => {
+          const listing = availableById.get(pack.packId);
+          return (
+            <div
+              key={pack.packId}
+              className="rounded-lg border border-border p-3"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">
+                  {listing?.title ?? pack.packId}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {t("settings.plugins.packMembersCount", {
+                    count: pack.members.length,
+                  })}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={() => onUninstall(pack.packId)}
+                >
+                  {t("settings.plugins.packUninstall")}
+                </Button>
+              </div>
+              <ul className="mt-2 space-y-1">
+                {pack.members.map((member) => (
+                  <li
+                    key={member.memberId}
+                    className="flex items-center justify-between text-xs"
+                  >
+                    <span className="truncate text-muted-foreground">
+                      {member.memberId}
+                      {member.ownership === "pre_existing" &&
+                        ` · ${t("settings.plugins.packMemberPreExisting")}`}
+                    </span>
+                    <PackMemberStateBadge state={member.state} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/** Presents one reconciled pack member state as a restrained badge. */
+function PackMemberStateBadge({
+  state,
+}: {
+  state: PackMemberReconciliationState;
+}) {
+  const { t } = useTranslation();
+  const label =
+    state.state === "expected_and_present"
+      ? t("settings.plugins.packMemberExpected")
+      : state.state === "version_changed"
+        ? t("settings.plugins.packMemberVersionChanged", {
+            version: state.currentVersion,
+          })
+        : t("settings.plugins.packMemberMissing");
+  const destructive =
+    state.state === "missing" || state.state === "version_changed";
+  return (
+    <Badge variant={destructive ? "destructive" : "secondary"}>{label}</Badge>
   );
 }
 
@@ -381,130 +542,173 @@ function AvailablePluginCard({
   const update = useUpdatePlugin(plugin.id);
   const hasUpdate = plugin.version !== installed?.version;
   const incompatible = plugin.compatibility === "incompatible";
+  const isHook = plugin.kind === "hook";
+  const [confirmAction, setConfirmAction] =
+    useState<HookExecutionAction | null>(null);
 
   const failInstall = (cause: unknown) => {
     showContractError(cause, t("settings.plugins.installFailed"));
   };
-  const succeedInstall = (response: { outcome: InstallOutcome }) => {
-    toast.success(
-      installOutcomeMessage(
-        response.outcome,
-        t,
-        "settings.plugins.installSuccess",
-      ),
-    );
-  };
+  const succeedInstall = (response: {
+    outcome: Parameters<typeof showPluginInstallOutcome>[0];
+  }) => showPluginInstallOutcome(response.outcome, t);
   const failUpdate = (cause: unknown) => {
     showContractError(cause, t("settings.plugins.updateFailed"));
   };
+  /** Asks for the Hook execution disclosure before the one action that would run a program. */
+  const start = (action: HookExecutionAction) => {
+    if (isHook) {
+      setConfirmAction(action);
+      return;
+    }
+    if (action === "install") {
+      install.mutate({}, { onError: failInstall, onSuccess: succeedInstall });
+      return;
+    }
+    update.mutate({}, { onError: failUpdate });
+  };
+  const confirm = (action: HookExecutionAction) => {
+    setConfirmAction(null);
+    if (action === "install") {
+      install.mutate(
+        { hookExecutionAcknowledged: true },
+        { onError: failInstall, onSuccess: succeedInstall },
+      );
+      return;
+    }
+    update.mutate({ hookExecutionAcknowledged: true }, { onError: failUpdate });
+  };
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label={t("settings.plugins.viewReadme", {
-        title: plugin.title || plugin.name,
-      })}
-      onClick={() => onSelect(plugin)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect(plugin);
-        }
-      }}
-      className="flex cursor-pointer items-center gap-3 rounded-lg border border-border p-3 outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <PluginLogo logo={plugin.logo} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">
-          {plugin.title || plugin.name}
+    <>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={t("settings.plugins.viewReadme", {
+          title: plugin.title || plugin.name,
+        })}
+        onClick={() => onSelect(plugin)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onSelect(plugin);
+          }
+        }}
+        className="flex cursor-pointer items-center gap-3 rounded-lg border border-border p-3 outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <PluginLogo logo={plugin.logo} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">
+            {plugin.title || plugin.name}
+          </span>
+          {plugin.description !== "" && (
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+              {plugin.description}
+            </span>
+          )}
+          {plugin.packMembers !== null && plugin.packMembers !== undefined && (
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+              {t("settings.plugins.packMembersCount", {
+                count: plugin.packMembers.length,
+              })}
+              {": "}
+              {plugin.packMembers.join(", ")}
+            </span>
+          )}
+          {incompatible && (
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              {plugin.reason}
+            </span>
+          )}
         </span>
-        {plugin.description !== "" && (
-          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-            {plugin.description}
-          </span>
-        )}
-        {incompatible && (
-          <span className="mt-0.5 block text-xs text-muted-foreground">
-            {plugin.reason}
-          </span>
-        )}
-      </span>
-      <span className="flex shrink-0 items-center">
-        {install.isPending ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled
-            className="shrink-0 disabled:opacity-100"
-            aria-label={t("settings.plugins.installing")}
-          >
-            <PluginDownloadProgress
-              progress={install.progress}
-              label={t("settings.plugins.downloadProgress")}
-            />
-          </Button>
-        ) : update.isPending ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled
-            className="shrink-0 disabled:opacity-100"
-            aria-label={t("settings.plugins.updating")}
-          >
-            <PluginDownloadProgress
-              progress={update.progress}
-              label={t("settings.plugins.downloadProgress")}
+        <span className="flex shrink-0 items-center">
+          {install.isPending ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled
+              className="shrink-0 disabled:opacity-100"
+              aria-label={t("settings.plugins.installing")}
             >
-              <IconArrowBigUpLines className="size-3.5" />
-            </PluginDownloadProgress>
-          </Button>
-        ) : installed === undefined ? (
-          <Button
-            variant="outline"
-            size="icon"
-            className="shrink-0"
-            disabled={incompatible}
-            aria-label={t("settings.plugins.install")}
-            onClick={(event) => {
-              event.stopPropagation();
-              install.mutate(
-                {},
-                { onError: failInstall, onSuccess: succeedInstall },
-              );
-            }}
-          >
-            <IconDownload />
-          </Button>
-        ) : hasUpdate ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="shrink-0"
-            aria-label={t("settings.plugins.update")}
-            onClick={(event) => {
-              event.stopPropagation();
-              update.mutate({}, { onError: failUpdate });
-            }}
-          >
-            <IconArrowBigUpLines />
-          </Button>
-        ) : (
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled
-            className="shrink-0"
-            aria-label={t("settings.plugins.installed")}
-          >
-            <CompletedInstallIcon
-              animate={install.completionId !== null}
-              onAnimationComplete={install.consumeCompletion}
-            />
-          </Button>
-        )}
-      </span>
-    </div>
+              <PluginDownloadProgress
+                progress={install.progress}
+                label={t("settings.plugins.downloadProgress")}
+              />
+            </Button>
+          ) : update.isPending ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled
+              className="shrink-0 disabled:opacity-100"
+              aria-label={t("settings.plugins.updating")}
+            >
+              <PluginDownloadProgress
+                progress={update.progress}
+                label={t("settings.plugins.downloadProgress")}
+              >
+                <IconArrowBigUpLines className="size-3.5" />
+              </PluginDownloadProgress>
+            </Button>
+          ) : installed === undefined ? (
+            <Button
+              variant="outline"
+              size="icon"
+              className="shrink-0"
+              disabled={incompatible}
+              aria-label={t("settings.plugins.install")}
+              onClick={(event) => {
+                event.stopPropagation();
+                start("install");
+              }}
+            >
+              <IconDownload />
+            </Button>
+          ) : hasUpdate ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              aria-label={t("settings.plugins.update")}
+              onClick={(event) => {
+                event.stopPropagation();
+                start("update");
+              }}
+            >
+              <IconArrowBigUpLines />
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled
+              className="shrink-0"
+              aria-label={t("settings.plugins.installed")}
+            >
+              <CompletedInstallIcon
+                animate={install.completionId !== null}
+                onAnimationComplete={install.consumeCompletion}
+              />
+            </Button>
+          )}
+        </span>
+      </div>
+      {/*
+        Sits beside the card rather than inside it: the card is one big button, and React portals
+        still bubble their events along the React tree, so a dialog rendered within it would open
+        the detail page as soon as the user answered the confirmation.
+      */}
+      {isHook && (
+        <HookExecutionConfirm
+          name={plugin.title || plugin.name}
+          action={confirmAction ?? "install"}
+          open={confirmAction !== null}
+          onOpenChange={(open) => setConfirmAction(open ? "install" : null)}
+          onConfirm={() => confirm(confirmAction ?? "install")}
+          busy={install.isPending || update.isPending}
+        />
+      )}
+    </>
   );
 }
 
@@ -541,17 +745,22 @@ function CompletedInstallIcon({
   );
 }
 
-/** Maps a typed install outcome to the toast the settings surface already shows. */
-function installOutcomeMessage(
-  outcome: InstallOutcome,
+/**
+ * Summarizes the per-document outcomes of a workflow package import.
+ *
+ * Every document imports on its own, so the summary reports both counts instead of only
+ * failures: "all imported" and "some refused" are different results, and the user has to be able
+ * to tell them apart without going to the workflow library to count rows.
+ */
+function workflowImportSummary(
+  outcomes: readonly ImportedWorkflowOutcome[],
   t: TFunction,
-  successKey:
-    "settings.plugins.installSuccess" | "settings.plugins.importSuccess",
 ): string {
-  if (outcome.state === "installed_with_command_conflict") {
-    return t("settings.plugins.installCommandConflict", {
-      pluginId: outcome.conflictPluginId,
-    });
-  }
-  return t(successKey);
+  const imported = outcomes.filter(
+    (outcome) => outcome.state === "imported",
+  ).length;
+  const failed = outcomes.length - imported;
+  return failed === 0
+    ? t("settings.plugins.importWorkflowsImported", { count: imported })
+    : t("settings.plugins.importWorkflowsSummary", { imported, failed });
 }

@@ -29,6 +29,7 @@ pub(super) fn available_plugin(entry: &RegistryEntry) -> AvailablePlugin {
             Ok(()) => PluginHostCompatibility::Compatible,
             Err(reason) => PluginHostCompatibility::Incompatible { reason },
         },
+        pack_members: entry.pack_members().map(<[String]>::to_vec),
     }
 }
 

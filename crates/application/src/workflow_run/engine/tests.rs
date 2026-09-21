@@ -519,7 +519,7 @@ fn parses_condition_cases_into_the_model() {
                 }
             ] } }
         ],
-        "edges": []
+        "edges": [{"source":"start","target":"c"}]
     }))
     .unwrap();
     let config = graph.node("c").unwrap().condition_config.as_ref().unwrap();
@@ -635,7 +635,7 @@ fn parses_structured_output_contract_into_the_model() {
                 }
             } } }
         ],
-        "edges": []
+        "edges": [{"source":"start","target":"review"}]
     }))
     .unwrap();
     let contract = graph
@@ -826,7 +826,7 @@ fn first_unsupported_node_reports_tool() {
             { "id": "start", "data": { "kind": "start" } },
             { "id": "t", "data": { "kind": "tool", "tool": "Terminal" } }
         ],
-        "edges": []
+        "edges": [{"source":"start","target":"t"}]
     }))
     .unwrap();
     assert_eq!(graph.first_unsupported_node().unwrap().id, "t");
@@ -851,7 +851,8 @@ fn unreachable_from_start_reports_isolated_nodes() {
         "edges": [{ "source": "start", "target": "a" }]
     }))
     .unwrap();
-    assert_eq!(graph.unreachable_from_start(), vec!["orphan"]);
+    assert_eq!(graph.node("orphan"), None);
+    assert_eq!(graph.unreachable_from_start(), Vec::<String>::new());
 }
 
 #[test]
@@ -871,6 +872,7 @@ fn node_type_round_trips_all_variants() {
         ("condition", NodeType::Condition),
         ("tool", NodeType::Tool),
         ("output", NodeType::Output),
+        ("loop", NodeType::Loop),
     ] {
         let parsed = NodeType::from_str(value).unwrap();
         assert_eq!(parsed, expected);
@@ -887,7 +889,7 @@ fn node_type_rejects_unknown_values() {
 }
 
 #[test]
-fn node_type_reports_the_v1_supported_set() {
+fn node_type_reports_the_supported_set() {
     let supported: Vec<&str> = [
         NodeType::Start,
         NodeType::Agent,
@@ -895,12 +897,16 @@ fn node_type_reports_the_v1_supported_set() {
         NodeType::Condition,
         NodeType::Tool,
         NodeType::Output,
+        NodeType::Loop,
     ]
     .iter()
     .filter(|node_type| node_type.supported())
     .map(|node_type| node_type.as_str())
     .collect();
-    assert_eq!(supported, vec!["start", "agent", "condition", "output"]);
+    assert_eq!(
+        supported,
+        vec!["start", "agent", "condition", "output", "loop"]
+    );
 }
 
 // Executable architecture constraints (ADR "node runtime orchestration" D1/D2).
@@ -967,6 +973,12 @@ fn without_comment_lines(source: &str) -> String {
 /// enter scheduling only by registering a runtime.
 #[test]
 fn scheduling_core_contains_no_node_type_literals() {
+    for source in [
+        include_str!("engine/composite_scheduler.rs"),
+        include_str!("engine/loop_scheduler.rs"),
+    ] {
+        assert!(!without_comment_lines(source).contains("NodeType::"));
+    }
     let engine_source = without_comment_lines(&without_test_module(include_str!("engine.rs")));
     let scheduling_core = engine_source.replacen(
         function_body(&engine_source, "fn validate_executable_graph")

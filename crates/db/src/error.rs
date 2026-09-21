@@ -38,6 +38,8 @@ pub enum DatabaseError {
     CorruptEffectState(String),
     #[error("workflow run execution context is incomplete")]
     IncompleteWorkflowRunContext,
+    #[error("workflow scope has invalid round index: {0}")]
+    CorruptWorkflowScopeRound(i64),
     #[error("migration versions must be unique, found duplicate version `{0}`")]
     DuplicateMigrationVersion(String),
     #[error("migration versions must be strictly increasing, found `{current}` after `{previous}`")]

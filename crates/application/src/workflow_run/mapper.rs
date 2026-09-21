@@ -1,10 +1,13 @@
 use ora_contracts::{
+    WorkflowExecutionScope as ContractExecutionScope,
+    WorkflowExecutionScopeStatus as ContractExecutionScopeStatus,
     WorkflowNodeRun as ContractNodeRun, WorkflowNodeStatus as ContractNodeStatus,
     WorkflowRun as ContractRun, WorkflowRunStatus as ContractRunStatus,
     WorkflowRunSummary as ContractRunSummary,
 };
 use ora_domain::{
-    WorkflowNodeRun, WorkflowNodeStatus, WorkflowRun, WorkflowRunStatus, WorkflowRunSummary,
+    WorkflowExecutionScope, WorkflowNodeRun, WorkflowNodeStatus, WorkflowRun, WorkflowRunStatus,
+    WorkflowRunSummary, WorkflowScopeStatus,
 };
 
 /// Converts a domain run into its public contract representation.
@@ -43,6 +46,7 @@ pub(crate) fn map_node_run(node_run: WorkflowNodeRun) -> ContractNodeRun {
     ContractNodeRun {
         id: node_run.id.to_string(),
         run_id: node_run.run_id.to_string(),
+        scope_id: node_run.scope_id.to_string(),
         node_id: node_run.node_id,
         node_type: node_run.node_type,
         session_id: node_run.session_id.map(|id| id.to_string()),
@@ -56,6 +60,25 @@ pub(crate) fn map_node_run(node_run: WorkflowNodeRun) -> ContractNodeRun {
         finished_at: node_run.finished_at,
         created_at: node_run.audit_fields.created_at,
         updated_at: node_run.audit_fields.updated_at,
+    }
+}
+
+/// Converts one internal Loop round identity into its history contract.
+pub(crate) fn map_execution_scope(scope: WorkflowExecutionScope) -> ContractExecutionScope {
+    ContractExecutionScope {
+        id: scope.id.to_string(),
+        run_id: scope.run_id.to_string(),
+        parent_loop_node_run_id: scope.parent_loop_node_run_id.to_string(),
+        round_index: scope.round_index,
+        status: match scope.status {
+            WorkflowScopeStatus::Pending => ContractExecutionScopeStatus::Pending,
+            WorkflowScopeStatus::Running => ContractExecutionScopeStatus::Running,
+            WorkflowScopeStatus::Succeeded => ContractExecutionScopeStatus::Succeeded,
+            WorkflowScopeStatus::Failed => ContractExecutionScopeStatus::Failed,
+            WorkflowScopeStatus::Cancelled => ContractExecutionScopeStatus::Cancelled,
+        },
+        created_at: scope.created_at,
+        updated_at: scope.updated_at,
     }
 }
 

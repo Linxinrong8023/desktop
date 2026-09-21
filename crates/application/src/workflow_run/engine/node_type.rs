@@ -16,6 +16,7 @@ pub enum NodeType {
     Condition,
     Tool,
     Output,
+    Loop,
     /// The foreach composite runtime: drives its region once per array element
     /// (ADR "iteration composite runtime" D1).
     Iteration,
@@ -36,18 +37,24 @@ impl NodeType {
             Self::Condition => "condition",
             Self::Tool => "tool",
             Self::Output => "output",
+            Self::Loop => "loop",
             Self::Iteration => "iteration",
         }
     }
 
-    /// Returns whether v1 can execute this node type.
+    /// Returns whether the production scheduler can execute this node type.
     ///
     /// Known-but-unsupported types stay recognized so workflow start rejects them explicitly
     /// rather than skipping or degrading them.
     pub fn supported(self) -> bool {
         matches!(
             self,
-            Self::Start | Self::Agent | Self::Condition | Self::Output | Self::Iteration
+            Self::Start
+                | Self::Agent
+                | Self::Condition
+                | Self::Output
+                | Self::Loop
+                | Self::Iteration
         )
     }
 
@@ -72,6 +79,7 @@ impl FromStr for NodeType {
             "condition" => Ok(Self::Condition),
             "tool" => Ok(Self::Tool),
             "output" => Ok(Self::Output),
+            "loop" => Ok(Self::Loop),
             "iteration" => Ok(Self::Iteration),
             _ => Err(UnknownNodeType(value.to_string())),
         }

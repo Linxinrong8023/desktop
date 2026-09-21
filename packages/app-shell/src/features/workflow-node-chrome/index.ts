@@ -1,4 +1,8 @@
 export { WorkflowNodeCardShell } from "./card-shell";
+export {
+  WorkflowMembershipProvider,
+  WorkflowUnusedBadge,
+} from "./execution-membership";
 export { AgentExecutionModeMark } from "./agent-execution-mode-mark";
 export type {
   WorkflowNodeCardDensity,
@@ -13,3 +17,5 @@ export {
   junctionWaitStrategyLabel,
 } from "./node-summary";
 export type { WorkflowSummaryLabels } from "./node-summary";
+
+export { useWorkflowNodeUnused } from "./execution-membership-context";

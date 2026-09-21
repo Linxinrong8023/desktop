@@ -132,18 +132,20 @@ fn resolve_role(
 /// Collects the distinct role ids declared across all agent nodes.
 fn collect_roles(graph: &WorkflowGraph) -> Vec<String> {
     let mut roles = Vec::new();
-    for node in graph.nodes() {
-        if node.node_type != NodeType::Agent {
-            continue;
-        }
-        let Some(config) = &node.agent_config else {
-            continue;
-        };
-        if let Some(role_id) = &config.role_id
-            && !role_id.trim().is_empty()
-            && !roles.contains(role_id)
-        {
-            roles.push(role_id.clone());
+    for scope in graph.execution_scopes() {
+        for node in scope.nodes() {
+            if node.node_type != NodeType::Agent {
+                continue;
+            }
+            let Some(config) = &node.agent_config else {
+                continue;
+            };
+            if let Some(role_id) = &config.role_id
+                && !role_id.trim().is_empty()
+                && !roles.contains(role_id)
+            {
+                roles.push(role_id.clone());
+            }
         }
     }
     roles
@@ -162,7 +164,9 @@ where
     let mut receipt = SkillMaterializationReceipt::default();
     let mut resolved_packages = HashMap::<StrictRelativePath, String>::new();
     for node in graph
-        .nodes()
+        .execution_scopes()
+        .into_iter()
+        .flat_map(WorkflowGraph::nodes)
         .filter(|node| node.node_type == NodeType::Agent)
     {
         let Some(config) = &node.agent_config else {
@@ -481,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn initialize_workspace_records_skill_bindings_without_copying_packages() {
+    fn initialize_workspace_records_child_loop_skills_without_copying_packages() {
         let temp = TempDir::new().unwrap();
         let skills_root = temp.path().join("skills");
         let skill_dir = skills_root.join("sfmea_review");
@@ -500,7 +504,17 @@ mod tests {
             .expect("bootstrap repository pool");
         let initializer = SkillRoleWorkspaceInitializer::new(skills_root, pool).unwrap();
         let graph = WorkflowGraph::parse(
-            r#"{"nodes":[{"id":"a","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"ora-space.codex","modelId":"m"},"skills":[{"skillId":"sfmea_review","enabled":true}]}}}],"edges":[]}"#,
+            r#"{"schemaVersion":2,"nodes":[
+                {"id":"start","data":{"kind":"start"}},
+                {"id":"loop","data":{"kind":"loop","loopConfig":{
+                    "maxIterations":1,
+                    "variables":[{"name":"draft","valueType":"string","initial":{"kind":"constant","value":""},"feedback":["a","output"]}],
+                    "until":{"logic":"and","conditions":[{"variableSelector":["a","output"],"operator":"equals","value":"done"}]},
+                    "outputs":[{"name":"result","variableSelector":["a","output"]}]
+                }}},
+                {"id":"entry","parentId":"loop","data":{"kind":"start","containerId":"loop"}},
+                {"id":"a","data":{"kind":"agent","containerId":"loop","agentConfig":{"executor":{"agentCli":"ora-space.codex","modelId":"m"},"skills":[{"skillId":"sfmea_review","enabled":true}]}}}
+            ],"edges":[{"source":"start","target":"loop"},{"source":"entry","target":"a"}]}"#,
         )
         .unwrap();
         let worktree = temp.path().join("worktree");

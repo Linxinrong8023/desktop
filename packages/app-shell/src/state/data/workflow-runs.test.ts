@@ -314,6 +314,145 @@ describe("buildDisplayRun", () => {
     expect(display.nodeStates.explore.sessionId).toBe("session-explore");
   });
 
+  it.each(["root:run-1", "root:restarted-execution"])(
+    "projects root nodes in %s while isolating Loop rounds",
+    (rootScopeId) => {
+      const loopGraph = JSON.stringify({
+        nodes: [
+          ...JSON.parse(GRAPH).nodes,
+          {
+            id: "output",
+            type: "workflow",
+            position: { x: 1000, y: 0 },
+            data: { kind: "output", title: "Result", description: "" },
+          },
+          {
+            id: "loop-1",
+            type: "workflow",
+            position: { x: 400, y: 0 },
+            data: { kind: "loop", title: "循环", description: "" },
+          },
+          {
+            id: "child-agent",
+            type: "workflow",
+            parentId: "loop-1",
+            position: { x: 80, y: 100 },
+            data: {
+              kind: "agent",
+              title: "改进",
+              description: "",
+              containerId: "loop-1",
+            },
+          },
+        ],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+      });
+      const display = buildDisplayRun(
+        {
+          ...detail,
+          run: { ...detail.run, status: "succeeded", state: null },
+          scopes: [
+            {
+              id: "scope-1",
+              parentLoopNodeRunId: "node-run-loop",
+              roundIndex: 0,
+              status: "succeeded" as const,
+              createdAt: 10n,
+              updatedAt: 20n,
+            },
+            {
+              id: "scope-2",
+              parentLoopNodeRunId: "node-run-loop",
+              roundIndex: 1,
+              status: "succeeded" as const,
+              createdAt: 30n,
+              updatedAt: 40n,
+            },
+          ],
+          nodes: [
+            ...["start", "output"].map((nodeId) => ({
+              id: `node-run-${nodeId}`,
+              scopeId: rootScopeId,
+              nodeId,
+              status: "succeeded",
+              startedAt: null,
+              finishedAt: null,
+              error: null,
+              output: null,
+              payload: null,
+            })),
+            {
+              id: "node-run-loop",
+              scopeId: rootScopeId,
+              nodeId: "loop-1",
+              status: "succeeded",
+              startedAt: 1n,
+              finishedAt: 50n,
+              error: null,
+              output: null,
+              payload: null,
+            },
+            {
+              id: "node-run-child-1",
+              scopeId: "scope-1",
+              nodeId: "child-agent",
+              status: "succeeded",
+              startedAt: 11n,
+              finishedAt: 19n,
+              error: null,
+              output: '"first"',
+              payload: null,
+            },
+            {
+              id: "node-run-child-2",
+              scopeId: "scope-2",
+              nodeId: "child-agent",
+              status: "succeeded",
+              startedAt: 31n,
+              finishedAt: 39n,
+              error: null,
+              output: '"second"',
+              payload: null,
+            },
+          ],
+        },
+        loopGraph,
+      );
+
+      expect(display.status).toBe("succeeded");
+      expect(display.nodeStates).toEqual({
+        start: { status: "succeeded" },
+        explore: { status: "idle" },
+        output: { status: "succeeded" },
+        "loop-1": {
+          status: "succeeded",
+          startedAt: new Date(1).toISOString(),
+          finishedAt: new Date(50).toISOString(),
+        },
+        "child-agent": { status: "idle" },
+      });
+      expect(display.rounds).toEqual([
+        expect.objectContaining({
+          id: "scope-1",
+          parentLoopNodeId: "loop-1",
+          roundIndex: 0,
+          nodeStates: {
+            "child-agent": expect.objectContaining({ status: "succeeded" }),
+          },
+        }),
+        expect.objectContaining({
+          id: "scope-2",
+          parentLoopNodeId: "loop-1",
+          roundIndex: 1,
+          nodeStates: {
+            "child-agent": expect.objectContaining({ status: "succeeded" }),
+          },
+        }),
+      ]);
+    },
+  );
+
   it("surfaces the committed run input on the start node as kickoff input", () => {
     const display = buildDisplayRun(
       {
@@ -391,6 +530,78 @@ describe("buildDisplayRun", () => {
       { path: "src/a.ts", additions: 1, deletions: 0 },
       { path: "src/new.ts", additions: 1, deletions: 0 },
     ]);
+  });
+
+  it("projects camelCase errorDetail from payload.error_detail", () => {
+    const withError = {
+      ...detail,
+      nodes: [
+        {
+          nodeId: "explore",
+          status: "failed",
+          startedAt: 10n,
+          finishedAt: 30n,
+          error: "review failed",
+          output: null,
+          payload:
+            '{"error_detail":{"kind":"structured_output","message":"review failed","source_chain":["not json"],"attempt":2,"resumable":false,"injects_previous_failure":true,"recorded_at":50}}',
+        },
+      ],
+    };
+    const display = buildDisplayRun(withError, GRAPH);
+    expect(display.nodeStates.explore.errorDetail).toEqual({
+      kind: "structured_output",
+      message: "review failed",
+      sourceChain: ["not json"],
+      attempt: 2,
+      resumable: false,
+      injectsPreviousFailure: true,
+      recordedAt: 50,
+    });
+  });
+
+  it("defaults injectsPreviousFailure to false when the payload key is absent", () => {
+    const withError = {
+      ...detail,
+      nodes: [
+        {
+          nodeId: "explore",
+          status: "failed",
+          startedAt: 10n,
+          finishedAt: 30n,
+          error: "review failed",
+          output: null,
+          payload:
+            '{"error_detail":{"kind":"structured_output","message":"review failed","source_chain":["not json"],"attempt":2,"resumable":false,"recorded_at":50}}',
+        },
+      ],
+    };
+    const display = buildDisplayRun(withError, GRAPH);
+    expect(display.nodeStates.explore.errorDetail?.injectsPreviousFailure).toBe(
+      false,
+    );
+  });
+
+  it("projects injectedFailureContext from payload.injected_failure_context", () => {
+    const withInjected = {
+      ...detail,
+      nodes: [
+        {
+          nodeId: "explore",
+          status: "running",
+          startedAt: 10n,
+          finishedAt: null,
+          error: null,
+          output: null,
+          payload:
+            '{"injected_failure_context":"## 上一次尝试（第 1 次）失败信息"}',
+        },
+      ],
+    };
+    const display = buildDisplayRun(withInjected, GRAPH);
+    expect(display.nodeStates.explore.injectedFailureContext).toBe(
+      "## 上一次尝试（第 1 次）失败信息",
+    );
   });
 
   it("projects the node conversation from its run output", () => {

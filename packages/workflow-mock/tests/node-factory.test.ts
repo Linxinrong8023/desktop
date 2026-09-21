@@ -1,6 +1,12 @@
 import { DEMO_AGENT_REF } from "../src/agent-identity";
 import { describe, expect, it } from "vitest";
-import { createMockWorkflowCapabilities, createMockWorkflowNode } from "../src";
+import {
+  createMockWorkflowCapabilities,
+  createMockWorkflowLoopGroup,
+  createMockWorkflowNode,
+  WORKFLOW_LOOP_NODE_HEIGHT,
+  WORKFLOW_LOOP_NODE_WIDTH,
+} from "../src";
 
 describe("createMockWorkflowNode", () => {
   it("keeps localized prototype defaults inside the mock package", () => {
@@ -75,6 +81,78 @@ describe("createMockWorkflowNode", () => {
     });
   });
 
+  it("creates an executable bounded Loop group with isolated child ownership", () => {
+    const group = createMockWorkflowLoopGroup({
+      sequence: 2,
+      position: { x: 400, y: 120 },
+      locale: "en-US",
+    });
+
+    expect(group.nodes.map((node) => node.id)).toEqual([
+      "loop-2",
+      "loop-2-start",
+      "loop-2-agent",
+    ]);
+    expect(group.nodes[0]).toMatchObject({
+      initialWidth: WORKFLOW_LOOP_NODE_WIDTH,
+      initialHeight: WORKFLOW_LOOP_NODE_HEIGHT,
+      data: {
+        kind: "loop",
+        loopConfig: {
+          maxIterations: 3,
+          variables: [
+            {
+              name: "value",
+              valueType: "string",
+              initial: { kind: "constant", value: "" },
+              feedback: ["loop-2-agent", "output"],
+            },
+          ],
+          until: {
+            logic: "and",
+            conditions: [
+              {
+                variableSelector: ["loop-2-agent", "output"],
+                operator: "not_empty",
+              },
+            ],
+          },
+          outputs: [
+            {
+              name: "result",
+              variableSelector: ["loop-2-agent", "output"],
+            },
+          ],
+        },
+      },
+    });
+    expect(group.nodes.slice(1)).toEqual([
+      expect.objectContaining({
+        id: "loop-2-start",
+        parentId: "loop-2",
+        data: expect.objectContaining({ containerId: "loop-2" }),
+      }),
+      expect.objectContaining({
+        id: "loop-2-agent",
+        parentId: "loop-2",
+        data: expect.objectContaining({
+          containerId: "loop-2",
+          agentConfig: expect.objectContaining({
+            prompt: expect.stringContaining("{{#loop-2.value#}}"),
+          }),
+        }),
+      }),
+    ]);
+    expect(group.edges).toEqual([
+      {
+        id: "e-loop-2-start-loop-2-agent",
+        source: "loop-2-start",
+        target: "loop-2-agent",
+        type: "workflow",
+      },
+    ]);
+  });
+
   it("provides localized model and tool capabilities for the inspector", () => {
     expect(createMockWorkflowCapabilities("zh-CN")).toEqual({
       nodeTypes: [
@@ -83,24 +161,41 @@ describe("createMockWorkflowNode", () => {
           label: "开始",
           description: "定义工作流输入",
           configFields: ["initialPrompt"],
+          supportedScopes: ["workflow"],
         },
         {
           kind: "agent",
           label: "Agent",
           description: "交给模型自主执行",
           configFields: ["agent"],
+          supportedScopes: ["workflow", "iteration"],
         },
         {
           kind: "condition",
           label: "条件分支",
           description: "根据规则选择路径",
           configFields: ["condition"],
+          supportedScopes: ["workflow", "iteration"],
+        },
+        {
+          kind: "iteration",
+          label: "迭代",
+          description: "对数组逐项执行区域内节点",
+          configFields: ["iteration"],
+          supportedScopes: ["workflow"],
+        },
+        {
+          kind: "loop",
+          label: "循环",
+          description: "重复执行直到满足条件",
+          configFields: ["maxIterations", "loopInitialValue"],
         },
         {
           kind: "output",
           label: "输出",
           description: "返回最终结果",
           configFields: [],
+          supportedScopes: ["workflow"],
         },
       ],
       models: [

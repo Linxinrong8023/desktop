@@ -23,7 +23,9 @@ English | [中文](agent-runtime.zh.md)
 
 ## Session MCP
 
-Configured MCP plugins are Session Runtime Input. `startSession` `session/new`, prompt-time attach `session/load`, rebuild `session/new`, live refresh, workflow start, and agent replacement all resolve one Snapshot and send it as ACP `mcpServers`. Live Sessions keep Desired/Active revisions in memory; a configuration change wakes idle Sessions immediately and busy Sessions after the current prompt. Refresh and Skill Effect mutation share one Agent Session Barrier. Setting values never enter Effect state, SQLite, Workspace files, logs, or UI. See [Session MCP](session-mcp.md).
+Configured MCP plugins are Session Runtime Input. `startSession` `session/new`, prompt-time attach `session/load`, rebuild `session/new`, live refresh, workflow start, and agent replacement all resolve one Snapshot and send it as ACP `mcpServers`. Live Sessions keep Desired/Active revisions in memory; a configuration change wakes idle Sessions immediately and busy Sessions after the current prompt. Refresh and Skill Effect mutation share one Agent Session Barrier. Setting values never enter Effect state, SQLite, Workspace files, logs, or UI. Setup success does not
+mean those servers completed a handshake; the Host observes that separately, in memory. See
+[Session MCP](session-mcp.md#runtime-health).
 
 - Connection loss fails that agent's in-flight operations, marks only its registered Sessions Stopped, asks the plugin lifecycle to stop the old process, and only then starts a replacement. Sessions are loaded again only on demand; prompts are never replayed automatically.
 - The `initialize` handshake advertises the client's session config-option capability. Agents withhold configuration options from clients that do not, so the model selector depends on it. Boolean options stay undeclared because Ora renders only id-valued selectors.
@@ -111,22 +113,35 @@ History replay is the one stream that applies backpressure instead of failing fa
 
 ## Timeouts and Limits
 
-| Bound                                | Value                                                                            |
-| ------------------------------------ | -------------------------------------------------------------------------------- |
-| `initialize` handshake               | 15 s                                                                             |
-| Plugin-owned model discovery         | 60 s                                                                             |
-| Session setup/load inactivity        | 30 s, reset by each session update                                               |
-| Prompt meaningful-activity deadline  | 45 s, then 60 s / 90 s / 120 s per retry; paused by running tools and permission |
-| Prompt stall retries                 | Up to 3 re-sends per prompt, same provider session                               |
-| Cancellation settlement grace        | 5 s                                                                              |
-| Connection retry backoff             | 250 ms, doubling to a 30 s cap                                                   |
-| Connection crash circuit             | Opens after more than 3 failures in 1 minute                                     |
-| Session-list title request           | 5 s per attempt                                                                  |
-| First-title fallback window          | 3 s and 10 s after the first eligible prompt                                     |
-| Session update and event queue depth | 256 items                                                                        |
-| JSON-RPC frame size                  | 8 MiB                                                                            |
-| Serialized structured prompt size    | 16 MiB                                                                           |
-| Handoff transcript size              | unbounded                                                                        |
+| Bound                                | Value                                                                                       |
+| ------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `initialize` handshake               | 15 s                                                                                        |
+| Plugin-owned model discovery         | 60 s                                                                                        |
+| Session setup/load inactivity        | 30 s, or 120 s when the request delivers MCP servers; reset by each setup or session update |
+| Prompt meaningful-activity deadline  | 45 s, then 60 s / 90 s / 120 s per retry; paused by running tools and permission            |
+| Prompt stall retries                 | Up to 3 re-sends per prompt, same provider session                                          |
+| Cancellation settlement grace        | 5 s                                                                                         |
+| Connection retry backoff             | 250 ms, doubling to a 30 s cap                                                              |
+| Connection crash circuit             | Opens after more than 3 failures in 1 minute                                                |
+| Session-list title request           | 5 s per attempt                                                                             |
+| First-title fallback window          | 3 s and 10 s after the first eligible prompt                                                |
+| Session update and event queue depth | 256 items                                                                                   |
+| JSON-RPC frame size                  | 8 MiB                                                                                       |
+| Serialized structured prompt size    | 16 MiB                                                                                      |
+| Handoff transcript size              | unbounded                                                                                   |
+
+### Session setup inactivity
+
+`session/new` and `session/load` wait under an inactivity deadline, not a total budget. A request
+that delivers MCP servers uses the 120-second window: the ACP session-setup sequence has the
+agent connect the delivered servers before responding, and real MCP initialization — cold stdio
+package boots, remote HTTP handshakes — routinely takes tens of seconds, so a bare 30-second cap
+would fail a slow-but-correct agent mid-connection. A request with no servers keeps the
+30-second window, because nothing obliges the agent to connect. Notifications the agent emits
+while a create is still waiting for its provider session id rearm the deadline — the signal is
+connection-wide, since that id is unknowable until the response arrives — so an agent that keeps
+reporting progress is never cut off by the clock, and a silent one fails with `agent_timed_out`
+once the window elapses.
 
 ### Prompt inactivity and retries
 

@@ -4,6 +4,14 @@ use ora_contracts::*;
 use serde::Deserialize;
 use std::path::PathBuf;
 
+backend_command!(
+    analyze_workflow,
+    AnalyzeWorkflowRequest,
+    AnalyzeWorkflowResponse,
+    workflows.analyze,
+    "Analyzes execution membership without preparing a run or changing its document."
+);
+
 /// Carries a user-selected destination and serialized workflow definition for export.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

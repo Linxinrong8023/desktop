@@ -38,6 +38,7 @@ import {
   type WorkflowCapabilities,
   type WorkflowOutputBinding,
   type WorkflowVariableCatalogEntry,
+  type WorkflowGlobalVariable,
   normalizeWorkflowAgentConfig,
 } from "@ora/workflow-mock";
 import type { Node } from "@xyflow/react";
@@ -79,6 +80,8 @@ interface WorkflowInspectorProps {
   onCloseNode: () => void;
   /** Whole-graph nodes, for detail panels whose configuration reads graph structure. */
   graphNodes?: Node<WorkflowNodeData, "workflow">[];
+  /** Workflow-wide declarations used by graph-aware detail panels. */
+  globalVariables?: WorkflowGlobalVariable[];
 }
 
 /** Right-rail editor for the selected workflow node (definition only). */
@@ -105,6 +108,7 @@ export function WorkflowInspector(props: WorkflowInspectorProps) {
       onDelete={props.onDelete}
       onClose={props.onCloseNode}
       graphNodes={props.graphNodes}
+      globalVariables={props.globalVariables}
     />
   );
 }
@@ -156,6 +160,7 @@ function WorkflowNodeInspector({
   onDelete,
   onClose,
   graphNodes,
+  globalVariables,
 }: {
   node: Node<WorkflowNodeData, "workflow">;
   capabilities: WorkflowCapabilities;
@@ -175,6 +180,7 @@ function WorkflowNodeInspector({
   onClose: () => void;
   /** Whole-graph nodes, for detail panels whose configuration reads graph structure. */
   graphNodes?: Node<WorkflowNodeData, "workflow">[];
+  globalVariables?: WorkflowGlobalVariable[];
 }) {
   const { t } = useTranslation();
   const nodeType = capabilities.nodeTypes.find(
@@ -236,6 +242,7 @@ function WorkflowNodeInspector({
                   catalogsLoading={agentCatalogsLoading}
                   catalogsError={agentCatalogsError}
                   onRetryCatalogs={onRetryAgentCatalogs}
+                  iterationMember={node.parentId !== undefined}
                   onChange={(config) =>
                     onUpdate({
                       ...node,
@@ -387,6 +394,7 @@ function WorkflowNodeInspector({
           onUpdate={onUpdate}
           onClose={onClose}
           graphNodes={graphNodes}
+          globalVariables={globalVariables}
         />
       )}
       <div className="border-t border-border p-3">
@@ -419,6 +427,7 @@ function AgentConfigurationFields({
   catalogsLoading,
   catalogsError,
   onRetryCatalogs,
+  iterationMember,
   onChange,
 }: {
   config: WorkflowAgentConfig;
@@ -434,6 +443,7 @@ function AgentConfigurationFields({
   catalogsLoading: boolean;
   catalogsError: boolean;
   onRetryCatalogs?: () => void;
+  iterationMember: boolean;
   onChange: (config: WorkflowAgentConfig) => void;
 }) {
   const { t } = useTranslation();
@@ -923,18 +933,42 @@ function AgentConfigurationFields({
         label={t("settings.workflow.field.interactive")}
         htmlFor="workflow-agent-interactive"
       >
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-muted-foreground">
-            {t("settings.workflow.field.interactiveDescription")}
-          </p>
-          <Switch
-            id="workflow-agent-interactive"
-            className="shrink-0 data-checked:bg-blue-600 hover:data-checked:bg-blue-700"
-            checked={config.interactive ?? false}
-            onCheckedChange={(interactive) =>
-              onChange({ ...config, interactive })
-            }
-          />
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              {t(
+                iterationMember
+                  ? "settings.workflow.iteration.interactiveUnavailable"
+                  : "settings.workflow.field.interactiveDescription",
+              )}
+            </p>
+            <Switch
+              id="workflow-agent-interactive"
+              className="shrink-0 data-checked:bg-blue-600 hover:data-checked:bg-blue-700"
+              checked={config.interactive ?? false}
+              disabled={iterationMember}
+              onCheckedChange={(interactive) =>
+                onChange({ ...config, interactive })
+              }
+            />
+          </div>
+          {iterationMember && config.interactive === true && (
+            <div
+              role="alert"
+              className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive"
+            >
+              <p>{t("settings.workflow.iteration.interactiveRepairHint")}</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2 h-7"
+                onClick={() => onChange({ ...config, interactive: false })}
+              >
+                {t("settings.workflow.iteration.disableInteractive")}
+              </Button>
+            </div>
+          )}
         </div>
       </InspectorField>
       <div className="min-w-0 space-y-1.5">

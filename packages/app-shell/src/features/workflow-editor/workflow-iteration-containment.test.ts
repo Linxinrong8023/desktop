@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Node } from "@xyflow/react";
+import type { WorkflowNodeData } from "@ora/workflow-mock";
 import {
-  applyIterationContainment,
+  applyIterationDragRules,
   type ContainmentWorkflow,
 } from "./workflow-iteration-containment";
-import type { WorkflowNodeData } from "@ora/workflow-mock";
 
 function workflowNode(
   id: string,
@@ -16,11 +16,7 @@ function workflowNode(
     id,
     type: "workflow",
     position,
-    data: {
-      kind,
-      title: id,
-      description: "",
-    },
+    data: { kind, title: id, description: "" },
     ...(parentId === undefined ? {} : { parentId }),
   };
 }
@@ -28,88 +24,76 @@ function workflowNode(
 function workflowOf(
   nodes: Node<WorkflowNodeData, "workflow">[],
 ): ContainmentWorkflow {
-  return { nodes };
+  return { nodes, edges: [] };
 }
 
-describe("applyIterationContainment", () => {
-  it("adopts a node dropped inside an iteration frame", () => {
-    const workflow = workflowOf([
+describe("iteration drag rules", () => {
+  it("restores an outer node dropped over an expanded iteration region", () => {
+    const before = workflowOf([
       workflowNode("iter", "iteration", { x: 0, y: 0 }),
-      workflowNode("fix", "agent", { x: 100, y: 200 }),
+      workflowNode("fix", "agent", { x: 700, y: 40 }),
     ]);
-    const next = applyIterationContainment(workflow, [
-      workflowNode("fix", "agent", { x: 100, y: 200 }),
+    const after = workflowOf([
+      before.nodes[0]!,
+      workflowNode("fix", "agent", { x: 100, y: 180 }),
     ]);
-    expect(next).not.toBe(workflow);
-    const fix = next.nodes.find((node) => node.id === "fix");
-    expect(fix?.parentId).toBe("iter");
-    expect(fix?.extent).toBe("parent");
-    expect(fix?.position).toEqual({ x: 100, y: 200 });
+
+    const result = applyIterationDragRules(after, before, ["fix"]);
+
+    expect(result.rejectedNodeIds).toEqual(["fix"]);
+    expect(result.workflow.nodes[1]?.position).toEqual({ x: 700, y: 40 });
+    expect(result.workflow.nodes[1]?.parentId).toBeUndefined();
   });
 
-  it("releases a member dragged outside its frame back to the outer canvas", () => {
-    // React Flow applied the drag to the draft before drag-stop: the member's stored
-    // position is its new frame-relative coordinate far outside the frame bounds.
-    const workflow = workflowOf([
+  it("never changes membership when a node moves inside a frame", () => {
+    const before = workflowOf([
       workflowNode("iter", "iteration", { x: 0, y: 0 }),
-      workflowNode("fix", "agent", { x: 900, y: 900 }, "iter"),
+      workflowNode("fix", "agent", { x: 700, y: 40 }),
     ]);
-    const next = applyIterationContainment(workflow, [workflow.nodes[1]!]);
-    expect(next).not.toBe(workflow);
-    const fix = next.nodes.find((node) => node.id === "fix");
-    expect(fix?.parentId).toBeUndefined();
-    expect(fix?.extent).toBeUndefined();
-    expect(fix?.position).toEqual({ x: 900, y: 900 });
+    const after = workflowOf([
+      before.nodes[0]!,
+      workflowNode("fix", "agent", { x: 40, y: 20 }),
+    ]);
+
+    const result = applyIterationDragRules(after, before, ["fix"]);
+
+    expect(result.workflow.nodes[1]?.parentId).toBeUndefined();
   });
 
-  it("keeps a member dragged within the same frame", () => {
-    const workflow = workflowOf([
+  it("keeps a member in its owner and expands the frame after member movement", () => {
+    const before = workflowOf([
       workflowNode("iter", "iteration", { x: 0, y: 0 }),
       workflowNode("fix", "agent", { x: 60, y: 180 }, "iter"),
     ]);
-    const next = applyIterationContainment(workflow, [workflow.nodes[1]!]);
-    expect(next).toBe(workflow);
+    const after = workflowOf([
+      before.nodes[0]!,
+      workflowNode("fix", "agent", { x: 620, y: 400 }, "iter"),
+    ]);
+
+    const result = applyIterationDragRules(after, before, ["fix"]);
+    const frame = result.workflow.nodes[0];
+
+    expect(result.rejectedNodeIds).toEqual([]);
+    expect(result.workflow.nodes[1]?.parentId).toBe("iter");
+    expect(frame?.initialWidth).toBeGreaterThan(560);
+    expect(frame?.initialHeight).toBeGreaterThan(340);
   });
 
-  it("never adopts output or nested iteration nodes", () => {
-    const workflow = workflowOf([
-      workflowNode("iter", "iteration", { x: 0, y: 0 }),
-      workflowNode("out", "output", { x: 100, y: 200 }),
-      workflowNode("inner", "iteration", { x: 100, y: 240 }),
+  it("does not treat a collapsed frame as an active region drop target", () => {
+    const frame = workflowNode("iter", "iteration", { x: 0, y: 0 });
+    frame.data = { ...frame.data, collapsed: true };
+    const before = workflowOf([
+      frame,
+      workflowNode("fix", "agent", { x: 700, y: 40 }),
     ]);
-    const next = applyIterationContainment(workflow, [
-      workflowNode("out", "output", { x: 100, y: 200 }),
-      workflowNode("inner", "iteration", { x: 100, y: 240 }),
+    const after = workflowOf([
+      frame,
+      workflowNode("fix", "agent", { x: 100, y: 180 }),
     ]);
-    expect(next).toBe(workflow);
-  });
 
-  it("uses the collapsed frame height so collapsed frames do not swallow drops", () => {
-    const workflow = workflowOf([
-      {
-        ...workflowNode("iter", "iteration", { x: 0, y: 0 }),
-        data: {
-          kind: "iteration" as const,
-          title: "iter",
-          description: "",
-          collapsed: true,
-        },
-      },
-      workflowNode("fix", "agent", { x: 100, y: 160 }),
-    ]);
-    // y=160 sits inside the expanded frame (340 tall) but below the collapsed one (112).
-    const next = applyIterationContainment(workflow, [
-      workflowNode("fix", "agent", { x: 100, y: 160 }),
-    ]);
-    expect(next).toBe(workflow);
-  });
+    const result = applyIterationDragRules(after, before, ["fix"]);
 
-  it("returns the same workflow when no iterations exist", () => {
-    const workflow = workflowOf([
-      workflowNode("a", "agent", { x: 0, y: 0 }),
-      workflowNode("b", "agent", { x: 300, y: 0 }),
-    ]);
-    const next = applyIterationContainment(workflow, [workflow.nodes[1]!]);
-    expect(next).toBe(workflow);
+    expect(result.rejectedNodeIds).toEqual([]);
+    expect(result.workflow.nodes[1]?.position).toEqual({ x: 100, y: 180 });
   });
 });

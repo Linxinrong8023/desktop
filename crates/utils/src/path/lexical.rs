@@ -63,6 +63,10 @@ pub fn normalize_relative(path: &Path) -> Option<PathBuf> {
 /// existing part resolved through the filesystem (symlinks, Windows short names) while still
 /// tolerating trailing components that do not exist yet. When nothing on the path exists the
 /// result falls back to plain lexical normalization.
+///
+/// The existing prefix keeps `std::fs::canonicalize` spelling (verbatim on Windows) so results
+/// compare directly against [`super::CanonicalPathRoot`]; callers handing the result to another
+/// process should pass it through [`super::strip_verbatim_prefix`] first.
 pub fn canonicalize_longest_existing_prefix(path: &Path) -> PathBuf {
     let mut current = path;
     let mut suffix_parts = Vec::new();

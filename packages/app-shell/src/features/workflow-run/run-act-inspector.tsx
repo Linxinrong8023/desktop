@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Button, Input, Textarea, cn } from "@ora/ui";
+import { Button, Input, Spinner, Textarea, cn } from "@ora/ui";
 import {
   IconLayoutSidebarRightCollapse,
   IconSparkles,
@@ -18,16 +18,25 @@ import { RunActAgentConfig } from "./run-act-agent-config";
 import { RunActArtifacts } from "./run-act-artifacts";
 import { RunActFileChanges } from "./run-act-file-changes";
 import { RunBriefPopover } from "./run-brief-popover";
+import { RunLoopRoundHistory } from "./run-loop-round-history";
 import { RunStatusBadge } from "./run-status-mark";
 import { shouldPreviewBrief } from "./should-preview-brief";
+import { useDiagnoseWorkflowNodeFailure } from "../../state/data/workflow-runs";
+import { useWorkspaceSelectionStore } from "../../state/stores/workspace-selection-store";
+import { useContractErrorToast } from "../../i18n/use-contract-error-toast";
 import type {
   GraphWorkflowNodeState,
+  GraphWorkflowRunStatus,
+  GraphWorkflowRound,
   GraphWorkflowSnapshotNodePatch,
   WorkflowArtifact,
   WorkflowNodeData,
   WorkflowNodeFileChange,
   WorkflowVariableValueType,
 } from "@ora/workflow-runtime";
+import { NODE_FAILURE_KINDS } from "./node-failure-kinds";
+
+const KNOWN_NODE_FAILURE_KINDS = new Set<string>(NODE_FAILURE_KINDS);
 
 interface RunActInspectorProps {
   nodeId: string | null;
@@ -38,8 +47,14 @@ interface RunActInspectorProps {
   /** Currently viewed round; `null` shows the node-level (latest) state. */
   selectedRound: number | null;
   onRoundChange: (round: number | null) => void;
+  /** Region navigation owns round selection when false, avoiding duplicate controls. */
+  showRoundSelector?: boolean;
   artifacts: WorkflowArtifact[];
   revealedArtifactId: string | null;
+  loopRounds?: GraphWorkflowRound[];
+  loopChildTitles?: Record<string, string>;
+  selectedLoopRoundId?: string | null;
+  onSelectedLoopRoundChange?: (roundId: string) => void;
   /**
    * When true, description and a human-approval prompt are editable for this run only
    * (`pending` overrides on the frozen snapshot).
@@ -60,6 +75,8 @@ interface RunActInspectorProps {
   instructionSavePending?: boolean;
   /** Fallback close action when no stage card can host the persistent toggle. */
   onClose?: () => void;
+  runStatus?: GraphWorkflowRunStatus;
+  runSnapshotId?: string;
 }
 
 /** Formats an optional typed Start value for the compact read-only summary. */
@@ -113,8 +130,13 @@ export function RunActInspector({
   roundStates,
   selectedRound,
   onRoundChange,
+  showRoundSelector = true,
   artifacts,
   revealedArtifactId,
+  loopRounds = [],
+  loopChildTitles = {},
+  selectedLoopRoundId,
+  onSelectedLoopRoundChange,
   editable = false,
   onPatchNode,
   instructionDraft,
@@ -125,6 +147,8 @@ export function RunActInspector({
   onDiscardInstructionDraft,
   instructionSavePending = false,
   onClose,
+  runStatus,
+  runSnapshotId,
 }: RunActInspectorProps) {
   const { t } = useTranslation();
   // Region nodes hold one state per round; the round strip lets the viewer switch rounds.
@@ -173,8 +197,13 @@ export function RunActInspector({
       rounds={rounds}
       selectedRound={selectedRound}
       onRoundChange={onRoundChange}
+      showRoundSelector={showRoundSelector}
       artifacts={artifacts}
       revealedArtifactId={revealedArtifactId}
+      loopRounds={loopRounds}
+      loopChildTitles={loopChildTitles}
+      selectedLoopRoundId={selectedLoopRoundId}
+      onSelectedLoopRoundChange={onSelectedLoopRoundChange}
       editable={editable}
       onPatchNode={onPatchNode}
       instructionDraft={instructionDraft}
@@ -186,6 +215,8 @@ export function RunActInspector({
       instructionSavePending={instructionSavePending}
       fileChanges={fileChanges}
       onClose={onClose}
+      runStatus={runStatus}
+      runSnapshotId={runSnapshotId}
     />
   );
 }
@@ -197,8 +228,13 @@ function RunActInspectorPanel({
   rounds,
   selectedRound,
   onRoundChange,
+  showRoundSelector,
   artifacts,
   revealedArtifactId,
+  loopRounds,
+  loopChildTitles,
+  selectedLoopRoundId,
+  onSelectedLoopRoundChange,
   editable,
   onPatchNode,
   instructionDraft,
@@ -210,6 +246,8 @@ function RunActInspectorPanel({
   instructionSavePending,
   fileChanges,
   onClose,
+  runStatus,
+  runSnapshotId,
 }: {
   nodeId: string;
   data: WorkflowNodeData;
@@ -217,8 +255,13 @@ function RunActInspectorPanel({
   rounds: GraphWorkflowNodeState[];
   selectedRound: number | null;
   onRoundChange: (round: number | null) => void;
+  showRoundSelector: boolean;
   artifacts: WorkflowArtifact[];
   revealedArtifactId: string | null;
+  loopRounds: GraphWorkflowRound[];
+  loopChildTitles: Record<string, string>;
+  selectedLoopRoundId?: string | null;
+  onSelectedLoopRoundChange?: (roundId: string) => void;
   editable: boolean;
   onPatchNode?: (patch: GraphWorkflowSnapshotNodePatch) => void;
   instructionDraft?: string | null;
@@ -230,8 +273,13 @@ function RunActInspectorPanel({
   instructionSavePending?: boolean;
   fileChanges: WorkflowNodeFileChange[];
   onClose?: () => void;
+  runStatus?: GraphWorkflowRunStatus;
+  runSnapshotId?: string;
 }) {
   const { i18n, t } = useTranslation();
+  const runId = useWorkspaceSelectionStore((s) => s.selection.workflowRunId);
+  const diagnose = useDiagnoseWorkflowNodeFailure();
+  const showContractError = useContractErrorToast();
   const locale =
     i18n.resolvedLanguage === "en-US" ? ("en-US" as const) : ("zh-CN" as const);
   const nodeType = createMockWorkflowNodeType(data.kind, locale);
@@ -265,7 +313,7 @@ function RunActInspectorPanel({
       className="flex min-h-0 min-w-0 flex-1 flex-col bg-background"
       aria-label={t("workflowRun.inspector.label")}
     >
-      {rounds.length > 1 && (
+      {showRoundSelector && rounds.length > 1 && (
         <div
           className="flex items-center gap-1 overflow-x-auto border-b border-border px-3 py-2"
           role="tablist"
@@ -338,6 +386,13 @@ function RunActInspectorPanel({
         <p className="mt-1 truncate text-[11px] text-muted-foreground">
           {data.description}
         </p>
+        {state.snapshotId != null &&
+          runSnapshotId != null &&
+          state.snapshotId !== runSnapshotId && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t("workflowRun.nodeFromOlderSnapshotHint")}
+            </p>
+          )}
       </div>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
@@ -453,6 +508,22 @@ function RunActInspectorPanel({
                 mono
               />
             )}
+          {nodeType.configFields.includes("maxIterations") &&
+            data.loopConfig !== undefined && (
+              <ReadOnlyField
+                label={t("settings.workflow.field.maxIterations")}
+                value={String(data.loopConfig.maxIterations)}
+                mono
+              />
+            )}
+          {nodeType.configFields.includes("loopInitialValue") &&
+            data.loopConfig?.variables[0]?.initial.kind === "constant" && (
+              <ReadOnlyField
+                label={t("settings.workflow.field.loopInitialValue")}
+                value={String(data.loopConfig.variables[0].initial.value ?? "")}
+                mono
+              />
+            )}
           {promptLabel !== null &&
             (canEdit ? (
               <div className="space-y-1.5">
@@ -524,14 +595,112 @@ function RunActInspectorPanel({
             </p>
           )}
           {state.errorMessage !== undefined && state.errorMessage !== "" && (
-            <p
+            <div
               role="alert"
               className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-[11px] leading-5 text-destructive"
             >
-              {state.errorMessage}
-            </p>
+              {state.errorDetail != null && (
+                <div className="mb-2 space-y-1">
+                  <p className="font-medium">
+                    {KNOWN_NODE_FAILURE_KINDS.has(state.errorDetail.kind)
+                      ? t(`workflowRun.errorKind.${state.errorDetail.kind}`)
+                      : state.errorDetail.kind}
+                  </p>
+                  {KNOWN_NODE_FAILURE_KINDS.has(state.errorDetail.kind) && (
+                    <p>
+                      {t(`workflowRun.errorHint.${state.errorDetail.kind}`)}
+                    </p>
+                  )}
+                  <p>
+                    {t("workflowRun.errorAttempt", {
+                      count: state.errorDetail.attempt,
+                    })}
+                  </p>
+                  {state.errorDetail.resumable === false &&
+                    state.errorDetail.injectsPreviousFailure === true && (
+                      <p>{t("workflowRun.errorInjectedResumeHint")}</p>
+                    )}
+                  {state.errorDetail.resumable === false &&
+                    state.errorDetail.injectsPreviousFailure === false && (
+                      <p>{t("workflowRun.errorNotResumableHint")}</p>
+                    )}
+                </div>
+              )}
+              <p>{state.errorMessage}</p>
+            </div>
           )}
+          {(state.status === "failed" || state.status === "cancelled") &&
+            (runStatus === "failed" || runStatus === "cancelled") && (
+              <p className="text-[11px] text-muted-foreground">
+                {t("workflowRun.resumeFromTopHint")}
+              </p>
+            )}
+          {state.injectedFailureContext !== undefined &&
+            state.injectedFailureContext !== "" && (
+              <details>
+                <summary>{t("workflowRun.injectedFailure.title")}</summary>
+                <pre className="whitespace-pre-wrap text-[11px] leading-5">
+                  {state.injectedFailureContext}
+                </pre>
+              </details>
+            )}
+          {state.status === "failed" &&
+          data.kind === "agent" &&
+          runId != null ? (
+            <div className="space-y-2">
+              {state.aiDiagnosis != null ? (
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <h5 className="text-[11px] font-medium">
+                    {t("workflowRun.aiDiagnosis.title", {
+                      model: state.aiDiagnosis.model,
+                    })}
+                  </h5>
+                  <p className="mt-1 whitespace-pre-wrap text-[11px] leading-5">
+                    {state.aiDiagnosis.text}
+                  </p>
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    {t("workflowRun.aiDiagnosis.disclaimer")}
+                  </p>
+                </div>
+              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="cursor-pointer"
+                disabled={diagnose.isPending}
+                onClick={() => {
+                  diagnose.mutate(
+                    { runId, nodeId },
+                    { onError: (error) => showContractError(error) },
+                  );
+                }}
+              >
+                {diagnose.isPending ? (
+                  <>
+                    <Spinner className="size-3.5" />
+                    {t("workflowRun.aiDiagnosis.running")}
+                  </>
+                ) : state.aiDiagnosis != null ? (
+                  t("workflowRun.aiDiagnosis.rerun")
+                ) : (
+                  t("workflowRun.aiDiagnosis.run")
+                )}
+              </Button>
+            </div>
+          ) : null}
         </InspectorSection>
+
+        {data.kind === "loop" && (
+          <InspectorSection title={t("workflowRun.loopRounds.title")}>
+            <RunLoopRoundHistory
+              rounds={loopRounds}
+              nodeTitles={loopChildTitles}
+              selectedRoundId={selectedLoopRoundId}
+              onSelectedRoundChange={onSelectedLoopRoundChange}
+            />
+          </InspectorSection>
+        )}
 
         <InspectorSection title={t("workflowRun.artifacts.title")}>
           {fileChanges.length > 0 ? (

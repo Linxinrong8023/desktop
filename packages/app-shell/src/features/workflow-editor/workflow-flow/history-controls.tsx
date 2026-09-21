@@ -184,6 +184,7 @@ export function WorkflowHistoryControls({
       "edge.connect": t("settings.workflow.historyEventEdgeConnect"),
       "edge.reconnect": t("settings.workflow.historyEventEdgeReconnect"),
       "node.move": t("settings.workflow.historyEventNodeMove"),
+      "iteration.resize": t("settings.workflow.historyEventIterationResize"),
       "layout.organize": t("settings.workflow.historyEventOrganize"),
       "node.edit": t("settings.workflow.historyEventNodeEdit"),
       "annotation.edit": t("settings.workflow.historyEventAnnotationEdit"),

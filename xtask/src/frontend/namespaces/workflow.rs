@@ -6,6 +6,14 @@ const NAMESPACE: &str = "workflow";
 
 pub(super) const ENDPOINTS: &[FrontendEndpoint] = &[
     FrontendEndpoint {
+        operation_name: "analyzeWorkflow",
+        namespace: NAMESPACE,
+        member_name: "analyze",
+        request_type: "AnalyzeWorkflowRequest",
+        response_type: "AnalyzeWorkflowResponse",
+        response_mode: FrontendResponseMode::Unary,
+    },
+    FrontendEndpoint {
         operation_name: "createWorkflow",
         namespace: NAMESPACE,
         member_name: "create",

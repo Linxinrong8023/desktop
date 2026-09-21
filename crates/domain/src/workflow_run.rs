@@ -1,6 +1,6 @@
 use crate::{
     AuditFields, DomainModelError, ProjectId, SessionId, WorkflowId, WorkflowNodeRunId,
-    WorkflowRunId, WorkflowSnapshotId, WorkspaceId,
+    WorkflowRunId, WorkflowScopeId, WorkflowSnapshotId, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +61,54 @@ pub enum WorkflowNodeStatus {
     Succeeded,
     Failed,
     Cancelled,
+}
+
+/// Lifecycle of one durable Loop round scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorkflowScopeStatus {
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+impl WorkflowScopeStatus {
+    /// Returns the integer code shared with workflow node lifecycle persistence.
+    pub fn database_value(self) -> i64 {
+        match self {
+            Self::Pending => 0,
+            Self::Running => 1,
+            Self::Succeeded => 2,
+            Self::Failed => 3,
+            Self::Cancelled => 4,
+        }
+    }
+
+    /// Converts a persisted integer into a strongly typed scope status.
+    pub fn from_database_value(value: i64) -> Result<Self, DomainModelError> {
+        match value {
+            0 => Ok(Self::Pending),
+            1 => Ok(Self::Running),
+            2 => Ok(Self::Succeeded),
+            3 => Ok(Self::Failed),
+            4 => Ok(Self::Cancelled),
+            _ => Err(DomainModelError::InvalidWorkflowScopeStatus(value)),
+        }
+    }
+}
+
+/// One durable Loop round and the opaque state owned by the workflow engine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowExecutionScope {
+    pub id: WorkflowScopeId,
+    pub run_id: WorkflowRunId,
+    pub parent_loop_node_run_id: WorkflowNodeRunId,
+    pub round_index: u32,
+    pub status: WorkflowScopeStatus,
+    pub state: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 impl WorkflowNodeStatus {
@@ -165,6 +213,7 @@ impl WorkflowRun {
 pub struct WorkflowNodeRun {
     pub id: WorkflowNodeRunId,
     pub run_id: WorkflowRunId,
+    pub scope_id: WorkflowScopeId,
     pub node_id: String,
     pub node_type: String,
     pub session_id: Option<SessionId>,
@@ -191,6 +240,7 @@ impl WorkflowNodeRun {
     pub fn new(
         id: WorkflowNodeRunId,
         run_id: WorkflowRunId,
+        scope_id: WorkflowScopeId,
         node_id: impl Into<String>,
         node_type: impl Into<String>,
         session_id: Option<SessionId>,
@@ -206,6 +256,7 @@ impl WorkflowNodeRun {
         Self {
             id,
             run_id,
+            scope_id,
             node_id: node_id.into(),
             node_type: node_type.into(),
             session_id,
@@ -257,4 +308,5 @@ pub struct WorkflowRunDetail {
     /// The project owning the workspace, mirroring the summary's `project_id`.
     pub project_id: ProjectId,
     pub nodes: Vec<WorkflowNodeRun>,
+    pub scopes: Vec<WorkflowExecutionScope>,
 }

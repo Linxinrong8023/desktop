@@ -61,6 +61,12 @@ export type AvailablePlugin =
      * Host-local asset URLs for the marketplace icon, absent when none is published.
      */
     logo: PluginLogo | null;
+    /**
+     * Declared member identifiers when this listing is a pack (`kind = "pack"`), absent for
+     * every other kind. Display data only: the ownership journal stays the authority for
+     * what a pack installation actually created.
+     */
+    packMembers?: Array<string>;
   }
   & ({ "compatibility": "compatible" } | {
     "compatibility": "incompatible";
@@ -92,6 +98,71 @@ export type GetPluginConfigurationResponse = {
 };
 
 /**
+ * Reports how one lifecycle execution ended.
+ *
+ * The two states are a closed enum rather than a success flag plus optional error text so a
+ * caller cannot observe a failure without a reason to show the user.
+ */
+export type HookLifecycleOutcome = {
+  "state": "succeeded";
+  /**
+   * Wall-clock time the command took, so a slow tool is visible without reading logs.
+   */
+  durationMs: number;
+} | {
+  "state": "failed";
+  /**
+   * The process exit code, absent when the command was killed or never started.
+   */
+  exitCode: number | null;
+  /**
+   * Wall-clock time the attempt took, including the timeout that ended it.
+   */
+  durationMs: number;
+  /**
+   * Why the attempt failed, shown to the user so retrying is an informed decision.
+   */
+  reason: string;
+};
+
+/**
+ * Names one lifecycle phase a Hook package declares a command for.
+ */
+export type HookLifecyclePhase = "init" | "deinit";
+
+/**
+ * Describes the most recent lifecycle execution the host performed for one installed package.
+ *
+ * The result is keyed by plugin rather than by phase: an update re-runs `init`, and an uninstall
+ * runs `deinit` immediately before the package disappears, so only the latest execution is ever
+ * meaningful to a reader. A Hook the host has never executed for has no report at all, which is
+ * how a pack-installed member reports "not initialized" without the pack path having to run
+ * anything (D2).
+ */
+export type HookLifecycleReport = {
+  pluginId: string;
+  phase: HookLifecyclePhase;
+  /**
+   * The package-relative executable that ran, so the result stays tied to the disclosure the
+   * user authorized even if a later version of the package ships a different one.
+   */
+  executable: string;
+  outcome: HookLifecycleOutcome;
+  /**
+   * The command's captured `stderr`, bounded by the host's capture limit and trimmed.
+   *
+   * A tool that refuses to install its Hook explains why on its error stream, so the failure
+   * stays actionable in the UI instead of only in the host logs. Empty when the command wrote
+   * nothing or never started.
+   */
+  output: string;
+  /**
+   * Whether `output` was cut at the host's capture limit.
+   */
+  outputTruncated: boolean;
+};
+
+/**
  * Requests importing one local `.orax` release archive into the installed plugins tree.
  */
 export type ImportPluginRequest = {
@@ -99,6 +170,11 @@ export type ImportPluginRequest = {
    * Absolute path to the local `.orax` archive.
    */
   path: string;
+  /**
+   * Declares that the user authorized the Hook lifecycle command this import would run; see
+   * [`InstallPluginRequest::hook_execution_acknowledged`].
+   */
+  hookExecutionAcknowledged: boolean;
 };
 
 /**
@@ -110,25 +186,112 @@ export type ImportPluginResponse = {
    * The typed installation outcome, identical in shape to a marketplace install.
    */
   outcome: InstallOutcome;
+  /**
+   * One entry per workflow document the package carried, in package order. Empty for every
+   * kind that contributes no workflow documents, so an ordinary plugin import reports nothing
+   * here rather than a caller having to know which kinds can carry workflows.
+   */
+  workflows: Array<ImportedWorkflowOutcome>;
 };
+
+/**
+ * Describes what happened to one workflow document an imported `.orax` package carried.
+ *
+ * Each document is imported on its own, so one unparseable or unrunnable document never costs
+ * the user the working workflows beside it. The outcome carries the document's package-relative
+ * path in both arms so a caller can report a failure against the exact file that produced it.
+ */
+export type ImportedWorkflowOutcome = {
+  "state": "imported";
+  /**
+   * Package-relative path the document was read from, e.g. `assets/workflows/1.0.0.json`.
+   */
+  sourceFile: string;
+  /**
+   * Identifier of the created workflow.
+   */
+  workflowId: string;
+  /**
+   * Workflow name taken from the document.
+   */
+  name: string;
+  /**
+   * The version the new snapshot was published under.
+   */
+  version: string;
+} | {
+  "state": "failed";
+  /**
+   * Package-relative path the document was read from, e.g. `assets/workflows/1.0.0.json`.
+   */
+  sourceFile: string;
+  /**
+   * Human-readable reason the document could not become a workflow.
+   */
+  reason: string;
+};
+
+/**
+ * Requests the `init` lifecycle command of one installed Hook package.
+ *
+ * This is the retry path for a failed `init` and the only way a pack-installed Hook member is
+ * ever initialized: a pack install lands packages without running anything (D2), so the user
+ * authorizes each member individually afterwards.
+ */
+export type InitializeHookRequest = {
+  pluginId: string;
+  /**
+   * Declares that the user authorized this execution; see
+   * [`InstallPluginRequest::hook_execution_acknowledged`](crate::InstallPluginRequest).
+   */
+  hookExecutionAcknowledged: boolean;
+};
+
+/**
+ * Returns the result of the initialization the caller asked for.
+ */
+export type InitializeHookResponse = { report: HookLifecycleReport };
 
 /**
  * Models the closed set of installation outcomes.
  *
  * The outcome is a closed enum rather than a pair of booleans so a caller can never observe
- * contradictory success flags. Installation always succeeds and the package remains available;
- * a command-alias collision is reported rather than silently sharing a PATH alias or pretending
- * the new package was disabled.
+ * contradictory success flags. Installation always succeeds and the package remains available.
  */
 export type InstallOutcome = { "state": "installed" } | {
-  "state": "installed_with_command_conflict";
-  conflictPluginId: string;
+  "state": "pack_installed";
+  /**
+   * Applicable members that were installed by this operation, in declaration order.
+   */
+  members: Array<string>;
+  /**
+   * Applicable members that were already installed (any version) and therefore skipped;
+   * their existing versions were left untouched.
+   */
+  skipped: Array<string>;
+  /**
+   * The first member that failed, when one did; members after it were not attempted.
+   */
+  failed: PackInstallFailure | null;
 };
 
 /**
  * Requests installation of one marketplace plugin by its registry identifier.
  */
-export type InstallPluginRequest = { pluginId: string };
+export type InstallPluginRequest = {
+  pluginId: string;
+  /**
+   * Declares that the user authorized the Hook lifecycle command this operation would run.
+   *
+   * The flag is the request-side form of the confirmation dialog the user answered. It is a
+   * process gate rather than a security boundary — the host still re-validates the package
+   * before every spawn — and it defaults to "not authorized" so a caller that never learned
+   * about Hook execution cannot silently start a package's program. The install itself is
+   * always authorized: without the declaration the package still lands, its `init` simply does
+   * not run until the user asks for it explicitly.
+   */
+  hookExecutionAcknowledged: boolean;
+};
 
 /**
  * Confirms the identifier installed after download, verification, and extraction complete.
@@ -136,11 +299,9 @@ export type InstallPluginRequest = { pluginId: string };
 export type InstallPluginResponse = {
   pluginId: string;
   /**
-   * The typed installation outcome. Installation always retains the package. A conflict-free
-   * install reports `installed`; a Hook whose command alias collides with another installed
-   * Hook reports `installed_with_command_conflict` carrying the colliding identity. Both
-   * packages remain available: the host has no enablement state, and uniqueness is deferred
-   * to a future consumer.
+   * The typed installation outcome. Installation always retains the package and never executes
+   * anything the package ships; a Hook's lifecycle commands run only on an explicitly
+   * authorized single-plugin operation.
    */
   outcome: InstallOutcome;
 };
@@ -173,20 +334,25 @@ export type InstalledPlugin =
     | { "kind": "workbench"; title: string }
     | { "kind": "webview"; title: string; startUrl: string }
     | { "kind": "skill" }
+    | { "kind": "workflow" }
     | { "kind": "mcp" }
     | {
       "kind": "hook";
-      protocol: string;
-      command: string;
+      /**
+       * The package-relative executable path the host runs. It is always inside the installed
+       * package; the path is shown so the user can see which file the disclosure refers to.
+       */
+      executable: string;
+      /**
+       * Agent identifiers the author claims the tool supports. Display only: the host validates
+       * their shape and never matches them against Agents it knows about.
+       */
+      supportedAgents: Array<string>;
       /**
        * The target triple the installed physical artifact self-declares, absent for a
        * universal release.
        */
       target: string | null;
-      /**
-       * The embedded tool version, independent from the Hook Plugin version.
-       */
-      toolVersion: string;
     }
   )
   & ({ "runtime": "stopped" } | { "runtime": "starting" } | {
@@ -207,20 +373,25 @@ export type InstalledPluginContribution =
   | { "kind": "workbench"; title: string }
   | { "kind": "webview"; title: string; startUrl: string }
   | { "kind": "skill" }
+  | { "kind": "workflow" }
   | { "kind": "mcp" }
   | {
     "kind": "hook";
-    protocol: string;
-    command: string;
+    /**
+     * The package-relative executable path the host runs. It is always inside the installed
+     * package; the path is shown so the user can see which file the disclosure refers to.
+     */
+    executable: string;
+    /**
+     * Agent identifiers the author claims the tool supports. Display only: the host validates
+     * their shape and never matches them against Agents it knows about.
+     */
+    supportedAgents: Array<string>;
     /**
      * The target triple the installed physical artifact self-declares, absent for a
      * universal release.
      */
     target: string | null;
-    /**
-     * The embedded tool version, independent from the Hook Plugin version.
-     */
-    toolVersion: string;
   };
 
 /**
@@ -234,6 +405,22 @@ export type ListAvailablePluginsRequest = Record<symbol, never>;
 export type ListAvailablePluginsResponse = {
   updatedAt: bigint;
   plugins: Array<AvailablePlugin>;
+};
+
+/**
+ * Requests this session's Hook lifecycle results.
+ */
+export type ListHookLifecycleReportsRequest = Record<symbol, never>;
+
+/**
+ * Returns one result per Hook package this session has executed a command for.
+ *
+ * Packages with no result are absent rather than reported as a state of their own: the caller
+ * distinguishes "never ran" from "ran and failed" by presence, which is the same distinction the
+ * host makes.
+ */
+export type ListHookLifecycleReportsResponse = {
+  reports: Array<HookLifecycleReport>;
 };
 
 /**
@@ -256,6 +443,20 @@ export type ListMarketplaceSourcesRequest = Record<symbol, never>;
  */
 export type ListMarketplaceSourcesResponse = {
   sources: Array<MarketplaceSource>;
+};
+
+/**
+ * Requests every recorded pack installation with its reconciled member states.
+ */
+export type ListPackInstallationsRequest = Record<symbol, never>;
+
+/**
+ * Returns every recorded pack installation, each member reconciled against the installed
+ * tree. Read-only: reconciliation identifies drift, it never repairs the journal or the
+ * installed tree.
+ */
+export type ListPackInstallationsResponse = {
+  packs: Array<PackInstallationStatus>;
 };
 
 /**
@@ -322,6 +523,121 @@ export type MarketplaceSource = {
    */
   artifactRetrieval: MarketplaceArtifactRetrieval;
 };
+
+/**
+ * Identifies the first pack member whose installation failed and the classified reason.
+ */
+export type PackInstallFailure = {
+  pluginId: string;
+  /**
+   * The stable public error code the member's install failure classified as.
+   */
+  errorCode: string;
+  /**
+   * Members created before the original failure whose rollback also failed, in creation
+   * order. These members remain installed and are journaled as pack-managed so a later
+   * uninstall or retry can recover. Empty when the rollback completed.
+   */
+  rollbackFailures: Array<PackRollbackFailure>;
+};
+
+/**
+ * One recorded pack installation projected for the installed-packs presentation.
+ */
+export type PackInstallationStatus = {
+  /**
+   * Canonical `namespace/identifier` of the pack listing.
+   */
+  packId: string;
+  /**
+   * Canonical URL of the marketplace source the pack was installed from.
+   */
+  sourceUrl: string;
+  /**
+   * Every journaled member, reconciled against the installed tree.
+   */
+  members: Array<PackMemberStatus>;
+};
+
+/**
+ * Whether the pack installation created this member or found it already installed.
+ */
+export type PackMemberOwnership = "managed_by_pack" | "pre_existing";
+
+/**
+ * The reconciled state of one journaled pack member against the installed tree.
+ */
+export type PackMemberReconciliationState =
+  | { "state": "expected_and_present" }
+  | { "state": "version_changed"; currentVersion: string }
+  | { "state": "missing" };
+
+/**
+ * One journaled pack member with its reconciled state.
+ */
+export type PackMemberStatus = {
+  memberId: string;
+  /**
+   * The member version at the moment the pack relationship was established.
+   */
+  versionAtInstall: string;
+  ownership: PackMemberOwnership;
+  state: PackMemberReconciliationState;
+};
+
+/**
+ * One member whose rollback failed during a failed pack install.
+ */
+export type PackRollbackFailure = {
+  pluginId: string;
+  /**
+   * The stable public error code the member's rollback failure classified as.
+   */
+  errorCode: string;
+};
+
+/**
+ * The computed, not-yet-executed uninstall plan for one recorded pack.
+ */
+export type PackUninstallPlan = {
+  /**
+   * Members the pack created at their recorded versions: safe to remove.
+   */
+  remove: Array<string>;
+  /**
+   * Members preserved with the structured reason the UI presents.
+   */
+  preserve: Array<PackUninstallPreservation>;
+  /**
+   * Managed members that are already absent: released without filesystem work.
+   */
+  alreadyMissing: Array<string>;
+};
+
+/**
+ * Requests the ownership-aware uninstall plan for one pack id.
+ */
+export type PackUninstallPlanRequest = { pluginId: string };
+
+/**
+ * Returns the ownership-aware uninstall plan, absent when the id has no journal.
+ */
+export type PackUninstallPlanResponse = { plan: PackUninstallPlan | null };
+
+/**
+ * One preserved member and why the pack uninstall leaves it alone.
+ */
+export type PackUninstallPreservation = {
+  memberId: string;
+  reason: PackUninstallPreservationReason;
+};
+
+/**
+ * Why a pack uninstall preserves a member.
+ */
+export type PackUninstallPreservationReason =
+  | "pre_existing"
+  | "version_changed";
 
 /**
  * Reports whether every required Setting has an effective type-correct value.
@@ -542,6 +858,11 @@ export type SyncAvailablePluginsResponse = {
 export type UninstallPluginRequest = {
   pluginId: string;
   dataDisposition: PluginDataDisposition;
+  /**
+   * Declares that the user authorized the `deinit` command this removal would run; see
+   * [`InstallPluginRequest::hook_execution_acknowledged`].
+   */
+  hookExecutionAcknowledged: boolean;
 };
 
 /**
@@ -574,7 +895,15 @@ export type UpdateMarketplaceSourceResponse = {
 /**
  * Requests updating one installed marketplace plugin to the version its source publishes.
  */
-export type UpdatePluginRequest = { pluginId: string };
+export type UpdatePluginRequest = {
+  pluginId: string;
+  /**
+   * Declares that the user authorized the `init` command this update would run; every update
+   * re-runs it, because only the tool knows whether the new version needs a migration. See
+   * [`InstallPluginRequest::hook_execution_acknowledged`].
+   */
+  hookExecutionAcknowledged: boolean;
+};
 
 /**
  * Confirms the identifier updated after the new release is verified and stale versions removed.

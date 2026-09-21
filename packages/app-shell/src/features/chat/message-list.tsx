@@ -1,7 +1,9 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  forcePlainTextClipboard,
   selectElementContents,
+  serializeSelectionPlainText,
   TextEditContextMenu,
   writeClipboardText,
 } from "../editor/text-edit-context-menu";
@@ -240,9 +242,14 @@ export function MessageList({
                 aria-live="polite"
                 className="scrollbar-hide h-full min-h-0 flex-1 animate-in overflow-y-auto fade-in duration-500"
                 onContextMenu={() => {
-                  const text = window.getSelection()?.toString() ?? "";
+                  const text = serializeSelectionPlainText();
                   parkedSelectionTextRef.current = text;
                   setMenuHasSelection(text.length > 0);
+                }}
+                onCopy={(event) => {
+                  // Path dumps render as ChatFileLink buttons with user-select:none;
+                  // serialize from the DOM so filenames are not dropped.
+                  forcePlainTextClipboard(event);
                 }}
               />
             }
@@ -261,8 +268,7 @@ export function MessageList({
                 return;
               }
               selectElementContents(root);
-              parkedSelectionTextRef.current =
-                window.getSelection()?.toString() ?? "";
+              parkedSelectionTextRef.current = serializeSelectionPlainText();
               setMenuHasSelection(parkedSelectionTextRef.current.length > 0);
             }}
           >

@@ -71,6 +71,9 @@ pub trait AsyncNodeRuntime: NodeRuntime {
         node_run_id: &WorkflowNodeRunId,
         node: &WorkflowGraphNode,
         context: &ExecutionContext,
+        graph: &WorkflowGraph,
+        scope_id: &ora_domain::WorkflowScopeId,
+        pool: &WorkflowVariablePool,
     );
 }
 
@@ -175,12 +178,15 @@ pub enum RegisteredNodeRuntime {
     Async(Arc<dyn AsyncNodeRuntime>),
     /// Drives a region over rounds; the engine re-plans it on every scheduling wave.
     Composite(Arc<dyn CompositeNodeRuntime>),
+    /// Drives durable isolated feedback scopes.
+    ScopedLoop,
 }
 
 impl RegisteredNodeRuntime {
     /// The run-output precedence rank of the registered runtime's node type.
     fn run_output_rank(&self) -> Option<u32> {
         match self {
+            Self::ScopedLoop => None,
             Self::Swift(runtime) => runtime.run_output_rank(),
             Self::Async(runtime) => runtime.run_output_rank(),
             Self::Composite(runtime) => runtime.run_output_rank(),
@@ -227,7 +233,7 @@ impl NodeRuntimeRegistry {
             Some(RegisteredNodeRuntime::Swift(runtime)) => runtime.start_input(node, context),
             Some(RegisteredNodeRuntime::Async(runtime)) => runtime.start_input(node, context),
             Some(RegisteredNodeRuntime::Composite(runtime)) => runtime.start_input(node, context),
-            None => None,
+            Some(RegisteredNodeRuntime::ScopedLoop) | None => None,
         }
     }
 
@@ -291,6 +297,7 @@ where
         NodeType::Iteration,
         RegisteredNodeRuntime::Composite(Arc::new(IterationRuntime)),
     );
+    runtimes.register(NodeType::Loop, RegisteredNodeRuntime::ScopedLoop);
     runtimes
 }
 
@@ -336,8 +343,12 @@ where
         node_run_id: &WorkflowNodeRunId,
         node: &WorkflowGraphNode,
         context: &ExecutionContext,
+        graph: &WorkflowGraph,
+        scope_id: &ora_domain::WorkflowScopeId,
+        pool: &WorkflowVariablePool,
     ) {
-        self.executor.dispatch(node_run_id, node, context);
+        self.executor
+            .dispatch(node_run_id, node, graph, context, scope_id, pool);
     }
 }
 
@@ -362,7 +373,10 @@ mod tests {
             &self,
             _node_run_id: &WorkflowNodeRunId,
             _node: &WorkflowGraphNode,
+            _graph: &WorkflowGraph,
             _context: &ExecutionContext,
+            _scope_id: &ora_domain::WorkflowScopeId,
+            _pool: &WorkflowVariablePool,
         ) {
         }
     }
@@ -371,6 +385,7 @@ mod tests {
     /// graph are unused by these tests.
     fn execution_context_with_input(input: Option<&str>) -> ExecutionContext {
         ExecutionContext {
+            root_scope_id: ora_domain::WorkflowScopeId::new("root:run-1"),
             run: WorkflowRun::new(
                 WorkflowRunId::new("run-1"),
                 WorkspaceId::new("workspace-1"),
@@ -410,6 +425,7 @@ mod tests {
         WorkflowNodeRun::new(
             WorkflowNodeRunId::new(format!("node-run-{node_id}")),
             WorkflowRunId::new("run-1"),
+            ora_domain::WorkflowScopeId::new("root:run-1"),
             node_id,
             node_type,
             None,
@@ -457,7 +473,7 @@ mod tests {
                 {"id":"agent","data":{"kind":"agent","agentConfig":{"executor":{"agentCli":"c","modelId":"m"},"prompt":"do"}}},
                 {"id":"c","data":{"kind":"condition"}},
                 {"id":"out","data":{"kind":"output"}}
-            ],"edges":[]}"#,
+            ],"edges":[{"source":"start","target":"agent"},{"source":"agent","target":"c"},{"source":"c","target":"out"}]}"#,
         )
         .unwrap();
         let context = execution_context_with_input(Some("kickoff"));

@@ -192,8 +192,16 @@ impl<'a> BranchProjection<'a> {
     fn compute_projected_state(&self, node_id: &str) -> ProjectedNodeState {
         let edges = self.graph.incoming_edges(node_id);
         if edges.is_empty() {
-            // The start node has no incoming edges and begins ready.
-            return ProjectedNodeState::Ready;
+            // Only the scope's explicit entry may start without a predecessor.
+            return if self
+                .graph
+                .start_node()
+                .is_some_and(|node| node.id == node_id)
+            {
+                ProjectedNodeState::Ready
+            } else {
+                ProjectedNodeState::Inactive
+            };
         }
         let mut any_active = false;
         for edge in &edges {
@@ -295,6 +303,7 @@ mod tests {
         WorkflowNodeRun::new(
             ora_domain::WorkflowNodeRunId::new(format!("node-{node_id}")),
             ora_domain::WorkflowRunId::new("run-1"),
+            ora_domain::WorkflowScopeId::new("root:run-1"),
             node_id,
             "agent",
             None,
@@ -460,6 +469,7 @@ mod tests {
         let region_row = WorkflowNodeRun::new(
             ora_domain::WorkflowNodeRunId::new("fix-0"),
             ora_domain::WorkflowRunId::new("run-1"),
+            ora_domain::WorkflowScopeId::new("root:run-1"),
             "fix",
             "agent",
             None,

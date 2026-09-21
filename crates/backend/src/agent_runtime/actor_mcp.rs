@@ -1,17 +1,16 @@
 //! Session MCP setup, live refresh, and prompt admission for one runtime actor.
 
 use super::super::RuntimeCommand;
-use super::super::SESSION_SETUP_TIMEOUT;
 use super::super::SessionChannel;
 use super::super::events::settle_idle_event;
 use super::super::routing::SessionEvent;
 use super::super::scheduling::{ActiveInput, ActiveInputState};
-use super::super::start::log_session_mcp_request;
+use super::super::start::record_session_mcp_boundary;
 use super::super::support::{
     agent_timed_out, contract_session, map_acp_error, protocol_violation, runtime_unavailable,
     session_event_overflow, session_stopped,
 };
-use super::{RuntimeActor, permission_not_pending, session_busy};
+use super::{RuntimeActor, permission_not_pending, session_busy, session_setup_window};
 use crate::BackendError;
 use crate::session_setup::{
     AgentSessionMcpCapabilities, BarrierGuard, BarrierReason, LiveMcpEvent, LiveMcpPromptAdmission,
@@ -217,16 +216,20 @@ impl RuntimeActor {
         // The live identity, not the row's: a session rebuilt for this turn is not persisted until
         // the transcript reaches it, and refreshing MCP on the replaced id would reach nothing.
         let agent_session_id = self.provider_session_id().to_string();
+        // The refresh reconnects the delivered MCP servers before responding, so its inactivity
+        // window widens with the snapshot just like `session/new` does.
+        let window = session_setup_window(&snapshot);
         let request =
             AcpLoadSessionRequest::new(AcpSessionId::new(agent_session_id.clone()), &self.cwd)
                 .mcp_servers(snapshot.servers().to_vec());
-        log_session_mcp_request(
+        record_session_mcp_boundary(
+            &self.session_mcp,
             &self.session.id,
             &self.session.agent_ref,
             Some(&agent_session_id),
             AGENT_METHOD_NAMES.session_load,
-            &self.session_mcp.selection,
             &snapshot,
+            &self.cwd,
         );
         ora_debug!(session_id = %self.session.id, "session/load MCP refresh sent");
         let pending = match client
@@ -243,7 +246,7 @@ impl RuntimeActor {
                 return Err(map_acp_error(error));
             }
         };
-        let deadline = tokio::time::sleep(SESSION_SETUP_TIMEOUT);
+        let deadline = tokio::time::sleep(window);
         tokio::pin!(deadline);
         let mut input_state = ActiveInputState::default();
         loop {
@@ -263,9 +266,7 @@ impl RuntimeActor {
             match input {
                 ActiveInput::Event(SessionEvent::Update(update)) => {
                     self.observe_session_update(&update.update);
-                    deadline
-                        .as_mut()
-                        .reset(Instant::now() + SESSION_SETUP_TIMEOUT);
+                    deadline.as_mut().reset(Instant::now() + window);
                     settle_idle_event(&client, SessionEvent::Update(update)).await;
                 }
                 ActiveInput::Event(SessionEvent::Permission(permission)) => {

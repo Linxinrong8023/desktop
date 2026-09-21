@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import type {
   ContractsClient,
+  InstallOutcome,
   InstalledPlugin,
+  PackInstallationStatus,
   PluginLogo,
 } from "@ora/contracts";
 import { toast } from "@ora/ui";
@@ -130,6 +132,129 @@ function weatherInstalled(): InstalledPlugin {
     configuration: { state: "not_declared" },
     runtime: "stopped",
   };
+}
+
+const HOOK_ID = "official/rtk-ai.rtk";
+
+/** An installed Hook package whose descriptor the manager row renders. */
+function hookInstalled(version = "0.1.0"): InstalledPlugin {
+  return {
+    id: HOOK_ID,
+    namespace: "official",
+    name: "rtk-ai.rtk",
+    displayName: "rtk-ai.rtk",
+    version,
+    description: "RTK command rewrite hook",
+    homepage: null,
+    license: null,
+    kind: "hook",
+    executable: "assets/rtk.exe",
+    supportedAgents: ["claude-code", "codex"],
+    target: "x86_64-pc-windows-msvc",
+    logo: null,
+    installationValidity: { validity: "valid" },
+    configuration: { state: "not_declared" },
+    runtime: "stopped",
+  };
+}
+
+/** One marketplace listing for the Hook, with nothing installed yet. */
+function clientWithHook(availableVersion = "0.1.0") {
+  const state = createFixtureState();
+  state.installedPlugins = [];
+  state.availablePlugins.push({
+    id: HOOK_ID,
+    name: "rtk-ai.rtk",
+    title: "RTK",
+    kind: "hook",
+    namespace: "official",
+    sourceUrl: "https://github.com/ora-space/marketplace",
+    version: availableVersion,
+    description: "RTK command rewrite hook",
+    logo: null,
+    compatibility: "compatible",
+  });
+  const handlers = createFixtureHandlers(state);
+  return { state, handlers, client: createTestClient(handlers) };
+}
+
+/** One installed Hook and nothing else, so manager assertions count exactly that package. */
+function clientWithInstalledHook(version = "0.1.0") {
+  const state = createFixtureState();
+  state.installedPlugins = [hookInstalled(version)];
+  const handlers = createFixtureHandlers(state);
+  return { state, handlers, client: createTestClient(handlers) };
+}
+
+const PACK_ID = "official/ora-space.python-extension-pack";
+const CORE_MEMBER_ID = "official/ora-space.python-core";
+const LINT_MEMBER_ID = "official/ora-space.python-lint";
+
+/** A package-shaped skill member used by the Pack memory adapter. */
+function packMember(id: string, version = "1.0.0"): InstalledPlugin {
+  return {
+    id,
+    namespace: "official",
+    name: id.slice(id.indexOf("/") + 1),
+    displayName: id.slice(id.indexOf("/") + 1),
+    version,
+    description: "Pack member",
+    homepage: null,
+    license: null,
+    kind: "skill",
+    logo: null,
+    installationValidity: { validity: "valid" },
+    configuration: { state: "not_declared" },
+    runtime: "stopped",
+  };
+}
+
+/** Creates one Pack listing whose installable members are explicit test state. */
+function clientWithPack() {
+  const state = createFixtureState();
+  state.installedPlugins = [];
+  state.availablePlugins.push({
+    id: PACK_ID,
+    name: "ora-space.python-extension-pack",
+    title: "Python Extension Pack",
+    kind: "pack",
+    namespace: "official",
+    sourceUrl: "https://github.com/ora-space/marketplace",
+    version: "1.0.0",
+    description: "Python development tools",
+    logo: null,
+    packMembers: ["ora-space.python-core"],
+    compatibility: "compatible",
+  });
+  state.packMemberPlugins.set(PACK_ID, [packMember(CORE_MEMBER_ID)]);
+  const handlers = createFixtureHandlers(state);
+  return { state, handlers, client: createTestClient(handlers) };
+}
+
+/** Seeds one visible Pack journal plus the plan presented by its uninstall dialog. */
+function seedInstalledPack(
+  state: FixtureState,
+  members: PackInstallationStatus["members"],
+) {
+  state.packInstallations = [
+    {
+      packId: PACK_ID,
+      sourceUrl: "https://github.com/ora-space/marketplace",
+      members,
+    },
+  ];
+  state.packUninstallPlans.set(PACK_ID, {
+    remove: members
+      .filter((member) => member.ownership === "managed_by_pack")
+      .map((member) => member.memberId),
+    preserve: members
+      .filter((member) => member.ownership === "pre_existing")
+      .map((member) => ({
+        memberId: member.memberId,
+        reason: "pre_existing" as const,
+      })),
+    alreadyMissing: [],
+  });
 }
 
 /** Seeds one installed plugin and its smallest editable declaration. */
@@ -288,6 +413,274 @@ it("installs a marketplace plugin through the backend", async () => {
   expect(completed).toHaveAttribute("data-animated", "true");
   expect(completed?.querySelector(".tabler-icon-check")).toHaveClass(
     "zoom-in-0",
+  );
+});
+
+/** A fresh Pack install refreshes its journal projection without faking an installed Pack. */
+it("shows a fresh Pack installation immediately without creating an InstalledPlugin", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithPack();
+  renderSettings(client);
+
+  await user.click(await screen.findByRole("button", { name: /安装|Install/ }));
+
+  expect(
+    await screen.findByRole("heading", {
+      name: /已安装集合包|Installed packs/,
+    }),
+  ).toBeInTheDocument();
+  expect(state.packInstallations).toHaveLength(1);
+  expect(state.installedPlugins.map((plugin) => plugin.id)).toEqual([
+    CORE_MEMBER_ID,
+  ]);
+  expect(state.installedPlugins.some((plugin) => plugin.id === PACK_ID)).toBe(
+    false,
+  );
+});
+
+/** Reinstalling a Pack refreshes the projection after filling a newly declared member. */
+it("refreshes Pack installations after a reinstall fills a missing member", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithPack();
+  renderSettings(client);
+  const install = await screen.findByRole("button", { name: /安装|Install/ });
+  await user.click(install);
+  await screen.findByRole("heading", { name: /已安装集合包|Installed packs/ });
+
+  state.packMemberPlugins.get(PACK_ID)?.push(packMember(LINT_MEMBER_ID));
+  await user.click(install);
+
+  await waitFor(() =>
+    expect(state.packInstallations[0]?.members).toHaveLength(2),
+  );
+  expect(await screen.findByText(LINT_MEMBER_ID)).toBeInTheDocument();
+});
+
+/** A failed Pack member is operation failure, even though the transport returned an outcome. */
+it("reports a Pack member failure with an error toast", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithPack();
+  state.installOutcome = {
+    state: "pack_installed",
+    members: [],
+    skipped: [],
+    failed: {
+      pluginId: CORE_MEMBER_ID,
+      errorCode: "plugin_download_failed",
+      rollbackFailures: [],
+    },
+  };
+  const successToast = vi
+    .spyOn(toast, "success")
+    .mockImplementation(() => "toast");
+  const errorToast = vi
+    .spyOn(toast, "error")
+    .mockClear()
+    .mockImplementation(() => "toast");
+  renderSettings(client);
+
+  await user.click(await screen.findByRole("button", { name: /安装|Install/ }));
+
+  await waitFor(() => expect(errorToast).toHaveBeenCalled());
+  expect(successToast).not.toHaveBeenCalled();
+  expect(errorToast.mock.calls[0]?.[1]?.description).toMatch(CORE_MEMBER_ID);
+});
+
+/** Rollback residuals remain an error and are named in the structured Pack feedback. */
+it("reports Pack rollback residuals in the error toast", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithPack();
+  state.installOutcome = {
+    state: "pack_installed",
+    members: [],
+    skipped: [],
+    failed: {
+      pluginId: LINT_MEMBER_ID,
+      errorCode: "plugin_download_failed",
+      rollbackFailures: [
+        { pluginId: CORE_MEMBER_ID, errorCode: "plugin_uninstall_failed" },
+      ],
+    },
+  };
+  const errorToast = vi.spyOn(toast, "error").mockImplementation(() => "toast");
+  renderSettings(client);
+
+  await user.click(await screen.findByRole("button", { name: /安装|Install/ }));
+
+  await waitFor(() => expect(errorToast).toHaveBeenCalled());
+  expect(errorToast.mock.calls[0]?.[1]?.description).toMatch(CORE_MEMBER_ID);
+});
+
+/** Marketplace card and README installs consume the same Pack outcome interpreter. */
+it("shows identical Pack failure feedback from card and README installs", async () => {
+  const failure: InstallOutcome = {
+    state: "pack_installed",
+    members: [],
+    skipped: [],
+    failed: {
+      pluginId: CORE_MEMBER_ID,
+      errorCode: "plugin_download_failed",
+      rollbackFailures: [],
+    },
+  };
+  const errorToast = vi
+    .spyOn(toast, "error")
+    .mockClear()
+    .mockImplementation(() => "toast");
+  const cardFixture = clientWithPack();
+  cardFixture.state.installOutcome = failure;
+  const card = renderSettings(cardFixture.client);
+  const cardUser = userEvent.setup();
+  await cardUser.click(
+    await screen.findByRole("button", { name: /安装|Install/ }),
+  );
+  await waitFor(() => expect(errorToast).toHaveBeenCalledOnce());
+  const cardFeedback = errorToast.mock.calls[0];
+  card.unmount();
+  act(() => usePluginOperationStore.setState({ activities: {} }));
+  errorToast.mockClear();
+
+  const detailFixture = clientWithPack();
+  detailFixture.state.installOutcome = failure;
+  renderSettings(detailFixture.client);
+  const detailUser = userEvent.setup();
+  await detailUser.click(await screen.findByText("Python Extension Pack"));
+  await detailUser.click(
+    await screen.findByRole("button", { name: /安装|Install/ }),
+  );
+
+  await waitFor(() => expect(errorToast).toHaveBeenCalledOnce());
+  expect(errorToast.mock.calls[0]).toEqual(cardFeedback);
+});
+
+/** The ownership plan is a hard gate while its backend query is unresolved. */
+it("disables Pack uninstall confirmation while the plan is loading", async () => {
+  const user = userEvent.setup();
+  const { state, handlers, client } = clientWithPack();
+  seedInstalledPack(state, [
+    {
+      memberId: CORE_MEMBER_ID,
+      versionAtInstall: "1.0.0",
+      ownership: "managed_by_pack",
+      state: { state: "expected_and_present" },
+    },
+  ]);
+  vi.spyOn(handlers, "packUninstallPlan").mockImplementation(
+    () => new Promise<never>(() => undefined),
+  );
+  renderSettings(client);
+
+  await user.click(
+    await screen.findByRole("button", { name: /卸载集合包|Uninstall pack/ }),
+  );
+
+  const dialog = await screen.findByRole("alertdialog");
+  expect(
+    within(dialog).getByRole("button", { name: /确认卸载|Uninstall/ }),
+  ).toBeDisabled();
+  expect(
+    within(dialog).getByText(/正在计算卸载范围|Calculating uninstall scope/),
+  ).toBeInTheDocument();
+});
+
+/** A failed plan query stays visible and cannot fall through to destructive execution. */
+it("shows a Pack uninstall plan error and keeps confirmation disabled", async () => {
+  const user = userEvent.setup();
+  const { state, handlers, client } = clientWithPack();
+  seedInstalledPack(state, []);
+  vi.spyOn(handlers, "packUninstallPlan").mockRejectedValue(
+    new Error("plan unavailable"),
+  );
+  renderSettings(client);
+
+  await user.click(
+    await screen.findByRole("button", { name: /卸载集合包|Uninstall pack/ }),
+  );
+
+  const dialog = await screen.findByRole("alertdialog");
+  expect(
+    await within(dialog).findByText(
+      /无法加载集合包卸载计划|Unable to load the pack uninstall plan/,
+    ),
+  ).toBeInTheDocument();
+  expect(
+    within(dialog).getByRole("button", { name: /确认卸载|Uninstall/ }),
+  ).toBeDisabled();
+});
+
+/** Backend uninstall failure remains visible and leaves the Pack presentation intact. */
+it("reports a Pack uninstall failure without dismissing the dialog", async () => {
+  const user = userEvent.setup();
+  const { state, handlers, client } = clientWithPack();
+  seedInstalledPack(state, [
+    {
+      memberId: CORE_MEMBER_ID,
+      versionAtInstall: "1.0.0",
+      ownership: "managed_by_pack",
+      state: { state: "expected_and_present" },
+    },
+  ]);
+  vi.spyOn(handlers, "uninstallPlugin").mockRejectedValue(
+    new Error("member is locked"),
+  );
+  const errorToast = vi.spyOn(toast, "error").mockImplementation(() => "toast");
+  renderSettings(client);
+  await user.click(
+    await screen.findByRole("button", { name: /卸载集合包|Uninstall pack/ }),
+  );
+  const dialog = await screen.findByRole("alertdialog");
+  await user.click(
+    await within(dialog).findByRole("button", {
+      name: /确认卸载|Uninstall/,
+    }),
+  );
+
+  await waitFor(() => expect(errorToast).toHaveBeenCalled());
+  expect(dialog).toBeInTheDocument();
+  expect(state.packInstallations).toHaveLength(1);
+});
+
+/** Pack uninstall removes managed members but preserves packages that predate the relationship. */
+it("preserves a pre-existing member when uninstalling a Pack", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithPack();
+  state.installedPlugins = [
+    packMember(CORE_MEMBER_ID),
+    packMember(LINT_MEMBER_ID),
+  ];
+  seedInstalledPack(state, [
+    {
+      memberId: CORE_MEMBER_ID,
+      versionAtInstall: "1.0.0",
+      ownership: "pre_existing",
+      state: { state: "expected_and_present" },
+    },
+    {
+      memberId: LINT_MEMBER_ID,
+      versionAtInstall: "1.0.0",
+      ownership: "managed_by_pack",
+      state: { state: "expected_and_present" },
+    },
+  ]);
+  renderSettings(client);
+  await user.click(
+    await screen.findByRole("button", { name: /卸载集合包|Uninstall pack/ }),
+  );
+  const dialog = await screen.findByRole("alertdialog");
+  await user.click(
+    await within(dialog).findByRole("button", {
+      name: /确认卸载|Uninstall/,
+    }),
+  );
+
+  await waitFor(() => expect(state.packInstallations).toHaveLength(0));
+  expect(state.installedPlugins.map((plugin) => plugin.id)).toEqual([
+    CORE_MEMBER_ID,
+  ]);
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("heading", { name: /已安装集合包|Installed packs/ }),
+    ).not.toBeInTheDocument(),
   );
 });
 
@@ -486,6 +879,7 @@ it("imports a local archive through the backend", async () => {
   await waitFor(() =>
     expect(importSpy).toHaveBeenCalledWith({
       path: "C:/downloads/weather.orax",
+      hookExecutionAcknowledged: false,
     }),
   );
   await waitFor(() => expect(state.installedPlugins).toHaveLength(1));
@@ -495,6 +889,95 @@ it("imports a local archive through the backend", async () => {
   expect(successToast).toHaveBeenCalledWith(
     expect.stringMatching(/插件已导入|Plugin imported/),
   );
+});
+
+/** A workflow package reports how many documents imported and how many were refused. */
+it("summarizes the workflow documents an imported package carried", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithWeather();
+  state.importTarget = weatherInstalled();
+  state.importedWorkflows = [
+    {
+      state: "imported",
+      sourceFile: "assets/workflows/1.0.0.json",
+      workflowId: "workflow-1",
+      name: "发布流程",
+      version: "1.0.0",
+    },
+    {
+      state: "failed",
+      sourceFile: "assets/workflows/2.0.0.json",
+      reason: "document is not valid JSON",
+    },
+  ];
+  const platform = createStubPlatform();
+  platform.selectPath = vi
+    .fn()
+    .mockResolvedValue("C:/downloads/workflows.orax");
+  const successToast = vi
+    .spyOn(toast, "success")
+    .mockClear()
+    .mockImplementation(() => "toast");
+  renderSettings(client, platform);
+
+  await openManagePlugins(user);
+  await user.click(
+    await screen.findByRole("button", { name: /导入插件|Import plugin/ }),
+  );
+
+  await waitFor(() => expect(successToast).toHaveBeenCalled());
+  expect(successToast.mock.calls[0]?.[0]).toEqual(
+    expect.stringMatching(/插件已导入|Plugin imported/),
+  );
+  expect(successToast.mock.calls[0]?.[1]).toEqual({
+    description: expect.stringMatching(
+      /导入了 1 个工作流，1 个被拒绝|Imported 1 workflow\(s\); 1 were refused/,
+    ),
+  });
+});
+
+/** A package whose documents all imported reports only the imported count. */
+it("reports a fully successful workflow import without a refusal count", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithWeather();
+  state.importTarget = weatherInstalled();
+  state.importedWorkflows = [
+    {
+      state: "imported",
+      sourceFile: "assets/workflows/1.0.0.json",
+      workflowId: "workflow-1",
+      name: "发布流程",
+      version: "1.0.0",
+    },
+    {
+      state: "imported",
+      sourceFile: "assets/workflows/2.0.0.json",
+      workflowId: "workflow-4",
+      name: "回归流程",
+      version: "2.0.0",
+    },
+  ];
+  const platform = createStubPlatform();
+  platform.selectPath = vi
+    .fn()
+    .mockResolvedValue("C:/downloads/workflows.orax");
+  const successToast = vi
+    .spyOn(toast, "success")
+    .mockClear()
+    .mockImplementation(() => "toast");
+  renderSettings(client, platform);
+
+  await openManagePlugins(user);
+  await user.click(
+    await screen.findByRole("button", { name: /导入插件|Import plugin/ }),
+  );
+
+  await waitFor(() => expect(successToast).toHaveBeenCalled());
+  expect(successToast.mock.calls[0]?.[1]).toEqual({
+    description: expect.stringMatching(
+      /并导入了 2 个工作流|Imported 2 workflow\(s\)/,
+    ),
+  });
 });
 
 /** A path picker that rejects surfaces an error toast without touching the backend. */
@@ -833,32 +1316,14 @@ it("disables install for a host-incompatible marketplace plugin", async () => {
 it("shows hook descriptor fields and hides configure when settings are not declared", async () => {
   const user = userEvent.setup();
   const state = createFixtureState();
-  state.installedPlugins.push({
-    id: "official/rtk-ai.rtk",
-    namespace: "official",
-    name: "rtk-ai.rtk",
-    displayName: "rtk-ai.rtk",
-    version: "0.1.0",
-    description: "RTK command rewrite hook",
-    homepage: null,
-    license: null,
-    kind: "hook",
-    protocol: "rtk-rewrite-v1",
-    command: "rtk",
-    target: "x86_64-pc-windows-msvc",
-    toolVersion: "0.45.0",
-    logo: null,
-    installationValidity: { validity: "valid" },
-    configuration: { state: "not_declared" },
-    runtime: "stopped",
-  });
+  state.installedPlugins.push(hookInstalled());
   renderSettings(createTestClient(createFixtureHandlers(state)));
 
   await openManagePlugins(user);
   expect(await screen.findByText("official/rtk-ai.rtk")).toBeInTheDocument();
   expect(
     screen.getByText(
-      /0\.1\.0 · hook · stopped · rtk-rewrite-v1 · rtk · x86_64-pc-windows-msvc · 0\.45\.0/,
+      /0\.1\.0 · hook · stopped · assets\/rtk\.exe · claude-code, codex · x86_64-pc-windows-msvc/,
     ),
   ).toBeInTheDocument();
   expect(
@@ -866,27 +1331,155 @@ it("shows hook descriptor fields and hides configure when settings are not decla
   ).not.toBeInTheDocument();
 });
 
-/** A command-alias conflict is a successful install that the toast must name the colliding plugin. */
-it("reports a command-alias conflict after a successful install", async () => {
+/** A Hook install discloses the program it will run before the request may carry the grant. */
+it("discloses hook execution before installing a marketplace hook", async () => {
   const user = userEvent.setup();
-  const { state, client } = clientWithWeather();
-  state.installOutcome = {
-    state: "installed_with_command_conflict",
-    conflictPluginId: "official/other-rtk",
-  };
-  const successToast = vi
-    .spyOn(toast, "success")
-    .mockClear()
-    .mockImplementation(() => "toast");
+  const { state, client } = clientWithHook();
+  const installSpy = vi.spyOn(client.plugin, "install");
   renderSettings(client);
 
   await user.click(await screen.findByRole("button", { name: /安装|Install/ }));
 
-  await waitFor(() => expect(state.installedPlugins).toHaveLength(1));
-  await waitFor(() => expect(successToast).toHaveBeenCalled());
-  expect(successToast.mock.calls[0]?.[0]).toEqual(
-    expect.stringMatching(/official\/other-rtk/),
+  const dialog = await screen.findByRole("alertdialog", {
+    name: /执行.*包含的程序|Run the program bundled with/,
+  });
+  expect(dialog).toHaveTextContent(
+    /此插件会执行包内程序，并可能读取或修改用户文件以及 Agent 配置文件|executes a program from its package/,
   );
+  expect(installSpy).not.toHaveBeenCalled();
+
+  await user.click(
+    within(dialog).getByRole("button", { name: /安装并执行|Install and run/ }),
+  );
+
+  await waitFor(() => expect(installSpy).toHaveBeenCalledOnce());
+  expect(installSpy.mock.calls[0]?.[0]).toEqual({
+    pluginId: HOOK_ID,
+    hookExecutionAcknowledged: true,
+  });
+  await waitFor(() => expect(state.hookLifecycleReports.size).toBe(1));
+  // The confirmation is answered from the card, so it must not also open the detail page.
+  expect(
+    screen.getByRole("button", { name: /查看 RTK 的 README|View RTK README/ }),
+  ).toBeInTheDocument();
+});
+
+/** An update re-runs `init`, so it asks for the grant again rather than reusing the install one. */
+it("discloses hook execution again before updating an installed hook", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithHook("0.2.0");
+  state.installedPlugins = [hookInstalled("0.1.0")];
+  const updateSpy = vi.spyOn(client.plugin, "update");
+  renderSettings(client);
+
+  await openManagePlugins(user);
+  await user.click(await screen.findByRole("button", { name: /更新|Update/ }));
+
+  const dialog = await screen.findByRole("alertdialog", {
+    name: /执行.*包含的程序|Run the program bundled with/,
+  });
+  expect(updateSpy).not.toHaveBeenCalled();
+
+  await user.click(
+    within(dialog).getByRole("button", { name: /更新并执行|Update and run/ }),
+  );
+
+  await waitFor(() => expect(updateSpy).toHaveBeenCalledOnce());
+  expect(updateSpy.mock.calls[0]?.[0]).toEqual({
+    pluginId: HOOK_ID,
+    hookExecutionAcknowledged: true,
+  });
+  expect(
+    await screen.findByText(/本次会话已初始化|Initialized this session/),
+  ).toBeInTheDocument();
+});
+
+/** With no result this session a Hook reads as unknown, and initializing it is an explicit act. */
+it("shows an uninitialized hook and initializes it on request", async () => {
+  const user = userEvent.setup();
+  const { client } = clientWithInstalledHook();
+  renderSettings(client);
+
+  await openManagePlugins(user);
+  expect(
+    await screen.findByText(/本次会话未初始化|Not initialized this session/),
+  ).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: /初始化|Initialize/ }));
+
+  expect(
+    await screen.findByText(/本次会话已初始化|Initialized this session/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(/重启对应 Agent|restart the Agent/),
+  ).toBeInTheDocument();
+});
+
+/** A failed initialization stays visible with its diagnostic and remains retryable by the user. */
+it("keeps a failed hook initialization visible and retries it", async () => {
+  const user = userEvent.setup();
+  const { state, client } = clientWithInstalledHook();
+  state.hookOutcome = {
+    state: "failed",
+    exitCode: 1,
+    durationMs: 9,
+    reason: "the command exited with code 1",
+  };
+  renderSettings(client);
+
+  await openManagePlugins(user);
+  await user.click(screen.getByRole("button", { name: /初始化|Initialize/ }));
+
+  expect(
+    await screen.findByText(/初始化失败|Initialization failed/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(/the command exited with code 1/),
+  ).toBeInTheDocument();
+  expect(state.installedPlugins).toHaveLength(1);
+
+  state.hookOutcome = undefined;
+  await user.click(screen.getByRole("button", { name: /初始化|Initialize/ }));
+
+  expect(
+    await screen.findByText(/本次会话已初始化|Initialized this session/),
+  ).toBeInTheDocument();
+});
+
+/** Removing a Hook states what runs and what stays behind, and its confirmation is the grant. */
+it("states the hook teardown before uninstalling and authorizes it once confirmed", async () => {
+  const user = userEvent.setup();
+  const { client } = clientWithInstalledHook();
+  const uninstallSpy = vi.spyOn(client.plugin, "uninstall");
+  renderSettings(client);
+
+  await openManagePlugins(user);
+  await user.click(
+    await screen.findByRole("button", {
+      name: /打开 rtk-ai\.rtk 的菜单|Open the rtk-ai\.rtk menu/,
+    }),
+  );
+  await user.click(
+    await screen.findByRole("menuitem", { name: /卸载|Uninstall/ }),
+  );
+
+  const dialog = await screen.findByRole("alertdialog", {
+    name: /卸载.*rtk-ai\.rtk|Uninstall rtk-ai\.rtk/,
+  });
+  expect(dialog).toHaveTextContent(
+    /卸载会先执行该工具声明的反初始化命令|Uninstalling runs the tool's declared teardown/,
+  );
+
+  await user.click(
+    within(dialog).getByRole("button", { name: /^卸载$|^Uninstall$/ }),
+  );
+
+  await waitFor(() => expect(uninstallSpy).toHaveBeenCalledOnce());
+  expect(uninstallSpy.mock.calls[0]?.[0]).toEqual({
+    pluginId: HOOK_ID,
+    dataDisposition: "delete",
+    hookExecutionAcknowledged: true,
+  });
 });
 
 /** The header gear offers the manage-plugin and manage-marketplace destinations. */

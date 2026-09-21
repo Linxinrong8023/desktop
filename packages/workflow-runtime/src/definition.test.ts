@@ -1,0 +1,39 @@
+import { describe, expect, it } from "vitest";
+import {
+  normalizeWorkflowDocument,
+  validateWorkflowDefinition,
+} from "./definition";
+import { parseWorkflowGraph, serializeWorkflowGraph } from "./graph-codec";
+
+describe("authoring document normalization", () => {
+  it("preserves spare cycles through persistence while executable validation remains strict", () => {
+    const definition = normalizeWorkflowDocument({
+      id: "workflow",
+      name: "Spare nodes",
+      description: "",
+      updatedAt: "2026-09-20T12:00:00+08:00",
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [
+        {
+          id: "start",
+          position: { x: 0, y: 0 },
+          data: { kind: "start", title: "Start", description: "" },
+        },
+        {
+          id: "spare",
+          position: { x: 0, y: 100 },
+          data: { kind: "agent", title: "Spare", description: "" },
+        },
+      ],
+      edges: [{ id: "cycle", source: "spare", target: "spare" }],
+    });
+    const restored = parseWorkflowGraph(serializeWorkflowGraph(definition));
+    expect({ nodes: restored.nodes, edges: restored.edges }).toEqual({
+      nodes: definition.nodes,
+      edges: definition.edges,
+    });
+    expect(() => validateWorkflowDefinition(definition)).toThrow(
+      "graph must be acyclic",
+    );
+  });
+});

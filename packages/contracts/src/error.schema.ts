@@ -5,6 +5,10 @@ export const requestIdSchema = z.string();
 
 export const emptyErrorParamsSchema = z.record(z.string(), z.never());
 
+export const packMemberParamsSchema = z.object({
+    pluginId: z.string()
+});
+
 export const marketplaceArtifactRetrievalFieldInvalidParamsSchema = z.object({
     field: z.string()
 });
@@ -22,6 +26,10 @@ export const sessionMcpSetupFailedParamsSchema = z.object({
 
 export const skillFolderConflictParamsSchema = z.object({
     name: z.string()
+});
+
+export const workflowSnapshotIncompatibleWithResumeParamsSchema = z.object({
+    reason: z.string()
 });
 
 export const openLocationTargetSchema = z.union([z.literal("explorer"), z.literal("terminal"), z.literal("vscode")]);
@@ -84,6 +92,21 @@ export const contractErrorSchema = z.object({
         "code": z.literal("plugin_host_incompatible"),
         "params": emptyErrorParamsSchema
     }), z.object({
+        "code": z.literal("pack_member_duplicate"),
+        "params": packMemberParamsSchema
+    }), z.object({
+        "code": z.literal("pack_self_reference"),
+        "params": packMemberParamsSchema
+    }), z.object({
+        "code": z.literal("pack_member_not_found"),
+        "params": packMemberParamsSchema
+    }), z.object({
+        "code": z.literal("pack_member_nested"),
+        "params": packMemberParamsSchema
+    }), z.object({
+        "code": z.literal("pack_no_applicable_members"),
+        "params": packMemberParamsSchema
+    }), z.object({
         "code": z.literal("marketplace_s3_credentials_required"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -360,6 +383,12 @@ export const contractErrorSchema = z.object({
         "code": z.literal("workflow_run_not_restartable"),
         "params": emptyErrorParamsSchema
     }), z.object({
+        "code": z.literal("workflow_run_not_resumable"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_snapshot_incompatible_with_resume"),
+        "params": workflowSnapshotIncompatibleWithResumeParamsSchema
+    }), z.object({
         "code": z.literal("workflow_run_not_editable"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -367,6 +396,9 @@ export const contractErrorSchema = z.object({
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("workflow_node_not_awaiting_input"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_node_not_diagnosable"),
         "params": emptyErrorParamsSchema
     })]));
 
@@ -413,6 +445,21 @@ export const publicErrorSchema = z.union([z.object({
         "code": z.literal("plugin_host_incompatible"),
         "params": emptyErrorParamsSchema
     }), z.object({
+        "code": z.literal("pack_member_duplicate"),
+        "params": packMemberParamsSchema
+    }), z.object({
+        "code": z.literal("pack_self_reference"),
+        "params": packMemberParamsSchema
+    }), z.object({
+        "code": z.literal("pack_member_not_found"),
+        "params": packMemberParamsSchema
+    }), z.object({
+        "code": z.literal("pack_member_nested"),
+        "params": packMemberParamsSchema
+    }), z.object({
+        "code": z.literal("pack_no_applicable_members"),
+        "params": packMemberParamsSchema
+    }), z.object({
         "code": z.literal("marketplace_s3_credentials_required"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -689,6 +736,12 @@ export const publicErrorSchema = z.union([z.object({
         "code": z.literal("workflow_run_not_restartable"),
         "params": emptyErrorParamsSchema
     }), z.object({
+        "code": z.literal("workflow_run_not_resumable"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_snapshot_incompatible_with_resume"),
+        "params": workflowSnapshotIncompatibleWithResumeParamsSchema
+    }), z.object({
         "code": z.literal("workflow_run_not_editable"),
         "params": emptyErrorParamsSchema
     }), z.object({
@@ -696,5 +749,8 @@ export const publicErrorSchema = z.union([z.object({
         "params": emptyErrorParamsSchema
     }), z.object({
         "code": z.literal("workflow_node_not_awaiting_input"),
+        "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("workflow_node_not_diagnosable"),
         "params": emptyErrorParamsSchema
     })]);

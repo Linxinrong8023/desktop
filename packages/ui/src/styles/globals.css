@@ -265,6 +265,15 @@
     user-select: none;
   }
 
+  /* Transcript path links opt back in so Copy keeps the visible filenames. */
+  button.select-text,
+  button[data-selectable],
+  [role="button"].select-text,
+  [role="button"][data-selectable] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]) {
     cursor: pointer;

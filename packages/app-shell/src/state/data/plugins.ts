@@ -14,6 +14,8 @@ export function invalidatePluginQueries(
   return Promise.all([
     invalidateInstalledPlugins(queryClient),
     invalidateAvailablePlugins(queryClient),
+    invalidatePackInstallations(queryClient),
+    invalidateHookLifecycleReports(queryClient),
   ]);
 }
 
@@ -23,14 +25,45 @@ export const pluginKeys = {
   pluginReadme: (pluginId: string) => ["plugin-readme", pluginId] as const,
   marketplaceSources: ["marketplace-sources"] as const,
   installedPlugins: ["installed-plugins"] as const,
+  packInstallations: ["pack-installations"] as const,
+  hookLifecycleReports: ["hook-lifecycle-reports"] as const,
   pluginConfiguration: (pluginId: string) =>
     ["plugin-configuration", pluginId] as const,
+  pluginLogLevel: (pluginId: string) => ["plugin-log-level", pluginId] as const,
 };
+
+/**
+ * Refreshes this session's Hook lifecycle results after any operation that can run one.
+ *
+ * Installing, updating, removing, and explicitly initializing a Hook are all triggers, and the
+ * result is session-scoped state rather than part of the installed snapshot, so it is invalidated
+ * alongside the installed list instead of being merged into it.
+ */
+export function invalidateHookLifecycleReports(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({
+    queryKey: pluginKeys.hookLifecycleReports,
+  });
+}
+
+/** Drops one plugin's cached log level once its identity has been uninstalled. */
+export function forgetPluginLogLevel(
+  queryClient: QueryClient,
+  pluginId: string,
+): void {
+  queryClient.removeQueries({ queryKey: pluginKeys.pluginLogLevel(pluginId) });
+}
 
 /** Refreshes installed state after a scan without forcing a marketplace fetch. */
 export function invalidateInstalledPlugins(queryClient: QueryClient) {
   return queryClient.invalidateQueries({
     queryKey: pluginKeys.installedPlugins,
+  });
+}
+
+/** Refreshes the ownership journal projection after any pack lifecycle change. */
+export function invalidatePackInstallations(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({
+    queryKey: pluginKeys.packInstallations,
   });
 }
 

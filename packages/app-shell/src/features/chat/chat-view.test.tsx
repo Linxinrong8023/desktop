@@ -2358,8 +2358,16 @@ describe("ChatView", () => {
     const thread = screen.getByTestId("message-list");
     fireEvent.contextMenu(thread);
     await user.click(await screen.findByRole("menuitem", { name: "全选" }));
+    // Finish closing the first popup before reopening it; otherwise its pending
+    // focus restoration can race the next menu interaction on slower CI workers.
+    await waitFor(() =>
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument(),
+    );
+    expect(window.getSelection()?.toString()).toContain("hello from the user");
     fireEvent.contextMenu(thread);
-    await user.click(await screen.findByRole("menuitem", { name: "复制" }));
+    const copy = await screen.findByRole("menuitem", { name: "复制" });
+    expect(copy).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(copy);
 
     await waitFor(() => expect(writeText).toHaveBeenCalled());
     expect(String(writeText.mock.calls[0]?.[0] ?? "")).toMatch(

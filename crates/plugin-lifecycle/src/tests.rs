@@ -1,8 +1,8 @@
 use super::{
     DenoPermission, InboundNotification, LaunchedRuntime, PluginCallError, PluginLaunchRequest,
-    PluginLifecycle, PluginLifecycleConfig, PluginLifecycleError, PluginNotificationSink,
-    PluginRegistration, PluginRuntime, PluginRuntimeExit, PluginRuntimeFailure,
-    PluginRuntimeLauncher, PluginStatusPublisher, ReadScope,
+    PluginLifecycle, PluginLifecycleConfig, PluginLifecycleError, PluginLogSetup,
+    PluginNotificationSink, PluginRegistration, PluginRuntime, PluginRuntimeExit,
+    PluginRuntimeFailure, PluginRuntimeLauncher, PluginStatusPublisher, ReadScope,
 };
 use ora_contracts::{
     ActivatePluginRequest, ActivatePluginResponse, InstalledPlugin, InstalledPluginContribution,
@@ -29,7 +29,7 @@ pub(super) fn trace_logging_guard() -> tracing::subscriber::DefaultGuard {
 }
 
 /// Opens lifecycle state for tests that never cross the external runtime boundary.
-fn open_without_runtime(
+pub(super) fn open_without_runtime(
     data_directory: &Path,
 ) -> PluginLifecycle<UnusedRuntimeLauncher, NoopStatusPublisher, NoopNotificationSink> {
     PluginLifecycle::open(
@@ -46,7 +46,7 @@ fn open_without_runtime(
 
 /// Rejects accidental launches in lifecycle tests that do not exercise process behavior.
 #[derive(Clone)]
-struct UnusedRuntimeLauncher;
+pub(super) struct UnusedRuntimeLauncher;
 
 impl PluginRuntimeLauncher for UnusedRuntimeLauncher {
     type Runtime = FakeRuntime;
@@ -55,6 +55,7 @@ impl PluginRuntimeLauncher for UnusedRuntimeLauncher {
     fn launch(
         &self,
         _request: PluginLaunchRequest,
+        _log: PluginLogSetup,
     ) -> impl Future<Output = Result<LaunchedRuntime<Self::Runtime>, PluginRuntimeFailure>> + Send
     {
         async { Err(PluginRuntimeFailure::new("runtime launch was not expected")) }
@@ -63,7 +64,7 @@ impl PluginRuntimeLauncher for UnusedRuntimeLauncher {
 
 /// Discards invalidations in tests that assert only returned lifecycle snapshots.
 #[derive(Clone)]
-struct NoopStatusPublisher;
+pub(super) struct NoopStatusPublisher;
 
 impl PluginStatusPublisher for NoopStatusPublisher {
     /// Intentionally ignores an invalidation outside event-focused tests.
@@ -83,7 +84,7 @@ impl PluginNotificationSink for NoopNotificationSink {
 ///
 /// The sender is leaked on purpose: dropping it would close the stream and make the lifecycle
 /// treat every fake launch as a dead reader.
-fn launched_runtime<Runtime>(runtime: Runtime) -> LaunchedRuntime<Runtime> {
+pub(super) fn launched_runtime<Runtime>(runtime: Runtime) -> LaunchedRuntime<Runtime> {
     let (sender, notifications) = mpsc::unbounded_channel();
     std::mem::forget(sender);
     LaunchedRuntime {
@@ -137,6 +138,9 @@ async fn manages_static_skill_plugin_without_a_runtime() {
             .uninstall_plugin(UninstallPluginRequest {
                 plugin_id: plugin_id.clone(),
                 data_disposition: PluginDataDisposition::Delete,
+                // This crate removes packages; it never runs a package program, so nothing here
+                // can be authorized by the flag.
+                hook_execution_acknowledged: false,
             })
             .await
             .expect("uninstall Skill plugin"),
@@ -179,6 +183,9 @@ async fn manages_static_hook_plugin_without_a_runtime() {
             .uninstall_plugin(UninstallPluginRequest {
                 plugin_id: plugin_id.clone(),
                 data_disposition: PluginDataDisposition::Delete,
+                // The Hook's `deinit` belongs to the operation layer, which runs it while the
+                // package is still on disk; this crate only removes the package.
+                hook_execution_acknowledged: false,
             })
             .await
             .expect("uninstall Hook plugin"),
@@ -648,6 +655,9 @@ async fn uninstalls_running_plugin_after_stopping_it() {
             .uninstall_plugin(UninstallPluginRequest {
                 plugin_id: "official/ora.example".to_string(),
                 data_disposition: PluginDataDisposition::Delete,
+                // This crate removes packages; it never runs a package program, so nothing here
+                // can be authorized by the flag.
+                hook_execution_acknowledged: false,
             })
             .await
     });
@@ -725,6 +735,9 @@ async fn uninstall_records_stopped_state_before_package_removal() {
             .uninstall_plugin(UninstallPluginRequest {
                 plugin_id: "official/ora.example".to_string(),
                 data_disposition: PluginDataDisposition::Delete,
+                // This crate removes packages; it never runs a package program, so nothing here
+                // can be authorized by the flag.
+                hook_execution_acknowledged: false,
             })
             .await
     });
@@ -843,10 +856,9 @@ fn expected_hook_plugin() -> InstalledPlugin {
         homepage: None,
         license: None,
         contribution: InstalledPluginContribution::Hook {
-            protocol: "rtk-rewrite-v1".to_string(),
-            command: "rtk".to_string(),
+            executable: "assets/rtk.exe".to_string(),
+            supported_agents: vec!["claude-code".to_string(), "codex".to_string()],
             target: Some("x86_64-pc-windows-msvc".to_string()),
-            tool_version: "0.45.0".to_string(),
         },
         logo: Some(universal_logo("official/rtk-ai.rtk")),
         installation_validity: PluginInstallationValidity::Valid,
@@ -910,6 +922,7 @@ impl PluginRuntimeLauncher for ControllableRuntimeLauncher {
     fn launch(
         &self,
         request: PluginLaunchRequest,
+        _log: PluginLogSetup,
     ) -> impl Future<Output = Result<LaunchedRuntime<Self::Runtime>, PluginRuntimeFailure>> + Send
     {
         let launched = self.launched.clone();
@@ -933,7 +946,7 @@ impl PluginRuntimeLauncher for ControllableRuntimeLauncher {
 
 /// Represents a running fake whose failure future remains pending for this test.
 #[derive(Clone)]
-struct FakeRuntime;
+pub(super) struct FakeRuntime;
 
 impl PluginRuntime for FakeRuntime {
     /// Stops immediately because this test exercises activation rather than shutdown timing.
@@ -974,6 +987,7 @@ impl PluginRuntimeLauncher for FailureRuntimeLauncher {
     fn launch(
         &self,
         _request: PluginLaunchRequest,
+        _log: PluginLogSetup,
     ) -> impl Future<Output = Result<LaunchedRuntime<Self::Runtime>, PluginRuntimeFailure>> + Send
     {
         let runtime = self.runtime.clone();
@@ -1045,6 +1059,7 @@ impl PluginRuntimeLauncher for ImmediateRuntimeLauncher {
     fn launch(
         &self,
         _request: PluginLaunchRequest,
+        _log: PluginLogSetup,
     ) -> impl Future<Output = Result<LaunchedRuntime<Self::Runtime>, PluginRuntimeFailure>> + Send
     {
         let runtime = self.runtime.clone();
@@ -1143,6 +1158,7 @@ impl PluginRuntimeLauncher for QueuedRuntimeLauncher {
     fn launch(
         &self,
         _request: PluginLaunchRequest,
+        _log: PluginLogSetup,
     ) -> impl Future<Output = Result<LaunchedRuntime<Self::Runtime>, PluginRuntimeFailure>> + Send
     {
         let runtime = self.runtime.clone();
@@ -1235,7 +1251,7 @@ description = "Example Skill plugin"
     .expect("write Skill plugin manifest");
 }
 
-/// Writes one processless Hook package with a contained executable and no `main.js`.
+/// Writes one Hook package with a contained executable and no plugin entrypoint.
 fn write_hook_plugin_package(data_dir: &std::path::Path, name: &str) {
     let package_root = package_version_root(data_dir, name);
     fs::create_dir_all(package_root.join("assets")).expect("create Hook plugin assets");
@@ -1245,10 +1261,12 @@ fn write_hook_plugin_package(data_dir: &std::path::Path, name: &str) {
         r#"{
             "schemaVersion": 1,
             "hook": {
-                "protocol": "rtk-rewrite-v1",
                 "executable": "assets/rtk.exe",
-                "command": "rtk",
-                "toolVersion": "0.45.0"
+                "supportedAgents": ["claude-code", "codex"],
+                "lifecycle": {
+                    "init": {"args": ["--init"]},
+                    "deinit": {"args": ["--deinit"]}
+                }
             }
         }"#,
     )

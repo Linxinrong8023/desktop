@@ -17,6 +17,7 @@ import {
   useTaskChangesNavigation,
 } from "../../diff/task-changes-navigation-context";
 import { classifyChatCandidate, type ChatLinkClassification } from "./classify";
+import { writeClipboardText } from "../../editor/text-edit-context-menu";
 import { useChatLinkContext } from "./context";
 
 const INLINE_CODE_CLASS =
@@ -24,7 +25,7 @@ const INLINE_CODE_CLASS =
 
 /** Codex-style file citation: blue path text and a dashed underline on hover. */
 const CHAT_FILE_LINK_CLASS =
-  "inline cursor-pointer border-0 bg-transparent p-0 font-mono text-[0.85em] font-normal text-sky-700 no-underline decoration-sky-700 decoration-dashed underline-offset-[3px] hover:underline focus-visible:rounded-sm focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-sky-400 dark:decoration-sky-400";
+  "inline cursor-pointer border-0 bg-transparent p-0 font-mono text-[0.85em] font-normal text-sky-700 no-underline decoration-sky-700 decoration-dashed underline-offset-[3px] select-text hover:underline focus-visible:rounded-sm focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring dark:text-sky-400 dark:decoration-sky-400";
 
 const CHAT_FILE_LINK_CODE_CLASS =
   "border-0 bg-transparent p-0 font-[inherit] text-[length:inherit] text-inherit leading-[inherit]";
@@ -266,10 +267,10 @@ function LinkedChatFile({
 
   const copyPath = async () => {
     if (osPath === null) return;
-    try {
-      await navigator.clipboard.writeText(osPath);
+    const ok = await writeClipboardText(osPath);
+    if (ok) {
       toast.success(t("locationActions.copied"));
-    } catch {
+    } else {
       toast.error(t("locationActions.copyFailed"));
     }
   };
@@ -278,7 +279,12 @@ function LinkedChatFile({
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger render={<button {...buttonProps} />}>
+      <ContextMenuTrigger
+        // Override the shared trigger's select-none so path text stays in the
+        // transcript selection / clipboard (global button rules also opt out).
+        className="select-text"
+        render={<button {...buttonProps} />}
+      >
         {diffBadge}
         {triggerChildren}
       </ContextMenuTrigger>

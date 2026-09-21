@@ -120,6 +120,27 @@ export interface WorkflowOutputBinding {
   variableSelector: string[];
 }
 
+/** One carried Loop variable with its first-round value and simultaneous feedback source. */
+export interface WorkflowLoopVariable {
+  name: string;
+  valueType: WorkflowVariableValueType;
+  initial:
+    | { kind: "constant"; value: unknown }
+    | { kind: "variable"; selector: string[] };
+  feedback: string[];
+}
+
+/** Executable bounded Loop configuration shared with the Rust snapshot decoder. */
+export interface WorkflowLoopConfig {
+  maxIterations: number;
+  variables: WorkflowLoopVariable[];
+  until: {
+    logic: WorkflowConditionLogic;
+    conditions: WorkflowConditionComparison[];
+  };
+  outputs: WorkflowOutputBinding[];
+}
+
 /** How an Iteration node reacts when one round fails (backend `errorStrategy`). */
 export type WorkflowIterationErrorStrategy = "fail" | "continue";
 
@@ -198,6 +219,10 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   cases?: WorkflowConditionCase[];
   /** Named result bindings of an Output node, resolved from the variable pool at completion. */
   outputs?: WorkflowOutputBinding[];
+  /** Owning Loop id for one child node. */
+  containerId?: string;
+  /** Bounded feedback behavior for a Loop container. */
+  loopConfig?: WorkflowLoopConfig;
   operation?: string;
   toolParameters?: WorkflowToolParameter[];
   waitStrategy?: WorkflowJunctionWaitStrategy;
@@ -230,14 +255,11 @@ export interface WorkflowDefinitionNode {
   type: "workflow";
   position: WorkflowPosition;
   data: WorkflowNodeData;
+  /** React Flow layout parent; must match `data.containerId` for Loop children. */
+  parentId?: string;
   deletable?: boolean;
   initialWidth?: number;
   initialHeight?: number;
-  /**
-   * Iteration containment: a node whose `parentId` references an iteration node executes
-   * inside that iteration's region, once per round. Absent for outer nodes.
-   */
-  parentId?: string;
 }
 
 /** Serializable execution edge with display text kept as plain data. */
@@ -303,6 +325,25 @@ export interface WorkflowNodeFileChange {
   deletions: number;
 }
 
+/** Structured failure persisted on a node run as `payload.error_detail`. */
+export interface WorkflowNodeErrorDetail {
+  kind: string;
+  message: string;
+  sourceChain: string[];
+  attempt: number;
+  resumable: boolean;
+  injectsPreviousFailure: boolean;
+  recordedAt: number;
+}
+
+/** On-demand AI guess persisted on a node run as `payload.ai_diagnosis`. */
+export interface WorkflowNodeAiDiagnosis {
+  text: string;
+  agentCli: string;
+  model: string;
+  generatedAt: number;
+}
+
 export interface GraphWorkflowNodeState {
   status: GraphWorkflowNodeStatus;
   /**
@@ -315,6 +356,14 @@ export interface GraphWorkflowNodeState {
   startedAt?: string;
   finishedAt?: string;
   errorMessage?: string;
+  /** Machine-readable failure detail parsed from `payload.error_detail`. */
+  errorDetail?: WorkflowNodeErrorDetail;
+  /** Snapshot id recorded when this node last ran, from `payload.snapshot_id`. */
+  snapshotId?: string;
+  /** Previous-failure block injected into this attempt's prompt, from `payload.injected_failure_context`. */
+  injectedFailureContext?: string;
+  /** On-demand AI guess stored as `payload.ai_diagnosis`; never used for scheduling or resume. */
+  aiDiagnosis?: WorkflowNodeAiDiagnosis;
   /** ACP stop reason recorded in `payload.stop_reason` when the node succeeded. */
   stopReason?: string;
   /** What this step received when it started (kickoff, upstream, schema…). */
@@ -325,6 +374,18 @@ export interface GraphWorkflowNodeState {
   conversation?: WorkflowNodeConversationItem[];
   /** Incremental worktree changes recorded in `payload.file_changes`. */
   fileChanges?: WorkflowNodeFileChange[];
+}
+
+/** One persisted Loop round with node states keyed inside that execution scope. */
+export interface GraphWorkflowRound {
+  id: string;
+  parentLoopNodeRunId: string;
+  parentLoopNodeId: string;
+  roundIndex: number;
+  status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  nodeStates: Record<string, GraphWorkflowNodeState>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** Lifecycle state for one projected session item. */
@@ -384,6 +445,8 @@ export interface GraphWorkflowRun {
   status: GraphWorkflowRunStatus;
   kickoffInput?: string;
   nodeStates: Record<string, GraphWorkflowNodeState>;
+  /** Complete Loop-round history; repeated child node ids remain isolated per round. */
+  rounds?: GraphWorkflowRound[];
   /**
    * Per-round states of composite-region nodes, grouped by `(nodeId, iteration)`. Region
    * nodes hold one state per executed round; `nodeStates` keeps only each region node's
@@ -396,6 +459,8 @@ export interface GraphWorkflowRun {
   createdAt: string;
   updatedAt: string;
   finishedAt?: string;
+  /** Snapshot this run currently points at; may differ from a node's payload.snapshot_id after a version switch. */
+  snapshotId?: string;
 }
 
 /**

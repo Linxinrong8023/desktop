@@ -65,12 +65,28 @@ pub struct SkillFolderConflictParams {
     pub name: String,
 }
 
+/// Explains why a published snapshot cannot take over an existing run on resume.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "error.ts")]
+pub struct WorkflowSnapshotIncompatibleWithResumeParams {
+    pub reason: String,
+}
+
 /// Carries the user-selected base branch name when Git cannot resolve it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "error.ts")]
 pub struct TaskBaseBranchNotFoundParams {
     pub branch_name: String,
+}
+
+/// Names one extension pack member (or the pack itself) in a pack preflight failure.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "error.ts")]
+pub struct PackMemberParams {
+    pub plugin_id: String,
 }
 
 /// Addresses one stable validation failure to its Setting ID.
@@ -131,6 +147,11 @@ pub enum PublicError {
     AgentNotFound(EmptyErrorParams),
     PluginNotFound(EmptyErrorParams),
     PluginHostIncompatible(EmptyErrorParams),
+    PackMemberDuplicate(PackMemberParams),
+    PackSelfReference(PackMemberParams),
+    PackMemberNotFound(PackMemberParams),
+    PackMemberNested(PackMemberParams),
+    PackNoApplicableMembers(PackMemberParams),
     MarketplaceS3CredentialsRequired(EmptyErrorParams),
     MarketplaceArtifactRetrievalFieldInvalid(MarketplaceArtifactRetrievalFieldInvalidParams),
     PluginConfigurationDeclarationInvalid(EmptyErrorParams),
@@ -223,9 +244,12 @@ pub enum PublicError {
     WorkflowRoleNotFound(EmptyErrorParams),
     WorkflowRunStartFailed(EmptyErrorParams),
     WorkflowRunNotRestartable(EmptyErrorParams),
+    WorkflowRunNotResumable(EmptyErrorParams),
+    WorkflowSnapshotIncompatibleWithResume(WorkflowSnapshotIncompatibleWithResumeParams),
     WorkflowRunNotEditable(EmptyErrorParams),
     WorkflowNodeNotFound(EmptyErrorParams),
     WorkflowNodeNotAwaitingInput(EmptyErrorParams),
+    WorkflowNodeNotDiagnosable(EmptyErrorParams),
 }
 
 impl PublicError {
@@ -246,6 +270,11 @@ impl PublicError {
             Self::AgentNotFound(_) => "agent_not_found",
             Self::PluginNotFound(_) => "plugin_not_found",
             Self::PluginHostIncompatible(_) => "plugin_host_incompatible",
+            Self::PackMemberDuplicate(_) => "pack_member_duplicate",
+            Self::PackSelfReference(_) => "pack_self_reference",
+            Self::PackMemberNotFound(_) => "pack_member_not_found",
+            Self::PackMemberNested(_) => "pack_member_nested",
+            Self::PackNoApplicableMembers(_) => "pack_no_applicable_members",
             Self::MarketplaceS3CredentialsRequired(_) => "marketplace_s3_credentials_required",
             Self::MarketplaceArtifactRetrievalFieldInvalid(_) => {
                 "marketplace_artifact_retrieval_field_invalid"
@@ -346,9 +375,14 @@ impl PublicError {
             Self::WorkflowRoleNotFound(_) => "workflow_role_not_found",
             Self::WorkflowRunStartFailed(_) => "workflow_run_start_failed",
             Self::WorkflowRunNotRestartable(_) => "workflow_run_not_restartable",
+            Self::WorkflowRunNotResumable(_) => "workflow_run_not_resumable",
+            Self::WorkflowSnapshotIncompatibleWithResume(_) => {
+                "workflow_snapshot_incompatible_with_resume"
+            }
             Self::WorkflowRunNotEditable(_) => "workflow_run_not_editable",
             Self::WorkflowNodeNotFound(_) => "workflow_node_not_found",
             Self::WorkflowNodeNotAwaitingInput(_) => "workflow_node_not_awaiting_input",
+            Self::WorkflowNodeNotDiagnosable(_) => "workflow_node_not_diagnosable",
         }
     }
 }
@@ -370,7 +404,9 @@ pub(crate) fn export(config: &Config) -> Result<(), ExportError> {
     OpenLocationTarget::export_all(config)?;
     OpenLocationFailedParams::export_all(config)?;
     SkillFolderConflictParams::export_all(config)?;
+    WorkflowSnapshotIncompatibleWithResumeParams::export_all(config)?;
     TaskBaseBranchNotFoundParams::export_all(config)?;
+    PackMemberParams::export_all(config)?;
     PluginConfigurationFieldError::export_all(config)?;
     PluginConfigurationValidationParams::export_all(config)?;
     MarketplaceArtifactRetrievalFieldInvalidParams::export_all(config)?;
@@ -383,9 +419,10 @@ pub(crate) fn export(config: &Config) -> Result<(), ExportError> {
 mod tests {
     use super::{
         ContractError, EmptyErrorParams, MarketplaceArtifactRetrievalFieldInvalidParams,
-        OpenLocationFailedParams, OpenLocationTarget, PluginConfigurationValidationParams,
-        PublicError, RequestId, SessionMcpSetupFailedParams, SkillFolderConflictParams,
-        TaskBaseBranchNotFoundParams,
+        OpenLocationFailedParams, OpenLocationTarget, PackMemberParams,
+        PluginConfigurationValidationParams, PublicError, RequestId, SessionMcpSetupFailedParams,
+        SkillFolderConflictParams, TaskBaseBranchNotFoundParams,
+        WorkflowSnapshotIncompatibleWithResumeParams,
     };
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -430,6 +467,21 @@ mod tests {
             PublicError::AgentNotFound(empty),
             PublicError::PluginNotFound(empty),
             PublicError::PluginHostIncompatible(empty),
+            PublicError::PackMemberDuplicate(PackMemberParams {
+                plugin_id: "official/ora-space.python-core".to_string(),
+            }),
+            PublicError::PackSelfReference(PackMemberParams {
+                plugin_id: "official/ora-space.python-extension-pack".to_string(),
+            }),
+            PublicError::PackMemberNotFound(PackMemberParams {
+                plugin_id: "official/ora-space.python-core".to_string(),
+            }),
+            PublicError::PackMemberNested(PackMemberParams {
+                plugin_id: "official/ora-space.nested-pack".to_string(),
+            }),
+            PublicError::PackNoApplicableMembers(PackMemberParams {
+                plugin_id: "official/ora-space.python-extension-pack".to_string(),
+            }),
             PublicError::MarketplaceS3CredentialsRequired(empty),
             PublicError::MarketplaceArtifactRetrievalFieldInvalid(
                 MarketplaceArtifactRetrievalFieldInvalidParams {
@@ -533,8 +585,15 @@ mod tests {
             PublicError::WorkflowRunCannotUseDraftSnapshot(empty),
             PublicError::WorkflowRunNotFound(empty),
             PublicError::WorkflowRunActive(empty),
+            PublicError::WorkflowRunNotResumable(empty),
+            PublicError::WorkflowSnapshotIncompatibleWithResume(
+                WorkflowSnapshotIncompatibleWithResumeParams {
+                    reason: "node_missing:b".to_string(),
+                },
+            ),
             PublicError::WorkflowNodeNotFound(empty),
             PublicError::WorkflowNodeNotAwaitingInput(empty),
+            PublicError::WorkflowNodeNotDiagnosable(empty),
         ];
 
         for error in &samples {
@@ -553,6 +612,11 @@ mod tests {
                 | PublicError::AgentNotFound(_)
                 | PublicError::PluginNotFound(_)
                 | PublicError::PluginHostIncompatible(_)
+                | PublicError::PackMemberDuplicate(_)
+                | PublicError::PackSelfReference(_)
+                | PublicError::PackMemberNotFound(_)
+                | PublicError::PackMemberNested(_)
+                | PublicError::PackNoApplicableMembers(_)
                 | PublicError::MarketplaceS3CredentialsRequired(_)
                 | PublicError::MarketplaceArtifactRetrievalFieldInvalid(_)
                 | PublicError::PluginConfigurationDeclarationInvalid(_)
@@ -645,9 +709,12 @@ mod tests {
                 | PublicError::WorkflowRoleNotFound(_)
                 | PublicError::WorkflowRunStartFailed(_)
                 | PublicError::WorkflowRunNotRestartable(_)
+                | PublicError::WorkflowRunNotResumable(_)
+                | PublicError::WorkflowSnapshotIncompatibleWithResume(_)
                 | PublicError::WorkflowRunNotEditable(_)
                 | PublicError::WorkflowNodeNotFound(_)
-                | PublicError::WorkflowNodeNotAwaitingInput(_) => {}
+                | PublicError::WorkflowNodeNotAwaitingInput(_)
+                | PublicError::WorkflowNodeNotDiagnosable(_) => {}
             }
         }
 
@@ -658,7 +725,7 @@ mod tests {
     #[test]
     fn public_error_codes_match_serde_tags_for_every_variant() {
         let samples = public_error_samples();
-        assert_eq!(samples.len(), 102);
+        assert_eq!(samples.len(), 110);
 
         for error in samples {
             let serialized = serde_json::to_value(&error).unwrap();
@@ -669,5 +736,25 @@ mod tests {
                 "code mismatch for {error:?}"
             );
         }
+    }
+
+    /// The resume-switch conflict round-trips the machine-readable incompatibility reason.
+    #[test]
+    fn workflow_snapshot_incompatible_with_resume_round_trips_its_reason() {
+        let error = PublicError::WorkflowSnapshotIncompatibleWithResume(
+            WorkflowSnapshotIncompatibleWithResumeParams {
+                reason: "node_missing:b".to_string(),
+            },
+        );
+        let serialized = serde_json::to_value(&error).unwrap();
+        assert_eq!(
+            serialized,
+            json!({
+                "code": "workflow_snapshot_incompatible_with_resume",
+                "params": { "reason": "node_missing:b" },
+            })
+        );
+        let deserialized: PublicError = serde_json::from_value(serialized).unwrap();
+        assert_eq!(deserialized, error);
     }
 }

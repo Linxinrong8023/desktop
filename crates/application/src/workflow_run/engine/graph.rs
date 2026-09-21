@@ -45,6 +45,8 @@ pub struct WorkflowGraph {
     /// Rank of each node in the unique `toposort` order, used to order transitive closures.
     topo_rank: HashMap<NodeIndex, usize>,
     global_variables: Vec<WorkflowGlobalVariable>,
+    /// Containers own child graphs; ordinary topology queries stay within this scope.
+    pub(super) loops: HashMap<String, (super::loop_config::LoopConfig, WorkflowGraph)>,
     /// Regions by owning composite node id.
     regions: HashMap<String, CompositeRegion>,
     /// Member node id → owning composite node id.
@@ -393,8 +395,8 @@ impl WireAgentSkill {
 }
 
 impl WorkflowGraph {
-    /// Parses a frozen React Flow graph JSON into a validated DAG.
-    pub fn parse(source: &str) -> Result<Self, GraphError> {
+    /// Parses one scope after container membership and cross-scope edges have been validated.
+    pub(super) fn parse_flat(source: &str) -> Result<Self, GraphError> {
         let envelope: ReactFlowEnvelope =
             serde_json::from_str(source).map_err(|_| GraphError::InvalidJson)?;
         let wire_nodes = envelope.nodes.ok_or(GraphError::MissingNodes)?;
@@ -547,6 +549,7 @@ impl WorkflowGraph {
             index_by_id,
             topo_rank,
             global_variables,
+            loops: HashMap::new(),
             regions: HashMap::new(),
             region_by_member: HashMap::new(),
         };
@@ -723,11 +726,6 @@ impl WorkflowGraph {
                     .all(|predecessor| completed.contains(predecessor.id.as_str()))
             })
             .collect()
-    }
-
-    /// Returns the first node whose type v1 cannot execute, in node-index order.
-    pub fn first_unsupported_node(&self) -> Option<&WorkflowGraphNode> {
-        self.nodes().find(|node| !node.node_type.supported())
     }
 
     /// Returns the ids of nodes not reachable from the unique start node via directed edges.

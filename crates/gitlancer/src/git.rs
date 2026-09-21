@@ -1,8 +1,11 @@
 pub mod base_branch;
 pub mod branch;
+pub mod branch_clone;
+pub mod checkpoint;
 pub mod commit;
 pub mod config;
 pub mod diff;
+mod inspection;
 pub mod push;
 pub mod repository;
 pub mod status;
