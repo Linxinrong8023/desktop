@@ -2,8 +2,9 @@
 
 English | [中文](local-runtime.zh.md)
 
-`ora-controller` owns durable local clone intent and result takeover. It does not execute Git, replace
-Backend writers, expose a Client transport, or act as Cloud authority. Linux sessions use the existing
+`ora-controller` owns durable local clone intent and result takeover, and its executable hosts the
+transitional clone API that [minicloud](../minicloud/runtime.md) calls. It does not execute Git, replace
+Backend writers, or act as Cloud authority. Linux sessions use the existing
 [Node IPC](../node/local-ipc.md) and length-prefixed JSON messages, without application credentials.
 
 ## Acceptance and persistence
@@ -27,44 +28,79 @@ incarnations are retained, while query reporters and heartbeats must match the c
 
 ## Independent executable
 
-`ControllerRuntime::open(RuntimeConfig)` also supports embedding. `handle()` exposes durable clone
+`ControllerRuntime::open(RuntimeConfig)` supports embedding. `handle()` exposes durable clone
 acceptance, operation listing and lookup; `run(shutdown)` owns reconnect loops without installing signal
-handlers. Missing lookup is distinct from an accepted operation without a terminal result. Callers stop
-accepting requests, await shutdown and release handles to release the database lease. The standalone
-executable uses this same runtime and supplies its own process signals.
+handlers. Missing lookup is distinct from an accepted operation without a terminal result. The library
+depends on no listener; `Service::start(DeploymentConfig, Transport, NodeHosting)` composes the API
+listener, the sole runtime owner and an optionally hosted Node for the executable and for tests.
 
 Build `cargo build -p ora-controller -p ora-node -p ora-process-host -p ora-process-guardian`.
-Deploy host and Node separately; configure Node's owner to match this ControllerId. Then run
-`ora-controller /absolute/path/controller.json`:
+Deployment state lives in one configuration file; per-process composition is given on the command line:
+
+```text
+ora-controller --config /absolute/path/controller.json [--single-node]
+               [--transport tcp|unix] [--host 127.0.0.1] [--port 4820] [--socket /path/api.sock]
+```
+
+| Flag | Rule |
+|---|---|
+| `--transport tcp` (default) | `--host` defaults to `127.0.0.1`, `--port` to `4820`. A non-loopback host is accepted with a warning: the API has no authentication, so loopback is a deployment restriction, not a security guarantee. |
+| `--transport unix` | Requires `--socket`, an absolute path directly inside `home_directory`, created with the same private-socket rules as the Node endpoint. `--host`/`--port` are rejected. |
+| `--single-node` | Starts the configured Node from the `single_node` section and stops it on normal shutdown; see below. |
+
+Invalid flag combinations and configuration are rejected before the database lease is taken.
 
 ```json
 {
-  "home_directory": "/home/node/controller",
-  "controller_id": "deployment-controller",
-  "protected_state_directories": ["/home/node/state", "/home/node/process"],
-  "nodes": [
-    {
-      "node_id": "deployment-node",
-      "endpoint": "/home/node/state/control.sock"
-    }
-  ],
-  "session": { "io_timeout_ms": 10000, "query_interval_ms": 1000 },
-  "reconnect_ms": 1000,
-  "timezone": "Asia/Shanghai"
+  "controller": {
+    "home_directory": "/home/node/controller",
+    "controller_id": "deployment-controller",
+    "protected_state_directories": ["/home/node/state", "/home/node/process"],
+    "nodes": [
+      {
+        "node_id": "deployment-node",
+        "endpoint": "/home/node/state/control.sock"
+      }
+    ],
+    "session": { "io_timeout_ms": 10000, "query_interval_ms": 1000 },
+    "reconnect_ms": 1000,
+    "timezone": "Asia/Shanghai"
+  },
+  "api": { "node_id": "deployment-node" },
+  "single_node": {
+    "node_executable": "/opt/ora/bin/ora-node",
+    "node_config": "/home/node/config/node.json",
+    "ready_timeout_ms": 30000,
+    "stop_timeout_ms": 30000
+  }
 }
 ```
 
-Declare all Node/host/guardian state roots in `protected_state_directories`; configured endpoint parents
-are also protected. Overlap with Controller state is rejected before opening its database. The executable
-recovers already accepted records; its configuration file and stdin are not business command channels.
-Until a Client entry exists, acceptance is through the Rust interface, not direct SQLite editing.
+`api.node_id` names the configured Node that accepted clones are dispatched to; callers never choose a
+Node. Declare all Node/host/guardian state roots in `protected_state_directories`; configured endpoint
+parents are also protected. Overlap with Controller state is rejected before opening its database. The
+executable recovers already accepted records; its configuration file and stdin are not business command
+channels. Deploy host and Node separately unless hosting the Node, and configure Node's owner to match
+this ControllerId.
 
-Each configured Node has an independent reconnect loop over the same Controller owner. A handshake
-checks Node identity and clone capability. Periodic status queries restore original execution state;
-Unknown permits at most one exact command retransmission per connection, never a fresh execution.
-Queries also keep sessions active; configure their interval below Node's idle frame deadline. Connection
-loss, unsupported peers and persistence errors do not manufacture a failed clone or discard its records.
-Normal Controller shutdown closes sessions, not accepted Node executions.
+With `--single-node`, `nodes` must contain exactly the `api.node_id` Node. Before opening state, the
+executable reads `node_config` read-only and refuses to start when its `ipc.controller_id` or
+`ipc.endpoint` does not match, or when something already accepts connections on the endpoint. It then
+starts `node_executable <node_config>` in its own process group (no new session), waits up to
+`ready_timeout_ms` for the endpoint, and only then binds the API. Process host and guardian are
+prerequisites: the executable neither deploys nor starts them. Controller death alone signals nothing to
+the Node, so an accepted clone keeps running; a group-level stop from an operator or launcher reaches
+both. If the hosted Node exits on its own, the Controller shuts down and exits with failure rather than
+accepting undispatchable requests.
+
+Normal shutdown stops in order: API admission (bounded wait for in-flight requests), Node sessions, the
+hosted Node (`SIGTERM`, waiting up to `stop_timeout_ms`; never escalated to `SIGKILL`), then the database
+lease. Accepted Node executions are never cancelled by this process stopping.
+
+The JSON surface is the transitional clone API documented under
+[minicloud](../minicloud/runtime.md#http-interface); its DTOs live in `ora-contracts::controller_api`.
+The Cloud-facing contract will be defined by proto and served on the same listener; until then the JSON
+surface is the only client entry.
 
 ## Verification and remaining scope
 

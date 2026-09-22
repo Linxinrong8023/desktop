@@ -40,6 +40,10 @@ pub(super) const BINDINGS: &[Binding] = &[
         permission: Permission::MainWebview,
     },
     Binding::Native {
+        handler: "commands::workflow::read_workflow_import",
+        permission: Permission::MainWebview,
+    },
+    Binding::Native {
         handler: "diagnostic_logs::download_today_log",
         permission: Permission::MainWebview,
     },

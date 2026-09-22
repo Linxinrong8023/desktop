@@ -102,6 +102,7 @@ desktop_command_registry! {
     commands::workspace::push_workspace_branch,
     commands::plugin::read_plugin_readme,
     commands::files::read_project_file,
+    commands::workflow::read_workflow_import,
     commands::files::read_workspace_file,
     commands::session::rename_session,
     commands::workflow_run::rename_workflow_run,

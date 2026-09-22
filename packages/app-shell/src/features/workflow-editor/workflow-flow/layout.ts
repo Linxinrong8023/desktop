@@ -53,6 +53,107 @@ export function shouldPersistWorkflowNodeChanges(
   );
 }
 
+/** True when every change is a plain React Flow size probe (no resize gesture). */
+export function isPlainMeasurementOnly(
+  changes: readonly NodeChange[],
+): boolean {
+  return (
+    changes.length > 0 &&
+    changes.every(
+      (change) => change.type === "dimensions" && change.resizing !== true,
+    )
+  );
+}
+
+/**
+ * Drops extent-clamp position writes that are not part of a user drag.
+ *
+ * Iteration/loop children use `extent: "parent"`. An undersized frame clamps
+ * members and emits bare position changes (no `dragging` flag). Committing
+ * those clamps rewrites React state every frame and thrash the canvas.
+ * Real drags always set `dragging` true while moving and false on drop.
+ */
+export function withoutExtentClampPositions<TNode extends Node = Node>(
+  changes: readonly NodeChange<TNode>[],
+): NodeChange<TNode>[] {
+  return changes.filter(
+    (change) =>
+      change.type !== "position" ||
+      change.dragging === true ||
+      change.dragging === false,
+  );
+}
+
+/** True when changes are only selection and/or plain size probes (no authored edit). */
+export function isNonAuthoringNodeChanges<TNode extends Node = Node>(
+  changes: readonly NodeChange<TNode>[],
+): boolean {
+  return (
+    changes.length > 0 &&
+    changes.every(
+      (change) =>
+        change.type === "select" ||
+        (change.type === "dimensions" && change.resizing !== true),
+    )
+  );
+}
+
+/** Compares authored iteration frame boxes so measurement churn can bail out. */
+export function iterationFrameSizesEqual(
+  left: readonly Node<WorkflowNodeData, "workflow">[],
+  right: readonly Node<WorkflowNodeData, "workflow">[],
+): boolean {
+  const rightById = new Map(
+    right
+      .filter((node) => node.data.kind === "iteration")
+      .map((node) => [node.id, iterationExpandedSize(node)] as const),
+  );
+  let leftCount = 0;
+  for (const node of left) {
+    if (node.data.kind !== "iteration") {
+      continue;
+    }
+    leftCount += 1;
+    const other = rightById.get(node.id);
+    if (other === undefined) {
+      return false;
+    }
+    const size = iterationExpandedSize(node);
+    if (size.width !== other.width || size.height !== other.height) {
+      return false;
+    }
+  }
+  return leftCount === rightById.size;
+}
+
+/** Compares authored node geometry/data, ignoring React Flow live probes. */
+export function authoredWorkflowNodesEqual(
+  left: readonly Node<WorkflowNodeData, "workflow">[],
+  right: readonly Node<WorkflowNodeData, "workflow">[],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const rightById = new Map(right.map((node) => [node.id, node]));
+  for (const node of left) {
+    const other = rightById.get(node.id);
+    if (other === undefined) {
+      return false;
+    }
+    if (
+      node.parentId !== other.parentId ||
+      node.position.x !== other.position.x ||
+      node.position.y !== other.position.y ||
+      node.initialWidth !== other.initialWidth ||
+      node.initialHeight !== other.initialHeight ||
+      JSON.stringify(node.data) !== JSON.stringify(other.data)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Projects Loop children into bounded, auto-expanding React Flow containers. */
 export function containWorkflowCanvasNodes(
   nodes: readonly Node<WorkflowNodeData, "workflow">[],

@@ -83,8 +83,12 @@ import { useWorkflowAgentModels } from "../../state/hooks/use-workflow-agent-mod
 import { localizeContractError } from "../../i18n/contract-error";
 import { WorkflowCanvas } from "./workflow-canvas";
 import {
+  authoredWorkflowNodesEqual,
+  isNonAuthoringNodeChanges,
+  iterationFrameSizesEqual,
   organizeWorkflowNodes,
   shouldPersistWorkflowNodeChanges,
+  withoutExtentClampPositions,
 } from "./workflow-flow/layout";
 import type { WorkflowCanvasNode } from "./workflow-flow/types";
 import { WorkflowInspector } from "./workflow-inspector";
@@ -260,9 +264,48 @@ function stripDerivedWorkflowNodeFields(
   delete persisted.expandParent;
   delete persisted.hidden;
   delete persisted.zIndex;
+  delete persisted.measured;
+  delete persisted.selected;
+  delete persisted.dragging;
+  delete persisted.resizing;
   const data = { ...node.data };
   delete data.regionMemberCount;
   return { ...persisted, data };
+}
+
+/**
+ * Analysis only needs reachability topology. Geometry and live probes must stay
+ * out of the query key or every ResizeObserver tick re-runs analyzeWorkflow and
+ * repaints unused badges that remeasure the same cards.
+ */
+function stripWorkflowNodeForAnalysis(
+  node: Node<WorkflowNodeData, "workflow">,
+): Node<WorkflowNodeData, "workflow"> {
+  const data = { ...node.data };
+  delete data.regionMemberCount;
+  return {
+    id: node.id,
+    type: node.type,
+    position: { x: 0, y: 0 },
+    data,
+    ...(node.parentId === undefined ? {} : { parentId: node.parentId }),
+  };
+}
+
+/** True when selected flags match for every node id. */
+function workflowSelectionEqual(
+  left: readonly { id: string; selected?: boolean }[],
+  right: readonly { id: string; selected?: boolean }[],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  const selectedById = new Map(
+    right.map((node) => [node.id, node.selected === true]),
+  );
+  return left.every(
+    (node) => selectedById.get(node.id) === (node.selected === true),
+  );
 }
 
 /** Provides one React Flow store to the canvas and its sibling inspector. */
@@ -700,19 +743,30 @@ function WorkflowEditorContent({
         : { ...workflow, ...previewedVersion.graph },
     [previewedVersion, workflow],
   );
-  const analysisGraph = useMemo(
-    () =>
-      serializeWorkflowGraph({
-        nodes: displayedWorkflow?.nodes ?? [],
-        edges: (displayedWorkflow?.edges ?? []).map((edge) => ({
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-        })),
-        viewport: displayedWorkflow?.viewport ?? { x: 0, y: 0, zoom: 1 },
-      }),
-    [displayedWorkflow],
-  );
+  const analysisGraph = useMemo(() => {
+    if (displayedWorkflow === null) {
+      return serializeWorkflowGraph({
+        nodes: [],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+      });
+    }
+    return serializeWorkflowGraph({
+      nodes: displayedWorkflow.nodes.map(stripWorkflowNodeForAnalysis),
+      edges: displayedWorkflow.edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        ...(edge.sourceHandle == null
+          ? {}
+          : { sourceHandle: edge.sourceHandle }),
+        ...(edge.targetHandle == null
+          ? {}
+          : { targetHandle: edge.targetHandle }),
+      })),
+      viewport: { x: 0, y: 0, zoom: 1 },
+    });
+  }, [displayedWorkflow]);
   const analysis = useWorkflowAnalysis(resolvedWorkflowId ?? "", analysisGraph);
   const loadCause =
     library.error ?? (resolvedWorkflowId !== null ? draftQuery.error : null);
@@ -837,6 +891,11 @@ function WorkflowEditorContent({
         ? null
         : captureWorkflowHistorySnapshot(current);
     const next = updater(current);
+    // Identity bail prevents measurement/select no-ops from re-rendering the
+    // canvas or bumping the autosave generation (which would stale-loop saves).
+    if (next === current) {
+      return;
+    }
     workflowRef.current = next;
     setWorkflow(next);
     if (options.history !== undefined && before !== null) {
@@ -879,8 +938,22 @@ function WorkflowEditorContent({
       return "skipped";
     }
     const snapshot = workflowFromCanvasSnapshot(current, toObject());
-    workflowRef.current = snapshot;
-    setWorkflow(snapshot);
+    // Avoid re-rendering from autosave when only live React Flow probes moved;
+    // a needless setWorkflow mid-save bumps measurement and can stale-loop drafts.
+    if (
+      !authoredWorkflowNodesEqual(current.nodes, snapshot.nodes) ||
+      current.viewport.x !== snapshot.viewport.x ||
+      current.viewport.y !== snapshot.viewport.y ||
+      current.viewport.zoom !== snapshot.viewport.zoom ||
+      JSON.stringify(current.annotations ?? []) !==
+        JSON.stringify(snapshot.annotations ?? []) ||
+      JSON.stringify(current.edges) !== JSON.stringify(snapshot.edges)
+    ) {
+      workflowRef.current = snapshot;
+      setWorkflow(snapshot);
+    } else {
+      workflowRef.current = { ...current, viewport: snapshot.viewport };
+    }
     const startedGeneration = editGenerationRef.current;
     setManagerError(null);
     try {
@@ -2009,9 +2082,13 @@ function WorkflowEditorContent({
 
   /** Applies React Flow node changes directly to the active graph. */
   function changeNodes(changes: NodeChange<WorkflowCanvasNode>[]): void {
-    const persistable = shouldPersistWorkflowNodeChanges(changes);
+    const appliedChanges = withoutExtentClampPositions(changes);
+    if (appliedChanges.length === 0) {
+      return;
+    }
+    const persistable = shouldPersistWorkflowNodeChanges(appliedChanges);
     const removedNodeIds = new Set(
-      changes
+      appliedChanges
         .filter((change) => change.type === "remove")
         .map((change) => change.id),
     );
@@ -2020,13 +2097,14 @@ function WorkflowEditorContent({
     // undershoot a tall member and React Flow's parent extent then clamps that member
     // up over the region's internal affordances. Re-fitting frames whenever plain
     // measurements arrive releases the clamp without persisting a no-edit workflow.
-    const measured = changes.some(
+    const measured = appliedChanges.some(
       (change) => change.type === "dimensions" && change.resizing !== true,
     );
-    beginIterationResizeHistory(changes);
+    const nonAuthoring = isNonAuthoringNodeChanges(appliedChanges);
+    beginIterationResizeHistory(appliedChanges);
     updateWorkflow(
       (current) => {
-        const nextNodes = applyNodeChanges<WorkflowCanvasNode>(changes, [
+        const nextNodes = applyNodeChanges<WorkflowCanvasNode>(appliedChanges, [
           ...current.nodes,
           ...(current.annotations ?? []),
         ]);
@@ -2037,12 +2115,65 @@ function WorkflowEditorContent({
               (node): node is Node<WorkflowNodeData, "workflow"> =>
                 !isWorkflowAnnotationNode(node),
             ),
-            changes,
+            appliedChanges,
           ),
           annotations: nextNodes.filter(isWorkflowAnnotationNode),
         };
         if (measured) {
           nextWorkflow = expandIterationFrames(nextWorkflow);
+        }
+        // Plain size probes (often batched with select bookkeeping) rewrite React
+        // Flow fields on every ResizeObserver tick. Committing measurements when
+        // frames already fit re-renders and remeasures — the flicker loop. Pure
+        // selection batches still apply; measurement-only noise is dropped.
+        if (
+          measured &&
+          nonAuthoring &&
+          removedNodeIds.size === 0 &&
+          iterationFrameSizesEqual(current.nodes, nextWorkflow.nodes)
+        ) {
+          const selectionChanges = appliedChanges.filter(
+            (change) => change.type === "select",
+          );
+          if (selectionChanges.length === 0) {
+            return current;
+          }
+          const selectedNodes = applyNodeChanges<WorkflowCanvasNode>(
+            selectionChanges,
+            [...current.nodes, ...(current.annotations ?? [])],
+          );
+          const nextNodes = selectedNodes.filter(
+            (node): node is Node<WorkflowNodeData, "workflow"> =>
+              !isWorkflowAnnotationNode(node),
+          );
+          const nextAnnotations = selectedNodes.filter(
+            isWorkflowAnnotationNode,
+          );
+          if (
+            workflowSelectionEqual(current.nodes, nextNodes) &&
+            workflowSelectionEqual(current.annotations ?? [], nextAnnotations)
+          ) {
+            return current;
+          }
+          return {
+            ...current,
+            nodes: nextNodes,
+            annotations: nextAnnotations,
+          };
+        }
+        // Drop any remaining non-persistable churn that did not change authored
+        // geometry/data (e.g. measured-only writes mixed with other RF noise).
+        if (
+          !persistable &&
+          removedNodeIds.size === 0 &&
+          authoredWorkflowNodesEqual(current.nodes, nextWorkflow.nodes) &&
+          workflowSelectionEqual(current.nodes, nextWorkflow.nodes) &&
+          workflowSelectionEqual(
+            current.annotations ?? [],
+            nextWorkflow.annotations ?? [],
+          )
+        ) {
+          return current;
         }
         if (removedNodeIds.size === 0) {
           return nextWorkflow;
@@ -2057,7 +2188,7 @@ function WorkflowEditorContent({
       },
       { persist: persistable },
     );
-    commitIterationResizeHistory(changes);
+    commitIterationResizeHistory(appliedChanges);
     if (clearedCollectSelectorIterationIds.length > 0) {
       toast.warning(
         t("settings.workflow.iteration.collectTargetDeleted", {

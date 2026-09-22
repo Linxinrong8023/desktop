@@ -94,8 +94,10 @@ export function IterationNodeFrame({
   useLayoutEffect(() => {
     // The internal start handle appears only in expanded mode. Refreshing after the DOM commit
     // keeps React Flow's handle registry aligned with the presentation-only composite chrome.
+    // Size changes must not re-enter updateNodeInternals: that remeasures members, which
+    // expands frames again, which retoggles this effect and flickers nested canvases.
     updateNodeInternals(id);
-  }, [collapsed, expandedHeight, expandedWidth, id, updateNodeInternals]);
+  }, [collapsed, id, updateNodeInternals]);
 
   return (
     <div

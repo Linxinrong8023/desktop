@@ -104,20 +104,27 @@ async fn relay(
     tokio::select! { result = upstream => result, result = downstream => result }
 }
 
-/// Runs the real Controller recovery executable with no file-based business command channel.
+/// Runs the real Controller recovery executable with no file-based business command channel;
+/// its API listens on an ephemeral loopback port that these tests never call.
 pub(super) fn launch(fixture: &Fixture, proxy: &Proxy) -> ChildGuard {
     let path = fixture.path().join("controller.json");
     fs::write(&path, serde_json::to_vec(&serde_json::json!({
-        "home_directory": fixture.path().join("controller"), "controller_id": "owner",
-        "protected_state_directories": [fixture.config().home_directory, fixture.process().host_directory],
-        "nodes": [{ "node_id": "test-node", "endpoint": proxy.endpoint }],
-        "session": { "io_timeout_ms": 5000, "query_interval_ms": 100 }, "reconnect_ms": 100, "timezone": "Asia/Shanghai",
+        "controller": {
+            "home_directory": fixture.path().join("controller"), "controller_id": "owner",
+            "protected_state_directories": [fixture.config().home_directory, fixture.process().host_directory],
+            "nodes": [{ "node_id": "test-node", "endpoint": proxy.endpoint }],
+            "session": { "io_timeout_ms": 5000, "query_interval_ms": 100 }, "reconnect_ms": 100, "timezone": "Asia/Shanghai",
+        },
+        "api": { "node_id": "test-node" },
+        "single_node": null,
     })).unwrap()).unwrap();
     ChildGuard(
         Command::new(
             std::path::Path::new(env!("CARGO_BIN_EXE_ora-node")).with_file_name("ora-controller"),
         )
+        .arg("--config")
         .arg(path)
+        .args(["--port", "0"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())

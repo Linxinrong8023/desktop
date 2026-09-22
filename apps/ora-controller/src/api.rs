@@ -1,11 +1,11 @@
+use crate::{CloneOperation, ControllerHandle, Error};
 use axum::{
     Json, Router,
     extract::{Path, State, rejection::JsonRejection},
     http::StatusCode,
     routing::get,
 };
-use ora_contracts::minicloud::*;
-use ora_controller::{CloneOperation, ControllerHandle, Error};
+use ora_contracts::controller_api::*;
 use ora_node_protocol::*;
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ struct App {
 }
 type Failure = (StatusCode, Json<MiniError>);
 
-/// Composes only the clone application surface; no Desktop bindings or Node wire messages leak through HTTP.
+/// Composes only the transitional clone surface; no Desktop bindings or Node wire messages leak through HTTP.
 pub(super) fn router(controller: ControllerHandle, node: NodeId) -> Router {
     Router::new()
         .route("/api/clones", get(list).post(submit))
@@ -32,7 +32,8 @@ fn failure(error: Error) -> Failure {
         | Error::Sql(_)
         | Error::Encoding(_)
         | Error::InvalidStorage
-        | Error::Injected => (StatusCode::SERVICE_UNAVAILABLE, MiniErrorCode::Unavailable),
+        | Error::Injected
+        | Error::Configuration(_) => (StatusCode::SERVICE_UNAVAILABLE, MiniErrorCode::Unavailable),
     };
     (status, Json(MiniError { code }))
 }

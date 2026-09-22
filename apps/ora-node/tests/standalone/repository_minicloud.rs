@@ -1,10 +1,12 @@
 use super::*;
 use crate::support::{ChildGuard, until};
-use ora_contracts::minicloud::*;
-use ora_controller::{NodeEndpoint, RuntimeConfig, SessionConfig};
-use ora_minicloud_server::ServerConfig;
+use ora_contracts::controller_api::*;
+use ora_controller::{
+    ApiConfig, DeploymentConfig, NodeEndpoint, NodeHosting, RuntimeConfig, SessionConfig,
+};
 use pretty_assertions::assert_eq;
 use std::{
+    os::unix::process::CommandExt,
     process::{Command, Stdio},
     time::Duration,
 };
@@ -64,22 +66,41 @@ async fn truncated_acceptance(address: String, input: &MiniCloneRequest) -> Mini
     relay.await.unwrap()
 }
 
-/// Starts a production server process and reads its actual ephemeral loopback address.
-fn launch(fixture: &Fixture, config: &ServerConfig) -> (ChildGuard, String) {
-    let path = fixture.path().join("minicloud.json");
+/// Starts the production Controller executable on loopback and reads its actual bound address.
+/// Port 0 picks an ephemeral port; restarts pass the first address's port back to keep clients stable.
+pub(super) fn launch(
+    fixture: &Fixture,
+    config: &DeploymentConfig,
+    port: u16,
+    hosting: NodeHosting,
+) -> (ChildGuard, String) {
+    let path = fixture.path().join("controller.json");
     fs::write(&path, serde_json::to_vec(config).unwrap()).unwrap();
-    let log = fixture.path().join("minicloud.log");
-    let child = ChildGuard(
-        Command::new(
-            std::path::Path::new(env!("CARGO_BIN_EXE_ora-node"))
-                .with_file_name("ora-minicloud-server"),
-        )
+    let log = fixture.path().join("controller.log");
+    let mut command = Command::new(
+        std::path::Path::new(env!("CARGO_BIN_EXE_ora-node")).with_file_name("ora-controller"),
+    );
+    command
+        .arg("--config")
         .arg(path)
-        .stdin(Stdio::null())
-        .stdout(fs::File::create(&log).unwrap())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("build ora-minicloud-server before standalone acceptance"),
+        .args(["--transport", "tcp", "--host", "127.0.0.1", "--port"])
+        .arg(port.to_string());
+    match hosting {
+        NodeHosting::Managed => {
+            command.arg("--single-node");
+        }
+        NodeHosting::External => {}
+    }
+    // Lead a fresh process group like the launcher's setsid does, so hosting tests can address the
+    // Controller and its Node together without signaling the test runner's own group.
+    let child = ChildGuard(
+        command
+            .process_group(/*pgroup*/ 0)
+            .stdin(Stdio::null())
+            .stdout(fs::File::create(&log).unwrap())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("build ora-controller before standalone acceptance"),
     );
     let mut address = None;
     until(|| {
@@ -87,7 +108,7 @@ fn launch(fixture: &Fixture, config: &ServerConfig) -> (ChildGuard, String) {
             .unwrap_or_default()
             .lines()
             .find_map(|line| {
-                line.strip_prefix("minicloud listening on ")
+                line.strip_prefix("ora-controller listening on tcp://")
                     .map(str::to_owned)
             });
         address.is_some()
@@ -95,7 +116,12 @@ fn launch(fixture: &Fixture, config: &ServerConfig) -> (ChildGuard, String) {
     (child, address.unwrap())
 }
 
-/// Exercises actual proxy/HTTP, independent server death, Node and HTTPS Git without a fake coordinator.
+/// Extracts the bound port so a restarted executable reuses the address clients already hold.
+fn port_of(address: &str) -> u16 {
+    address.rsplit(':').next().unwrap().parse().unwrap()
+}
+
+/// Exercises actual proxy/HTTP, independent Controller death, Node and HTTPS Git without a fake coordinator.
 fn exercise(entry: Entry) {
     ora_logging::with_trace_logging(|| {
         let fixture = Fixture::new();
@@ -110,9 +136,11 @@ fn exercise(entry: Entry) {
                 .unwrap_or_default()
                 .contains("Node IPC listening")
         });
-        let mut config = ServerConfig {
-            listen: "127.0.0.1:0".parse().unwrap(),
-            node_id: NodeId::new("test-node"),
+        let config = DeploymentConfig {
+            api: ApiConfig {
+                node_id: NodeId::new("test-node"),
+            },
+            single_node: None,
             controller: RuntimeConfig {
                 home_directory: fixture.path().join("controller"),
                 protected_state_directories: vec![
@@ -132,13 +160,21 @@ fn exercise(entry: Entry) {
                 timezone: "Asia/Shanghai".into(),
             },
         };
-        let (mut server, address) = launch(&fixture, &config);
-        config.listen = address.parse().unwrap();
+        let (mut server, address) =
+            launch(&fixture, &config, /*port*/ 0, NodeHosting::External);
+        let port = port_of(&address);
         let mut vite = None;
         let base = match entry {
             Entry::Http => format!("http://{address}"),
             Entry::Vite => {
                 let log = fixture.path().join("vite.log");
+                // Vite treats port 0 as unset and falls back to its default, which another
+                // development server on the host may hold; reserve a free loopback port instead.
+                let vite_port = std::net::TcpListener::bind("127.0.0.1:0")
+                    .unwrap()
+                    .local_addr()
+                    .unwrap()
+                    .port();
                 vite = Some(ChildGuard(
                     Command::new(
                         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -148,7 +184,7 @@ fn exercise(entry: Entry) {
                         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                             .join("../minicloud/client"),
                     )
-                    .args(["--port", "0"])
+                    .args(["--port", &vite_port.to_string()])
                     .env("MINICLOUD_SERVER_URL", format!("http://{address}"))
                     .env("NO_COLOR", "1")
                     .stdout(fs::File::create(&log).unwrap())
@@ -227,7 +263,7 @@ fn exercise(entry: Entry) {
                 .await
                 .unwrap();
                 server.kill();
-                let (replacement, _) = launch(&fixture, &config);
+                let (replacement, _) = launch(&fixture, &config, port, NodeHosting::External);
                 server = replacement;
                 assert_eq!(
                     client
@@ -274,7 +310,7 @@ fn exercise(entry: Entry) {
                 assert!(node.0.try_wait().unwrap().is_none());
                 assert!(!git.has_exited().unwrap());
                 source.paused.store(false, Ordering::SeqCst);
-                let (replacement, _) = launch(&fixture, &config);
+                let (replacement, _) = launch(&fixture, &config, port, NodeHosting::External);
                 server = replacement;
                 let final_record = tokio::time::timeout(Duration::from_secs(/*secs*/ 40), async {
                     loop {
@@ -306,7 +342,7 @@ fn exercise(entry: Entry) {
                 assert!(std::path::Path::new(path).join(".git").is_dir());
                 source.reject_auth.store(true, Ordering::SeqCst);
                 server.kill();
-                let (replacement, _) = launch(&fixture, &config);
+                let (replacement, _) = launch(&fixture, &config, port, NodeHosting::External);
                 server = replacement;
                 let restored: MiniCloneOperation = client
                     .get(format!("{endpoint}/{}", receipt.execution_id))
@@ -343,9 +379,9 @@ fn exercise(entry: Entry) {
     });
 }
 
-/// Ordinary crates acceptance needs no JavaScript installation and exercises the independent HTTP executable.
+/// Ordinary crates acceptance needs no JavaScript installation and exercises the independent executable.
 #[test]
-fn minicloud_http_clone_survives_server_kill_and_replays_original_intent() {
+fn minicloud_http_clone_survives_controller_kill_and_replays_original_intent() {
     exercise(Entry::Http);
 }
 

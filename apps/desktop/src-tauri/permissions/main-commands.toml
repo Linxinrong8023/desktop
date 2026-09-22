@@ -105,6 +105,7 @@ commands.allow = [
     "push_workspace_branch",
     "read_plugin_readme",
     "read_project_file",
+    "read_workflow_import",
     "read_workspace_file",
     "rename_session",
     "rename_workflow_run",

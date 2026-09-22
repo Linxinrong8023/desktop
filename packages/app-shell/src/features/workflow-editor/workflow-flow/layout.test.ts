@@ -10,11 +10,16 @@ import {
   type WorkflowNodeData,
 } from "@ora/workflow-mock";
 import {
+  authoredWorkflowNodesEqual,
   containWorkflowCanvasNodes,
+  isNonAuthoringNodeChanges,
+  isPlainMeasurementOnly,
+  iterationFrameSizesEqual,
   nodePositionAt,
   organizeWorkflowNodes,
   shouldPersistWorkflowNodeChanges,
   snapNodePosition,
+  withoutExtentClampPositions,
 } from "./layout";
 
 /** Creates the smallest executable node needed to exercise layout behavior. */
@@ -62,6 +67,126 @@ describe("workflow-flow layout", () => {
           resizing: false,
         },
       ]),
+    ).toBe(true);
+  });
+
+  it("treats plain dimension probes as measurement-only updates", () => {
+    expect(
+      isPlainMeasurementOnly([
+        {
+          id: "card",
+          type: "dimensions",
+          dimensions: { width: 230, height: 140 },
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      isPlainMeasurementOnly([
+        {
+          id: "card",
+          type: "dimensions",
+          dimensions: { width: 230, height: 140 },
+          resizing: true,
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it("drops bare extent-clamp positions but keeps user drag gestures", () => {
+    expect(
+      withoutExtentClampPositions([
+        {
+          id: "member",
+          type: "dimensions",
+          dimensions: { width: 230, height: 180 },
+        },
+        {
+          id: "member",
+          type: "position",
+          position: { x: 120, y: 40 },
+        },
+        {
+          id: "member",
+          type: "position",
+          position: { x: 140, y: 100 },
+          dragging: true,
+        },
+      ]),
+    ).toEqual([
+      {
+        id: "member",
+        type: "dimensions",
+        dimensions: { width: 230, height: 180 },
+      },
+      {
+        id: "member",
+        type: "position",
+        position: { x: 140, y: 100 },
+        dragging: true,
+      },
+    ]);
+    expect(
+      withoutExtentClampPositions([
+        {
+          id: "member",
+          type: "position",
+          position: { x: 120, y: 40 },
+        },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("treats selection plus plain measurements as non-authoring", () => {
+    expect(
+      isNonAuthoringNodeChanges([
+        { id: "card", type: "select", selected: true },
+        {
+          id: "card",
+          type: "dimensions",
+          dimensions: { width: 230, height: 140 },
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      isNonAuthoringNodeChanges([
+        {
+          id: "card",
+          type: "position",
+          position: { x: 10, y: 20 },
+          dragging: true,
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it("compares authored iteration frame boxes ignoring measured noise", () => {
+    const frame = {
+      id: "iter",
+      type: "workflow" as const,
+      position: { x: 0, y: 0 },
+      initialWidth: 560,
+      initialHeight: 340,
+      data: {
+        kind: "iteration" as const,
+        title: "iter",
+        description: "",
+        instruction: "",
+      },
+    };
+    expect(
+      iterationFrameSizesEqual(
+        [frame],
+        [{ ...frame, measured: { width: 561.2, height: 340.4 } }],
+      ),
+    ).toBe(true);
+    expect(
+      iterationFrameSizesEqual([frame], [{ ...frame, initialHeight: 420 }]),
+    ).toBe(false);
+    expect(
+      authoredWorkflowNodesEqual(
+        [frame],
+        [{ ...frame, measured: { width: 999, height: 999 }, selected: true }],
+      ),
     ).toBe(true);
   });
 

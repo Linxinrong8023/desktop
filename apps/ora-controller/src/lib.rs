@@ -1,11 +1,23 @@
 //! Local durable clone coordination; no Desktop/Backend writer or Cloud authority is installed.
+#[cfg(target_os = "linux")]
+mod api;
+#[cfg(target_os = "linux")]
+mod deployment;
 mod operations;
 #[cfg(target_os = "linux")]
 mod runtime;
 #[cfg(target_os = "linux")]
+mod service;
+#[cfg(target_os = "linux")]
 mod session;
+#[cfg(target_os = "linux")]
+mod single_node;
 mod storage;
 mod takeover;
+#[cfg(target_os = "linux")]
+mod transport;
+#[cfg(target_os = "linux")]
+pub use deployment::{ApiConfig, DeploymentConfig, NodeHosting, SingleNodeConfig};
 pub use operations::CloneOperation;
 use ora_node_protocol::*;
 use ora_utils::fs::{ExclusiveFileLock, ExclusiveLockError};
@@ -13,8 +25,12 @@ use ora_utils::fs::{ExclusiveFileLock, ExclusiveLockError};
 pub use runtime::{ControllerHandle, ControllerRuntime, RuntimeConfig};
 use rusqlite::Connection;
 #[cfg(target_os = "linux")]
+pub use service::Service;
+#[cfg(target_os = "linux")]
 pub use session::{NodeEndpoint, SessionConfig, run_session};
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+pub use transport::{DEFAULT_PORT, Listener, Transport};
 
 /// Local persistence failures never authorize dispatch or acknowledgement.
 #[derive(Debug, thiserror::Error)]
@@ -35,6 +51,8 @@ pub enum Error {
     Conflict,
     #[error("injected persistence failure")]
     Injected,
+    #[error("invalid deployment composition: {0}")]
+    Configuration(String),
 }
 
 /// Test seams refuse writes before transactions commit, using the same real SQLite and reconciliation.

@@ -6,9 +6,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PathSelectionInProgressError } from "@ora/app-shell/platform";
 import { createTauriPlatformAdapter } from "./tauri-platform-adapter";
 
+const { onDragDropEventMock } = vi.hoisted(() => ({
+  onDragDropEventMock: vi.fn(),
+}));
+
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ onDragDropEvent: onDragDropEventMock }),
+}));
 
 const openMock = vi.mocked(open);
 const saveMock = vi.mocked(save);
@@ -23,6 +30,7 @@ describe("TauriPlatformAdapter", () => {
     saveMock.mockReset();
     invokeMock.mockReset();
     listenMock.mockReset();
+    onDragDropEventMock.mockReset();
   });
 
   it("maps surface commands to the desktop command names and request shapes", async () => {
@@ -223,6 +231,46 @@ describe("TauriPlatformAdapter", () => {
         content: '{"id":"workflow"}\n',
       },
     });
+  });
+
+  it("forwards native OS file drops and reads the dropped path", async () => {
+    const stop = vi.fn();
+    onDragDropEventMock.mockResolvedValue(stop);
+    invokeMock.mockResolvedValue({
+      name: "import.reactflow.json",
+      size: 12,
+      content: '{"ok":true}',
+    });
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    const adapter = createTauriPlatformAdapter();
+    const listener = vi.fn();
+    const unsubscribe = adapter.subscribeOsFileDrop(listener);
+
+    expect(onDragDropEventMock).toHaveBeenCalledOnce();
+    const handler = onDragDropEventMock.mock.calls[0]?.[0] as (event: {
+      payload: { type: string; paths?: string[] };
+    }) => void;
+    handler({ payload: { type: "over" } });
+    handler({
+      payload: { type: "drop", paths: ["/tmp/import.reactflow.json"] },
+    });
+    expect(listener).toHaveBeenCalledWith(["/tmp/import.reactflow.json"]);
+
+    await expect(
+      adapter.readOsTextFile("/tmp/import.reactflow.json"),
+    ).resolves.toEqual({
+      name: "import.reactflow.json",
+      size: 12,
+      content: '{"ok":true}',
+    });
+    expect(invokeMock).toHaveBeenCalledWith("read_workflow_import", {
+      request: { path: "/tmp/import.reactflow.json" },
+    });
+
+    unsubscribe();
+    await Promise.resolve();
+    expect(stop).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
   });
 
   it("downloads today's diagnostic log to the native save destination", async () => {

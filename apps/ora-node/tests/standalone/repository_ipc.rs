@@ -21,6 +21,24 @@ pub(super) fn launch_with_deadline(
     clone: &CloneConfig,
     frame_timeout_ms: u64,
 ) -> ChildGuard {
+    let config = write_config(fixture, clone, frame_timeout_ms);
+    ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_ora-node"))
+            .arg(config)
+            .stdin(Stdio::null())
+            .stdout(fs::File::create(fixture.path().join("ipc.log")).unwrap())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    )
+}
+
+/// Writes the IPC deployment file that either this test or a hosting Controller starts Node from.
+pub(super) fn write_config(
+    fixture: &Fixture,
+    clone: &CloneConfig,
+    frame_timeout_ms: u64,
+) -> PathBuf {
     let config = fixture.path().join("ipc-config.json");
     fs::write(
         &config,
@@ -40,15 +58,7 @@ pub(super) fn launch_with_deadline(
         .unwrap(),
     )
     .unwrap();
-    ChildGuard(
-        Command::new(env!("CARGO_BIN_EXE_ora-node"))
-            .arg(config)
-            .stdin(Stdio::null())
-            .stdout(fs::File::create(fixture.path().join("ipc.log")).unwrap())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap(),
-    )
+    config
 }
 
 /// Opens an actual framed stream without bypassing the server's handshake policy.

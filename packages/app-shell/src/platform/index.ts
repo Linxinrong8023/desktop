@@ -12,6 +12,7 @@ export {
   type ManualUpdateReason,
   type LocationTarget,
   type PathSelectionKind,
+  type OsDroppedTextFile,
   type PlatformAdapter,
   type SaveTextFileOptions,
   type SelectPathOptions,

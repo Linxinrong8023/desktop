@@ -84,7 +84,7 @@ bounded and volatile; truncated, failed or missing output is not parsed as compl
 
 ## Verification and next boundary
 
-Before standalone tests, build `cargo build -p ora-node -p ora-controller -p ora-minicloud-server -p ora-process-host -p ora-process-guardian`.
+Before standalone tests, build `cargo build -p ora-node -p ora-controller -p ora-process-host -p ora-process-guardian`.
 `cargo test -p ora-node --test standalone` exercises the actual Node, host and guardian executables with
 real SQLite and a blocking Git hook. Build the three executables first for a focused run. Tests cover
 Node SIGKILL followed by immediate restart, guardian cleanup without a replacement Node, guardian loss

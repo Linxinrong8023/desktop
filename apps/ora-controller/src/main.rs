@@ -1,50 +1,58 @@
 use std::process::ExitCode;
 
-/// Runs the shared coordinator runtime with executable-owned signals.
+#[cfg(target_os = "linux")]
+mod cli;
+
+/// Runs the composed Controller executable with executable-owned signals.
 fn main() -> ExitCode {
     #[cfg(target_os = "linux")]
     {
-        let args: Vec<_> = std::env::args_os().skip(1).collect();
-        if args.len() == 1 {
-            return match run(std::path::Path::new(&args[0])) {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(error) => {
-                    eprintln!("ora-controller: {error}");
-                    ExitCode::FAILURE
-                }
-            };
+        match run() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("ora-controller: {error}");
+                ExitCode::FAILURE
+            }
         }
     }
-    eprintln!("usage (Linux): ora-controller <absolute-config-file>");
-    ExitCode::FAILURE
+    #[cfg(not(target_os = "linux"))]
+    {
+        eprintln!("ora-controller currently requires the Linux local Node runtime");
+        ExitCode::FAILURE
+    }
 }
 
-/// Opens injected state and stops only this runtime's connections on process shutdown.
+/// Validates flags and configuration before opening state; stops only this composition on shutdown.
 #[cfg(target_os = "linux")]
-fn run(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-    use ora_controller::{ControllerRuntime, RuntimeConfig};
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    use clap::Parser;
+    use ora_controller::{DeploymentConfig, Service};
     use tokio::signal::unix::{SignalKind, signal};
-    if !path.is_absolute() {
+    let cli = cli::Cli::parse();
+    if !cli.config.is_absolute() {
         return Err("configuration path must be absolute".into());
     }
-    let config: RuntimeConfig = serde_json::from_slice(&std::fs::read(path)?)?;
+    let transport = cli.transport()?;
+    let hosting = cli.hosting();
+    let config: DeploymentConfig = serde_json::from_slice(&std::fs::read(&cli.config)?)?;
     let _logging = ora_logging::init_logging(ora_logging::LoggingConfig::new(
         ora_logging::LogLevel::Info,
         ora_logging::LogOutput::Stdout,
-        config.timezone.parse()?,
+        config.controller.timezone.parse()?,
     ))?;
-    let runtime = ControllerRuntime::open(config)?;
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
         .block_on(async {
             let mut terminate = signal(SignalKind::terminate())?;
             let mut interrupt = signal(SignalKind::interrupt())?;
-            runtime
+            let service = Service::start(config, transport, hosting).await?;
+            println!("ora-controller listening on {}", service.endpoint()?);
+            service
                 .run(async {
                     tokio::select! { _ = terminate.recv() => {}, _ = interrupt.recv() => {} }
                 })
-                .await
-        })?;
-    Ok(())
+                .await?;
+            Ok::<(), Box<dyn std::error::Error>>(())
+        })
 }

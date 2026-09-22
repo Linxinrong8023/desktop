@@ -4,6 +4,7 @@ import type { WorkflowNodeData } from "@ora/workflow-mock";
 import {
   applyIterationFrameResize,
   compactIterationFrames,
+  expandIterationFrames,
   insertIterationMember,
   iterationExpandedSize,
   type IterationGraph,
@@ -388,6 +389,37 @@ describe("iteration graph transforms", () => {
       initialWidth: 560,
       initialHeight: 340,
     });
+  });
+
+  it("expands nested frames in one pass and ignores nested measurement noise", () => {
+    const inner = {
+      ...node("inner", "iteration", { x: 120, y: 100 }, "outer"),
+      initialWidth: 560,
+      initialHeight: 340,
+      // Subpixel measured chrome must not keep ratcheting the outer frame.
+      measured: { width: 560.8, height: 340.6 },
+    };
+    const agent = node("agent", "agent", { x: 120, y: 420 }, "inner");
+    const outer = {
+      ...node("outer", "iteration"),
+      initialWidth: 560,
+      initialHeight: 340,
+    };
+
+    const expanded = expandIterationFrames(graph([outer, inner, agent]));
+    const expandedInner = expanded.nodes.find(
+      (candidate) => candidate.id === "inner",
+    );
+    const expandedOuter = expanded.nodes.find(
+      (candidate) => candidate.id === "outer",
+    );
+    expect(expandedInner?.initialHeight).toBeGreaterThan(340);
+    expect(expandedOuter?.initialHeight).toBeGreaterThan(
+      expandedInner?.initialHeight ?? 0,
+    );
+
+    const again = expandIterationFrames(expanded);
+    expect(again).toEqual(expanded);
   });
 
   it("clears a deleted collect target and leaves unrelated selectors untouched", () => {

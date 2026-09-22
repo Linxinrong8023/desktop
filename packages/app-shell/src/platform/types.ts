@@ -266,6 +266,22 @@ export interface PlatformAdapter {
    * the app.
    */
   openExternalUrl(url: string): Promise<void>;
+  /**
+   * Host OS file drops (Explorer → WebView2) never fill HTML5 `dataTransfer.files`.
+   * Desktop listens to the native drag-drop event and reports dropped paths.
+   */
+  subscribeOsFileDrop?(
+    listener: (paths: readonly string[]) => void,
+  ): () => void;
+  /** Reads a user-dropped file so the import picker can preview it as a `File`. */
+  readOsTextFile?(path: string): Promise<OsDroppedTextFile>;
+}
+
+/** Contents of a file the user dropped onto the desktop window. */
+export interface OsDroppedTextFile {
+  name: string;
+  size: number;
+  content: string;
 }
 
 /** Reports a caller bug that attempts to open two selectors on one adapter concurrently. */

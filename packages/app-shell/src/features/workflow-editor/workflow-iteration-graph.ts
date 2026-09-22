@@ -466,58 +466,73 @@ function resizeIterationFrames<TGraph extends IterationGraph>(
   mode: "expand" | "compact",
 ): TGraph {
   const selectedIds = iterationIds === undefined ? null : new Set(iterationIds);
+  let nodes = graph.nodes;
   let changed = false;
-  const nodes = graph.nodes.map((node) => {
-    if (
-      node.data.kind !== "iteration" ||
-      (selectedIds !== null && !selectedIds.has(node.id))
-    ) {
-      return node;
+  // Nested regions read member sizes from the working node list. One map pass can
+  // enlarge an inner frame while the outer still sees the pre-expand size, so the
+  // next measurement tick expands the ancestor and the canvas appears to thrash.
+  // Repeat until a pass is a no-op (bounded by nesting depth).
+  for (let pass = 0; pass < nodes.length; pass += 1) {
+    let passChanged = false;
+    const nextNodes = nodes.map((node) => {
+      if (
+        node.data.kind !== "iteration" ||
+        (selectedIds !== null && !selectedIds.has(node.id))
+      ) {
+        return node;
+      }
+      const members = nodes.filter(
+        (candidate) => candidate.parentId === node.id,
+      );
+      const requiredWidth = Math.max(
+        WORKFLOW_ITERATION_NODE_WIDTH,
+        ...members.map(
+          (member) =>
+            member.position.x +
+            nodeWidth(member) +
+            ITERATION_FRAME_RIGHT_PADDING,
+        ),
+      );
+      const requiredHeight = Math.max(
+        WORKFLOW_ITERATION_NODE_HEIGHT,
+        ...members.map(
+          (member) =>
+            member.position.y +
+            nodeHeight(member) +
+            ITERATION_FRAME_BOTTOM_PADDING,
+        ),
+      );
+      const current = iterationExpandedSize(node);
+      const width = snapSize(
+        mode === "expand"
+          ? Math.max(current.width, requiredWidth)
+          : requiredWidth,
+      );
+      const height = snapSize(
+        mode === "expand"
+          ? Math.max(current.height, requiredHeight)
+          : requiredHeight,
+      );
+      if (node.initialWidth === width && node.initialHeight === height) {
+        return node;
+      }
+      passChanged = true;
+      // React Flow pins the wrapper to width/height once a manual resize sets
+      // them; mirroring the new size keeps the pinned box from going stale after
+      // an automatic compact or expand rewrites the authored frame size.
+      const resized = { ...node, initialWidth: width, initialHeight: height };
+      if (node.width !== undefined || node.height !== undefined) {
+        resized.width = width;
+        resized.height = height;
+      }
+      return resized;
+    });
+    if (!passChanged) {
+      break;
     }
-    const members = graph.nodes.filter(
-      (candidate) => candidate.parentId === node.id,
-    );
-    const requiredWidth = Math.max(
-      WORKFLOW_ITERATION_NODE_WIDTH,
-      ...members.map(
-        (member) =>
-          member.position.x + nodeWidth(member) + ITERATION_FRAME_RIGHT_PADDING,
-      ),
-    );
-    const requiredHeight = Math.max(
-      WORKFLOW_ITERATION_NODE_HEIGHT,
-      ...members.map(
-        (member) =>
-          member.position.y +
-          nodeHeight(member) +
-          ITERATION_FRAME_BOTTOM_PADDING,
-      ),
-    );
-    const current = iterationExpandedSize(node);
-    const width = snapSize(
-      mode === "expand"
-        ? Math.max(current.width, requiredWidth)
-        : requiredWidth,
-    );
-    const height = snapSize(
-      mode === "expand"
-        ? Math.max(current.height, requiredHeight)
-        : requiredHeight,
-    );
-    if (node.initialWidth === width && node.initialHeight === height) {
-      return node;
-    }
+    nodes = nextNodes;
     changed = true;
-    // React Flow pins the wrapper to width/height once a manual resize sets
-    // them; mirroring the new size keeps the pinned box from going stale after
-    // an automatic compact or expand rewrites the authored frame size.
-    const resized = { ...node, initialWidth: width, initialHeight: height };
-    if (node.width !== undefined || node.height !== undefined) {
-      resized.width = width;
-      resized.height = height;
-    }
-    return resized;
-  });
+  }
   return changed ? ({ ...graph, nodes } as TGraph) : graph;
 }
 
@@ -562,6 +577,14 @@ export function applyIterationFrameResize(
 
 /** Returns the visual width used for fitting and insertion. */
 function nodeWidth(node: Node<WorkflowNodeData, "workflow">): number {
+  // Iteration frames author their box in initialWidth; measured can include
+  // subpixel chrome and would keep ratcheting an ancestor frame on every pass.
+  if (node.data.kind === "iteration") {
+    return finiteSize(
+      node.initialWidth ?? node.width ?? node.measured?.width,
+      WORKFLOW_ITERATION_NODE_WIDTH,
+    );
+  }
   return finiteSize(
     node.measured?.width ?? node.width ?? node.initialWidth,
     node.data.kind === "condition" ? CONDITION_NODE_WIDTH : WORKFLOW_NODE_WIDTH,
@@ -570,6 +593,12 @@ function nodeWidth(node: Node<WorkflowNodeData, "workflow">): number {
 
 /** Returns the visual height used for fitting and insertion. */
 function nodeHeight(node: Node<WorkflowNodeData, "workflow">): number {
+  if (node.data.kind === "iteration") {
+    return finiteSize(
+      node.initialHeight ?? node.height ?? node.measured?.height,
+      WORKFLOW_ITERATION_NODE_HEIGHT,
+    );
+  }
   return finiteSize(
     node.measured?.height ?? node.height ?? node.initialHeight,
     WORKFLOW_NODE_INITIAL_HEIGHT,

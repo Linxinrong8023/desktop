@@ -1,4 +1,11 @@
-import { useRef, useState, type DragEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconAlertCircle,
@@ -20,6 +27,7 @@ import {
   cn,
 } from "@ora/ui";
 import type { DemoWorkflow } from "@ora/workflow-mock";
+import { useOptionalPlatform } from "../../platform";
 import {
   formatWorkflowFileSize,
   isValidPublishVersion,
@@ -152,6 +160,23 @@ function Header({
   );
 }
 
+/** Reads the first file from a browser drop, including WebView items that omit `files`. */
+function fileFromDataTransfer(dataTransfer: DataTransfer): File | undefined {
+  const [listed] = Array.from(dataTransfer.files);
+  if (listed !== undefined) {
+    return listed;
+  }
+  for (const item of Array.from(dataTransfer.items)) {
+    if (item.kind === "file") {
+      const file = item.getAsFile();
+      if (file !== null) {
+        return file;
+      }
+    }
+  }
+  return undefined;
+}
+
 /** Drop zone that also opens the native picker, matching the host's file selection. */
 function PickStage({
   onFile: selectFile,
@@ -161,18 +186,82 @@ function PickStage({
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const platform = useOptionalPlatform();
+  const selectFileRef = useRef(selectFile);
+  useLayoutEffect(() => {
+    selectFileRef.current = selectFile;
+  }, [selectFile]);
   const [dragging, setDragging] = useState(false);
 
   /** Accepts the first dropped file; folders and multi-select are not meaningful here. */
-  function drop(event: DragEvent<HTMLButtonElement>): void {
+  function drop(event: DragEvent<HTMLElement>): void {
     event.preventDefault();
+    event.stopPropagation();
     setDragging(false);
-    const [file] = Array.from(event.dataTransfer.files);
+    const file = fileFromDataTransfer(event.dataTransfer);
     if (file !== undefined) {
       selectFile(file);
     }
   }
+
+  /** Marks the zone as a copy target so the OS drop is delivered instead of navigating. */
+  function dragOver(event: DragEvent<HTMLElement>): void {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "copy";
+    setDragging(true);
+  }
+
+  useEffect(() => {
+    // WebView2 only fires drop if the window itself cancels the default navigation.
+    function allowWindowDrop(event: globalThis.DragEvent): void {
+      event.preventDefault();
+    }
+    function dropOnWindow(event: globalThis.DragEvent): void {
+      event.preventDefault();
+      const file =
+        event.dataTransfer === null
+          ? undefined
+          : fileFromDataTransfer(event.dataTransfer);
+      if (file !== undefined) {
+        selectFileRef.current(file);
+      }
+    }
+    window.addEventListener("dragover", allowWindowDrop);
+    window.addEventListener("drop", dropOnWindow);
+    return () => {
+      window.removeEventListener("dragover", allowWindowDrop);
+      window.removeEventListener("drop", dropOnWindow);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Explorer → WebView2 drops arrive as native paths, not HTML5 FileList.
+    const subscribe = platform?.subscribeOsFileDrop;
+    const readOsTextFile = platform?.readOsTextFile;
+    if (subscribe === undefined || readOsTextFile === undefined) {
+      return;
+    }
+    return subscribe((paths) => {
+      const [path] = paths;
+      if (path === undefined) {
+        return;
+      }
+      void readOsTextFile(path)
+        .then((dropped) => {
+          selectFileRef.current(
+            new File([dropped.content], dropped.name, {
+              type: "application/json",
+            }),
+          );
+        })
+        .catch(() => {
+          selectFileRef.current(
+            new File(["{"], "dropped.json", { type: "application/json" }),
+          );
+        });
+    });
+  }, [platform]);
 
   return (
     <>
@@ -181,17 +270,17 @@ function PickStage({
         description={t("settings.workflow.transfer.pickDescription")}
       />
       <div className="px-5 pt-1.5 pb-3.5">
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setDragging(true);
+        <label
+          onDragEnter={dragOver}
+          onDragOver={dragOver}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+              setDragging(false);
+            }
           }}
-          onDragLeave={() => setDragging(false)}
           onDrop={drop}
           className={cn(
-            "grid w-full justify-items-center gap-1.5 rounded-[11px] border-[1.5px] border-dashed border-border bg-muted px-4 py-[26px] text-center outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "grid w-full cursor-pointer justify-items-center gap-1.5 rounded-[11px] border-[1.5px] border-dashed border-border bg-muted px-4 py-[26px] text-center outline-none focus-within:ring-2 focus-within:ring-ring",
             dragging && "border-foreground",
           )}
         >
@@ -205,21 +294,20 @@ function PickStage({
           <span className="text-[13px] text-muted-foreground">
             {t("settings.workflow.transfer.dropZoneHint")}
           </span>
-        </button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept={ACCEPTED_FILE_TYPES}
-          className="hidden"
-          aria-label={t("settings.workflow.transfer.dropZoneTitle")}
-          onChange={(event) => {
-            const [file] = Array.from(event.target.files ?? []);
-            event.target.value = "";
-            if (file !== undefined) {
-              selectFile(file);
-            }
-          }}
-        />
+          <input
+            type="file"
+            accept={ACCEPTED_FILE_TYPES}
+            className="sr-only"
+            aria-label={t("settings.workflow.transfer.dropZoneTitle")}
+            onChange={(event) => {
+              const [file] = Array.from(event.target.files ?? []);
+              event.target.value = "";
+              if (file !== undefined) {
+                selectFile(file);
+              }
+            }}
+          />
+        </label>
       </div>
       <Footer>
         <span className="flex-1" />

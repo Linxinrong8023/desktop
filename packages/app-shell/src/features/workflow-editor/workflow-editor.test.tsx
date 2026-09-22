@@ -1987,6 +1987,45 @@ describe("WorkflowEditor", () => {
     expect(screen.getByText("新导入")).toBeInTheDocument();
   });
 
+  it("previews a workflow dropped onto the import picker", async () => {
+    const user = userEvent.setup();
+    const state = createFixtureState();
+    renderEditor(undefined, state);
+    await screen.findByLabelText("工作流画布");
+
+    const imported = createMockWorkflow("zh-CN");
+    imported.name = "拖入的工作流";
+    fireEvent.click(screen.getByRole("button", { name: "新建或导入工作流" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "导入工作流…" }),
+    );
+    const pickDialog = await screen.findByRole("dialog");
+    const dropZone =
+      within(pickDialog).getByLabelText("拖入文件，或点击选择").parentElement;
+    if (dropZone === null) {
+      throw new Error("import drop zone is missing");
+    }
+    const file = new File(
+      [JSON.stringify(imported)],
+      "拖入的工作流.reactflow.json",
+      { type: "application/json" },
+    );
+    fireEvent.drop(dropZone, {
+      dataTransfer: {
+        files: [file],
+        items: [],
+        types: ["Files"],
+        dropEffect: "copy",
+      },
+    });
+
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("确认导入")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/拖入的工作流\.reactflow\.json/),
+    ).toBeInTheDocument();
+  });
+
   it("explains an unreadable import file without creating a workflow", async () => {
     const user = userEvent.setup();
     const state = createFixtureState();

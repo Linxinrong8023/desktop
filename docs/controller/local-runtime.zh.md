@@ -2,8 +2,9 @@
 
 [English](local-runtime.md) | 中文
 
-`ora-controller` 负责本机 clone 意图的持久接受与结果接管，不执行 Git、不替换 Backend 写入入口、
-不提供 Client transport，也不充当 Cloud 权威存储。Linux 会话使用现有 [Node IPC](../node/local-ipc.zh.md)
+`ora-controller` 负责本机 clone 意图的持久接受与结果接管，其可执行入口同时承载
+[minicloud](../minicloud/runtime.zh.md) 调用的过渡 clone API。它不执行 Git、不替换 Backend 写入入口，
+也不充当 Cloud 权威存储。Linux 会话使用现有 [Node IPC](../node/local-ipc.zh.md)
 和长度前缀 JSON 消息，不增加应用凭据。
 
 ## 接受与存储
@@ -25,39 +26,71 @@ application ID 为 `0x4f524143`、schema version 为 1；精确结构／完整�
 
 ## 独立可执行入口
 
-`ControllerRuntime::open(RuntimeConfig)` 同时支持内嵌。`handle()` 提供持久 clone 接受、操作列表和查询；
+`ControllerRuntime::open(RuntimeConfig)` 支持内嵌。`handle()` 提供持久 clone 接受、操作列表和查询；
 `run(shutdown)` 拥有重连循环，不安装进程信号。查询不存在与操作已接受但尚无终态明确区分。
-调用方停止受理、等待关闭并释放句柄后，数据库独占锁才释放。独立程序也使用同一运行时，只自行提供进程信号。
+库本身不依赖任何监听器；`Service::start(DeploymentConfig, Transport, NodeHosting)` 为可执行入口和测试
+组合 API 监听、唯一运行时所有者以及可选托管的 Node。
 
 构建 `cargo build -p ora-controller -p ora-node -p ora-process-host -p ora-process-guardian`。
-分别部署 host 和 Node，Node 配置的归属须匹配 ControllerId，然后运行
-`ora-controller /absolute/path/controller.json`：
+部署状态放在一个配置文件里，本次进程的组合方式由命令行给出：
+
+```text
+ora-controller --config /absolute/path/controller.json [--single-node]
+               [--transport tcp|unix] [--host 127.0.0.1] [--port 4820] [--socket /path/api.sock]
+```
+
+| 参数 | 规则 |
+|---|---|
+| `--transport tcp`（默认） | `--host` 默认 `127.0.0.1`，`--port` 默认 `4820`。非回环地址允许启动但会记录警告：API 没有认证，回环只是部署约束而不是安全保证。 |
+| `--transport unix` | 需要 `--socket`，必须是直接位于 `home_directory` 内的绝对路径，按与 Node endpoint 相同的私有 socket 规则创建；不接受 `--host`／`--port`。 |
+| `--single-node` | 按 `single_node` 段启动配置的 Node，正常关停时停止它，见下文。 |
+
+非法参数组合与配置都在获取数据库租约前拒绝。
 
 ```json
 {
-  "home_directory": "/home/node/controller",
-  "controller_id": "deployment-controller",
-  "protected_state_directories": ["/home/node/state", "/home/node/process"],
-  "nodes": [
-    {
-      "node_id": "deployment-node",
-      "endpoint": "/home/node/state/control.sock"
-    }
-  ],
-  "session": { "io_timeout_ms": 10000, "query_interval_ms": 1000 },
-  "reconnect_ms": 1000,
-  "timezone": "Asia/Shanghai"
+  "controller": {
+    "home_directory": "/home/node/controller",
+    "controller_id": "deployment-controller",
+    "protected_state_directories": ["/home/node/state", "/home/node/process"],
+    "nodes": [
+      {
+        "node_id": "deployment-node",
+        "endpoint": "/home/node/state/control.sock"
+      }
+    ],
+    "session": { "io_timeout_ms": 10000, "query_interval_ms": 1000 },
+    "reconnect_ms": 1000,
+    "timezone": "Asia/Shanghai"
+  },
+  "api": { "node_id": "deployment-node" },
+  "single_node": {
+    "node_executable": "/opt/ora/bin/ora-node",
+    "node_config": "/home/node/config/node.json",
+    "ready_timeout_ms": 30000,
+    "stop_timeout_ms": 30000
+  }
 }
 ```
 
-`protected_state_directories` 须列出所有 Node／host／guardian 状态根；配置的 endpoint 父目录也受保护。
-Controller 数据目录与它们重叠时，在开库前拒绝。独立程序恢复已接受记录，配置文件和 stdin 不是业务命令通道。
-Client 入口接通前通过 Rust 接口受理，不直接修改 SQLite。
+`api.node_id` 指定已接受 clone 派发到的 Node，调用方不选择 Node。`protected_state_directories`
+须列出所有 Node／host／guardian 状态根；配置的 endpoint 父目录也受保护。Controller 数据目录与它们
+重叠时，在开库前拒绝。独立程序恢复已接受记录，配置文件和 stdin 不是业务命令通道。
+不托管 Node 时分别部署 host 和 Node，Node 配置的归属须匹配 ControllerId。
 
-每个配置 Node 有独立重连循环，共享同一持久 Controller 所有者。握手检查 Node 身份和 clone 能力。
-定期状态查询恢复原执行；Unknown 每条连接至多触发一次原命令重传，不新建执行。
-查询也用于保活，其间隔须小于 Node 的空闲帧期限。断连、不支持的对端或持久化错误不制造 clone 失败，
-也不丢弃记录。Controller 正常停止关闭会话，不取消 Node 已接受的执行。
+`--single-node` 要求 `nodes` 恰好包含 `api.node_id` 这一个 Node。开库前，程序只读读取 `node_config`，
+其 `ipc.controller_id` 或 `ipc.endpoint` 不匹配、或 endpoint 上已有进程接受连接时拒绝启动。随后在
+自身进程组内（不新建会话）启动 `node_executable <node_config>`，在 `ready_timeout_ms` 内等待 endpoint
+可连接，然后才绑定 API。process host 与 guardian 是前置条件，程序不部署也不启动它们。Controller
+单独退出不会向 Node 发送任何信号，已接受的 clone 继续执行；运维或启动器按进程组停止时两者都会收到。
+托管的 Node 自行退出时，Controller 关停并以失败退出，而不是继续受理无法派发的请求。
+
+正常关停顺序固定为：API 受理（有限等待在途请求）→ Node 会话 → 托管 Node（`SIGTERM`，最多等待
+`stop_timeout_ms`，不升级为 `SIGKILL`）→ 数据库租约。本进程停止从不取消 Node 已接受的执行。
+
+JSON 接口是 [minicloud](../minicloud/runtime.zh.md#http-接口) 文档描述的过渡 clone API，
+DTO 位于 `ora-contracts::controller_api`。面向 Cloud 的契约将由 proto 定义并在同一监听器上提供；
+在此之前 JSON 接口是唯一的调用方入口。
 
 ## 验证与保留范围
 

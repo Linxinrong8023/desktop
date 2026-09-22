@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
       port: 5174,
       strictPort: true,
       proxy: {
-        "/api": { target: env.MINICLOUD_SERVER_URL || "http://127.0.0.1:4317" },
+        "/api": { target: env.MINICLOUD_SERVER_URL || "http://127.0.0.1:4820" },
       },
     },
   };

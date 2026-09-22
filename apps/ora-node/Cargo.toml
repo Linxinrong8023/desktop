@@ -35,6 +35,5 @@ pretty_assertions.workspace = true
 tempfile.workspace = true
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-ora-minicloud-server = { path = "../minicloud/server" }
 ora-contracts.workspace = true
 reqwest = { workspace = true, features = ["json"] }

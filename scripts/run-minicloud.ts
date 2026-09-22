@@ -109,10 +109,8 @@ export async function initialize(root: string): Promise<void> {
     }),
   );
   await defaultFile(
-    path.join(config, "server.json"),
+    path.join(config, "controller.json"),
     json({
-      listen: "127.0.0.1:4317",
-      node_id: "minicloud-node",
       controller: {
         home_directory: controller,
         protected_state_directories: [node, host],
@@ -127,9 +125,38 @@ export async function initialize(root: string): Promise<void> {
         reconnect_ms: 1000,
         timezone,
       },
+      api: { node_id: "minicloud-node" },
+      single_node: {
+        node_executable: path.join(workspace, "target", "debug", "ora-node"),
+        node_config: path.join(config, "node.json"),
+        ready_timeout_ms: 30000,
+        stop_timeout_ms: 30000,
+      },
     }),
   );
-  await defaultFile(path.join(config, "client.json"), json({ port: 5174 }));
+  // Listener choices are per-process flags, so the launcher keeps them beside the frontend port.
+  await defaultFile(
+    path.join(config, "client.json"),
+    json({ port: 5174, controllerPort: 4820 }),
+  );
+}
+
+/** Builds the hosted Controller command line; the API stays on loopback by explicit argument. */
+export function controllerArguments(
+  configFile: string,
+  port: number,
+): string[] {
+  return [
+    "--config",
+    configFile,
+    "--single-node",
+    "--transport",
+    "tcp",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    String(port),
+  ];
 }
 
 type Child = {
@@ -141,10 +168,12 @@ type Child = {
 
 /** Supervises isolated process groups so terminal signals cannot bypass ordered Node cleanup. */
 async function run(): Promise<void> {
-  if (Deno.build.os !== "linux")
+  if (Deno.build.os !== "linux") {
     throw new Error("minicloud currently requires Linux.");
-  if (Deno.args.some((arg) => !["--init-only", "--no-build"].includes(arg)))
+  }
+  if (Deno.args.some((arg) => !["--init-only", "--no-build"].includes(arg))) {
     throw new Error("Usage: run-minicloud.ts [--init-only] [--no-build]");
+  }
   // State lives under the home directory, not the checkout: Unix socket paths are limited to
   // 108 bytes, and checkout locations (especially generated worktree names) are not under the
   // launcher's control. The real home path is what the kernel sees, so resolve it before measuring.
@@ -238,30 +267,91 @@ async function run(): Promise<void> {
     return child;
   }
 
+  // The Controller's own bounds (Node ready/stop 30 s each, API drain 5 s) must expire before the
+  // launcher gives up on it, or the launcher would kill a Node that is still cleaning up.
+  const deadlines = (name: string) =>
+    name === "controller"
+      ? { ready: 60000, stop: 45000 }
+      : { ready: 30000, stop: 30000 };
+
+  /** Lists live members of a process group; the launcher holds no handle to a Node its Controller started. */
+  async function groupMembers(pgid: number): Promise<number[]> {
+    const found: number[] = [];
+    for await (const entry of Deno.readDir("/proc")) {
+      if (!/^\d+$/.test(entry.name)) continue;
+      try {
+        const stat = await Deno.readTextFile(
+          path.join("/proc", entry.name, "stat"),
+        );
+        const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+        if (fields[0] !== "Z" && Number(fields[2]) === pgid)
+          found.push(Number(entry.name));
+      } catch (error) {
+        if (
+          !(error instanceof Deno.errors.NotFound) &&
+          !(error instanceof Deno.errors.PermissionDenied)
+        )
+          throw error;
+      }
+    }
+    return found;
+  }
+
   /** Bounds each normal stop and reports escalation instead of claiming graceful completion. */
   async function terminate(child: Child): Promise<void> {
-    if (child.exited) return;
-    Deno.kill(-child.process.pid, "SIGTERM");
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const exited = await Promise.race([
-      child.status.then(() => true),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), 30000);
-      }),
-    ]);
-    clearTimeout(timer);
-    if (!exited) {
-      console.error(
-        `${child.name}: graceful stop timed out; killing its process group. State retained for recovery.`,
-      );
-      Deno.kill(-child.process.pid, "SIGKILL");
+    const controller = child.name === "controller";
+    if (!child.exited) {
+      // Only the Controller is signaled directly: it closes API admission before retiring its
+      // Node, and a group-wide SIGTERM would let the Node stop while requests are still accepted.
+      Deno.kill(controller ? child.process.pid : -child.process.pid, "SIGTERM");
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const exited = await Promise.race([
+        child.status.then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), deadlines(child.name).stop);
+        }),
+      ]);
+      clearTimeout(timer);
+      if (!exited) {
+        console.error(
+          `${child.name}: graceful stop timed out; killing its process group. State retained for recovery.`,
+        );
+        Deno.kill(-child.process.pid, "SIGKILL");
+      }
+      const status = await child.status;
+      if (!status.success && controller) {
+        console.error(
+          "Controller or its Node did not stop cleanly; inspect recovery on next startup.",
+        );
+        Deno.exitCode = 1;
+      }
     }
-    const status = await child.status;
-    if (!status.success && child.name === "node") {
-      console.error(
-        "Node did not stop cleanly; inspect recovery on next startup.",
-      );
-      Deno.exitCode = 1;
+    if (!controller) return;
+    // A Node that outlived a crashed or timed-out Controller still belongs to its process group.
+    const group = child.process.pid;
+    if (!(await groupMembers(group)).length) return;
+    const deadline = Date.now() + deadlines(child.name).stop;
+    try {
+      Deno.kill(-group, "SIGTERM");
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+    }
+    while ((await groupMembers(group)).length) {
+      if (Date.now() > deadline + 2000) {
+        console.error(
+          "The Node left by the Controller did not exit; inspect processes before restarting.",
+        );
+        Deno.exitCode = 1;
+        break;
+      }
+      if (Date.now() > deadline) {
+        try {
+          Deno.kill(-group, "SIGKILL");
+        } catch (error) {
+          if (!(error instanceof Deno.errors.NotFound)) throw error;
+        }
+      }
+      await delay(100);
     }
   }
 
@@ -270,7 +360,7 @@ async function run(): Promise<void> {
     child: Child,
     probe: () => Promise<boolean>,
   ): Promise<void> {
-    const deadline = Date.now() + 30000;
+    const deadline = Date.now() + deadlines(child.name).ready;
     while (!stopping && !child.exited && Date.now() < deadline) {
       if (await probe()) return;
       await delay(100);
@@ -303,20 +393,23 @@ async function run(): Promise<void> {
         if (
           path.dirname(executable) !== path.join(root, "bin") ||
           !/^guardian-[a-f0-9]{64}$/.test(path.basename(executable))
-        )
+        ) {
           continue;
+        }
         const stat = await Deno.readTextFile(
           path.join("/proc", entry.name, "stat"),
         );
         const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-        if (fields[0] !== "Z")
+        if (fields[0] !== "Z") {
           found.push({ pid: Number(entry.name), identity: fields[19] });
+        }
       } catch (error) {
         if (
           !(error instanceof Deno.errors.NotFound) &&
           !(error instanceof Deno.errors.PermissionDenied)
-        )
+        ) {
           throw error;
+        }
       }
     }
     return found;
@@ -338,7 +431,7 @@ async function run(): Promise<void> {
             "cargo",
             "build",
             "-p",
-            "ora-minicloud-server",
+            "ora-controller",
             "-p",
             "ora-node",
             "-p",
@@ -353,44 +446,46 @@ async function run(): Promise<void> {
           child.status,
           stopped.then(() => null),
         ]);
-        if (!status?.success)
+        if (!status?.success) {
           throw new Error(`${name} failed or was interrupted.`);
+        }
       }
     }
     const config = path.join(root, "config");
     const nodeConfig = JSON.parse(
       await Deno.readTextFile(path.join(config, "node.json")),
     );
-    const serverConfig = JSON.parse(
-      await Deno.readTextFile(path.join(config, "server.json")),
+    const controllerConfig = JSON.parse(
+      await Deno.readTextFile(path.join(config, "controller.json")),
     );
     const clientConfig = JSON.parse(
       await Deno.readTextFile(path.join(config, "client.json")),
     );
+    const binary = (name: string) =>
+      path.join(workspace, "target", "debug", name);
     if (
       nodeConfig.node.home_directory !== path.join(root, "node") ||
       nodeConfig.process.host_directory !== path.join(root, "p") ||
       nodeConfig.ipc.endpoint !== path.join(root, "node", "control.sock") ||
-      serverConfig.controller.home_directory !== path.join(root, "controller")
+      controllerConfig.controller.home_directory !==
+        path.join(root, "controller") ||
+      controllerConfig.single_node?.node_config !==
+        path.join(config, "node.json") ||
+      controllerConfig.single_node?.node_executable !== binary("ora-node")
     ) {
       throw new Error(
         "Launcher-owned state paths must remain under the launcher's state directory; use the standalone binaries for other deployments.",
       );
     }
-    const url = new URL(`http://${serverConfig.listen}`);
-    if (
-      url.hostname !== "127.0.0.1" ||
-      !Number.isInteger(clientConfig.port) ||
-      clientConfig.port < 1 ||
-      clientConfig.port > 65535
-    )
-      throw new Error("Use 127.0.0.1 and valid local ports.");
-    for (const port of [Number(url.port), clientConfig.port]) {
+    const controllerPort: number = clientConfig.controllerPort ?? 4820;
+    for (const port of [controllerPort, clientConfig.port]) {
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new Error("Use valid local ports.");
+      }
       const listener = Deno.listen({ hostname: "127.0.0.1", port });
       listener.close();
     }
-    const binary = (name: string) =>
-      path.join(workspace, "target", "debug", name);
+    const url = new URL(`http://127.0.0.1:${controllerPort}`);
     const bytes = await Deno.readFile(binary("ora-process-guardian"));
     const hash = Array.from(
       new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
@@ -408,8 +503,9 @@ async function run(): Promise<void> {
       !guardianInfo.isFile ||
       guardianInfo.isSymlink ||
       (guardianInfo.mode! & 0o077) !== 0
-    )
+    ) {
       throw new Error(`Invalid deployed guardian: ${guardian}`);
+    }
     const host = path.join(root, "p");
     if (
       (await socket(path.join(host, "host.sock"))) ||
@@ -434,14 +530,13 @@ async function run(): Promise<void> {
     ]);
     await ready(hostChild, () => socket(path.join(host, "host.sock")));
     ownsHost = true;
-    const node = start("node", [
-      binary("ora-node"),
-      path.join(config, "node.json"),
-    ]);
-    await ready(node, () => socket(nodeConfig.ipc.endpoint));
-    const server = start("server", [
-      binary("ora-minicloud-server"),
-      path.join(config, "server.json"),
+    // The Controller starts Node inside its own process group; a group stop below reaches both.
+    const controller = start("controller", [
+      binary("ora-controller"),
+      ...controllerArguments(
+        path.join(config, "controller.json"),
+        controllerPort,
+      ),
     ]);
     const http = async (address: string) => {
       try {
@@ -454,7 +549,7 @@ async function run(): Promise<void> {
         return false;
       }
     };
-    await ready(server, () => http(`${url.origin}/api/clones`));
+    await ready(controller, () => http(`${url.origin}/api/clones`));
     const vite = start(
       "vite",
       [
@@ -475,17 +570,18 @@ async function run(): Promise<void> {
     );
     await Promise.race([
       stopped,
-      ...[hostChild, node, server, vite].map(async (child) => {
+      ...[hostChild, controller, vite].map(async (child) => {
         const status = await child.status;
-        if (!stopping)
+        if (!stopping) {
           throw new Error(
             `${child.name} exited unexpectedly (${status.code}).`,
           );
+        }
       }),
     ]);
   } finally {
     stopping = true;
-    // Reverse order is Vite → server → Node → host. Guardian shutdown follows Node cleanup.
+    // Reverse order is Vite → Controller (which retires its Node) → host. Guardian shutdown follows Node cleanup.
     for (const child of children.toReversed()) {
       try {
         await terminate(child);

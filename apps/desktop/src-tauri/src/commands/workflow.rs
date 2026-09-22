@@ -1,7 +1,7 @@
 //! Desktop workflow operations.
 
 use ora_contracts::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 backend_command!(
@@ -27,6 +27,61 @@ pub async fn write_workflow_export(request: WriteWorkflowExportRequest) -> Resul
         .await
         .map_err(|error| format!("workflow export task failed: {error}"))?
         .map_err(|error| format!("workflow export write failed: {error}"))
+}
+
+/// Carries a user-dropped filesystem path for the import picker.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadWorkflowImportRequest {
+    path: PathBuf,
+}
+
+/// Returns the dropped file's name and UTF-8 contents for the import preview.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadWorkflowImportResponse {
+    name: String,
+    size: u64,
+    content: String,
+}
+
+/// Matches the editor's import size gate so a huge drop is rejected before reading.
+const MAX_WORKFLOW_IMPORT_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Reads a dropped workflow file after the OS drag-drop event supplied its path.
+///
+/// WebView2 does not populate HTML5 `dataTransfer.files` for Explorer drops, so the
+/// desktop host must load the path from Tauri's native drag-drop event instead.
+#[tauri::command]
+pub async fn read_workflow_import(
+    request: ReadWorkflowImportRequest,
+) -> Result<ReadWorkflowImportResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let metadata = std::fs::metadata(&request.path)
+            .map_err(|error| format!("workflow import read failed: {error}"))?;
+        if !metadata.is_file() {
+            return Err("workflow import path is not a file".to_string());
+        }
+        let size = metadata.len();
+        if size > MAX_WORKFLOW_IMPORT_BYTES {
+            return Err("workflow import file is too large".to_string());
+        }
+        let name = request
+            .path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "workflow import file name is not utf-8".to_string())?
+            .to_string();
+        let content = std::fs::read_to_string(&request.path)
+            .map_err(|error| format!("workflow import read failed: {error}"))?;
+        Ok(ReadWorkflowImportResponse {
+            name,
+            size,
+            content,
+        })
+    })
+    .await
+    .map_err(|error| format!("workflow import task failed: {error}"))?
 }
 
 backend_command!(

@@ -1,6 +1,7 @@
 import { onMarketplaceAutoSyncChanged } from "./marketplace-sync.generated";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
@@ -9,6 +10,7 @@ import {
   type DesktopUpdateCapability,
   type DesktopUpdateStatus,
   type DiagnosticLogsCapability,
+  type OsDroppedTextFile,
   type LocationTarget,
   type PlatformAdapter,
   type PluginInstallProgress,
@@ -304,6 +306,35 @@ export class TauriPlatformAdapter implements PlatformAdapter {
   /** Hands an http(s)/mailto URL to the host browser instead of a new webview. */
   async openExternalUrl(url: string): Promise<void> {
     await invoke("open_external_url", { request: { url } });
+  }
+
+  /**
+   * Forwards native OS file drops. WebView2 leaves HTML5 `dataTransfer.files` empty,
+   * so the import picker must use this event instead of the browser drop payload.
+   */
+  subscribeOsFileDrop(
+    listener: (paths: readonly string[]) => void,
+  ): () => void {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+      return () => undefined;
+    }
+    let active = true;
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      if (active && event.payload.type === "drop") {
+        listener(event.payload.paths);
+      }
+    });
+    return () => {
+      active = false;
+      void unlisten.then((stop) => stop());
+    };
+  }
+
+  /** Loads a dropped path through the desktop command that owns filesystem reads. */
+  async readOsTextFile(path: string): Promise<OsDroppedTextFile> {
+    return invoke<OsDroppedTextFile>("read_workflow_import", {
+      request: { path },
+    });
   }
 }
 

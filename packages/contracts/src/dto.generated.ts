@@ -2,6 +2,7 @@
 export * from "./dto/agent-import.ts";
 export * from "./dto/agent.ts";
 export * from "./dto/app-event.ts";
+export * from "./dto/controller-api.ts";
 export * from "./dto/developer-mode.ts";
 export * from "./dto/effect.ts";
 export * from "./dto/error.ts";
@@ -9,7 +10,6 @@ export * from "./dto/file-system.ts";
 export * from "./dto/git.ts";
 export * from "./dto/marketplace-sync.ts";
 export * from "./dto/mcp-health.ts";
-export * from "./dto/minicloud.ts";
 export * from "./dto/plugin-log-level.ts";
 export * from "./dto/plugin.ts";
 export * from "./dto/project.ts";

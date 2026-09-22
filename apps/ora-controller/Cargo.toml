@@ -18,9 +18,16 @@ thiserror.workspace = true
 uuid.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+ora-contracts.workspace = true
+ora-utils = { workspace = true, features = ["local-ipc"] }
 libc.workspace = true
+clap.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "time", "signal", "macros", "sync"] }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 
 [dev-dependencies]
 tempfile.workspace = true
 pretty_assertions.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+reqwest = { workspace = true, features = ["json"] }

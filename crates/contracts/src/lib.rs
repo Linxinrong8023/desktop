@@ -1,5 +1,5 @@
 pub mod app_event;
-pub mod minicloud;
+pub mod controller_api;
 
 pub mod agent;
 pub mod agent_import;
@@ -55,7 +55,7 @@ pub fn export_typescript_bindings_to(
 ) -> Result<(), ExportError> {
     let config = Config::new().with_out_dir(output_directory.as_ref());
     agent_import::export(&config)?;
-    minicloud::export(&config)?;
+    controller_api::export(&config)?;
 
     app_event::export(&config)?;
     agent::export(&config)?;

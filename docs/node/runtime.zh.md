@@ -74,7 +74,7 @@ SIGTERM／SIGINT 关闭新工作准入，给当前 Git 配置的完成宽限，�
 
 ## 验证与下一阶段
 
-独立进程测试前先构建 `cargo build -p ora-node -p ora-controller -p ora-minicloud-server -p ora-process-host -p ora-process-guardian`。
+独立进程测试前先构建 `cargo build -p ora-node -p ora-controller -p ora-process-host -p ora-process-guardian`。
 `cargo test -p ora-node --test standalone` 使用真实 Node、host、guardian 程序、SQLite 和阻塞 Git hook。
 定向测试前先构建三个可执行程序。覆盖 Node SIGKILL 后立即重启、没有新 Node 时 guardian 独立收尾、
 guardian 丢失后不冲突工作继续执行、正常停止超时及数据目录隔离。单元测试覆盖局部恢复故障、冻结基准、

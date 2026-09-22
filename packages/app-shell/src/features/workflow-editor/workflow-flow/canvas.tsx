@@ -242,10 +242,14 @@ function WorkflowCanvasInner({
     const executableNodes = containWorkflowCanvasNodes(nodes).map((node) => ({
       ...node,
       // parentId is persisted graph structure; React Flow constraints are presentation only.
-      ...(node.data.containerId !== undefined ||
-      (node.parentId !== undefined && iterationIds.has(node.parentId))
+      // Loop bodies still use expandParent. Iteration members must not: frames already
+      // grow through expandIterationFrames, and stacking both on nested regions fights
+      // over parent size on every measurement and makes the canvas thrash.
+      ...(node.data.containerId !== undefined
         ? { extent: "parent" as const, expandParent: true }
-        : { extent: undefined, expandParent: undefined }),
+        : node.parentId !== undefined && iterationIds.has(node.parentId)
+          ? { extent: "parent" as const, expandParent: undefined }
+          : { extent: undefined, expandParent: undefined }),
       // Notes reserve the bottom layer, while selected executable nodes keep
       // React Flow's usual elevation over their executable peers.
       zIndex:

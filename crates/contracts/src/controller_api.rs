@@ -4,7 +4,7 @@ use ts_rs::TS;
 /// Public clone intent; target Node and deployment paths belong to server configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[ts(export_to = "minicloud.ts")]
+#[ts(export_to = "controller-api.ts")]
 pub struct MiniCloneRequest {
     pub request_id: String,
     pub repository: String,
@@ -14,7 +14,7 @@ pub struct MiniCloneRequest {
 /// Stable receipt for durable acceptance, independent of eventual execution success.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "minicloud.ts")]
+#[ts(export_to = "controller-api.ts")]
 pub struct MiniCloneAccepted {
     pub request_id: String,
     pub operation_id: String,
@@ -28,7 +28,7 @@ pub struct MiniCloneAccepted {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-#[ts(export_to = "minicloud.ts")]
+#[ts(export_to = "controller-api.ts")]
 pub enum MiniCloneState {
     Pending,
     Succeeded {
@@ -44,7 +44,7 @@ pub enum MiniCloneState {
 /// Known clone failure categories, without raw Git output or deployment credentials.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "minicloud.ts")]
+#[ts(export_to = "controller-api.ts")]
 pub enum MiniCloneFailure {
     SourceUnavailable,
     BranchNotFound,
@@ -55,7 +55,7 @@ pub enum MiniCloneFailure {
 /// One durable operation for list and detail views; paths remain Node-local facts.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "minicloud.ts")]
+#[ts(export_to = "controller-api.ts")]
 pub struct MiniCloneOperation {
     pub operation_id: String,
     pub execution_id: String,
@@ -68,7 +68,7 @@ pub struct MiniCloneOperation {
 /// HTTP failures do not become terminal execution failures.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export_to = "minicloud.ts")]
+#[ts(export_to = "controller-api.ts")]
 pub enum MiniErrorCode {
     InvalidInput,
     Conflict,
@@ -78,12 +78,12 @@ pub enum MiniErrorCode {
 
 /// Stable error envelope for the non-production HTTP adapter.
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
-#[ts(export_to = "minicloud.ts")]
+#[ts(export_to = "controller-api.ts")]
 pub struct MiniError {
     pub code: MiniErrorCode,
 }
 
-/// Generates minicloud DTOs without installing Desktop operations or bindings.
+/// Generates transitional Controller API DTOs without installing Desktop operations or bindings.
 pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     MiniCloneRequest::export(config)?;
     MiniCloneAccepted::export(config)?;
