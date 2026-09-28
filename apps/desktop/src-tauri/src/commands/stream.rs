@@ -151,7 +151,10 @@ pub async fn stream_contract(
         .streams
         .register(stream_call_id)
         .map_err(|error| CommandError::from_backend_with_lifecycle(error, &lifecycle))?;
-    stream_routes::start(
+    // Stream startup dispatches into the session/runtime start chains, which are deep enough
+    // to threaten the IPC main thread's stack if materialized unboxed there; see
+    // `commands::run_async_backend` for the constraint.
+    Box::pin(stream_routes::start(
         state,
         operation,
         StreamStart {
@@ -159,7 +162,7 @@ pub async fn stream_contract(
             channel: on_event,
             lifecycle,
         },
-    )
+    ))
     .await
 }
 

@@ -5,6 +5,7 @@ import {
   type HookLifecyclePhase,
   type HookLifecycleReport,
   type MarketplaceSource,
+  type MarketplaceSourceSyncFailure,
   type InstalledPlugin,
   type ImportedWorkflowOutcome,
   type InstallOutcome,
@@ -28,6 +29,12 @@ export interface PluginMemoryState {
   /** README text served for one marketplace listing keyed by plugin id. */
   pluginReadmes: Map<string, string>;
   availablePluginsUpdatedAt: bigint;
+  /**
+   * Marketplace sources the last rebuild could not refresh. Served by both marketplace reads the
+   * way the host serves them from the cached index, so a test can exercise the stale-listing
+   * warning without driving a real sync.
+   */
+  marketplaceSourceFailures: MarketplaceSourceSyncFailure[];
   marketplaceSources: MarketplaceSource[];
   /** This session's Hook lifecycle results, keyed by plugin id the way the host stores them. */
   hookLifecycleReports: Map<string, HookLifecycleReport>;
@@ -81,6 +88,7 @@ export function createPluginMemory(): PluginMemoryState {
     availablePlugins: [],
     pluginReadmes: new Map(),
     availablePluginsUpdatedAt: 0n,
+    marketplaceSourceFailures: [],
     marketplaceSources: [],
     mcpHealthByView: new Map(),
     packInstallations: [],
@@ -409,6 +417,7 @@ export function pluginHandlers(state: PluginMemoryState) {
     listAvailablePlugins: async () => ({
       updatedAt: state.availablePluginsUpdatedAt,
       plugins: [...state.availablePlugins],
+      failedSources: [...state.marketplaceSourceFailures],
     }),
     listMarketplaceSources: async () => ({
       sources: [...state.marketplaceSources],
@@ -465,6 +474,7 @@ export function pluginHandlers(state: PluginMemoryState) {
     syncAvailablePlugins: async () => ({
       updatedAt: state.availablePluginsUpdatedAt,
       plugins: [...state.availablePlugins],
+      failedSources: [...state.marketplaceSourceFailures],
     }),
     readPluginReadme: async (req) => ({
       readme: state.pluginReadmes.get(req.pluginId) ?? null,

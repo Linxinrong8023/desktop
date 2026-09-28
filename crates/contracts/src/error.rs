@@ -106,6 +106,19 @@ pub struct PluginConfigurationValidationParams {
     pub field_errors: Vec<PluginConfigurationFieldError>,
 }
 
+/// Names the package field a plugin install or import rejected, with its technical reason.
+///
+/// `field` is a stable manifest path — `description`, `webview.allowed_origins[0]`, or the
+/// manifest file itself — so the UI can point at the exact value a package author must fix,
+/// while `message` carries the detail the installer produced for logs and bug reports.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "error.ts")]
+pub struct PluginPackageInvalidParams {
+    pub field: String,
+    pub message: String,
+}
+
 /// Identifies an invalid retrieval field without including its submitted or stored value.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -147,6 +160,7 @@ pub enum PublicError {
     AgentNotFound(EmptyErrorParams),
     PluginNotFound(EmptyErrorParams),
     PluginHostIncompatible(EmptyErrorParams),
+    PluginPackageInvalid(PluginPackageInvalidParams),
     PackMemberDuplicate(PackMemberParams),
     PackSelfReference(PackMemberParams),
     PackMemberNotFound(PackMemberParams),
@@ -270,6 +284,7 @@ impl PublicError {
             Self::AgentNotFound(_) => "agent_not_found",
             Self::PluginNotFound(_) => "plugin_not_found",
             Self::PluginHostIncompatible(_) => "plugin_host_incompatible",
+            Self::PluginPackageInvalid(_) => "plugin_package_invalid",
             Self::PackMemberDuplicate(_) => "pack_member_duplicate",
             Self::PackSelfReference(_) => "pack_self_reference",
             Self::PackMemberNotFound(_) => "pack_member_not_found",
@@ -409,6 +424,7 @@ pub(crate) fn export(config: &Config) -> Result<(), ExportError> {
     PackMemberParams::export_all(config)?;
     PluginConfigurationFieldError::export_all(config)?;
     PluginConfigurationValidationParams::export_all(config)?;
+    PluginPackageInvalidParams::export_all(config)?;
     MarketplaceArtifactRetrievalFieldInvalidParams::export_all(config)?;
     PublicError::export_all(config)?;
     ContractError::export_all(config)?;
@@ -420,8 +436,8 @@ mod tests {
     use super::{
         ContractError, EmptyErrorParams, MarketplaceArtifactRetrievalFieldInvalidParams,
         OpenLocationFailedParams, OpenLocationTarget, PackMemberParams,
-        PluginConfigurationValidationParams, PublicError, RequestId, SessionMcpSetupFailedParams,
-        SkillFolderConflictParams, TaskBaseBranchNotFoundParams,
+        PluginConfigurationValidationParams, PluginPackageInvalidParams, PublicError, RequestId,
+        SessionMcpSetupFailedParams, SkillFolderConflictParams, TaskBaseBranchNotFoundParams,
         WorkflowSnapshotIncompatibleWithResumeParams,
     };
     use pretty_assertions::assert_eq;
@@ -467,6 +483,10 @@ mod tests {
             PublicError::AgentNotFound(empty),
             PublicError::PluginNotFound(empty),
             PublicError::PluginHostIncompatible(empty),
+            PublicError::PluginPackageInvalid(PluginPackageInvalidParams {
+                field: "description".to_owned(),
+                message: "missing field `description`".to_owned(),
+            }),
             PublicError::PackMemberDuplicate(PackMemberParams {
                 plugin_id: "official/ora-space.python-core".to_string(),
             }),
@@ -612,6 +632,7 @@ mod tests {
                 | PublicError::AgentNotFound(_)
                 | PublicError::PluginNotFound(_)
                 | PublicError::PluginHostIncompatible(_)
+                | PublicError::PluginPackageInvalid(_)
                 | PublicError::PackMemberDuplicate(_)
                 | PublicError::PackSelfReference(_)
                 | PublicError::PackMemberNotFound(_)
@@ -725,7 +746,7 @@ mod tests {
     #[test]
     fn public_error_codes_match_serde_tags_for_every_variant() {
         let samples = public_error_samples();
-        assert_eq!(samples.len(), 110);
+        assert_eq!(samples.len(), 111);
 
         for error in samples {
             let serialized = serde_json::to_value(&error).unwrap();

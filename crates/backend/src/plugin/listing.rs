@@ -227,6 +227,7 @@ mod tests {
             ListAvailablePluginsResponse {
                 updated_at: 0,
                 plugins: Vec::new(),
+                failed_sources: Vec::new(),
             }
         );
         // Reading the marketplace never repairs the cache: that would mean touching the network

@@ -26,12 +26,15 @@ pub async fn get_developer_mode(
 ) -> Result<DeveloperModeResponse, CommandError> {
     let _ = request;
     let settings_handle = state.backend.settings().clone();
-    run_async_backend("get_developer_mode", async move {
-        settings_handle
-            .developer_mode()
-            .await
-            .map(developer_mode_response)
-    })
+    run_async_backend(
+        "get_developer_mode",
+        Box::pin(async move {
+            settings_handle
+                .developer_mode()
+                .await
+                .map(developer_mode_response)
+        }),
+    )
     .await
 }
 
@@ -42,12 +45,15 @@ pub async fn set_developer_mode(
     request: SetDeveloperModeRequest,
 ) -> Result<DeveloperModeResponse, CommandError> {
     let settings_handle = state.backend.settings().clone();
-    run_async_backend("set_developer_mode", async move {
-        settings_handle
-            .set_developer_mode(internal_developer_mode(request.enabled))
-            .await
-            .map(developer_mode_response)
-    })
+    run_async_backend(
+        "set_developer_mode",
+        Box::pin(async move {
+            settings_handle
+                .set_developer_mode(internal_developer_mode(request.enabled))
+                .await
+                .map(developer_mode_response)
+        }),
+    )
     .await
 }
 
@@ -59,13 +65,18 @@ pub async fn get_runtime_log_level(
 ) -> Result<RuntimeLogLevelStateResponse, CommandError> {
     let _ = request;
     let manager = state.runtime_log_level.clone();
-    run_async_backend("get_runtime_log_level", async move {
-        manager
-            .state()
-            .await
-            .map(runtime_log_level_response)
-            .map_err(|source| BackendError::internal("failed to read runtime log level", source))
-    })
+    run_async_backend(
+        "get_runtime_log_level",
+        Box::pin(async move {
+            manager
+                .state()
+                .await
+                .map(runtime_log_level_response)
+                .map_err(|source| {
+                    BackendError::internal("failed to read runtime log level", source)
+                })
+        }),
+    )
     .await
 }
 
@@ -87,27 +98,29 @@ where
     C: RuntimeLogLevelControl,
     S: PreferredLogLevelStore,
 {
-    run_async_backend_with_request_id("set_runtime_log_level", move |request_id| async move {
-        manager
-            .set_level(internal_log_level(request.level))
-            .await
-            .map(runtime_log_level_response)
-            .map_err(|error| {
-                if let Some(rollback_error) = error.rollback_error() {
-                    let report = ora_logging::ErrorReport::from_error(rollback_error);
-                    ora_logging::ora_error!(
-                        operation = "set_runtime_log_level.rollback",
-                        request_id = %request_id,
-                        outcome = "secondary_failure",
-                        error.code = "internal_error",
-                        error.message = report.message(),
-                        error.chain = report.chain(),
-                        error.chain_depth = report.chain_depth(),
-                        "secondary cleanup failed"
-                    );
-                }
-                BackendError::internal("failed to update runtime log level", error)
-            })
+    run_async_backend_with_request_id("set_runtime_log_level", move |request_id| {
+        Box::pin(async move {
+            manager
+                .set_level(internal_log_level(request.level))
+                .await
+                .map(runtime_log_level_response)
+                .map_err(|error| {
+                    if let Some(rollback_error) = error.rollback_error() {
+                        let report = ora_logging::ErrorReport::from_error(rollback_error);
+                        ora_logging::ora_error!(
+                            operation = "set_runtime_log_level.rollback",
+                            request_id = %request_id,
+                            outcome = "secondary_failure",
+                            error.code = "internal_error",
+                            error.message = report.message(),
+                            error.chain = report.chain(),
+                            error.chain_depth = report.chain_depth(),
+                            "secondary cleanup failed"
+                        );
+                    }
+                    BackendError::internal("failed to update runtime log level", error)
+                })
+        })
     })
     .await
 }
@@ -120,12 +133,15 @@ pub async fn get_proxy_settings(
 ) -> Result<GetProxySettingsResponse, CommandError> {
     let _ = request;
     let settings_handle = state.backend.settings().clone();
-    run_async_backend("get_proxy_settings", async move {
-        settings_handle
-            .network_proxy_settings()
-            .await
-            .map(proxy_settings_response)
-    })
+    run_async_backend(
+        "get_proxy_settings",
+        Box::pin(async move {
+            settings_handle
+                .network_proxy_settings()
+                .await
+                .map(proxy_settings_response)
+        }),
+    )
     .await
 }
 /// Persists and returns the configured network proxy.
@@ -135,13 +151,16 @@ pub async fn set_proxy_settings(
     request: SetProxySettingsRequest,
 ) -> Result<SetProxySettingsResponse, CommandError> {
     let settings_handle = state.backend.settings().clone();
-    run_async_backend("set_proxy_settings", async move {
-        let settings = internal_network_proxy_settings(request.settings);
-        settings_handle
-            .set_network_proxy_settings(settings)
-            .await
-            .map(set_proxy_settings_response)
-    })
+    run_async_backend(
+        "set_proxy_settings",
+        Box::pin(async move {
+            let settings = internal_network_proxy_settings(request.settings);
+            settings_handle
+                .set_network_proxy_settings(settings)
+                .await
+                .map(set_proxy_settings_response)
+        }),
+    )
     .await
 }
 
@@ -153,10 +172,13 @@ pub async fn clear_proxy_settings(
 ) -> Result<ClearProxySettingsResponse, CommandError> {
     let _ = request;
     let settings_handle = state.backend.settings().clone();
-    run_async_backend("clear_proxy_settings", async move {
-        settings_handle.clear_network_proxy_settings().await?;
-        Ok(ClearProxySettingsResponse { settings: None })
-    })
+    run_async_backend(
+        "clear_proxy_settings",
+        Box::pin(async move {
+            settings_handle.clear_network_proxy_settings().await?;
+            Ok(ClearProxySettingsResponse { settings: None })
+        }),
+    )
     .await
 }
 
@@ -167,14 +189,17 @@ pub async fn check_proxy_settings(
     request: CheckProxySettingsRequest,
 ) -> Result<CheckProxySettingsResponse, CommandError> {
     let settings_handle = state.backend.settings().clone();
-    run_async_backend("check_proxy_settings", async move {
-        settings_handle
-            .check_network_proxy_settings(
-                internal_network_proxy_settings(request.settings),
-                request.url,
-            )
-            .await
-    })
+    run_async_backend(
+        "check_proxy_settings",
+        Box::pin(async move {
+            settings_handle
+                .check_network_proxy_settings(
+                    internal_network_proxy_settings(request.settings),
+                    request.url,
+                )
+                .await
+        }),
+    )
     .await
 }
 /// Converts optional persisted proxy settings into the Settings response shape.

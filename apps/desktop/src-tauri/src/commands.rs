@@ -4,7 +4,26 @@ use crate::error::CommandError;
 use ora_backend::{BackendError, RequestLifecycle, UuidRequestIdGenerator};
 use ora_contracts::RequestId;
 use std::future::Future;
+use std::pin::Pin;
 use tracing::Instrument;
+
+/// Upper bound for the future an async command may hold across its await.
+///
+/// Tauri constructs every async command's future on the **main thread**, inside the WebView2
+/// custom-protocol callback, and only then moves it onto the async runtime. That callback stack
+/// is roughly 1 MB and the webview/tauri frames below the command handler already occupy
+/// several hundred KB of it, so a command future of a few hundred KB overflows the stack before
+/// the runtime ever polls it. Release 0.2.0 died exactly this way (WER `0xc00000fd`, main
+/// thread, in `tauri::async_runtime::spawn` called from this crate's invoke handler): the
+/// marketplace install chain monomorphizes into a single ~650 KB state machine, and the mere
+/// act of constructing the `install_plugin` future killed the process.
+///
+/// The budget below is therefore an IPC-stack safety envelope, not a style preference: any
+/// command future within it leaves two orders of magnitude of headroom under the remaining
+/// main-thread stack, while a regression that embeds a deep domain future again fails this
+/// bound by orders of magnitude.
+#[cfg(test)]
+pub(super) const IPC_COMMAND_FUTURE_BUDGET: usize = 4096;
 
 /// Executes one synchronous backend operation on the runtime's blocking executor.
 pub(super) async fn run_backend<Context, Request, Response, Operation>(
@@ -49,9 +68,19 @@ where
 }
 
 /// Executes asynchronous work with the same correlated request completion contract.
+///
+/// `call` must already be boxed (`Box::pin(..)`): Tauri constructs every async command's future
+/// on the main thread inside the WebView2 IPC callback, and a deep domain future held across
+/// this await overflows that ~1 MB stack before the runtime ever polls it (release 0.2.0 died
+/// with a main-thread stack overflow the moment a marketplace install was clicked — the
+/// install chain alone is a ~650 KB state machine). Boxing at the call site keeps the future
+/// this wrapper — and therefore the command future the IPC thread materializes — pointer-sized,
+/// while the deep domain future itself is only ever constructed on the async-runtime thread
+/// that first polls this wrapper. The boxed parameter type makes the invariant
+/// compiler-enforced: a caller cannot pass a raw domain future here without noticing.
 pub(super) async fn run_async_backend<Response, Call>(
     operation_name: &'static str,
-    call: Call,
+    call: Pin<Box<Call>>,
 ) -> Result<Response, CommandError>
 where
     Call: Future<Output = Result<Response, BackendError>>,
@@ -60,12 +89,14 @@ where
 }
 
 /// Supplies diagnostic correlation without granting the operation lifecycle completion authority.
-pub(super) async fn run_async_backend_with_request_id<Response, Operation, Call>(
+///
+/// The operation returns an already-boxed future for the same IPC-stack reason
+/// [`run_async_backend`] requires one.
+pub(super) async fn run_async_backend_with_request_id<Response, Call>(
     operation_name: &'static str,
-    operation: Operation,
+    operation: impl FnOnce(RequestId) -> Pin<Box<Call>>,
 ) -> Result<Response, CommandError>
 where
-    Operation: FnOnce(RequestId) -> Call,
     Call: Future<Output = Result<Response, BackendError>>,
 {
     let lifecycle = RequestLifecycle::start(operation_name, &UuidRequestIdGenerator);
@@ -112,7 +143,13 @@ macro_rules! async_backend_command {
             request: $request,
         ) -> Result<$response, $crate::error::CommandError> {
             let module = state.backend.$domain();
-            $crate::commands::run_async_backend(stringify!($name), module.$operation(request)).await
+            // The domain future is boxed so the IPC thread never materializes it; see
+            // `run_async_backend` and `IPC_COMMAND_FUTURE_BUDGET` for the stack constraint.
+            $crate::commands::run_async_backend(
+                stringify!($name),
+                Box::pin(module.$operation(request)),
+            )
+            .await
         }
     };
 }

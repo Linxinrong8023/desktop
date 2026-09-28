@@ -20,6 +20,7 @@ export type ContractError =
     | { "code": "agent_not_found"; "params": EmptyErrorParams }
     | { "code": "plugin_not_found"; "params": EmptyErrorParams }
     | { "code": "plugin_host_incompatible"; "params": EmptyErrorParams }
+    | { "code": "plugin_package_invalid"; "params": PluginPackageInvalidParams }
     | { "code": "pack_member_duplicate"; "params": PackMemberParams }
     | { "code": "pack_self_reference"; "params": PackMemberParams }
     | { "code": "pack_member_not_found"; "params": PackMemberParams }
@@ -220,6 +221,15 @@ export type PluginConfigurationValidationParams = {
 };
 
 /**
+ * Names the package field a plugin install or import rejected, with its technical reason.
+ *
+ * `field` is a stable manifest path — `description`, `webview.allowed_origins[0]`, or the
+ * manifest file itself — so the UI can point at the exact value a package author must fix,
+ * while `message` carries the detail the installer produced for logs and bug reports.
+ */
+export type PluginPackageInvalidParams = { field: string; message: string };
+
+/**
  * Enumerates every user-visible Ora failure and its exact interpolation parameters.
  */
 export type PublicError =
@@ -237,6 +247,7 @@ export type PublicError =
   | { "code": "agent_not_found"; "params": EmptyErrorParams }
   | { "code": "plugin_not_found"; "params": EmptyErrorParams }
   | { "code": "plugin_host_incompatible"; "params": EmptyErrorParams }
+  | { "code": "plugin_package_invalid"; "params": PluginPackageInvalidParams }
   | { "code": "pack_member_duplicate"; "params": PackMemberParams }
   | { "code": "pack_self_reference"; "params": PackMemberParams }
   | { "code": "pack_member_not_found"; "params": PackMemberParams }

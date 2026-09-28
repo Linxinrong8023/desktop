@@ -39,7 +39,7 @@ mod service;
 #[cfg(target_os = "linux")]
 pub use managed::{ManagedGitRunner, ProcessConfig, Shutdown};
 #[cfg(target_os = "linux")]
-pub use service::{IpcConfig, ServiceConfig, serve};
+pub use service::{ControlConfig, ControlListen, ServiceConfig, serve};
 #[cfg(target_os = "linux")]
 pub type ManagedNode = Node<gitlancer::Git<ManagedGitRunner>>;
 pub use ora_node_db::{Command, DurableWrites, WriteGuard, WritePoint};
@@ -77,6 +77,9 @@ pub enum Error {
     Shutdown(String),
     #[error("invalid Node configuration: {0}")]
     Configuration(String),
+    /// The Controller sent a message this session does not handle.
+    #[error("message is not supported in this session")]
+    UnsupportedMessage,
 }
 
 /// Exclusive mutable execution access serializes commands and recovery for the leased database.

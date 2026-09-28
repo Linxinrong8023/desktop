@@ -40,6 +40,11 @@ forms accept an optional human-readable `title` that falls back to the identifie
   code inside it; it learns that at spawn time from `ora-plugin-lifecycle` instead.
 - Report structural failures with the TOML path of the offending value and semantic failures with
   a typed `ManifestField`, including the index of a webview origin or download rule.
+- Attribute every failure to the field a user must fix through `ManifestError::field_path()`. A
+  missing required field is reported by the deserializer at the enclosing table and named only in
+  its message, so the name is recovered here, next to the schema that declares it, rather than by
+  each caller (`description`, `webview.downloads.rules[0].page.path_prefix`). A TOML syntax error
+  concerns the whole document and names no field.
 - Preserve deterministic validation order so callers receive a stable first error.
 - Reuse domain-free slug and Git branch-name validation from `ora-utils`.
 

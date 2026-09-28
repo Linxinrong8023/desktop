@@ -12,6 +12,7 @@
 //! single-plugin uninstall chain.
 
 use super::PluginApi;
+use super::marketplace::map_install_error;
 use super::pack_reconcile::PackMemberReconciliation;
 use super::pack_uninstall::PackPreserveReason;
 use crate::error::{BackendError, ErrorClassification};
@@ -381,7 +382,7 @@ impl PluginApi {
         let mut applicable = Vec::new();
         for (member_id, _agents, member_manifest) in selected {
             let release = select_release(&member_manifest, host).map_err(|error| {
-                self.map_install_error("failed to select pack member release", error)
+                map_install_error("failed to select pack member release", error)
             })?;
             if installed
                 .installed_plugins()
@@ -470,7 +471,7 @@ impl PluginApi {
                 }
             };
             if let Err(error) = install_result {
-                let mapped = self.map_install_error("failed to install pack member", error);
+                let mapped = map_install_error("failed to install pack member", error);
                 ora_info!(
                     plugin_id = %member.plugin_id.canonical(),
                     error = %mapped,

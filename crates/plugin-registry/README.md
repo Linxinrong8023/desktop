@@ -29,11 +29,27 @@
   other: an entry's id is `<source namespace>/<identifier>`, so two repositories publishing the same
   `identifier` produce two ids and both stay listed. Deduplication only collapses a repeated id
   within one source.
+- `RegistryIndex::build_with_failures` is the rebuild one marketplace sync actually performs: it
+  scans the sources that answered and carries forward, verbatim, the entries the previous index
+  already listed for the sources that failed. A failed source is never re-scanned — the checkout
+  that could not be refreshed may also be half-written — so a repository that is temporarily
+  unreachable keeps its published listings instead of appearing to have withdrawn them. A source
+  the caller did not pass (removed or disabled) loses its listings, and a failure reported for it
+  is neither carried over nor recorded, so "removed" and "unreachable" never produce the same
+  index. The failures are stored in the index itself, because the consumers that explain stale
+  listings read the cached file long after the sync call returned.
+- `RegistrySourceFailure::from_sync_error` turns a failed `RegistrySync::sync` into the message
+  that is shown to the user and persisted with the index. A failed Git command renders its whole
+  argument list, local checkout path included, so only Git's own `fatal:` / `error:` lines are
+  kept (falling back to Git's last line, then its exit code); the complete error stays with the
+  caller's log.
 - `RegistryIndex::resolve_manifest_all` resolves an id against the source that owns its namespace
   rather than the first source in order, so an install or update always follows the entry's own
   repository and proxy policy.
 - `RegistryIndex::load` reads a previously written index file; `RegistryIndex::write` replaces the
-  target file atomically through `ora-utils` so readers never observe a partial index.
+  target file atomically through `ora-utils` so readers never observe a partial index. The index is
+  the only durable resident of `plugins/cache/`: downloaded release archives are transfer state
+  owned by `ora-plugin-manager`, which sweeps them by extension and never touches this file.
 - Each entry records the canonical URL of the source that published it, because every other
   display field comes from a manifest either repository can copy verbatim and the namespace is an
   opaque digest to a reader; attribution is what lets the UI tell two same-named listings apart.
@@ -62,9 +78,13 @@
 
 ## Public interface
 
-`RegistryIndex::build_all(sources, updated_at)` returns a `RegistryBuild` carrying the ordered index and any
-skipped manifests; `RegistryIndex::build_all(dirs, updated_at)` does the same across several
-source directories. `RegistryIndex::load(path)` / `RegistryIndex::write(path)` read and atomically
-persist an index, and `RegistryIndex::resolve_manifest_all(dirs, id)` finds a release manifest
-across sources in source order. `RegistrySync::sync(&git, &source)` returns the checkout directory
-so callers can then build an index from it.
+`RegistryIndex::build_all(sources, updated_at)` returns a `RegistryBuild` carrying the ordered index
+and any skipped manifests; `RegistryIndex::build_with_failures(sources, failures, previous,
+updated_at)` returns the same shape while carrying over the failed sources' previous entries and
+recording the failures, each built with `RegistrySourceFailure::new(url, message)` or
+`RegistrySourceFailure::from_sync_error(url, &error)`. `RegistryIndex::source_failures()` reads
+those records back, including from an index written by an older version that had none. `RegistryIndex::load(path)` /
+`RegistryIndex::write(path)` read and atomically persist an index, and
+`RegistryIndex::resolve_manifest_all(dirs, id)` finds a release manifest across sources in source
+order. `RegistrySync::sync(&git, &source)` returns the checkout directory so callers can then build
+an index from it.

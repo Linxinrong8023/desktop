@@ -30,10 +30,12 @@ describe("useAvailablePlugins", () => {
     expect(result.current.data).toEqual({
       updatedAt: 0n,
       plugins: state.availablePlugins,
+      failedSources: [],
     });
     expect(queryClient.getQueryData(pluginKeys.availablePlugins)).toEqual({
       updatedAt: 0n,
       plugins: state.availablePlugins,
+      failedSources: [],
     });
   });
 });

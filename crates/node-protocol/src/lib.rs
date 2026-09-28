@@ -17,7 +17,8 @@ pub use domain::{
     WorktreeRemovalOutcome, WorktreeRemoved,
 };
 pub use frame::{
-    FrameError, MAX_FRAME_LENGTH, NODE_MESSAGE_FRAME_TYPE, read_controller_message,
+    FrameError, MAX_FRAME_LENGTH, NODE_MESSAGE_FRAME_TYPE, decode_controller_frame,
+    decode_node_frame, encode_controller_frame, encode_node_frame, read_controller_message,
     read_node_message, write_controller_message, write_node_message,
 };
 pub use identity::{
@@ -26,11 +27,12 @@ pub use identity::{
     WorkspaceId, WorktreeId,
 };
 pub use message::{
-    CloneRepository, CloneRepositoryMessage, CloneResultMessage, ControllerToNodeMessage,
-    EnsureWorktree, EnsureWorktreeMessage, EventAck, EventAckMessage, ExecutionState,
-    ExecutionStatus, ExecutionStatusMessage, GetExecutionStatus, GetExecutionStatusMessage,
-    Heartbeat, HeartbeatMessage, Hello, HelloAccepted, HelloAcceptedMessage, HelloMessage,
-    MessageValidationError, NodeCapability, NodeToControllerMessage, RemoveWorktree,
-    RemoveWorktreeMessage, ValidateMessage, WorktreeFailedMessage, WorktreeReadyMessage,
-    WorktreeRemovalFailedMessage, WorktreeRemovedMessage,
+    CloneRepository, CloneRepositoryMessage, CloneResultMessage, ControllerHeartbeat,
+    ControllerHeartbeatMessage, ControllerToNodeMessage, EnsureWorktree, EnsureWorktreeMessage,
+    EventAck, EventAckMessage, ExecutionState, ExecutionStatus, ExecutionStatusMessage,
+    GetExecutionStatus, GetExecutionStatusMessage, Heartbeat, HeartbeatMessage, Hello,
+    HelloAccepted, HelloAcceptedMessage, HelloMessage, MessageValidationError, NodeCapability,
+    NodeToControllerMessage, RemoveWorktree, RemoveWorktreeMessage, ValidateMessage,
+    WorktreeFailedMessage, WorktreeReadyMessage, WorktreeRemovalFailedMessage,
+    WorktreeRemovedMessage,
 };

@@ -228,12 +228,16 @@ pub enum PluginHostCompatibility {
 pub struct ListAvailablePluginsRequest {}
 
 /// Returns the marketplace plugins cached in the registry index.
+///
+/// `failed_sources` is read from the cache rather than from the request that rebuilt it, so a
+/// marketplace page opened long after a failed refresh still explains why the listings are stale.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "plugin.ts")]
 pub struct ListAvailablePluginsResponse {
     pub updated_at: i64,
     pub plugins: Vec<AvailablePlugin>,
+    pub failed_sources: Vec<MarketplaceSourceSyncFailure>,
 }
 
 /// Requests a marketplace source sync followed by an atomic registry-index rebuild.
@@ -242,13 +246,34 @@ pub struct ListAvailablePluginsResponse {
 #[ts(export_to = "plugin.ts")]
 pub struct SyncAvailablePluginsRequest {}
 
-/// Returns the registry index rebuilt immediately after a marketplace sync succeeds.
+/// Returns the registry index rebuilt after a marketplace sync.
+///
+/// A rebuild reports per source instead of failing as a whole: the sources that answered publish
+/// their new listings, the ones that failed keep the listings they already had, and
+/// `failed_sources` names them so the caller can tell the two apart.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "plugin.ts")]
 pub struct SyncAvailablePluginsResponse {
     pub updated_at: i64,
     pub plugins: Vec<AvailablePlugin>,
+    pub failed_sources: Vec<MarketplaceSourceSyncFailure>,
+}
+
+/// Describes one marketplace source whose most recent refresh failed.
+///
+/// The listing that source published is still served from the previous index, so the failure is
+/// reported instead of being folded into the listings it makes stale.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "plugin.ts")]
+pub struct MarketplaceSourceSyncFailure {
+    /// The canonical URL of the source that could not be refreshed.
+    pub url: String,
+    /// Why the refresh failed: Git's own diagnosis, or the source configuration that prevented it
+    /// such as a required proxy that is not configured. It never carries the Git command line or
+    /// local checkout paths; the complete error is only written to the log.
+    pub message: String,
 }
 
 /// Requests the README one marketplace listing publishes beside its `orax.toml`.
@@ -675,6 +700,7 @@ pub(crate) fn export(config: &ts_rs::Config) -> Result<(), ts_rs::ExportError> {
     ListAvailablePluginsResponse::export(config)?;
     SyncAvailablePluginsRequest::export(config)?;
     SyncAvailablePluginsResponse::export(config)?;
+    MarketplaceSourceSyncFailure::export(config)?;
     ReadPluginReadmeRequest::export(config)?;
     ReadPluginReadmeResponse::export(config)?;
     MarketplaceArtifactRetrieval::export(config)?;
@@ -944,6 +970,10 @@ mod tests {
                     pack_members: None,
                     compatibility: super::PluginHostCompatibility::Compatible,
                 }],
+                failed_sources: vec![super::MarketplaceSourceSyncFailure {
+                    url: "https://github.com/acme/plugins".to_string(),
+                    message: "git fetch failed".to_string(),
+                }],
             })
             .unwrap(),
             json!({
@@ -960,6 +990,10 @@ mod tests {
                     "logo": null,
                     "packMembers": null,
                     "compatibility": "compatible"
+                }],
+                "failedSources": [{
+                    "url": "https://github.com/acme/plugins",
+                    "message": "git fetch failed"
                 }]
             })
         );
@@ -976,11 +1010,19 @@ mod tests {
             serde_json::to_value(SyncAvailablePluginsResponse {
                 updated_at: 1_776_244_428,
                 plugins: Vec::new(),
+                failed_sources: vec![super::MarketplaceSourceSyncFailure {
+                    url: "https://github.com/acme/plugins".to_string(),
+                    message: "git fetch failed".to_string(),
+                }],
             })
             .unwrap(),
             json!({
                 "updatedAt": 1_776_244_428,
-                "plugins": []
+                "plugins": [],
+                "failedSources": [{
+                    "url": "https://github.com/acme/plugins",
+                    "message": "git fetch failed"
+                }]
             })
         );
     }

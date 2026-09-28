@@ -1,4 +1,7 @@
-//! One blocking execution owner and an independently responsive, bounded local control session.
+//! One blocking database owner, a clone executor that waits on Git for it, and an independently
+//! responsive, bounded control session.
+mod clones;
+mod executor;
 mod session;
 mod worker;
 use crate::{CloneConfig, NodeConfig, ProcessConfig, Shutdown};
@@ -6,20 +9,34 @@ use ora_node_protocol::*;
 use serde::{Deserialize, Serialize};
 use std::{
     io,
+    net::SocketAddr,
     path::PathBuf,
     sync::{Arc, Mutex, mpsc},
     time::Duration,
 };
 use tokio::sync::oneshot;
 
-/// Local transport is explicitly configured; it neither authenticates peers nor changes ownership.
+/// The control session is explicitly configured; it neither authenticates peers nor changes
+/// ownership. Exactly one listening entry is served, so session admission has a single source.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct IpcConfig {
+pub struct ControlConfig {
     pub controller_id: ControllerId,
-    pub endpoint: PathBuf,
+    pub listen: ControlListen,
     pub heartbeat_ms: u64,
     pub frame_timeout_ms: u64,
+}
+
+/// Where the Node accepts its Controller. Local deployments use a private Unix socket under the
+/// Node home; sandboxes listen for WebSocket upgrades that only the platform router can reach,
+/// because the Node itself performs no authentication.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", deny_unknown_fields)]
+pub enum ControlListen {
+    #[serde(rename = "ipc")]
+    Ipc { path: PathBuf },
+    #[serde(rename = "websocket")]
+    WebSocket { bind: SocketAddr, path: String },
 }
 
 /// Composition keeps deployment paths separate from business requests and supports recovery-only startup.
@@ -31,12 +48,15 @@ pub struct ServiceConfig {
     #[serde(default)]
     pub clone: Option<CloneConfig>,
     #[serde(default)]
-    pub ipc: Option<IpcConfig>,
+    pub control: Option<ControlConfig>,
     pub recovery_interval_ms: u64,
     pub timezone: String,
 }
 
-// The queue holds at most 16 entries; inline envelopes avoid another allocation per control message.
+/// Requests waiting for the blocking worker, across message handling and the replay pass.
+const ADMISSION_QUEUE_BOUND: usize = 16;
+
+// The queue holds at most ADMISSION_QUEUE_BOUND entries; inline envelopes avoid another allocation per control message.
 #[allow(clippy::large_enum_variant)]
 enum Request {
     Message(ControllerToNodeMessage),
@@ -45,7 +65,12 @@ enum Request {
 struct Work {
     active: Arc<Mutex<bool>>,
     request: Request,
-    reply: oneshot::Sender<Result<Vec<NodeToControllerMessage>, String>>,
+    reply: oneshot::Sender<Result<Vec<NodeToControllerMessage>, Rejection>>,
+}
+/// Why the worker refused a request, and the close code the session ends with because of it.
+struct Rejection {
+    close: ora_node_transport::CloseReason,
+    message: String,
 }
 #[derive(Clone)]
 struct SessionInfo {
@@ -62,36 +87,53 @@ impl Drop for StopOnDrop {
     }
 }
 
-/// Runs independent IPC and execution lifecycles while retaining the Node lease until cleanup finishes.
+/// Runs independent control-session and execution lifecycles while retaining the Node lease until cleanup finishes.
 pub async fn serve(config: ServiceConfig, shutdown: Shutdown) -> io::Result<()> {
     let _stop = StopOnDrop(shutdown.clone());
     if config.recovery_interval_ms == 0 {
         return Err(io::Error::other("recovery interval must be positive"));
     }
-    if let Some(ipc) = &config.ipc
-        && (ipc.heartbeat_ms == 0
-            || ipc.frame_timeout_ms <= ipc.heartbeat_ms
-            || !ipc.endpoint.is_absolute()
-            || ipc.endpoint.parent() != Some(config.node.home_directory.as_path())
-            || config.clone.is_none())
-    {
-        return Err(io::Error::other(
-            "IPC needs clone configuration, positive bounded timing and an endpoint directly under Node home",
-        ));
+    if let Some(control) = &config.control {
+        let listen_valid = match &control.listen {
+            ControlListen::Ipc { path } => {
+                path.is_absolute() && path.parent() == Some(config.node.home_directory.as_path())
+            }
+            ControlListen::WebSocket { path, .. } => path.starts_with('/'),
+        };
+        if control.heartbeat_ms == 0
+            || control.frame_timeout_ms <= control.heartbeat_ms
+            || !listen_valid
+            || config.clone.is_none()
+        {
+            return Err(io::Error::other(
+                "control needs clone configuration, positive bounded timing, and an IPC path directly under Node home or a WebSocket path starting with /",
+            ));
+        }
     }
-    let ipc = config.ipc.clone();
-    let (sender, receiver) = mpsc::sync_channel(/*bound*/ 16);
+    let control = config.control.clone();
+    let (sender, receiver) = mpsc::sync_channel(ADMISSION_QUEUE_BOUND);
     let (ready, started) = oneshot::channel();
     let worker_shutdown = shutdown.clone();
     let mut worker =
         tokio::task::spawn_blocking(move || worker::run(config, receiver, ready, worker_shutdown));
     let startup = started.await.map_err(io::Error::other)?;
     let result = match startup {
-        Ok(info) => match ipc {
-            Some(ipc) => tokio::select! {
-                result = session::listen(ipc, info, sender, shutdown.clone()) => result,
-                result = &mut worker => return result.map_err(io::Error::other)?.map_err(io::Error::other),
-            },
+        Ok(info) => match control {
+            Some(control) => {
+                let session = session::serve(control, info, sender, shutdown.clone());
+                tokio::pin!(session);
+                tokio::select! {
+                    result = &mut session => result,
+                    result = &mut worker => {
+                        // A normal stop can finish the worker first; the session then only tells
+                        // the Controller it is stopping, bounded by its frame deadline.
+                        if shutdown.requested() {
+                            let _ = session.await;
+                        }
+                        return result.map_err(io::Error::other)?.map_err(io::Error::other);
+                    }
+                }
+            }
             None => {
                 while !shutdown.requested() && !worker.is_finished() {
                     tokio::time::sleep(Duration::from_millis(/*millis*/ 25)).await;

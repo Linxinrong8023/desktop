@@ -1,16 +1,9 @@
-use super::*;
+use crate::*;
 use rusqlite::OptionalExtension;
 
-/// An accepted operation and its durable terminal fact; no result means awaiting reconciliation, not failure.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CloneOperation {
-    pub command: CloneRepositoryMessage,
-    pub result: Option<CloneExecutionResult>,
-}
-
-impl<W: WriteGuard> Controller<W> {
+impl<W: WriteGuard> super::Inner<W> {
     /// Lists durable operations for presentation without exposing storage or manufacturing live progress.
-    pub fn operations(&self) -> Result<Vec<CloneOperation>, Error> {
+    pub(super) fn operations(&self) -> Result<Vec<CloneOperation>, Error> {
         let mut statement = self
             .connection
             .prepare("SELECT input,result FROM clone_operations ORDER BY rowid DESC")?;
@@ -34,7 +27,10 @@ impl<W: WriteGuard> Controller<W> {
     }
 
     /// Distinguishes an absent operation from an accepted operation whose result is not known yet.
-    pub fn operation(&self, execution: &ExecutionId) -> Result<Option<CloneOperation>, Error> {
+    pub(super) fn operation(
+        &self,
+        execution: &ExecutionId,
+    ) -> Result<Option<CloneOperation>, Error> {
         let row = self
             .connection
             .query_row(

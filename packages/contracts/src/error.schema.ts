@@ -5,6 +5,11 @@ export const requestIdSchema = z.string();
 
 export const emptyErrorParamsSchema = z.record(z.string(), z.never());
 
+export const pluginPackageInvalidParamsSchema = z.object({
+    field: z.string(),
+    message: z.string()
+});
+
 export const packMemberParamsSchema = z.object({
     pluginId: z.string()
 });
@@ -91,6 +96,9 @@ export const contractErrorSchema = z.object({
     }), z.object({
         "code": z.literal("plugin_host_incompatible"),
         "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_package_invalid"),
+        "params": pluginPackageInvalidParamsSchema
     }), z.object({
         "code": z.literal("pack_member_duplicate"),
         "params": packMemberParamsSchema
@@ -444,6 +452,9 @@ export const publicErrorSchema = z.union([z.object({
     }), z.object({
         "code": z.literal("plugin_host_incompatible"),
         "params": emptyErrorParamsSchema
+    }), z.object({
+        "code": z.literal("plugin_package_invalid"),
+        "params": pluginPackageInvalidParamsSchema
     }), z.object({
         "code": z.literal("pack_member_duplicate"),
         "params": packMemberParamsSchema

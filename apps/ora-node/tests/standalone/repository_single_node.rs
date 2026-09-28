@@ -2,8 +2,8 @@ use super::*;
 use crate::support::until;
 use ora_contracts::controller_api::*;
 use ora_controller::{
-    ApiConfig, DeploymentConfig, NodeEndpoint, NodeHosting, RuntimeConfig, SessionConfig,
-    SingleNodeConfig,
+    ApiConfig, DeploymentConfig, NodeEndpoint, NodeHosting, NodeTarget, Persistence, RuntimeConfig,
+    SessionConfig, SingleNodeConfig,
 };
 use ora_utils::process::{LinuxPidFd, ProcessSignal, linux_process_snapshot};
 use pretty_assertions::assert_eq;
@@ -90,9 +90,9 @@ fn single_node_composition_hosts_and_retires_its_node() {
         let node_config = ipc::write_config(&fixture, &clone, /*frame_timeout_ms*/ 40_000);
         let endpoint = fixture.config().home_directory.join("control.sock");
         let config = DeploymentConfig {
-            api: ApiConfig {
+            api: Some(ApiConfig {
                 node_id: NodeId::new("test-node"),
-            },
+            }),
             single_node: Some(SingleNodeConfig {
                 node_executable: env!("CARGO_BIN_EXE_ora-node").into(),
                 node_config: node_config.clone(),
@@ -101,14 +101,17 @@ fn single_node_composition_hosts_and_retires_its_node() {
             }),
             controller: RuntimeConfig {
                 home_directory: fixture.path().join("controller"),
+                persistence: Persistence::Sqlite,
                 protected_state_directories: vec![
                     fixture.config().home_directory,
                     fixture.process().host_directory,
                 ],
                 controller_id: ControllerId::new("owner"),
-                nodes: vec![NodeEndpoint {
+                nodes: vec![NodeTarget {
                     node_id: NodeId::new("test-node"),
-                    endpoint: endpoint.clone(),
+                    endpoint: NodeEndpoint::Ipc {
+                        path: endpoint.clone(),
+                    },
                 }],
                 session: SessionConfig {
                     io_timeout_ms: 5000,
@@ -121,7 +124,7 @@ fn single_node_composition_hosts_and_retires_its_node() {
         // A hosting Controller refuses to start when Node configuration binds another owner.
         let mut foreign: serde_json::Value =
             serde_json::from_slice(&fs::read(&node_config).unwrap()).unwrap();
-        foreign["ipc"]["controller_id"] = "someone-else".into();
+        foreign["control"]["controller_id"] = "someone-else".into();
         let foreign_path = fixture.path().join("foreign-node.json");
         fs::write(&foreign_path, serde_json::to_vec(&foreign).unwrap()).unwrap();
         let mut misbound = config.clone();

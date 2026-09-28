@@ -1,13 +1,16 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
-/// Deployment state for the executable: the shared runtime configuration, the API's dispatch target
-/// and the optional Node this process may host. Listener and hosting choices stay on the command line.
+/// Deployment state for the executable: the shared runtime configuration, the JSON surface's
+/// dispatch target when the persistence adapter accepts requests locally, and the optional Node this
+/// process may host. Listener and hosting choices stay on the command line.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeploymentConfig {
     pub controller: RuntimeConfig,
-    pub api: ApiConfig,
+    /// Required with SQLite persistence, which serves the transitional JSON surface; refused with
+    /// cloud persistence, whose acceptance belongs to Cloud's public API.
+    pub api: Option<ApiConfig>,
     pub single_node: Option<SingleNodeConfig>,
 }
 
@@ -36,17 +39,33 @@ pub enum NodeHosting {
 }
 
 impl DeploymentConfig {
-    /// Rejects an unknown API target or an incomplete hosting request before any state is opened.
+    /// Rejects a JSON surface that does not fit the persistence adapter, an unknown API target or
+    /// an incomplete hosting request before any state is opened.
     pub fn validate(&self, hosting: NodeHosting) -> Result<Option<&SingleNodeConfig>, Error> {
-        if !self
-            .controller
-            .nodes
-            .iter()
-            .any(|node| node.node_id == self.api.node_id)
-        {
-            return Err(Error::Configuration(
-                "api.node_id must name a configured Node".into(),
-            ));
+        match (&self.controller.persistence, &self.api) {
+            (Persistence::Sqlite, None) => {
+                return Err(Error::Configuration(
+                    "sqlite persistence serves the JSON surface; add an api section".into(),
+                ));
+            }
+            (Persistence::Sqlite, Some(api)) => {
+                if !self
+                    .controller
+                    .nodes
+                    .iter()
+                    .any(|node| node.node_id == api.node_id)
+                {
+                    return Err(Error::Configuration(
+                        "api.node_id must name a configured Node".into(),
+                    ));
+                }
+            }
+            (Persistence::Cloud { .. }, Some(_)) => {
+                return Err(Error::Configuration(
+                    "cloud persistence serves no JSON surface; remove the api section".into(),
+                ));
+            }
+            (Persistence::Cloud { .. }, None) => {}
         }
         match hosting {
             NodeHosting::External => Ok(None),

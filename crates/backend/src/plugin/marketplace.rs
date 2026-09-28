@@ -8,19 +8,23 @@ use super::PluginApi;
 use crate::error::{BackendError, ErrorClassification};
 use crate::proxy;
 use ora_contracts::{
-    EmptyErrorParams, InstallOutcome, InstallPluginRequest, InstallPluginResponse, PublicError,
-    StopPluginRequest, UpdatePluginRequest, UpdatePluginResponse,
+    EmptyErrorParams, InstallOutcome, InstallPluginRequest, InstallPluginResponse,
+    PluginPackageInvalidParams, PublicError, StopPluginRequest, UpdatePluginRequest,
+    UpdatePluginResponse,
 };
 use ora_domain::{PluginId, PluginNamespace};
 use ora_logging::ora_info;
-use ora_plugin_manager::{HostTarget, InstallError, Installer, UpdateError, select_release};
-use ora_plugin_manifest::{PluginKind, PluginManifest};
+use ora_plugin_manager::{
+    HostTarget, InstallError, Installer, MANIFEST_FILE_NAME, UpdateError, select_release,
+};
+use ora_plugin_manifest::{ManifestError, PluginKind, PluginManifest};
 use ora_plugin_registry::RegistryIndex;
+use ora_utils::http::{
+    DownloadError, HttpDownload, ProgressCallback, ProxyConfig, ReqwestDownloader,
+    S3AwareDownloader, S3Config,
+};
 #[cfg(test)]
 use ora_utils::http::{DownloadSource, LocalFileDownloader};
-use ora_utils::http::{
-    HttpDownload, ProgressCallback, ProxyConfig, ReqwestDownloader, S3AwareDownloader, S3Config,
-};
 
 impl PluginApi {
     /// Installs a marketplace plugin by resolving its release manifest from the synced sources and
@@ -137,7 +141,7 @@ impl PluginApi {
                     .await
             }
         }
-        .map_err(|error| self.map_install_error("failed to install plugin", error))?;
+        .map_err(|error| map_install_error("failed to install plugin", error))?;
         self.finalize_new_install(&request.plugin_id).await?;
         ora_info!(plugin_id = %request.plugin_id, "installed marketplace plugin");
         Ok(InstallPluginResponse {
@@ -325,7 +329,7 @@ impl PluginApi {
     ) -> Result<ora_plugin_manager::ResolvedReleaseSource, BackendError> {
         let host_target = ora_plugin_registry::current_host_target();
         select_release(manifest, HostTarget::from_option(host_target.as_ref()))
-            .map_err(|error| self.map_install_error("failed to select plugin release", error))
+            .map_err(|error| map_install_error("failed to select plugin release", error))
     }
 
     /// Returns whether a pack has any test-local member transfer overrides.
@@ -360,30 +364,10 @@ impl PluginApi {
         Ok(self.local_marketplace_release(&plugin_id))
     }
 
-    /// Maps installer failures that describe host incompatibility onto the public contract error.
-    pub(super) fn map_install_error(
-        &self,
-        context: &'static str,
-        error: InstallError,
-    ) -> BackendError {
-        match error {
-            InstallError::NoArtifactForTarget { .. }
-            | InstallError::MissingRelease
-            | InstallError::UnsupportedHost
-            | InstallError::TargetMismatch { .. }
-            | InstallError::MissingArtifactTarget => BackendError::new(
-                ErrorClassification::Unprocessable,
-                PublicError::PluginHostIncompatible(EmptyErrorParams {}),
-                format!("{error}"),
-            ),
-            error => BackendError::internal(context, error),
-        }
-    }
-
     /// Maps update failures, preserving host-incompatibility from the nested install path.
     fn map_update_error(&self, context: &'static str, error: UpdateError) -> BackendError {
         match error {
-            UpdateError::Install(install_error) => self.map_install_error(context, install_error),
+            UpdateError::Install(install_error) => map_install_error(context, install_error),
             error => BackendError::internal(context, error),
         }
     }
@@ -413,6 +397,88 @@ impl PluginApi {
             s3_config,
         )))
     }
+}
+
+/// Maps one installer failure onto the public contract error the frontend can act on.
+///
+/// Host incompatibility and invalid package content are the two failure families a user can
+/// respond to — pick another release, or fix and republish the package — so both are classified
+/// explicitly. A package failure carries the field the installer refused, which is what turns a
+/// defect from "quote this request ID" into a statement the user can act on. Transport failures,
+/// host I/O problems, and installer defects have no field to name and stay `internal_error`.
+///
+/// The match is exhaustive so a new installer failure must be assigned a family here rather than
+/// silently defaulting to `internal_error`.
+pub(super) fn map_install_error(context: &'static str, error: InstallError) -> BackendError {
+    let public_error = match &error {
+        InstallError::NoArtifactForTarget { .. }
+        | InstallError::MissingRelease
+        | InstallError::UnsupportedHost
+        | InstallError::TargetMismatch { .. }
+        | InstallError::MissingArtifactTarget => {
+            Some(PublicError::PluginHostIncompatible(EmptyErrorParams {}))
+        }
+        InstallError::MissingManifest => Some(package_invalid(
+            MANIFEST_FILE_NAME.to_owned(),
+            format!("the package does not contain {MANIFEST_FILE_NAME} at its root"),
+        )),
+        // A TOML syntax error concerns the document as a whole, so the manifest file is the field.
+        InstallError::InvalidManifest(source) => Some(package_invalid(
+            source
+                .field_path()
+                .unwrap_or_else(|| MANIFEST_FILE_NAME.to_owned()),
+            match source {
+                // The deserializer message is the reason; the wrapper sentence would only repeat
+                // that the manifest is invalid.
+                ManifestError::InvalidToml { source, .. } => source.message().to_owned(),
+                ManifestError::UnsupportedResolver { .. } | ManifestError::InvalidField { .. } => {
+                    source.to_string()
+                }
+            },
+        )),
+        InstallError::InvalidPackage {
+            field_path,
+            message,
+        } => Some(package_invalid(field_path.clone(), message.clone())),
+        // A declared digest the bytes do not match is a package-integrity failure: retrying may
+        // recover a truncated transfer, but no local fix makes the archive match its declaration.
+        InstallError::ChecksumMismatch { .. } => {
+            Some(package_invalid("sha256".to_owned(), error.to_string()))
+        }
+        InstallError::Download(source) => match source.as_ref() {
+            // The downloader verifies the digest while writing and removes its temporary file, so
+            // a mismatch means the published bytes are not the bytes the listing describes.
+            DownloadError::ChecksumMismatch { .. } => Some(package_invalid(
+                "sha256".to_owned(),
+                "the downloaded package does not match the sha256 its listing declares".to_owned(),
+            )),
+            DownloadError::Network { .. }
+            | DownloadError::HttpStatus { .. }
+            | DownloadError::Io { .. }
+            | DownloadError::TooLarge { .. }
+            | DownloadError::Timeout { .. }
+            | DownloadError::Cancelled
+            | DownloadError::InvalidSource(_) => None,
+        },
+        // A corrupt archive has no single field to blame, and the archive error family already
+        // names what broke; the remaining failures are host-side, not package content.
+        InstallError::Extract { .. }
+        | InstallError::AlreadyInstalled { .. }
+        | InstallError::Io { .. } => None,
+    };
+    match public_error {
+        Some(public_error) => BackendError::new(
+            ErrorClassification::Unprocessable,
+            public_error,
+            format!("{error}"),
+        ),
+        None => BackendError::internal(context, error),
+    }
+}
+
+/// Builds the `plugin_package_invalid` contract error for one refused package field.
+fn package_invalid(field: String, message: String) -> PublicError {
+    PublicError::PluginPackageInvalid(PluginPackageInvalidParams { field, message })
 }
 
 /// Replaces only the selected transfer locator while preserving digest and target verification.

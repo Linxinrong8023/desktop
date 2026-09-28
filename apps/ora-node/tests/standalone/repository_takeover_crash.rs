@@ -1,10 +1,12 @@
 use super::*;
-use crate::support::{ChildGuard, until};
-use ora_controller::{Controller, NodeEndpoint, SessionConfig, WriteGuard, WritePoint};
+use crate::support::{ChildGuard, block_on, until};
+use ora_controller::{
+    CloneIntake, CoordinationStore, ExecutionOutcome, NodeEndpoint, NodeTarget, SessionConfig,
+    SqliteStore, WriteGuard, WritePoint,
+};
 use pretty_assertions::assert_eq;
 use std::{
     process::{Command, Stdio},
-    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -28,16 +30,14 @@ impl WriteGuard for PauseBeforeCommit {
 fn controller_transaction_child() {
     ora_logging::with_trace_logging(|| {
         let root = PathBuf::from(std::env::var_os("ORA_TEST_CONTROLLER_CRASH_ROOT").unwrap());
-        let endpoint: NodeEndpoint =
+        let endpoint: NodeTarget =
             serde_json::from_slice(&fs::read(root.join("target.json")).unwrap()).unwrap();
-        let owner = Arc::new(Mutex::new(
-            Controller::open_with_guard(
-                &root.join("controller"),
-                ControllerId::new("owner"),
-                PauseBeforeCommit(root.join("before-commit")),
-            )
-            .unwrap(),
-        ));
+        let store = SqliteStore::open_with_guard(
+            &root.join("controller"),
+            ControllerId::new("owner"),
+            PauseBeforeCommit(root.join("before-commit")),
+        )
+        .unwrap();
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -45,7 +45,7 @@ fn controller_transaction_child() {
             .block_on(async {
                 loop {
                     let _ = ora_controller::run_session(
-                        &owner,
+                        &store,
                         &endpoint,
                         &SessionConfig {
                             io_timeout_ms: 5000,
@@ -68,13 +68,12 @@ fn killed_controller_before_commit_replays_without_losing_node_responsibility() 
         let server = HttpsRepository::new(fixture.path(), fixture.path().join("main").join(".git"));
         let clone = configuration(&fixture, &server);
         let home = fixture.path().join("controller");
-        let mut owner = Controller::open(&home, ControllerId::new("owner")).unwrap();
-        let command = owner
-            .accept_clone(
-                RequestId::new("crash-request"),
-                request(&server, "crash", "main").payload.spec,
-            )
-            .unwrap();
+        let owner = SqliteStore::open(&home, ControllerId::new("owner")).unwrap();
+        let command = block_on(owner.accept_request(
+            RequestId::new("crash-request"),
+            request(&server, "crash", "main").payload.spec,
+        ))
+        .unwrap();
         drop(owner);
         let mut node = ipc::launch(&fixture, &clone);
         until(|| {
@@ -85,9 +84,11 @@ fn killed_controller_before_commit_replays_without_losing_node_responsibility() 
         let proxy = controller::Proxy::new(&fixture);
         fs::write(
             fixture.path().join("target.json"),
-            serde_json::to_vec(&NodeEndpoint {
+            serde_json::to_vec(&NodeTarget {
                 node_id: NodeId::new("test-node"),
-                endpoint: proxy.endpoint.clone(),
+                endpoint: NodeEndpoint::Ipc {
+                    path: proxy.endpoint.clone(),
+                },
             })
             .unwrap(),
         )
@@ -124,10 +125,10 @@ fn killed_controller_before_commit_replays_without_losing_node_responsibility() 
             Err(std::sync::mpsc::TryRecvError::Empty)
         ));
         child.kill();
-        let owner = Controller::open(&home, ControllerId::new("owner")).unwrap();
-        assert_eq!(owner.result(&command.execution_id).unwrap(), None);
+        let owner = SqliteStore::open(&home, ControllerId::new("owner")).unwrap();
+        assert_eq!(block_on(owner.result(&command.execution_id)).unwrap(), None);
         assert_eq!(
-            owner.commands(&NodeId::new("test-node")).unwrap(),
+            block_on(owner.pending_dispatches(&NodeId::new("test-node"))).unwrap(),
             vec![command.clone()]
         );
         drop(owner);
@@ -140,10 +141,10 @@ fn killed_controller_before_commit_replays_without_losing_node_responsibility() 
             .unwrap();
         assert_eq!(ack.execution_id, command.execution_id);
         replacement.terminate();
-        let owner = Controller::open(&home, ControllerId::new("owner")).unwrap();
+        let owner = SqliteStore::open(&home, ControllerId::new("owner")).unwrap();
         assert!(matches!(
-            owner.result(&command.execution_id).unwrap(),
-            Some(CloneExecutionResult::CloneReady(_))
+            block_on(owner.result(&command.execution_id)).unwrap(),
+            Some(ExecutionOutcome::Ready { .. })
         ));
         node.terminate();
         let node = Node::open(fixture.config(), fixture.process(), Shutdown::default()).unwrap();
@@ -159,7 +160,11 @@ fn killed_controller_before_commit_replays_without_losing_node_responsibility() 
         assert_eq!(
             status.payload.state,
             ExecutionState::Completed(ExecutionResult::Clone(
-                owner.result(&query.execution_id).unwrap().unwrap()
+                block_on(owner.operation(&query.execution_id))
+                    .unwrap()
+                    .unwrap()
+                    .result
+                    .unwrap()
             ))
         );
     });

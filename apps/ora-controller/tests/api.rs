@@ -2,16 +2,16 @@
 #![allow(clippy::unwrap_used)]
 use ora_contracts::controller_api::*;
 use ora_controller::{
-    ApiConfig, DeploymentConfig, NodeEndpoint, NodeHosting, RuntimeConfig, Service, SessionConfig,
-    SingleNodeConfig, Transport,
+    ApiConfig, CloneIntake, DeploymentConfig, NodeEndpoint, NodeHosting, NodeTarget, Persistence,
+    RuntimeConfig, Service, SessionConfig, SingleNodeConfig, SqliteStore, Transport,
 };
 use ora_node_protocol::{BranchName, CloneExecutionSpec, CloneRepositoryUrl, ControllerId, NodeId};
 use pretty_assertions::assert_eq;
 use std::{fs, os::unix::fs::PermissionsExt};
 
 /// Starts the composition without a hosted Node on an ephemeral loopback port.
-async fn start(config: DeploymentConfig) -> Result<Service, ora_controller::Error> {
-    Service::start(
+async fn start(config: DeploymentConfig) -> Result<Service<SqliteStore>, ora_controller::Error> {
+    Service::<SqliteStore>::start(
         config,
         Transport::loopback(/*port*/ 0),
         NodeHosting::External,
@@ -20,7 +20,7 @@ async fn start(config: DeploymentConfig) -> Result<Service, ora_controller::Erro
 }
 
 /// Resolves the HTTP base of a bound service; the transitional surface only binds TCP in this test.
-fn clones_url(service: &Service) -> String {
+fn clones_url(service: &Service<SqliteStore>) -> String {
     match service.endpoint().unwrap() {
         Transport::Tcp(address) => format!("http://{address}/api/clones"),
         Transport::Unix(path) => panic!("unexpected Unix endpoint {}", path.display()),
@@ -36,17 +36,20 @@ fn http_acceptance_is_idempotent_and_survives_service_restart() {
             .tempdir_in(std::env::var_os("HOME").unwrap())
             .unwrap();
         let config = DeploymentConfig {
-            api: ApiConfig {
+            api: Some(ApiConfig {
                 node_id: NodeId::new("node"),
-            },
+            }),
             single_node: None,
             controller: RuntimeConfig {
                 home_directory: root.path().join("controller"),
+                persistence: Persistence::Sqlite,
                 protected_state_directories: vec![root.path().join("process")],
                 controller_id: ControllerId::new("owner"),
-                nodes: vec![NodeEndpoint {
+                nodes: vec![NodeTarget {
                     node_id: NodeId::new("node"),
-                    endpoint: root.path().join("node").join("control.sock"),
+                    endpoint: NodeEndpoint::Ipc {
+                        path: root.path().join("node").join("control.sock"),
+                    },
                 }],
                 session: SessionConfig {
                     io_timeout_ms: 100,
@@ -63,10 +66,15 @@ fn http_acceptance_is_idempotent_and_survives_service_restart() {
             .block_on(async {
                 // Composition errors are rejected before any Controller state exists on disk.
                 let mut unknown_target = config.clone();
-                unknown_target.api.node_id = NodeId::new("other");
+                unknown_target.api = Some(ApiConfig {
+                    node_id: NodeId::new("other"),
+                });
                 assert!(start(unknown_target).await.is_err());
+                let mut no_surface = config.clone();
+                no_surface.api = None;
+                assert!(start(no_surface).await.is_err());
                 assert!(
-                    Service::start(
+                    Service::<SqliteStore>::start(
                         config.clone(),
                         Transport::loopback(/*port*/ 0),
                         NodeHosting::Managed
@@ -82,7 +90,7 @@ fn http_acceptance_is_idempotent_and_survives_service_restart() {
                     stop_timeout_ms: 1000,
                 });
                 assert!(
-                    Service::start(
+                    Service::<SqliteStore>::start(
                         hosted,
                         Transport::loopback(/*port*/ 0),
                         NodeHosting::Managed
@@ -98,14 +106,20 @@ fn http_acceptance_is_idempotent_and_survives_service_restart() {
                     ready_timeout_ms: 1000,
                     stop_timeout_ms: 1000,
                 });
-                many.controller.nodes.push(NodeEndpoint {
+                many.controller.nodes.push(NodeTarget {
                     node_id: NodeId::new("second"),
-                    endpoint: root.path().join("second").join("control.sock"),
+                    endpoint: NodeEndpoint::Ipc {
+                        path: root.path().join("second").join("control.sock"),
+                    },
                 });
                 assert!(
-                    Service::start(many, Transport::loopback(/*port*/ 0), NodeHosting::Managed)
-                        .await
-                        .is_err()
+                    Service::<SqliteStore>::start(
+                        many,
+                        Transport::loopback(/*port*/ 0),
+                        NodeHosting::Managed
+                    )
+                    .await
+                    .is_err()
                 );
                 assert!(!config.controller.home_directory.exists());
                 let mut overlap = config.clone();
@@ -128,21 +142,22 @@ fn http_acceptance_is_idempotent_and_survives_service_restart() {
                 // Retain the rejected fixture file; the legitimate owner starts in a fresh root.
                 let mut config = config;
                 config.controller.home_directory = root.path().join("valid-controller");
-                let mut standalone = ora_controller::Controller::open(
+                let standalone = ora_controller::SqliteStore::open(
                     &config.controller.home_directory,
                     config.controller.controller_id.clone(),
                 )
                 .unwrap();
                 let original = standalone
-                    .accept_clone(
+                    .accept_request(
                         ora_node_protocol::RequestId::new("original"),
                         CloneExecutionSpec {
-                            node_id: config.api.node_id.clone(),
+                            node_id: NodeId::new("node"),
                             repository: CloneRepositoryUrl::parse("https://example.com/repo.git")
                                 .unwrap(),
                             branch: BranchName::new("main"),
                         },
                     )
+                    .await
                     .unwrap();
                 assert!(start(config.clone()).await.is_err());
                 drop(standalone);
@@ -273,7 +288,7 @@ fn http_acceptance_is_idempotent_and_survives_service_restart() {
                 stop.send(()).unwrap();
                 task.await.unwrap().unwrap();
                 // The same surface is reachable over a private Unix socket inside the Controller home.
-                let service = Service::start(
+                let service = Service::<SqliteStore>::start(
                     config.clone(),
                     Transport::Unix(config.controller.home_directory.join("api.sock")),
                     NodeHosting::External,

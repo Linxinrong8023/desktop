@@ -41,6 +41,55 @@ ownership checks remain enabled; release builds still enforce permission bits. S
 home directory rather than the checkout because Unix socket paths are limited to 108 bytes; an
 unusually long real home path is rejected, not shortened or redirected through a symlink.
 
+## Cloud persistence mode
+
+`task run:minicloud -- --cloud` starts the same host, `ora-controller --single-node` and Node, but the
+Controller runs with [cloud persistence](../controller/local-runtime.md#independent-executable): Cloud
+holds every durable fact and the Controller only calls out to it, so it opens no SQLite database and
+no listener, and the minicloud frontend is not started. Requests enter through Cloud's tenant clone
+API instead.
+
+Cloud is started separately and must come from a revision that serves the clone API and accepts
+unauthenticated Controllers. In the Cloud repository, copy `config.toml.template` to `config.toml`
+and run `task setup` once (PostgreSQL DSN, Gateway keys, `.local/dev.env`, migrations), then run
+`task run` for the Cloud server (HTTP `:8080`, Controller gRPC `:8082`) and `task run:gateway` for
+its authentication Gateway (`:8081`); Cloud's `docs/gateway.md` describes both. The Controller
+presents no credential at this stage: it names itself with `controller_id`, which Cloud records as
+the lease holder.
+
+State lives under `~/.ora/cloud/<digest>/`, apart from the local mode's directory: a Node's journal
+belongs to one persistence authority, so work accepted by SQLite is never reported to Cloud and clone
+destinations are never shared. The layout matches the local mode without `client.json` and `vite/`;
+`config/controller.json` selects `persistence: cloud` with Cloud's gRPC endpoint and the claim
+interval, and has no `api` section. Edit it to reach Cloud elsewhere. The
+launcher refuses a `controller.json` whose persistence does not match the mode.
+
+Startup warns once when Cloud's gRPC endpoint is unreachable but continues, because the Controller
+keeps retrying Cloud. The Controller has no port to probe, so readiness means only that it is still
+running two seconds after start, not that it holds Cloud's lease; later exits stop all components as
+in the local mode. Clones are submitted like any Cloud client's requests: through the Gateway, with a
+session from its development login and a tenant of that user. Nothing on this side holds a key or
+token. With the Gateway on `:8081` and its default public origin `http://localhost:5173`, which
+state-changing requests must name in `Origin`:
+
+```bash
+G=http://localhost:8081 O=http://localhost:5173 JAR=$(mktemp)
+# Development login: start an attempt, post the identity form, follow the callback to the session cookie.
+AUTH=$(curl -s -c "$JAR" -H "Origin: $O" -H 'content-type: application/json' -d '{"provider":"dev"}' "$G/auth/login" | sed -E 's/.*"authorizationUrl":"([^"]*)".*/\1/; s/\\u0026/\&/g')
+CALLBACK=$(curl -s -o /dev/null -w '%{redirect_url}' -b "$JAR" -c "$JAR" -H "Origin: $O" -d "${AUTH#*\?}" -d source=dev -d subject=minicloud "$G/auth/dev/authorize")
+curl -s -o /dev/null -b "$JAR" -c "$JAR" "${CALLBACK/#$O/$G}"
+# Tenant creation is idempotent per user and key, so rerunning this returns the same tenant.
+TID=$(curl -s -b "$JAR" -H "Origin: $O" -H 'content-type: application/json' -H 'Idempotency-Key: minicloud' -d '{"name":"minicloud","slug":"minicloud"}' "$G/api/v1/tenants" | sed -E 's/.*"tenant":\{"id":"([^"]*)".*/\1/')
+curl -s -b "$JAR" -H "Origin: $O" -H 'content-type: application/json' -H 'Idempotency-Key: r1' -d '{"requestId":"r1","repository":"https://github.com/octocat/Hello-World","branch":"master"}' "$G/api/v1/tenants/$TID/clones"
+```
+
+`curl -s -b "$JAR" "$G/api/v1/tenants/$TID/clones"` lists operations and `.../clones/{operationId}`
+reads one; `state` moves from `pending` to `succeeded` (`path`, `commit`) or `failed` (`reason`,
+optional `retainedPath`). Resubmitting the same `requestId` returns the original operation instead of
+cloning again. Work accepted while the Controller is down
+stays pending until it is claimed. After a run whose Controller was killed rather than stopped, the
+previous lease is not released, so work waits until Cloud's 30-second lease expires.
+
 ## Manual deployment
 
 The API is served by the `ora-controller` executable itself; there is no separate minicloud server.

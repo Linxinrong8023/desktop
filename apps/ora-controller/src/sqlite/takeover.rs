@@ -1,70 +1,35 @@
-use super::*;
+use crate::*;
 use rusqlite::{OptionalExtension, params};
 
-impl<W: WriteGuard> Controller<W> {
-    /// Commits query/event facts through one boundary; only an actually received event can produce an Ack.
-    pub fn take_over(
+impl<W: WriteGuard> super::Inner<W> {
+    /// Commits the event's fact and exact receipt in one transaction; nothing here acknowledges.
+    pub(super) fn take_over_event(
         &mut self,
         session: &NodeRuntimeIdentity,
-        message: &NodeToControllerMessage,
-    ) -> Result<Option<EventAckMessage>, Error> {
-        message.validate()?;
-        match message {
-            NodeToControllerMessage::CloneResult(event) => {
-                self.commit_result(
-                    session,
-                    &event.operation_id,
-                    &event.execution_id,
-                    &event.payload,
-                    Some(event),
-                )?;
-                Ok(Some(EventAckMessage {
-                    protocol_version: CURRENT_PROTOCOL_VERSION,
-                    operation_id: event.operation_id.clone(),
-                    execution_id: event.execution_id.clone(),
-                    sequence: event.sequence,
-                    payload: EventAck {
-                        node_id: session.node_id.clone(),
-                    },
-                }))
-            }
-            NodeToControllerMessage::ExecutionStatus(status) => {
-                if status.payload.node != *session {
-                    return Err(Error::Conflict);
-                }
-                self.original(session, &status.operation_id, &status.execution_id)?;
-                match &status.payload.state {
-                    ExecutionState::Completed(ExecutionResult::Clone(result)) => self
-                        .commit_result(
-                            session,
-                            &status.operation_id,
-                            &status.execution_id,
-                            result,
-                            /*event*/ None,
-                        )?,
-                    ExecutionState::Completed(ExecutionResult::Worktree(_)) => {
-                        return Err(Error::Conflict);
-                    }
-                    ExecutionState::Unknown
-                    | ExecutionState::Accepted
-                    | ExecutionState::Running => {}
-                }
-                Ok(None)
-            }
-            NodeToControllerMessage::Heartbeat(heartbeat) if heartbeat.payload.node == *session => {
-                Ok(None)
-            }
-            NodeToControllerMessage::Heartbeat(_)
-            | NodeToControllerMessage::HelloAccepted(_)
-            | NodeToControllerMessage::WorktreeReady(_)
-            | NodeToControllerMessage::WorktreeFailed(_)
-            | NodeToControllerMessage::WorktreeRemoved(_)
-            | NodeToControllerMessage::WorktreeRemovalFailed(_) => Err(Error::Conflict),
-        }
+        event: &CloneResultMessage,
+    ) -> Result<(), Error> {
+        self.commit_result(
+            session,
+            &event.operation_id,
+            &event.execution_id,
+            &event.payload,
+            Some(event),
+        )
+    }
+
+    /// Commits a queried Completed result without any receipt, so it never justifies an Ack.
+    pub(super) fn record_queried_result(
+        &mut self,
+        session: &NodeRuntimeIdentity,
+        operation: &OperationId,
+        execution: &ExecutionId,
+        result: &CloneExecutionResult,
+    ) -> Result<(), Error> {
+        self.commit_result(session, operation, execution, result, /*event*/ None)
     }
 
     /// Resolves the exact durable dispatch before using any remote fact or authorizing retransmission.
-    pub(crate) fn original(
+    pub(super) fn original(
         &self,
         session: &NodeRuntimeIdentity,
         operation: &OperationId,

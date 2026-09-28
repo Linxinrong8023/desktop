@@ -201,13 +201,14 @@ pub async fn install_plugin(
     request: InstallPluginRequest,
 ) -> Result<InstallPluginResponse, CommandError> {
     let progress = plugin_transfer_progress(app, request.plugin_id.clone());
-
+    let plugins = state.backend.plugins();
+    // The marketplace install chain is the deepest command the Desktop surface drives: it
+    // monomorphizes into a future hundreds of KB in size, and constructing that future on the
+    // IPC main thread is what killed release 0.2.0 with a stack overflow. Boxing keeps the
+    // command future pointer-sized; see `run_async_backend`.
     run_async_backend(
         "install_plugin",
-        state
-            .backend
-            .plugins()
-            .install_with_progress(request, progress),
+        Box::pin(plugins.install_with_progress(request, progress)),
     )
     .await
 }
@@ -220,13 +221,11 @@ pub async fn update_plugin(
     request: UpdatePluginRequest,
 ) -> Result<UpdatePluginResponse, CommandError> {
     let progress = plugin_transfer_progress(app, request.plugin_id.clone());
-
+    let plugins = state.backend.plugins();
+    // Same transfer chain and same IPC-stack constraint as `install_plugin` above.
     run_async_backend(
         "update_plugin",
-        state
-            .backend
-            .plugins()
-            .update_with_progress(request, progress),
+        Box::pin(plugins.update_with_progress(request, progress)),
     )
     .await
 }
@@ -258,3 +257,86 @@ async_backend_command!(
     plugins.probe_mcp_health,
     "Awaits one Host MCP health probe for a currently eligible member."
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::{IPC_COMMAND_FUTURE_BUDGET, run_async_backend};
+    use ora_backend::{Backend, BackendPaths};
+    use ora_contracts::{InstallPluginRequest, UpdatePluginRequest};
+    use ora_utils::http::ProgressCallback;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    /// Opens a throwaway Backend rooted in one isolated data directory.
+    ///
+    /// The futures below are never polled, so no marketplace source is contacted and the missing
+    /// `deno` executable is never launched; only their construction matters here.
+    fn test_backend(root: &std::path::Path) -> Backend {
+        ora_logging::initialize_test_clock();
+        Backend::open(BackendPaths {
+            app_data_directory: root.to_path_buf(),
+            home_directory: root.to_path_buf(),
+            deno_path: std::path::PathBuf::from("deno"),
+            relative_path_base: root.to_path_buf(),
+            timezone: chrono_tz::UTC,
+        })
+        .expect("open backend")
+    }
+
+    /// Guards the marketplace transfer commands against regrowing the future the IPC thread
+    /// materializes.
+    ///
+    /// Tauri constructs every async command's future on the main thread inside the WebView2 IPC
+    /// callback, whose ~1 MB stack the webview/tauri frames already occupy for several hundred
+    /// KB. Release 0.2.0 crashed the process with a main-thread stack overflow (WER
+    /// `0xc00000fd`) the moment a marketplace install was clicked, because the install chain
+    /// monomorphizes into a single ~650 KB state machine and constructing it on that stack
+    /// overflowed before the async runtime ever polled it (see `IPC_COMMAND_FUTURE_BUDGET`).
+    ///
+    /// This measures the executor wrapper the command holds across its await — the part that
+    /// dominates the command future — against the budget. The deep transfer future itself stays
+    /// huge by design; it is only ever constructed on the runtime thread that first polls the
+    /// wrapper, which is exactly what the boxing at the `run_async_backend` seam guarantees.
+    #[test]
+    fn marketplace_transfer_commands_stay_within_the_ipc_future_budget() {
+        ora_logging::with_trace_logging(|| {
+            let directory = TempDir::new().expect("temp directory");
+            let backend = test_backend(directory.path());
+            let plugins = backend.plugins();
+            let progress: ProgressCallback = Arc::new(|_| {});
+            let install = run_async_backend(
+                "install_plugin",
+                Box::pin(plugins.install_with_progress(
+                    InstallPluginRequest {
+                        plugin_id: "official/absent".to_owned(),
+                        hook_execution_acknowledged: false,
+                    },
+                    progress.clone(),
+                )),
+            );
+            let update = run_async_backend(
+                "update_plugin",
+                Box::pin(plugins.update_with_progress(
+                    UpdatePluginRequest {
+                        plugin_id: "official/absent".to_owned(),
+                        hook_execution_acknowledged: false,
+                    },
+                    progress,
+                )),
+            );
+
+            let sizes = [
+                ("install_plugin", std::mem::size_of_val(&install)),
+                ("update_plugin", std::mem::size_of_val(&update)),
+            ];
+            for (name, size) in sizes {
+                assert!(
+                    size <= IPC_COMMAND_FUTURE_BUDGET,
+                    "{name} future is {size} bytes, above the {IPC_COMMAND_FUTURE_BUDGET}-byte IPC \
+                     budget: deep domain futures must stay boxed at the run_async_backend seam",
+                );
+            }
+        });
+    }
+}

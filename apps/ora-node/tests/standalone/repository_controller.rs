@@ -1,6 +1,6 @@
 use super::*;
-use crate::support::{ChildGuard, until};
-use ora_controller::Controller;
+use crate::support::{ChildGuard, block_on, until};
+use ora_controller::{CloneIntake, CoordinationStore, ExecutionOutcome, SqliteStore};
 use pretty_assertions::assert_eq;
 use std::{
     process::{Command, Stdio},
@@ -110,9 +110,9 @@ pub(super) fn launch(fixture: &Fixture, proxy: &Proxy) -> ChildGuard {
     let path = fixture.path().join("controller.json");
     fs::write(&path, serde_json::to_vec(&serde_json::json!({
         "controller": {
-            "home_directory": fixture.path().join("controller"), "controller_id": "owner",
+            "home_directory": fixture.path().join("controller"), "persistence": { "kind": "sqlite" }, "controller_id": "owner",
             "protected_state_directories": [fixture.config().home_directory, fixture.process().host_directory],
-            "nodes": [{ "node_id": "test-node", "endpoint": proxy.endpoint }],
+            "nodes": [{ "node_id": "test-node", "endpoint": { "kind": "ipc", "path": proxy.endpoint } }],
             "session": { "io_timeout_ms": 5000, "query_interval_ms": 100 }, "reconnect_ms": 100, "timezone": "Asia/Shanghai",
         },
         "api": { "node_id": "test-node" },
@@ -142,13 +142,12 @@ fn independent_controller_replays_durable_takeover_after_lost_ack_and_kill() {
         let server = HttpsRepository::new(fixture.path(), fixture.path().join("main").join(".git"));
         let clone = configuration(&fixture, &server);
         let home = fixture.path().join("controller");
-        let mut owner = Controller::open(&home, ControllerId::new("owner")).unwrap();
-        let command = owner
-            .accept_clone(
-                RequestId::new("client-request"),
-                request(&server, "unused", "main").payload.spec,
-            )
-            .unwrap();
+        let owner = SqliteStore::open(&home, ControllerId::new("owner")).unwrap();
+        let command = block_on(owner.accept_request(
+            RequestId::new("client-request"),
+            request(&server, "unused", "main").payload.spec,
+        ))
+        .unwrap();
         drop(owner);
         let mut node = super::ipc::launch(&fixture, &clone);
         until(|| {
@@ -163,15 +162,15 @@ fn independent_controller_replays_durable_takeover_after_lost_ack_and_kill() {
             .recv_timeout(Duration::from_secs(/*secs*/ 45))
             .unwrap();
         controller.kill();
-        let owner = Controller::open(&home, ControllerId::new("owner")).unwrap();
-        let result = owner
-            .result(&command.execution_id)
+        let owner = SqliteStore::open(&home, ControllerId::new("owner")).unwrap();
+        let result = block_on(owner.result(&command.execution_id))
             .unwrap()
             .expect("Ack requires committed result");
-        assert!(matches!(result, CloneExecutionResult::CloneReady(_)));
+        assert!(matches!(result, ExecutionOutcome::Ready { .. }));
+        // The committed result retires the execution from periodic queries.
         assert_eq!(
-            owner.commands(&NodeId::new("test-node")).unwrap(),
-            vec![command.clone()]
+            block_on(owner.pending_dispatches(&NodeId::new("test-node"))).unwrap(),
+            vec![]
         );
         drop(owner);
         server.reject_auth.store(true, Ordering::SeqCst);
@@ -198,8 +197,11 @@ fn independent_controller_replays_durable_takeover_after_lost_ack_and_kill() {
         });
         replacement.terminate();
         node.terminate();
-        let owner = Controller::open(&home, ControllerId::new("owner")).unwrap();
-        assert_eq!(owner.result(&command.execution_id).unwrap(), Some(result));
+        let owner = SqliteStore::open(&home, ControllerId::new("owner")).unwrap();
+        assert_eq!(
+            block_on(owner.result(&command.execution_id)).unwrap(),
+            Some(result)
+        );
         let database =
             ora_node_db::NodeDatabase::open(&node_path, fixture.config().identity).unwrap();
         assert_eq!(

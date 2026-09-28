@@ -1,4 +1,4 @@
-use crate::{CloneOperation, ControllerHandle, Error};
+use crate::{CloneIntake, CloneOperation, ControllerHandle, Error};
 use axum::{
     Json, Router,
     extract::{Path, State, rejection::JsonRejection},
@@ -8,18 +8,26 @@ use axum::{
 use ora_contracts::controller_api::*;
 use ora_node_protocol::*;
 
-#[derive(Clone)]
-struct App {
-    controller: ControllerHandle,
+struct App<S: CloneIntake> {
+    controller: ControllerHandle<S>,
     node: NodeId,
+}
+
+impl<S: CloneIntake> Clone for App<S> {
+    fn clone(&self) -> Self {
+        Self {
+            controller: self.controller.clone(),
+            node: self.node.clone(),
+        }
+    }
 }
 type Failure = (StatusCode, Json<MiniError>);
 
 /// Composes only the transitional clone surface; no Desktop bindings or Node wire messages leak through HTTP.
-pub(super) fn router(controller: ControllerHandle, node: NodeId) -> Router {
+pub(super) fn router<S: CloneIntake>(controller: ControllerHandle<S>, node: NodeId) -> Router {
     Router::new()
-        .route("/api/clones", get(list).post(submit))
-        .route("/api/clones/{execution}", get(detail))
+        .route("/api/clones", get(list::<S>).post(submit::<S>))
+        .route("/api/clones/{execution}", get(detail::<S>))
         .with_state(App { controller, node })
 }
 
@@ -33,14 +41,17 @@ fn failure(error: Error) -> Failure {
         | Error::Encoding(_)
         | Error::InvalidStorage
         | Error::Injected
-        | Error::Configuration(_) => (StatusCode::SERVICE_UNAVAILABLE, MiniErrorCode::Unavailable),
+        | Error::Configuration(_)
+        | Error::Unavailable(_)
+        | Error::Unknown(_)
+        | Error::StaleEligibility => (StatusCode::SERVICE_UNAVAILABLE, MiniErrorCode::Unavailable),
     };
     (status, Json(MiniError { code }))
 }
 
 /// Returns acceptance only after Controller commits the original request identity and full intent.
-async fn submit(
-    State(app): State<App>,
+async fn submit<S: CloneIntake>(
+    State(app): State<App<S>>,
     input: Result<Json<MiniCloneRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<MiniCloneAccepted>), Failure> {
     let Json(input) = input.map_err(|_| {
@@ -82,7 +93,9 @@ async fn submit(
 }
 
 /// Lists durable intent regardless of current Node connectivity.
-async fn list(State(app): State<App>) -> Result<Json<Vec<MiniCloneOperation>>, Failure> {
+async fn list<S: CloneIntake>(
+    State(app): State<App<S>>,
+) -> Result<Json<Vec<MiniCloneOperation>>, Failure> {
     Ok(Json(
         app.controller
             .operations()
@@ -95,8 +108,8 @@ async fn list(State(app): State<App>) -> Result<Json<Vec<MiniCloneOperation>>, F
 }
 
 /// An absent execution is not the same as a pending result.
-async fn detail(
-    State(app): State<App>,
+async fn detail<S: CloneIntake>(
+    State(app): State<App<S>>,
     Path(execution): Path<String>,
 ) -> Result<Json<MiniCloneOperation>, Failure> {
     app.controller
@@ -127,6 +140,7 @@ fn present(operation: CloneOperation) -> MiniCloneOperation {
                 CloneFailureCode::BranchNotFound => MiniCloneFailure::BranchNotFound,
                 CloneFailureCode::DestinationConflict => MiniCloneFailure::DestinationConflict,
                 CloneFailureCode::OperationFailed => MiniCloneFailure::OperationFailed,
+                CloneFailureCode::Interrupted => MiniCloneFailure::Interrupted,
             },
             retained_path: match result.residual {
                 CloneResidual::NoDirectory {} => None,
@@ -142,5 +156,54 @@ fn present(operation: CloneOperation) -> MiniCloneOperation {
         repository: command.payload.spec.repository.as_str().into(),
         branch: command.payload.spec.branch.as_str().into(),
         state,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    /// An interrupted attempt keeps its own browser reason and retained path instead of reading
+    /// as a Git failure, so the caller knows a plain retry is appropriate.
+    #[test]
+    fn interrupted_failure_presents_its_own_reason() {
+        let spec = CloneExecutionSpec {
+            node_id: NodeId::new("node"),
+            repository: CloneRepositoryUrl::parse("https://example.test/repo.git").unwrap(),
+            branch: BranchName::new("main"),
+        };
+        let operation = CloneOperation {
+            command: CloneRepositoryMessage {
+                protocol_version: CURRENT_PROTOCOL_VERSION,
+                request_id: None,
+                operation_id: OperationId::new("operation"),
+                execution_id: ExecutionId::new("execution"),
+                payload: CloneRepository { spec: spec.clone() },
+            },
+            result: Some(CloneExecutionResult::CloneFailed(CloneFailed {
+                node: NodeRuntimeIdentity {
+                    node_id: NodeId::new("node"),
+                    incarnation_id: NodeIncarnationId::new("incarnation"),
+                },
+                spec,
+                failure: CloneFailureCode::Interrupted,
+                residual: CloneResidual::Retained {
+                    repository_id: RepositoryId::new("repository"),
+                    path: NodePath::new("/node/cut"),
+                },
+            })),
+        };
+        assert_eq!(
+            serde_json::to_value(present(operation)).unwrap(),
+            serde_json::json!({
+                "operationId": "operation",
+                "executionId": "execution",
+                "nodeId": "node",
+                "repository": "https://example.test/repo.git",
+                "branch": "main",
+                "state": { "kind": "failed", "reason": "interrupted", "retainedPath": "/node/cut" },
+            })
+        );
     }
 }

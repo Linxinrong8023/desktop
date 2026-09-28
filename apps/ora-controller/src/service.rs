@@ -3,16 +3,23 @@ use single_node::ManagedNode;
 use std::{future::Future, io, time::Duration};
 use tokio::{sync::watch, task::JoinHandle};
 
-/// One process hosting the API listener, the sole Controller owner and optionally its Node.
-pub struct Service {
-    listener: Listener,
-    runtime: ControllerRuntime,
-    node_id: NodeId,
+/// One process hosting the sole Controller owner, optionally its Node, and the JSON surface when
+/// the persistence adapter accepts requests locally.
+pub struct Service<S: CoordinationStore> {
+    surface: Option<Surface>,
+    runtime: ControllerRuntime<S>,
     managed: Option<ManagedNode>,
 }
 
-impl Service {
-    /// Validates composition, opens the exclusive owner, hosts the Node when requested, then binds the API.
+/// The bound transitional JSON surface: composed only by adapters that implement [`CloneIntake`],
+/// so a deployment without local intake has no listener at all rather than one answering errors.
+struct Surface {
+    listener: Listener,
+    router: axum::Router,
+}
+
+impl Service<SqliteStore> {
+    /// Validates composition, opens the exclusive local owner, hosts the Node when requested, then binds the API.
     pub async fn start(
         config: DeploymentConfig,
         transport: Transport,
@@ -20,16 +27,17 @@ impl Service {
     ) -> Result<Self, Error> {
         let single = config.validate(hosting)?.cloned();
         transport.validate(&config.controller.home_directory)?;
-        // Every composition check precedes the database lease so a refusal leaves no state behind.
-        let launch = match &single {
-            Some(single) => Some(ManagedNode::prepare(single, &config.controller).await?),
-            None => None,
-        };
-        let runtime = ControllerRuntime::open(config.controller.clone())?;
-        let managed = match launch {
-            Some(launch) => Some(launch.start().await?),
-            None => None,
-        };
+        let api = config.api.clone().ok_or_else(|| {
+            Error::Configuration(
+                "sqlite persistence serves the JSON surface; add an api section".into(),
+            )
+        })?;
+        let (runtime, managed) = compose(
+            &config,
+            single.as_ref(),
+            ControllerRuntime::<SqliteStore>::open,
+        )
+        .await?;
         let listener = match transport.bind(&config.controller.home_directory).await {
             Ok(listener) => listener,
             Err(error) => {
@@ -40,17 +48,62 @@ impl Service {
                 return Err(error.into());
             }
         };
+        let router = api::router(runtime.handle(), api.node_id);
         Ok(Self {
-            listener,
+            surface: Some(Surface { listener, router }),
             runtime,
-            node_id: config.api.node_id,
             managed,
         })
     }
+}
 
-    /// Reports the actual bound endpoint, including an ephemeral test port.
+impl Service<CloudStore> {
+    /// Composes a cloud deployment: the Controller bound to Cloud and optionally its Node. There is
+    /// no JSON surface, because acceptance and queries belong to Cloud's public API.
+    pub async fn start(config: DeploymentConfig, hosting: NodeHosting) -> Result<Self, Error> {
+        let single = config.validate(hosting)?.cloned();
+        let (runtime, managed) = compose(
+            &config,
+            single.as_ref(),
+            ControllerRuntime::<CloudStore>::open,
+        )
+        .await?;
+        Ok(Self {
+            surface: None,
+            runtime,
+            managed,
+        })
+    }
+}
+
+/// The order every composition shares: all checks, then the owner, then the hosted Node, so a
+/// refusal leaves no state behind and a Node never runs without its Controller.
+async fn compose<S: CoordinationStore>(
+    config: &DeploymentConfig,
+    single: Option<&SingleNodeConfig>,
+    open: impl FnOnce(RuntimeConfig) -> Result<ControllerRuntime<S>, Error>,
+) -> Result<(ControllerRuntime<S>, Option<ManagedNode>), Error> {
+    let launch = match single {
+        Some(single) => Some(ManagedNode::prepare(single, &config.controller).await?),
+        None => None,
+    };
+    let runtime = open(config.controller.clone())?;
+    let managed = match launch {
+        Some(launch) => Some(launch.start().await?),
+        None => None,
+    };
+    Ok((runtime, managed))
+}
+
+impl<S: CoordinationStore> Service<S> {
+    /// Reports the actual bound endpoint, including an ephemeral test port; a composition without
+    /// local intake has none.
     pub fn endpoint(&self) -> io::Result<Transport> {
-        self.listener.endpoint()
+        self.surface
+            .as_ref()
+            .ok_or_else(|| io::Error::other("this deployment serves no JSON surface"))?
+            .listener
+            .endpoint()
     }
 
     /// Runs until shutdown or an unexpected component stop, then stops in order: API admission,
@@ -58,10 +111,17 @@ impl Service {
     pub async fn run(self, shutdown: impl Future<Output = ()>) -> io::Result<()> {
         let (stop_api, api_stopping) = watch::channel(false);
         let (stop_sessions, sessions_stopping) = watch::channel(false);
-        let router = api::router(self.runtime.handle(), self.node_id);
-        let mut api = serve(self.listener, router, api_stopping);
+        let mut api = match self.surface {
+            Some(Surface { listener, router }) => serve(listener, router, api_stopping),
+            // Nothing to admit: the task resolves only when told to stop, like an idle listener.
+            None => tokio::spawn(async move {
+                let mut stopping = api_stopping;
+                let _ = stopping.changed().await;
+                Ok(())
+            }),
+        };
         let runtime = self.runtime;
-        let mut sessions: JoinHandle<(ControllerRuntime, io::Result<()>)> =
+        let mut sessions: JoinHandle<(ControllerRuntime<S>, io::Result<()>)> =
             tokio::spawn(async move {
                 let mut stopping = sessions_stopping;
                 let result = runtime

@@ -6,8 +6,11 @@ import {
   publicErrorSchema,
 } from "@ora/contracts";
 import { describe, expect, it } from "vitest";
-import { translationResources } from "./i18n-instance";
-import { hasDiagnosticRequestId } from "./contract-error";
+import { activeLocale, appI18n, translationResources } from "./i18n-instance";
+import {
+  hasDiagnosticRequestId,
+  localizeContractError,
+} from "./contract-error";
 
 const interpolationFields = (text: string): string[] =>
   [...text.matchAll(/{{(\w+)}}/g)].map((match) => match[1]).sort();
@@ -64,6 +67,29 @@ describe("contract error translations", () => {
         ],
       ).toBeTypeOf("string");
     }
+  });
+});
+
+describe("plugin package failures", () => {
+  it("renders the rejected field and reason instead of a bare request ID", () => {
+    const error = new RemoteContractError(
+      {
+        code: "plugin_package_invalid",
+        requestId: "00000000-0000-4000-8000-000000000004",
+        params: {
+          field: "description",
+          message: "missing field `description`",
+        },
+      },
+      {},
+    );
+    const expected =
+      activeLocale() === "zh-CN"
+        ? "插件包内容不合法（description）：missing field `description`"
+        : "The plugin package is invalid at description: missing field `description`";
+
+    expect(localizeContractError(error, appI18n.t)).toBe(expected);
+    expect(hasDiagnosticRequestId(error)).toBe(false);
   });
 });
 

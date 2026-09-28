@@ -29,6 +29,18 @@ records at most one completion event. Session load, prompt, and `watchAppEvents`
 forwards ordered `data`, `error`, and `end` frames over a Tauri Channel. A private call id allows an
 `AbortSignal` to cancel only that stream, while one separate request id correlates the complete stream.
 
+The asynchronous executor (`run_async_backend` and its request-id variant) takes every domain call as an
+already-boxed future (`Box::pin(..)`), and hand-written commands that await domain futures directly box
+them the same way. Tauri constructs each async command's future on the main thread inside the WebView2
+IPC callback, whose roughly 1 MB stack the webview and Tauri frames below the handler already occupy for
+several hundred KB. A deep domain future held across the command's await — the marketplace install chain
+alone monomorphizes into a ~650 KB state machine — overflows that stack before the async runtime ever
+polls it; release 0.2.0 died exactly this way (WER `0xc00000fd`) the moment a marketplace install was
+clicked. Boxing at the call site keeps the command future pointer-sized, so the deep chain is only ever
+constructed on the runtime thread that first polls the wrapper, and the boxed parameter type makes the
+contract compiler-enforced. Desktop tests pin the marketplace transfer commands against an explicit
+IPC future size budget.
+
 The stream registry claims the call id before domain startup and retains it until its owning
 registration is dropped. Cancellation signals that owner instead of freeing the id for reuse.
 Startup already in progress is allowed to settle, because abandoning arbitrary domain work
@@ -124,6 +136,25 @@ release updates, a refresh only rebuilds the cached listing and never installs o
 installed plugin, so development builds register it too rather than leaving it untested until a
 packaged release. A refresh that fails is logged and not retried on its own: the next six-hour
 tick is the retry.
+
+A refresh is per source: every configured source is pulled on its own, and a source that fails
+keeps exactly the listings the previous index carried for it instead of aborting the refresh. Its
+checkout is not re-scanned either — a repository that could not be fetched may also be mid-write —
+so the retained listings keep the version they were last published with until a later refresh
+succeeds. Only a source that was removed or disabled loses its listings, because "removed" and
+"unreachable" must not produce the same catalog. A failure belongs to one source whenever its cause
+does: its Git work, or a proxy it opts into that is absent or unusable. Only failing to read Ora's
+own state — the proxy settings, the configured sources, their namespace bindings — fails the whole
+refresh.
+
+The failures travel with the cached index and are returned by both `list_available_plugins` and
+`sync_available_plugins`, so the shell names the sources whose listings are stale instead of
+presenting a partly stale catalog as freshly synced. Each failure carries only Git's own
+`fatal:` / `error:` diagnosis or the configuration problem, never the Git command line or local
+checkout paths; the complete error is written to the log. The sync time only advances when at least
+one source actually refreshed: a refresh that reached none of them keeps the previous time, and a
+first refresh that reached none reports "never synced". A refresh with no enabled source failed
+nothing, so it advances the sync time over the empty catalog it writes.
 
 The backend admits one index rebuild at a time. Because every rebuild produces the same index for
 every caller, a caller that arrives while one is in flight is turned away rather than queued —

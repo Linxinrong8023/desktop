@@ -3,7 +3,7 @@
 //! Executable-level composition tests. A child-only stand-in replaces `ora-node` at the process
 //! boundary so readiness, stop and crash behavior can be shaped without Git, host or guardian.
 use ora_contracts::controller_api::*;
-use ora_controller::Controller;
+use ora_controller::{CloneIntake, SqliteStore};
 use ora_node_protocol::{ControllerId, RequestId};
 use ora_utils::process::{LinuxPidFd, ProcessSignal, linux_process};
 use pretty_assertions::assert_eq;
@@ -88,7 +88,7 @@ fn deployment(mode: FakeNode, ready_timeout_ms: u64, stop_timeout_ms: u64) -> De
     fs::write(
         &node_config,
         serde_json::to_vec(&serde_json::json!({
-            "ipc": { "controller_id": "owner", "endpoint": endpoint }
+            "control": { "controller_id": "owner", "listen": { "kind": "ipc", "path": endpoint } }
         }))
         .unwrap(),
     )
@@ -116,9 +116,10 @@ fn deployment(mode: FakeNode, ready_timeout_ms: u64, stop_timeout_ms: u64) -> De
         serde_json::to_vec(&serde_json::json!({
             "controller": {
                 "home_directory": home,
+                "persistence": { "kind": "sqlite" },
                 "protected_state_directories": [path.join("node")],
                 "controller_id": "owner",
-                "nodes": [{ "node_id": "node", "endpoint": endpoint }],
+                "nodes": [{ "node_id": "node", "endpoint": { "kind": "ipc", "path": endpoint } }],
                 "session": { "io_timeout_ms": 500, "query_interval_ms": 100 },
                 "reconnect_ms": 200,
                 "timezone": "Asia/Shanghai",
@@ -167,14 +168,11 @@ impl Executable {
     fn errors(&self) -> String {
         fs::read_to_string(&self.errors).unwrap_or_default()
     }
-    /// Waits for the actual bound address; the executable prints it only after its Node is ready.
+    /// Waits for the actual bound address; the executable logs it only after its Node is ready.
     fn address(&self) -> String {
         let mut address = None;
         until(|| {
-            address = self.log().lines().find_map(|line| {
-                line.strip_prefix("ora-controller listening on tcp://")
-                    .map(str::to_owned)
-            });
+            address = listening(&self.log());
             address.is_some()
         });
         address.unwrap()
@@ -222,6 +220,19 @@ fn until(mut ready: impl FnMut() -> bool) {
     }
 }
 
+/// The TCP address the executable reported as bound, read from its structured log line.
+fn listening(log: &str) -> Option<String> {
+    log.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["message"] == "ora-controller listening")
+        .and_then(|event| {
+            event["context"]["endpoint"]
+                .as_str()
+                .and_then(|endpoint| endpoint.strip_prefix("tcp://"))
+                .map(str::to_owned)
+        })
+}
+
 /// Byte offset of a log line so ordering assertions read the actual sequence of events.
 fn position(log: &str, needle: &str) -> usize {
     log.find(needle)
@@ -258,8 +269,7 @@ fn refused_composition_leaves_no_state_behind() {
     }
     // A hosting request whose Node configuration binds another Controller is refused read-only.
     let original = fs::read(&deployment.node_config).unwrap();
-    let foreign: serde_json::Value =
-        serde_json::json!({ "ipc": { "controller_id": "other", "endpoint": deployment.endpoint } });
+    let foreign: serde_json::Value = serde_json::json!({ "control": { "controller_id": "other", "listen": { "kind": "ipc", "path": deployment.endpoint } } });
     fs::write(
         &deployment.node_config,
         serde_json::to_vec(&foreign).unwrap(),
@@ -327,10 +337,10 @@ fn readiness_timeout_stops_node_and_never_opens_api() {
     let status = executable.wait();
     assert!(!status.success());
     assert!(executable.errors().contains("did not become ready"));
-    assert!(!executable.log().contains("listening on"));
+    assert!(!executable.log().contains("ora-controller listening"));
     until(|| node.has_exited().unwrap());
     // The lease is free again: the same identity reopens the state the refused run created.
-    drop(Controller::open(&deployment.home, ControllerId::new("owner")).unwrap());
+    drop(SqliteStore::open(&deployment.home, ControllerId::new("owner")).unwrap());
 }
 
 /// Normal stop follows the fixed order and retires the hosted Node before the process exits.
@@ -351,7 +361,7 @@ fn normal_stop_orders_phases_and_retires_node() {
     let address = executable.address();
     let node = fake_node(&deployment);
     let log = executable.log();
-    assert!(position(&log, "managed Node ready") < position(&log, "listening on tcp://"));
+    assert!(position(&log, "managed Node ready") < position(&log, "ora-controller listening"));
     assert!(std::net::TcpStream::connect(&address).is_ok());
     assert!(executable.terminate().success());
     let log = executable.log();
@@ -437,8 +447,13 @@ fn node_exit_stops_admission_and_keeps_records() {
             .contains("managed Node exited unexpectedly")
     );
     assert!(std::net::TcpStream::connect(&address).is_err());
-    let owner = Controller::open(&deployment.home, ControllerId::new("owner")).unwrap();
-    let operations = owner.operations().unwrap();
+    let owner = SqliteStore::open(&deployment.home, ControllerId::new("owner")).unwrap();
+    let operations = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(owner.operations())
+        .unwrap();
     assert_eq!(operations.len(), 1);
     assert_eq!(
         operations[0].command.execution_id.as_str(),
@@ -453,4 +468,54 @@ fn node_exit_stops_admission_and_keeps_records() {
         Some("before-node-loss")
     );
     assert!(operations[0].result.is_none());
+}
+
+/// A cloud deployment binds no JSON surface, refuses listener flags and creates no local state;
+/// with Cloud unreachable it stays up, ineligible, until asked to stop.
+#[test]
+fn cloud_persistence_serves_no_surface_and_creates_no_local_state() {
+    let root = tempfile::Builder::new()
+        .permissions(fs::Permissions::from_mode(/*mode*/ 0o700))
+        .tempdir_in(std::env::var_os("HOME").unwrap())
+        .unwrap();
+    let path = root.path();
+    let home = path.join("controller");
+    let config = path.join("controller.json");
+    fs::write(
+        &config,
+        serde_json::to_vec(&serde_json::json!({
+            "controller": {
+                "home_directory": home,
+                "persistence": {
+                    "kind": "cloud",
+                    "endpoint": "http://127.0.0.1:1",
+                    "claim_interval_ms": 100,
+                },
+                "protected_state_directories": [path.join("node")],
+                "controller_id": "owner",
+                "nodes": [{ "node_id": "node", "endpoint": { "kind": "ipc", "path": path.join("node").join("control.sock") } }],
+                "session": { "io_timeout_ms": 500, "query_interval_ms": 100 },
+                "reconnect_ms": 200,
+                "timezone": "Asia/Shanghai",
+            },
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let config = config.to_str().unwrap();
+    let mut refused = Executable::start(path, &["--config", config, "--port", "0"]);
+    assert!(!refused.wait().success());
+    assert!(refused.errors().contains("serves no JSON surface"));
+    assert!(!home.exists());
+    let mut executable = Executable::start(path, &["--config", config]);
+    until(|| {
+        let log = executable.log();
+        log.contains("ora-controller coordinating through cloud")
+            && log.contains("http://127.0.0.1:1")
+    });
+    until(|| executable.log().contains("Cloud lease not acquired"));
+    assert!(!executable.log().contains("ora-controller listening"));
+    assert!(!home.exists());
+    assert!(executable.terminate().success());
+    assert!(!home.exists());
 }

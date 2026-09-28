@@ -2,13 +2,13 @@
 use ora_controller::*;
 use ora_node_protocol::*;
 use pretty_assertions::assert_eq;
-use std::{cell::Cell, rc::Rc};
+use std::sync::{Arc, Mutex};
 
-struct Fault(Rc<Cell<Option<WritePoint>>>);
+struct Fault(Arc<Mutex<Option<WritePoint>>>);
 impl WriteGuard for Fault {
     /// Refuses one transaction boundary while preserving the production database behavior.
     fn before_write(&self, point: WritePoint) -> Result<(), Error> {
-        if self.0.get() == Some(point) {
+        if *self.0.lock().unwrap() == Some(point) {
             Err(Error::Injected)
         } else {
             Ok(())
@@ -63,56 +63,64 @@ fn event(command: &CloneRepositoryMessage) -> CloneResultMessage {
 }
 
 /// Acceptance survives restart, rejects changed input and excludes a second live database owner.
-#[test]
-fn acceptance_is_durable_idempotent_and_exclusive() {
+#[tokio::test]
+async fn acceptance_is_durable_idempotent_and_exclusive() {
     let directory = directory();
-    let mut owner = Controller::open(directory.path(), ControllerId::new("owner")).unwrap();
+    let owner = SqliteStore::open(directory.path(), ControllerId::new("owner")).unwrap();
     let accepted = owner
-        .accept_clone(RequestId::new("request"), spec())
+        .accept_request(RequestId::new("request"), spec())
+        .await
         .unwrap();
     assert!(matches!(
-        Controller::open(directory.path(), ControllerId::new("owner")),
+        SqliteStore::open(directory.path(), ControllerId::new("owner")),
         Err(Error::AlreadyRunning)
     ));
     assert_eq!(
         owner
-            .accept_clone(RequestId::new("request"), spec())
+            .accept_request(RequestId::new("request"), spec())
+            .await
             .unwrap(),
         accepted
     );
     let mut changed = spec();
     changed.branch = BranchName::new("different");
     assert!(matches!(
-        owner.accept_clone(RequestId::new("request"), changed),
+        owner
+            .accept_request(RequestId::new("request"), changed)
+            .await,
         Err(Error::Conflict)
     ));
     drop(owner);
-    let owner = Controller::open(directory.path(), ControllerId::new("owner")).unwrap();
+    let owner = SqliteStore::open(directory.path(), ControllerId::new("owner")).unwrap();
     assert_eq!(
-        owner.commands(&NodeId::new("node")).unwrap(),
+        owner
+            .pending_dispatches(&NodeId::new("node"))
+            .await
+            .unwrap(),
         vec![accepted]
     );
     drop(owner);
     assert!(matches!(
-        Controller::open(directory.path(), ControllerId::new("other")),
+        SqliteStore::open(directory.path(), ControllerId::new("other")),
         Err(Error::InvalidStorage)
     ));
 }
 
 /// Query/event order and lost Ack share one immutable result; receipt failure rolls back first takeover.
-#[test]
-fn takeover_is_atomic_in_both_delivery_orders_and_conflicts_never_ack() {
+#[tokio::test]
+async fn takeover_is_atomic_in_both_delivery_orders_and_conflicts_never_ack() {
     for query_first in [true, false] {
         let directory = directory();
-        let fault = Rc::new(Cell::new(None));
-        let mut owner = Controller::open_with_guard(
+        let fault = Arc::new(Mutex::new(None));
+        let owner = SqliteStore::open_with_guard(
             directory.path(),
             ControllerId::new("owner"),
             Fault(fault.clone()),
         )
         .unwrap();
         let command = owner
-            .accept_clone(RequestId::new("request"), spec())
+            .accept_request(RequestId::new("request"), spec())
+            .await
             .unwrap();
         let event = event(&command);
         let session = NodeRuntimeIdentity {
@@ -128,18 +136,27 @@ fn takeover_is_atomic_in_both_delivery_orders_and_conflicts_never_ack() {
                 state: ExecutionState::Completed(ExecutionResult::Clone(event.payload.clone())),
             },
         });
-        fault.set(Some(WritePoint::Receipt));
+        *fault.lock().unwrap() = Some(WritePoint::Receipt);
         assert!(matches!(
-            owner.take_over(
+            take_over(
+                &owner,
                 &session,
                 &NodeToControllerMessage::CloneResult(event.clone())
-            ),
+            )
+            .await,
             Err(Error::Injected)
         ));
-        assert_eq!(owner.result(&command.execution_id).unwrap(), None);
-        fault.set(None);
+        assert_eq!(owner.result(&command.execution_id).await.unwrap(), None);
+        assert_eq!(
+            owner
+                .pending_dispatches(&NodeId::new("node"))
+                .await
+                .unwrap(),
+            vec![command.clone()]
+        );
+        *fault.lock().unwrap() = None;
         if query_first {
-            assert_eq!(owner.take_over(&session, &query).unwrap(), None);
+            assert_eq!(take_over(&owner, &session, &query).await.unwrap(), None);
         }
         let expected = Some(EventAckMessage {
             protocol_version: CURRENT_PROTOCOL_VERSION,
@@ -151,30 +168,46 @@ fn takeover_is_atomic_in_both_delivery_orders_and_conflicts_never_ack() {
             },
         });
         assert_eq!(
-            owner
-                .take_over(
-                    &session,
-                    &NodeToControllerMessage::CloneResult(event.clone())
-                )
-                .unwrap(),
+            take_over(
+                &owner,
+                &session,
+                &NodeToControllerMessage::CloneResult(event.clone())
+            )
+            .await
+            .unwrap(),
             expected
         );
-        assert_eq!(owner.take_over(&session, &query).unwrap(), None);
-        drop(owner);
-        let mut owner = Controller::open(directory.path(), ControllerId::new("owner")).unwrap();
+        assert_eq!(take_over(&owner, &session, &query).await.unwrap(), None);
+        // A committed result retires the execution from periodic queries; replayed events are
+        // still recognized through the original dispatch.
         assert_eq!(
             owner
-                .take_over(
-                    &session,
-                    &NodeToControllerMessage::CloneResult(event.clone())
-                )
+                .pending_dispatches(&NodeId::new("node"))
+                .await
                 .unwrap(),
+            vec![]
+        );
+        drop(owner);
+        let owner = SqliteStore::open(directory.path(), ControllerId::new("owner")).unwrap();
+        assert_eq!(
+            take_over(
+                &owner,
+                &session,
+                &NodeToControllerMessage::CloneResult(event.clone())
+            )
+            .await
+            .unwrap(),
             expected
         );
         let mut wrong = event.clone();
         wrong.request_id = Some(RequestId::new("other"));
         assert!(matches!(
-            owner.take_over(&session, &NodeToControllerMessage::CloneResult(wrong)),
+            take_over(
+                &owner,
+                &session,
+                &NodeToControllerMessage::CloneResult(wrong)
+            )
+            .await,
             Err(Error::Conflict)
         ));
         let mut wrong = event.clone();
@@ -182,12 +215,24 @@ fn takeover_is_atomic_in_both_delivery_orders_and_conflicts_never_ack() {
             ready.commit = CommitId::new("1123456789abcdef0123456789abcdef01234567");
         }
         assert!(matches!(
-            owner.take_over(&session, &NodeToControllerMessage::CloneResult(wrong)),
+            take_over(
+                &owner,
+                &session,
+                &NodeToControllerMessage::CloneResult(wrong)
+            )
+            .await,
             Err(Error::Conflict)
         ));
         assert_eq!(
-            owner.result(&command.execution_id).unwrap(),
-            Some(event.payload)
+            owner.result(&command.execution_id).await.unwrap(),
+            Some(ExecutionOutcome::from(&event.payload))
+        );
+        assert_eq!(
+            owner.operation(&command.execution_id).await.unwrap(),
+            Some(CloneOperation {
+                command: command.clone(),
+                result: Some(event.payload)
+            })
         );
         let inspect =
             rusqlite::Connection::open(directory.path().join("ora-controller.sqlite3")).unwrap();
@@ -202,20 +247,28 @@ fn takeover_is_atomic_in_both_delivery_orders_and_conflicts_never_ack() {
 }
 
 /// Persistence failure cannot manufacture accepted intent, and foreign files are not reinitialized.
-#[test]
-fn failed_acceptance_and_unknown_files_remain_untouched() {
+#[tokio::test]
+async fn failed_acceptance_and_unknown_files_remain_untouched() {
     let directory = directory();
-    let mut owner = Controller::open_with_guard(
+    let owner = SqliteStore::open_with_guard(
         directory.path(),
         ControllerId::new("owner"),
-        Fault(Rc::new(Cell::new(Some(WritePoint::Accept)))),
+        Fault(Arc::new(Mutex::new(Some(WritePoint::Accept)))),
     )
     .unwrap();
     assert!(matches!(
-        owner.accept_clone(RequestId::new("request"), spec()),
+        owner
+            .accept_request(RequestId::new("request"), spec())
+            .await,
         Err(Error::Injected)
     ));
-    assert_eq!(owner.commands(&NodeId::new("node")).unwrap(), vec![]);
+    assert_eq!(
+        owner
+            .pending_dispatches(&NodeId::new("node"))
+            .await
+            .unwrap(),
+        vec![]
+    );
     drop(owner);
     let foreign = directory.path().join("foreign");
     std::fs::create_dir(&foreign).unwrap();
@@ -227,6 +280,6 @@ fn failed_acceptance_and_unknown_files_remain_untouched() {
     }
     let path = foreign.join("ora-controller.sqlite3");
     std::fs::write(&path, "user content").unwrap();
-    assert!(Controller::open(&foreign, ControllerId::new("owner")).is_err());
+    assert!(SqliteStore::open(&foreign, ControllerId::new("owner")).is_err());
     assert_eq!(std::fs::read_to_string(path).unwrap(), "user content");
 }

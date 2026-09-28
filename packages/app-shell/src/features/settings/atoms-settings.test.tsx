@@ -202,6 +202,7 @@ describe("atom settings content", () => {
       handlers.listAvailablePlugins = async () => ({
         updatedAt: 0n,
         plugins: [],
+        failedSources: [],
       });
       handlers.uninstallPlugin = uninstallPlugin;
     });

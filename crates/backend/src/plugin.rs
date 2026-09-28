@@ -512,17 +512,13 @@ impl PluginApi {
         let configured = self.enabled_marketplace_sources()?;
         let mut registry_sources = Vec::with_capacity(configured.len());
 
-        for (source, mut registry_source) in configured.iter().zip(self.registry_sources()?) {
-            if source.source().use_proxy {
-                let git_env = proxy::git_proxy_env(proxy_settings.as_ref())?.ok_or_else(|| {
-                    BackendError::invalid_proxy_settings(
-                        "a marketplace source uses the proxy but no proxy is configured",
-                    )
-                })?;
-                registry_source = registry_source.with_git_env(git_env);
-            }
+        for (source, registry_source) in configured.iter().zip(self.registry_sources()?) {
             registry_sources.push((
-                registry_source,
+                with_source_proxy(
+                    registry_source,
+                    source.source().use_proxy,
+                    proxy_settings.as_ref(),
+                )?,
                 source.source().use_proxy,
                 source.s3_config().map_err(map_marketplace_source_error)?,
             ));
@@ -701,16 +697,11 @@ impl PluginApi {
         })
         .await
         .map_err(|error| BackendError::internal("failed to join plugin import task", error))?
-        .map_err(|error| match error {
-            ora_plugin_manager::InstallError::TargetMismatch { .. }
-            | ora_plugin_manager::InstallError::MissingArtifactTarget
-            | ora_plugin_manager::InstallError::UnsupportedHost
-            | ora_plugin_manager::InstallError::NoArtifactForTarget { .. } => BackendError::new(
-                ErrorClassification::Unprocessable,
-                PublicError::PluginHostIncompatible(EmptyErrorParams {}),
-                format!("{error}"),
-            ),
-            error => BackendError::internal("failed to import plugin archive", error),
+        // The same mapping a marketplace install uses: a local archive is refused for the same
+        // reasons, so both entry points report host incompatibility and invalid package content
+        // through the same public errors instead of diverging on which one is user-actionable.
+        .map_err(|error| {
+            marketplace::map_install_error("failed to import plugin archive", error)
         })?;
         let plugin_id = package.id.canonical();
         self.finalize_new_install(&plugin_id).await?;
@@ -813,6 +804,27 @@ impl PluginApi {
             )
             .map_err(|error| BackendError::internal("failed to persist plugin Skills", error))
     }
+}
+
+/// Applies one marketplace source's proxy policy to the Git network work done for it.
+///
+/// A source that opts into the proxy cannot connect at all without one, so an absent or unusable
+/// proxy is reported as that source's error rather than silently falling back to a direct
+/// connection the user explicitly opted out of.
+fn with_source_proxy(
+    source: ora_plugin_registry::RegistrySource,
+    use_proxy: bool,
+    proxy_settings: Option<&ora_application::NetworkProxySettings>,
+) -> Result<ora_plugin_registry::RegistrySource, BackendError> {
+    if !use_proxy {
+        return Ok(source);
+    }
+    let git_env = proxy::git_proxy_env(proxy_settings)?.ok_or_else(|| {
+        BackendError::invalid_proxy_settings(
+            "a marketplace source uses the proxy but no proxy is configured",
+        )
+    })?;
+    Ok(source.with_git_env(git_env))
 }
 
 #[cfg(test)]

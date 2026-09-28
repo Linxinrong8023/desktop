@@ -718,3 +718,290 @@ async fn marketplace_plugin_full_lifecycle_walkthrough() -> Result<(), Box<dyn s
     );
     Ok(())
 }
+
+/// Writes a release-less skill listing, which is all a catalog refresh needs to index.
+fn stage_skill_listing(repository: &Path, identifier: &str, version: &str) -> io::Result<()> {
+    stage_listing(
+        repository,
+        identifier,
+        &format!(
+            "resolver = 1\nidentifier = \"{identifier}\"\nkind = \"skill\"\nversion = \"{version}\"\ndescription = \"{identifier} {version}\"\n"
+        ),
+    )
+}
+
+/// Commits everything staged in a fixture origin so the next sync can fetch it.
+fn publish(origin: &Path, git_config: &Path, message: &str) -> io::Result<()> {
+    run_git(origin, git_config, &["add", "."])?;
+    run_git(origin, git_config, &["commit", "-m", message])
+}
+
+/// Returns every listed `identifier@version`, in catalog order.
+fn listed_versions(plugins: &[ora_contracts::AvailablePlugin]) -> Vec<String> {
+    plugins
+        .iter()
+        .map(|plugin| format!("{}@{}", plugin.name, plugin.version))
+        .collect()
+}
+
+/// Walkthrough: one marketplace source that cannot be refreshed no longer freezes the catalog.
+///
+/// Drives the production `Backend` against two real local Git origins: the default source and a
+/// third-party one. Each step breaks or restores one source the way a user's network or
+/// configuration does, and checks what the sync call, the cached listing, and the persisted index
+/// report afterwards.
+#[tokio::test]
+async fn marketplace_sync_isolates_sources_that_fail_to_refresh()
+-> Result<(), Box<dyn std::error::Error>> {
+    use ora_contracts::{
+        AddMarketplaceSourceRequest, MarketplaceArtifactRetrievalUpdate,
+        MarketplaceSourceSyncFailure, UpdateMarketplaceSourceRequest,
+    };
+
+    const THIRD_PARTY_URL: &str = "https://github.com/acme/plugins";
+    const THIRD_PARTY_CANONICAL: &str = "https://github.com/acme/plugins";
+    const NO_PROXY: &str = "a marketplace source uses the proxy but no proxy is configured";
+
+    initialize_process_logging()?;
+    let workspace = tempdir()?;
+    let root = workspace.path().to_path_buf();
+    let app_data = root.join("app_data");
+    let home = root.join("home");
+    fs::create_dir_all(&app_data)?;
+    fs::create_dir_all(&home)?;
+    let git_config = root.join("gitconfig");
+    fs::write(&git_config, "")?;
+    let sources_root = home.join("plugins").join("sources");
+
+    // ---- Fixture: two real local origins, each cloned where production checks its source out.
+    // The checkout path derives from the canonical URL alone, so the namespace passed here to
+    // locate it has no bearing on which namespace the backend binds.
+    let mut checkouts = Vec::new();
+    for (url, identifier) in [
+        (SOURCE_URL, "ora-space.weather"),
+        (THIRD_PARTY_URL, "acme.notes"),
+    ] {
+        let origin = root.join(format!("{identifier}-origin"));
+        fs::create_dir_all(&origin)?;
+        run_git(&origin, &git_config, &["init", "--initial-branch=main"])?;
+        stage_skill_listing(&origin, identifier, "0.1.0")?;
+        publish(&origin, &git_config, "publish 0.1.0")?;
+        let checkout =
+            RegistrySource::try_from_git(url, PluginNamespace::official(), "main", &sources_root)?
+                .checkout_dir()
+                .to_path_buf();
+        fs::create_dir_all(checkout.parent().ok_or("checkout has no parent")?)?;
+        run_git(
+            &origin,
+            &git_config,
+            &[
+                "clone",
+                "--branch",
+                "main",
+                ".",
+                &checkout.to_string_lossy(),
+            ],
+        )?;
+        checkouts.push((origin, checkout));
+    }
+    let [
+        (official_origin, _official_checkout),
+        (third_party_origin, third_party_checkout),
+    ] = <[(PathBuf, PathBuf); 2]>::try_from(checkouts).map_err(|_| "two fixture sources")?;
+    let third_party_remote = third_party_origin.to_string_lossy().into_owned();
+    let unreachable_remote = root.join("gone").to_string_lossy().into_owned();
+
+    let backend = Backend::open(BackendPaths {
+        app_data_directory: app_data,
+        home_directory: home.clone(),
+        deno_path: PathBuf::from(env!("CARGO_BIN_EXE_fake-agent")),
+        relative_path_base: root,
+        timezone: chrono_tz::Asia::Shanghai,
+    })?;
+    let plugins = backend.plugins();
+    plugins.add_source(AddMarketplaceSourceRequest {
+        url: THIRD_PARTY_URL.to_owned(),
+        branch: "main".to_owned(),
+        use_proxy: false,
+    })?;
+    let set_source = |url: &str, use_proxy: bool, enabled: bool| {
+        plugins.update_source(UpdateMarketplaceSourceRequest {
+            url: url.to_owned(),
+            new_url: url.to_owned(),
+            branch: "main".to_owned(),
+            use_proxy,
+            enabled,
+            artifact_retrieval: MarketplaceArtifactRetrievalUpdate::DirectHttps,
+        })
+    };
+
+    // ---- Step 1: both sources answer.
+    eprintln!("== Isolation step 1: every source refreshes");
+    let first = plugins.sync_available(SyncAvailablePluginsRequest {})?;
+    assert_eq!(
+        (
+            listed_versions(&first.plugins),
+            first.failed_sources.clone()
+        ),
+        (
+            vec![
+                "ora-space.weather@0.1.0".to_owned(),
+                "acme.notes@0.1.0".to_owned(),
+            ],
+            Vec::new(),
+        ),
+    );
+    assert!(first.updated_at > 0, "a successful sync records its time");
+
+    // ---- Step 2: the default source publishes 0.2.0 while the third-party one becomes
+    // unreachable. Its checkout also loses its listing, which must not reach the catalog: a
+    // failed source is carried over from the previous index, never re-scanned.
+    eprintln!("== Isolation step 2: one source fails");
+    stage_skill_listing(&official_origin, "ora-space.weather", "0.2.0")?;
+    publish(&official_origin, &git_config, "publish 0.2.0")?;
+    run_git(
+        &third_party_checkout,
+        &git_config,
+        &["remote", "set-url", "origin", &unreachable_remote],
+    )?;
+    fs::remove_dir_all(third_party_checkout.join("registry"))?;
+    let partial = plugins.sync_available(SyncAvailablePluginsRequest {})?;
+    assert_eq!(
+        listed_versions(&partial.plugins),
+        vec![
+            "ora-space.weather@0.2.0".to_owned(),
+            "acme.notes@0.1.0".to_owned(),
+        ],
+        "the reachable source refreshes and the failed one keeps its listing",
+    );
+    assert_eq!(
+        partial
+            .failed_sources
+            .iter()
+            .map(|failure| failure.url.as_str())
+            .collect::<Vec<_>>(),
+        vec![THIRD_PARTY_CANONICAL],
+    );
+    let message = &partial.failed_sources[0].message;
+    assert!(
+        message.starts_with("fatal:"),
+        "the failure carries Git's own diagnosis: {message}"
+    );
+    let checkout_path = third_party_checkout.to_string_lossy();
+    assert!(
+        !message.contains("args") && !message.contains(checkout_path.as_ref()),
+        "the failure never carries the Git command line or the local checkout: {message}"
+    );
+    assert!(
+        partial.updated_at >= first.updated_at,
+        "a partly successful sync advances the sync time"
+    );
+
+    // The warning outlives the call: the cached listing and the persisted index both carry it.
+    let cached = plugins.list_available(ListAvailablePluginsRequest {})?;
+    assert_eq!(
+        (
+            cached.updated_at,
+            listed_versions(&cached.plugins),
+            cached.failed_sources.clone(),
+        ),
+        (
+            partial.updated_at,
+            listed_versions(&partial.plugins),
+            partial.failed_sources.clone(),
+        ),
+    );
+    let index = RegistryIndex::load(
+        &home
+            .join("plugins")
+            .join("cache")
+            .join("registry_index.json"),
+    )?;
+    assert_eq!(
+        index
+            .source_failures()
+            .iter()
+            .map(|failure| MarketplaceSourceSyncFailure {
+                url: failure.url().to_owned(),
+                message: failure.message().to_owned(),
+            })
+            .collect::<Vec<_>>(),
+        partial.failed_sources,
+    );
+
+    // ---- Step 3: the default source now also fails, through a proxy requirement nobody
+    // configured. That is a property of that one source, so the sync still answers instead of
+    // failing as a whole, and it claims no refresh because none happened.
+    eprintln!("== Isolation step 3: every source fails");
+    set_source(SOURCE_URL, true, true)?;
+    let stalled = plugins.sync_available(SyncAvailablePluginsRequest {})?;
+    assert_eq!(
+        (
+            listed_versions(&stalled.plugins),
+            stalled.updated_at,
+            stalled
+                .failed_sources
+                .iter()
+                .map(|failure| failure.url.as_str())
+                .collect::<Vec<_>>(),
+        ),
+        (
+            listed_versions(&partial.plugins),
+            partial.updated_at,
+            vec![SOURCE_URL, THIRD_PARTY_CANONICAL],
+        ),
+        "every listing is kept and the sync time does not move",
+    );
+    assert_eq!(stalled.failed_sources[0].message, NO_PROXY);
+
+    // ---- Step 4: both sources recover and the third party publishes 0.2.0.
+    eprintln!("== Isolation step 4: every source recovers");
+    set_source(SOURCE_URL, false, true)?;
+    run_git(
+        &third_party_checkout,
+        &git_config,
+        &["remote", "set-url", "origin", &third_party_remote],
+    )?;
+    run_git(
+        &third_party_checkout,
+        &git_config,
+        &["checkout", "--", "registry"],
+    )?;
+    stage_skill_listing(&third_party_origin, "acme.notes", "0.2.0")?;
+    publish(&third_party_origin, &git_config, "publish 0.2.0")?;
+    let recovered = plugins.sync_available(SyncAvailablePluginsRequest {})?;
+    assert_eq!(
+        (
+            listed_versions(&recovered.plugins),
+            recovered.failed_sources.clone()
+        ),
+        (
+            vec![
+                "ora-space.weather@0.2.0".to_owned(),
+                "acme.notes@0.2.0".to_owned(),
+            ],
+            Vec::new(),
+        ),
+    );
+
+    // ---- Step 5: a source that fails and is then disabled stops being reported, and its
+    // listings go with it: a disabled source is removed from the catalog, not stale in it.
+    eprintln!("== Isolation step 5: a failed source is disabled");
+    run_git(
+        &third_party_checkout,
+        &git_config,
+        &["remote", "set-url", "origin", &unreachable_remote],
+    )?;
+    let failed_again = plugins.sync_available(SyncAvailablePluginsRequest {})?;
+    assert_eq!(failed_again.failed_sources.len(), 1);
+    set_source(THIRD_PARTY_URL, false, false)?;
+    let after_disable = plugins.list_available(ListAvailablePluginsRequest {})?;
+    assert_eq!(
+        (
+            listed_versions(&after_disable.plugins),
+            after_disable.failed_sources
+        ),
+        (vec!["ora-space.weather@0.2.0".to_owned()], Vec::new()),
+    );
+    Ok(())
+}

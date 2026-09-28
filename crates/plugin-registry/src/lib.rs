@@ -3,6 +3,7 @@
 
 mod entry;
 mod error;
+mod failure;
 mod host;
 mod index;
 mod readme;
@@ -10,6 +11,7 @@ mod source;
 
 pub use entry::RegistryEntry;
 pub use error::RegistryError;
+pub use failure::RegistrySourceFailure;
 pub use host::current_host_target;
 pub use index::{RegistryBuild, RegistryIndex, SkippedManifest};
 pub use readme::ReadmeReadError;

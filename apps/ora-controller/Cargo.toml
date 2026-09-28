@@ -15,19 +15,31 @@ rusqlite = { workspace = true, features = ["bundled"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "time", "signal", "macros", "sync"] }
 uuid.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ora-contracts.workspace = true
+ora-controller-proto.workspace = true
+ora-node-transport = { workspace = true, features = ["websocket"] }
 ora-utils = { workspace = true, features = ["local-ipc"] }
 libc.workspace = true
 clap.workspace = true
-tokio = { workspace = true, features = ["rt", "net", "time", "signal", "macros", "sync"] }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+prost.workspace = true
+prost-types.workspace = true
+# The Substrate effects interface is plain HTTP+JSON; the workspace client already carries rustls.
+reqwest = { workspace = true, features = ["json"] }
+tonic.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 pretty_assertions.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
+ora-node-transport = { workspace = true, features = ["websocket"] }
 reqwest = { workspace = true, features = ["json"] }
+# The test-only server stubs host an in-memory Cloud over the real contract.
+ora-controller-proto = { workspace = true, features = ["test-server"] }
+futures.workspace = true

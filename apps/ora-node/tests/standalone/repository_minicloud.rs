@@ -2,7 +2,8 @@ use super::*;
 use crate::support::{ChildGuard, until};
 use ora_contracts::controller_api::*;
 use ora_controller::{
-    ApiConfig, DeploymentConfig, NodeEndpoint, NodeHosting, RuntimeConfig, SessionConfig,
+    ApiConfig, DeploymentConfig, NodeEndpoint, NodeHosting, NodeTarget, Persistence, RuntimeConfig,
+    SessionConfig,
 };
 use pretty_assertions::assert_eq;
 use std::{
@@ -104,11 +105,16 @@ pub(super) fn launch(
     );
     let mut address = None;
     until(|| {
+        // The bound endpoint is a structured log event, ordered with the rest of the log.
         address = fs::read_to_string(&log)
             .unwrap_or_default()
             .lines()
-            .find_map(|line| {
-                line.strip_prefix("ora-controller listening on tcp://")
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find(|event| event["message"] == "ora-controller listening")
+            .and_then(|event| {
+                event["context"]["endpoint"]
+                    .as_str()
+                    .and_then(|endpoint| endpoint.strip_prefix("tcp://"))
                     .map(str::to_owned)
             });
         address.is_some()
@@ -137,20 +143,23 @@ fn exercise(entry: Entry) {
                 .contains("Node IPC listening")
         });
         let config = DeploymentConfig {
-            api: ApiConfig {
+            api: Some(ApiConfig {
                 node_id: NodeId::new("test-node"),
-            },
+            }),
             single_node: None,
             controller: RuntimeConfig {
                 home_directory: fixture.path().join("controller"),
+                persistence: Persistence::Sqlite,
                 protected_state_directories: vec![
                     fixture.config().home_directory,
                     fixture.process().host_directory,
                 ],
                 controller_id: ControllerId::new("owner"),
-                nodes: vec![NodeEndpoint {
+                nodes: vec![NodeTarget {
                     node_id: NodeId::new("test-node"),
-                    endpoint: fixture.config().home_directory.join("control.sock"),
+                    endpoint: NodeEndpoint::Ipc {
+                        path: fixture.config().home_directory.join("control.sock"),
+                    },
                 }],
                 session: SessionConfig {
                     io_timeout_ms: 5000,

@@ -128,19 +128,24 @@ fn verify(executor: Executor, outcome: Outcome) {
                     .await
                 }
                 Executor::AsyncWithRequestId => {
-                    run_async_backend_with_request_id("executor_test", |request_id| async move {
-                        tokio::task::yield_now().await;
-                        ora_logging::ora_info!(request_id = %request_id, "correlation received");
-                        operation("context", "request", outcome)
+                    run_async_backend_with_request_id("executor_test", |request_id| {
+                        Box::pin(async move {
+                            tokio::task::yield_now().await;
+                            ora_logging::ora_info!(request_id = %request_id, "correlation received");
+                            operation("context", "request", outcome)
+                        })
                     })
                     .await
                 }
                 Executor::Async => {
-                    run_async_backend("executor_test", async {
-                        // Force a second poll to exercise instrumentation across suspension.
-                        tokio::task::yield_now().await;
-                        operation("context", "request", outcome)
-                    })
+                    run_async_backend(
+                        "executor_test",
+                        Box::pin(async {
+                            // Force a second poll to exercise instrumentation across suspension.
+                            tokio::task::yield_now().await;
+                            operation("context", "request", outcome)
+                        }),
+                    )
                     .await
                 }
             }

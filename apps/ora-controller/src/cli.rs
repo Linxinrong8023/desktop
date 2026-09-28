@@ -18,9 +18,9 @@ pub struct Cli {
     /// Start the configured Node in this process group and stop it on normal shutdown.
     #[arg(long)]
     pub single_node: bool,
-    /// How the API listener accepts connections.
-    #[arg(long, value_enum, default_value_t = TransportKind::Tcp)]
-    pub transport: TransportKind,
+    /// How the API listener accepts connections; SQLite persistence only, TCP when omitted.
+    #[arg(long, value_enum)]
+    pub transport: Option<TransportKind>,
     /// TCP bind address; defaults to loopback because the API has no authentication yet.
     #[arg(long)]
     pub host: Option<IpAddr>,
@@ -39,9 +39,18 @@ pub enum TransportKind {
 }
 
 impl Cli {
+    /// Whether any listener flag was given; a cloud deployment has no listener to apply them to.
+    pub fn listener_requested(&self) -> bool {
+        self.transport.is_some()
+            || self.host.is_some()
+            || self.port.is_some()
+            || self.socket.is_some()
+    }
+
     /// Rejects flag combinations that would silently ignore an operator's intent.
     pub fn transport(&self) -> Result<Transport, String> {
-        match (self.transport, self.host, self.port, &self.socket) {
+        let kind = self.transport.unwrap_or(TransportKind::Tcp);
+        match (kind, self.host, self.port, &self.socket) {
             (TransportKind::Tcp, host, port, None) => Ok(Transport::Tcp(SocketAddr::new(
                 host.unwrap_or(Ipv4Addr::LOCALHOST.into()),
                 port.unwrap_or(DEFAULT_PORT),
@@ -99,5 +108,8 @@ mod tests {
         );
         assert_eq!(parse(&["--single-node"]).hosting(), NodeHosting::Managed);
         assert_eq!(parse(&[]).hosting(), NodeHosting::External);
+        assert!(!parse(&["--single-node"]).listener_requested());
+        assert!(parse(&["--port", "0"]).listener_requested());
+        assert!(parse(&["--transport", "tcp"]).listener_requested());
     }
 }

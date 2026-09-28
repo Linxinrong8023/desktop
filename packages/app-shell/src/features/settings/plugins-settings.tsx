@@ -9,6 +9,9 @@ import type {
   PackMemberReconciliationState,
 } from "@ora/contracts";
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
   Badge,
   Button,
   DropdownMenu,
@@ -19,6 +22,7 @@ import {
   toast,
 } from "@ora/ui";
 import {
+  IconAlertTriangle,
   IconArrowBigUpLines,
   IconCheck,
   IconDownload,
@@ -220,6 +224,17 @@ export function PluginsSettings({
   }, [visiblePlugins]);
 
   const updatedAt = available.data?.updatedAt;
+  // The host keeps serving the listings a source published before its refresh failed, so the
+  // page states which sources those stale listings come from instead of presenting them as fresh.
+  // The wording is built here rather than in JSX because the failure description is a transport
+  // diagnostic the UI only relays.
+  const syncFailures = (available.data?.failedSources ?? []).map((failure) => ({
+    url: failure.url,
+    label: t("settings.plugins.syncFailures.entry", {
+      url: failure.url,
+      message: failure.message,
+    }),
+  }));
   const lastSynced =
     updatedAt === undefined || updatedAt === 0n
       ? t("settings.plugins.neverSynced")
@@ -362,6 +377,21 @@ export function PluginsSettings({
                 onError: (cause) => {
                   showContractError(cause, t("settings.plugins.syncFailed"));
                 },
+                // A sync that refreshed nothing still answers with the listings it kept, so a
+                // plain success toast would hide the fact that part of the catalog is stale.
+                onSuccess: (response) => {
+                  if (response.failedSources.length === 0) return;
+                  toast.warning(
+                    t("settings.plugins.syncFailures.title", {
+                      count: response.failedSources.length,
+                    }),
+                    {
+                      description: response.failedSources
+                        .map((failure) => failure.url)
+                        .join(" "),
+                    },
+                  );
+                },
               })
             }
             aria-label={t("settings.plugins.syncMarketplace")}
@@ -382,6 +412,27 @@ export function PluginsSettings({
         <span className="block text-xs text-muted-foreground">
           {lastSynced}
         </span>
+
+        {syncFailures.length > 0 && (
+          <Alert>
+            <IconAlertTriangle />
+            <AlertTitle>
+              {t("settings.plugins.syncFailures.title", {
+                count: syncFailures.length,
+              })}
+            </AlertTitle>
+            <AlertDescription>
+              <p>{t("settings.plugins.syncFailures.description")}</p>
+              <ul className="mt-1 space-y-0.5">
+                {syncFailures.map((failure) => (
+                  <li key={failure.url} className="break-all">
+                    {failure.label}
+                  </li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
       </div>
 
       {visiblePlugins.length === 0 ? (

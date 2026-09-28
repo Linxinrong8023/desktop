@@ -7,6 +7,7 @@ use ora_plugin_manifest::PluginManifest;
 
 use crate::entry::{RegistryEntry, entry_id};
 use crate::error::RegistryError;
+use crate::failure::RegistrySourceFailure;
 use crate::source::RegistrySource;
 
 /// The index schema version reported in every built index file.
@@ -26,6 +27,14 @@ pub struct RegistryIndex {
     updated_at: i64,
     version: String,
     plugins: Vec<RegistryEntry>,
+    /// The sources the rebuild that produced this index could not refresh, empty when every
+    /// configured source answered.
+    ///
+    /// The record travels with the cache instead of only with the sync response because the
+    /// marketplace page reads the cache: a warning that existed for the duration of one call
+    /// would be gone by the time anyone looks at the listings it applies to.
+    #[serde(default)]
+    source_failures: Vec<RegistrySourceFailure>,
 }
 
 impl RegistryIndex {
@@ -42,41 +51,47 @@ impl RegistryIndex {
     /// manifest in path order wins. Telling the two apart is the display layer's job, which is
     /// what [`RegistryEntry::source_url`] exists for.
     pub fn build_all(sources: &[&RegistrySource], updated_at: i64) -> RegistryBuild {
+        Self::build_with_failures(sources, &[], None, updated_at)
+    }
+
+    /// Rebuilds the index from the sources that refreshed, carrying forward what the sources that
+    /// failed had already published.
+    ///
+    /// A failed source is not scanned at all: its checkout may be stale, half-written, or gone, so
+    /// re-reading it could publish a listing that silently lost entries. The previous index is the
+    /// only trustworthy record of what that source publishes, so its entries are carried over
+    /// verbatim and the failure is recorded beside them. A source that is no longer configured is
+    /// absent from `sources` and loses its listings, because "removed" and "unreachable" are
+    /// different situations that must not collapse into one.
+    ///
+    /// Failures are matched by canonical URL, which is also the attribution every entry carries,
+    /// and only sources this build was given can be reported as failed: a failure naming a source
+    /// the caller did not pass is neither carried over nor reported.
+    pub fn build_with_failures(
+        sources: &[&RegistrySource],
+        failures: &[RegistrySourceFailure],
+        previous: Option<&RegistryIndex>,
+        updated_at: i64,
+    ) -> RegistryBuild {
+        let failures: Vec<RegistrySourceFailure> = failures
+            .iter()
+            .filter(|failure| {
+                sources
+                    .iter()
+                    .any(|source| source.canonical_url() == failure.url())
+            })
+            .cloned()
+            .collect();
         let mut entries = Vec::new();
         let mut skipped = Vec::new();
-        for source in sources {
-            for path in orax_manifest_paths(&source.registry_dir()) {
-                match parse_manifest(&path) {
-                    Ok(manifest) => {
-                        // A hidden listing never enters the derived index: the visibility filter
-                        // runs before an index entry exists, so no projection or consumer layer
-                        // can leak the listing back into discovery. Addressability is untouched —
-                        // `resolve_manifest` re-reads the checkout, so a hidden entry stays
-                        // resolvable and installable by its id.
-                        if !manifest.marketplace_visible() {
-                            continue;
-                        }
-                        // The icon lives beside the manifest under one of the fixed candidate
-                        // names; the same scan runs against an installed package root, so a
-                        // listing and its install can never resolve to different icons.
-                        let logo = path.parent().and_then(ora_plugin_asset::resolve_logo);
-                        entries.push(RegistryEntry::from_manifest(
-                            &manifest,
-                            source.namespace(),
-                            source.canonical_url(),
-                            logo,
-                        ));
-                    }
-                    Err(error) => {
-                        ora_warn!(path = %path.display(), %error, "skipping invalid registry plugin manifest");
-                        skipped.push(SkippedManifest {
-                            path,
-                            reason: error.to_string(),
-                        });
-                    }
-                }
-            }
+        for source in sources.iter().copied().filter(|source| {
+            !failures
+                .iter()
+                .any(|failure| failure.url() == source.canonical_url())
+        }) {
+            scan_source(source, &mut entries, &mut skipped);
         }
+        entries.extend(carried_over_entries(&failures, previous));
         entries.sort_by(|left, right| left.id().cmp(right.id()));
         entries.dedup_by(|left, right| left.id() == right.id());
 
@@ -84,6 +99,7 @@ impl RegistryIndex {
             updated_at,
             version: INDEX_VERSION.to_owned(),
             plugins: entries,
+            source_failures: failures,
         };
         RegistryBuild { index, skipped }
     }
@@ -234,6 +250,11 @@ impl RegistryIndex {
     pub fn plugins(&self) -> &[RegistryEntry] {
         &self.plugins
     }
+
+    /// Returns the sources the rebuild behind this index could not refresh, in failure order.
+    pub fn source_failures(&self) -> &[RegistrySourceFailure] {
+        &self.source_failures
+    }
 }
 
 /// Holds one built index together with every manifest that was skipped during the scan.
@@ -272,6 +293,72 @@ impl SkippedManifest {
     pub fn reason(&self) -> &str {
         &self.reason
     }
+}
+
+/// Scans one source's registry directory, appending its entries and every manifest it skipped.
+///
+/// Malformed or unreadable manifests are skipped, logged as warnings, and reported through
+/// `skipped` so a single bad file never blocks the whole build.
+fn scan_source(
+    source: &RegistrySource,
+    entries: &mut Vec<RegistryEntry>,
+    skipped: &mut Vec<SkippedManifest>,
+) {
+    for path in orax_manifest_paths(&source.registry_dir()) {
+        match parse_manifest(&path) {
+            Ok(manifest) => {
+                // A hidden listing never enters the derived index: the visibility filter runs
+                // before an index entry exists, so no projection or consumer layer can leak the
+                // listing back into discovery. Addressability is untouched — `resolve_manifest`
+                // re-reads the checkout, so a hidden entry stays resolvable and installable by
+                // its id.
+                if !manifest.marketplace_visible() {
+                    continue;
+                }
+                // The icon lives beside the manifest under one of the fixed candidate names; the
+                // same scan runs against an installed package root, so a listing and its install
+                // can never resolve to different icons.
+                let logo = path.parent().and_then(ora_plugin_asset::resolve_logo);
+                entries.push(RegistryEntry::from_manifest(
+                    &manifest,
+                    source.namespace(),
+                    source.canonical_url(),
+                    logo,
+                ));
+            }
+            Err(error) => {
+                ora_warn!(path = %path.display(), %error, "skipping invalid registry plugin manifest");
+                skipped.push(SkippedManifest {
+                    path,
+                    reason: error.to_string(),
+                });
+            }
+        }
+    }
+}
+
+/// Returns the entries the previous index already listed for the sources that failed.
+///
+/// Rebuilding a failed source from its own checkout is not an option — that checkout is exactly
+/// what could not be refreshed — so its previous listings are the only truthful record of what it
+/// publishes, and they keep their version, logo, and attribution unchanged.
+fn carried_over_entries(
+    failures: &[RegistrySourceFailure],
+    previous: Option<&RegistryIndex>,
+) -> Vec<RegistryEntry> {
+    let Some(previous) = previous else {
+        return Vec::new();
+    };
+    previous
+        .plugins()
+        .iter()
+        .filter(|entry| {
+            failures
+                .iter()
+                .any(|failure| failure.url() == entry.source_url())
+        })
+        .cloned()
+        .collect()
 }
 
 /// Collects every `orax.toml` beneath `root` in deterministic path order.
@@ -892,6 +979,173 @@ mod tests {
             ],
         );
         assert_eq!(build.skipped().len(), 0);
+        Ok(())
+    }
+
+    /// Verifies a source that failed to refresh keeps exactly the listings the previous index
+    /// already carried, while the sources that answered publish their new content.
+    #[test]
+    fn carries_over_the_listings_of_a_source_that_failed_to_refresh()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let refreshed_root = TempDir::new()?;
+        let failed_root = TempDir::new()?;
+        write_manifest(
+            refreshed_root.path(),
+            "weather",
+            &valid_manifest("weather", "Weather plugin"),
+        )?;
+        write_manifest(
+            failed_root.path(),
+            "retired",
+            &valid_manifest("retired", "Retired plugin"),
+        )?;
+        let refreshed = official_source(refreshed_root.path());
+        let failed = third_party_source(failed_root.path());
+        let previous = RegistryIndex::build_all(&[&refreshed, &failed], UPDATED_AT)
+            .index()
+            .clone();
+
+        // The failed source's checkout loses its listing, which must not reach the rebuilt index.
+        fs::remove_dir_all(failed_root.path().join("registry"))?;
+        write_manifest(
+            refreshed_root.path(),
+            "weather",
+            &valid_manifest("weather", "Weather plugin, republished"),
+        )?;
+        let failure = RegistrySourceFailure::new(failed.canonical_url(), "git fetch failed");
+
+        let build = RegistryIndex::build_with_failures(
+            &[&refreshed, &failed],
+            std::slice::from_ref(&failure),
+            Some(&previous),
+            UPDATED_AT + 1,
+        );
+
+        assert_eq!(
+            build
+                .index()
+                .plugins()
+                .iter()
+                .map(|entry| (entry.id().canonical(), entry.description().to_owned()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "official/weather".to_string(),
+                    "Weather plugin, republished".to_string(),
+                ),
+                (
+                    format!("{}/retired", failed.namespace()),
+                    "Retired plugin".to_string(),
+                ),
+            ],
+        );
+        assert_eq!(
+            build.index().source_failures(),
+            std::slice::from_ref(&failure)
+        );
+        Ok(())
+    }
+
+    /// Verifies a source that is no longer configured loses its listings, because a removed source
+    /// and an unreachable one must not produce the same index — and a failure reported for it
+    /// cannot keep it alive.
+    #[test]
+    fn drops_the_listings_of_a_source_that_is_no_longer_configured()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let kept_root = TempDir::new()?;
+        let removed_root = TempDir::new()?;
+        write_manifest(
+            kept_root.path(),
+            "weather",
+            &valid_manifest("weather", "Weather plugin"),
+        )?;
+        write_manifest(
+            removed_root.path(),
+            "gone",
+            &valid_manifest("gone", "Removed plugin"),
+        )?;
+        let kept = official_source(kept_root.path());
+        let removed = third_party_source(removed_root.path());
+        let previous = RegistryIndex::build_all(&[&kept, &removed], UPDATED_AT)
+            .index()
+            .clone();
+        let removed_failure =
+            RegistrySourceFailure::new(removed.canonical_url(), "git fetch failed");
+
+        let build = RegistryIndex::build_with_failures(
+            &[&kept],
+            std::slice::from_ref(&removed_failure),
+            Some(&previous),
+            UPDATED_AT + 1,
+        );
+
+        assert_eq!(
+            build
+                .index()
+                .plugins()
+                .iter()
+                .map(|entry| entry.id().canonical())
+                .collect::<Vec<_>>(),
+            vec!["official/weather".to_string()],
+        );
+        assert_eq!(build.index().source_failures(), Vec::new());
+        Ok(())
+    }
+
+    /// Verifies the recorded failures survive the cache, since the warning has to outlive the sync
+    /// that produced it.
+    #[test]
+    fn writes_and_reads_recorded_failures() -> Result<(), Box<dyn std::error::Error>> {
+        let root = TempDir::new()?;
+        write_manifest(
+            root.path(),
+            "weather",
+            &valid_manifest("weather", "Weather plugin"),
+        )?;
+        let source = official_source(root.path());
+        let failure = RegistrySourceFailure::new(
+            "https://github.com/ora-space/marketplace/",
+            "git fetch failed",
+        );
+        let target = root.path().join("registry_index.json");
+
+        RegistryIndex::build_with_failures(
+            &[&source],
+            std::slice::from_ref(&failure),
+            None,
+            UPDATED_AT,
+        )
+        .index()
+        .write(&target)?;
+
+        let loaded = RegistryIndex::load(&target)?;
+        assert_eq!(loaded.source_failures(), std::slice::from_ref(&failure));
+        assert_eq!(loaded.updated_at(), UPDATED_AT);
+        Ok(())
+    }
+
+    /// Verifies a cache written before failures were recorded still loads as one with none.
+    #[test]
+    fn reads_a_cache_written_before_failures_were_recorded()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = TempDir::new()?;
+        write_manifest(
+            root.path(),
+            "weather",
+            &valid_manifest("weather", "Weather plugin"),
+        )?;
+        let source = official_source(root.path());
+        let mut legacy =
+            serde_json::to_value(RegistryIndex::build_all(&[&source], UPDATED_AT).index())?;
+        legacy
+            .as_object_mut()
+            .ok_or_else(|| std::io::Error::other("expected a serialized index object"))?
+            .remove("source_failures");
+
+        let loaded = serde_json::from_value::<RegistryIndex>(legacy)?;
+
+        assert_eq!(loaded.source_failures(), Vec::new());
+        assert_eq!(loaded.plugins().len(), 1);
         Ok(())
     }
 

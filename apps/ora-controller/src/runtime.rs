@@ -1,41 +1,124 @@
 use super::*;
+use crate::session::{SessionObserver, run_observed_session};
 use serde::{Deserialize, Serialize};
-use std::{
-    future::Future,
-    io,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{future::Future, io, sync::Arc, time::Duration};
+use tokio::sync::watch;
+
+/// Which authority persists coordination for this deployment. Chosen once at deployment time: a
+/// running Controller never switches adapters, and neither adapter is a fallback for the other,
+/// because two authorities would leave nobody able to say which record is the fact.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Persistence {
+    /// Local single-node deployments: the SQLite database and its lease live in `home_directory`.
+    Sqlite,
+    /// Cloud deployments: every durable operation is a call to the Cloud internal control contract
+    /// at `endpoint` (a gRPC URI); no database is opened locally. Tenant clone work accepted by
+    /// Cloud is dispatched to the single configured Node. While a `Watch` stream is live, claims
+    /// follow its signals and every lease renewal; `claim_interval_ms` is the claim cadence while
+    /// no stream is live. With `substrate`, the Controller also drives runtime Workspace
+    /// operations: it creates and terminates Workspace sandboxes through the Substrate effects
+    /// interface and reaches each sandbox's Node through the router; static `nodes` then serve
+    /// only tenant clones and may be empty.
+    Cloud {
+        endpoint: String,
+        claim_interval_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        substrate: Option<SubstrateConfig>,
+    },
+}
+
+/// Where Workspace sandboxes are created and how their Nodes are reached. Both implementations of
+/// the Substrate effects interface (the local Sandbox Server and the platform adapter) sit behind
+/// `effects_url`, so the Controller needs no per-platform code.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubstrateConfig {
+    /// Base URL of `GET/PUT /effects/{effectId}`.
+    pub effects_url: String,
+    /// WebSocket URL of the Node router including its path, such as
+    /// `ws://sandbox-server:18000/ora-node/v1`; every sandbox Node is reached through it.
+    pub router_url: String,
+    /// The atespace that prefixes the `ate-target-actor` routing header.
+    pub atespace: String,
+    /// Deadline of one effect call; an elapsed call is queried again, never assumed absent.
+    pub request_timeout_ms: u64,
+}
 
 /// Shared deployment configuration for the standalone executable and embedded HTTP composition.
+/// `home_directory` is the process-private state root in both modes (API socket, and in SQLite
+/// mode the database); it never holds cloud-authoritative records.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfig {
     pub home_directory: PathBuf,
+    pub persistence: Persistence,
     pub protected_state_directories: Vec<PathBuf>,
     pub controller_id: ControllerId,
-    pub nodes: Vec<NodeEndpoint>,
+    pub nodes: Vec<NodeTarget>,
     pub session: SessionConfig,
     pub reconnect_ms: u64,
     pub timezone: String,
 }
 
 /// Owns deployment and the reconnect lifetime; callers supply their own process shutdown signal.
-pub struct ControllerRuntime {
-    handle: ControllerHandle,
+/// The store type is fixed at construction: one deployment runs exactly one persistence adapter.
+pub struct ControllerRuntime<S: CoordinationStore> {
+    handle: ControllerHandle<S>,
     config: RuntimeConfig,
 }
 
-/// Narrow application access to the single Controller owner; SQLite runs on a blocking executor.
-#[derive(Clone)]
-pub struct ControllerHandle {
-    owner: Arc<Mutex<Controller>>,
+/// Narrow application access to the durable store; the store itself decides how its work is executed.
+pub struct ControllerHandle<S: CoordinationStore> {
+    store: S,
     nodes: Arc<Vec<NodeId>>,
 }
 
-impl ControllerRuntime {
-    /// Validates deployment before opening state, preserving protected roots and exclusive ownership.
+impl<S: CoordinationStore> Clone for ControllerHandle<S> {
+    fn clone(&self) -> Self {
+        Self {
+            store: self.store.clone(),
+            nodes: self.nodes.clone(),
+        }
+    }
+}
+
+impl ControllerRuntime<SqliteStore> {
+    /// Validates deployment before opening local state, preserving protected roots and exclusive ownership.
+    /// Only SQLite persistence opens here; a cloud deployment is a different adapter, not a fallback.
     pub fn open(config: RuntimeConfig) -> Result<Self, Error> {
+        match &config.persistence {
+            Persistence::Sqlite => {}
+            Persistence::Cloud { .. } => {
+                return Err(Error::Configuration(
+                    "persistence.kind is cloud; open the cloud adapter instead of sqlite".into(),
+                ));
+            }
+        }
+        Self::validate(&config)?;
+        let store = SqliteStore::open(&config.home_directory, config.controller_id.clone())?;
+        Ok(Self::with_store(config, store))
+    }
+}
+
+impl ControllerRuntime<CloudStore> {
+    /// Validates deployment and binds the Cloud adapter. No local database, lease or directory is
+    /// created: `home_directory` stays the process-private root for the API socket and nothing else.
+    pub fn open(config: RuntimeConfig) -> Result<Self, Error> {
+        if config.persistence == Persistence::Sqlite {
+            return Err(Error::Configuration(
+                "persistence.kind is sqlite; open the sqlite adapter instead of cloud".into(),
+            ));
+        }
+        Self::validate(&config)?;
+        let store = CloudStore::open(&config)?;
+        Ok(Self::with_store(config, store))
+    }
+}
+
+impl<S: CoordinationStore> ControllerRuntime<S> {
+    /// Deployment checks shared by every adapter, all before any state is touched.
+    fn validate(config: &RuntimeConfig) -> Result<(), Error> {
         if !config.home_directory.is_absolute()
             || config.reconnect_ms == 0
             || config.session.query_interval_ms == 0
@@ -44,8 +127,12 @@ impl ControllerRuntime {
             return Err(Error::InvalidStorage);
         }
         for (index, node) in config.nodes.iter().enumerate() {
+            let endpoint_valid = match &node.endpoint {
+                NodeEndpoint::Ipc { path } => path.is_absolute(),
+                NodeEndpoint::WebSocket(endpoint) => endpoint.validate().is_ok(),
+            };
             if node.node_id.as_str().trim().is_empty()
-                || !node.endpoint.is_absolute()
+                || !endpoint_valid
                 || config.nodes[..index]
                     .iter()
                     .any(|other| other.node_id == node.node_id || other.endpoint == node.endpoint)
@@ -59,10 +146,11 @@ impl ControllerRuntime {
             .iter()
             .map(PathBuf::as_path)
             .chain(
-                config
-                    .nodes
-                    .iter()
-                    .filter_map(|node| node.endpoint.parent()),
+                // Only local sockets live on this filesystem; remote endpoints own no local state.
+                config.nodes.iter().filter_map(|node| match &node.endpoint {
+                    NodeEndpoint::Ipc { path } => path.parent(),
+                    NodeEndpoint::WebSocket(_) => None,
+                }),
             )
         {
             if !root.is_absolute() {
@@ -73,7 +161,11 @@ impl ControllerRuntime {
                 return Err(Error::InvalidStorage);
             }
         }
-        let owner = Controller::open(&config.home_directory, config.controller_id.clone())?;
+        Ok(())
+    }
+
+    /// Binds validated deployment to an already opened store; adapters validate their own state.
+    fn with_store(config: RuntimeConfig, store: S) -> Self {
         let nodes = Arc::new(
             config
                 .nodes
@@ -81,62 +173,100 @@ impl ControllerRuntime {
                 .map(|node| node.node_id.clone())
                 .collect(),
         );
-        Ok(Self {
-            handle: ControllerHandle {
-                owner: Arc::new(Mutex::new(owner)),
-                nodes,
-            },
+        Self {
+            handle: ControllerHandle { store, nodes },
             config,
-        })
+        }
     }
 
-    /// Supplies application access without exposing the database, mutex or reconnect implementation.
-    pub fn handle(&self) -> ControllerHandle {
+    /// Supplies application access without exposing the store, mutex or reconnect implementation.
+    pub fn handle(&self) -> ControllerHandle<S> {
         self.handle.clone()
     }
 
-    /// Reconnects configured Nodes until shutdown; cancellation drops the JoinSet and aborts every session.
+    /// Reconnects configured Nodes and runs the adapter's authority coordination until shutdown.
+    /// Sessions stop first so nothing writes under a lease the adapter is about to release: a
+    /// stopping session drops its coordination at once and only closes its connection, which is
+    /// bounded and aborted if the Node does not answer.
     pub async fn run(&self, shutdown: impl Future<Output = ()>) -> io::Result<()> {
         let mut sessions = tokio::task::JoinSet::new();
+        let (stop_sessions, sessions_stopping) = watch::channel(false);
         for target in self.config.nodes.clone() {
-            let owner = self.handle.owner.clone();
+            let store = self.handle.store.clone();
             let settings = self.config.session.clone();
             let delay = Duration::from_millis(self.config.reconnect_ms);
+            let mut stopping = sessions_stopping.clone();
             sessions.spawn(async move {
                 loop {
-                    if run_session(&owner, &target, &settings).await.is_err() { ora_logging::ora_warn!(node_id = %target.node_id.as_str(), "Controller connection unavailable; original execution responsibility retained"); }
-                    tokio::time::sleep(delay).await;
+                    let stop = async {
+                        let _ = stopping.wait_for(|stop| *stop).await;
+                    };
+                    if let Err(error) = run_observed_session(&store, &target, &settings, stop, &StaticNode(&store)).await { ora_logging::ora_warn!(node_id = %target.node_id.as_str(), error = %error, "Controller connection unavailable; original execution responsibility retained"); }
+                    tokio::select! {
+                        _ = stopping.wait_for(|stop| *stop) => return,
+                        () = tokio::time::sleep(delay) => {}
+                    }
                 }
             });
         }
+        let (stop_serving, serving_stopping) = watch::channel(false);
+        let store = self.handle.store.clone();
+        let mut serving = tokio::spawn(async move {
+            store
+                .serve(async move {
+                    let mut stopping = serving_stopping;
+                    let _ = stopping.changed().await;
+                })
+                .await
+        });
+        let mut serving_done = false;
         ora_logging::ora_info!("Controller recovery started");
         let result = tokio::select! {
             _ = shutdown => Ok(()),
             result = sessions.join_next(), if !sessions.is_empty() => Err(io::Error::other(format!("Controller session task stopped: {result:?}"))),
+            result = &mut serving => {
+                serving_done = true;
+                Err(io::Error::other(format!("Controller authority coordination stopped: {result:?}")))
+            }
         };
-        sessions.abort_all();
-        while sessions.join_next().await.is_some() {}
+        let _ = stop_sessions.send(true);
+        // A session may still be connecting when asked to stop; both steps share the I/O deadline.
+        let closing = Duration::from_millis(self.config.session.io_timeout_ms).saturating_mul(2);
+        let drained = tokio::time::timeout(closing, async {
+            while sessions.join_next().await.is_some() {}
+        })
+        .await;
+        if drained.is_err() {
+            sessions.abort_all();
+            while sessions.join_next().await.is_some() {}
+        }
+        let _ = stop_serving.send(true);
+        if !serving_done {
+            // Releasing a remote lease is bounded; a hung authority must not hold up shutdown.
+            match tokio::time::timeout(Duration::from_secs(/*secs*/ 5), &mut serving).await {
+                Ok(_) => {}
+                Err(_) => serving.abort(),
+            }
+        }
         result
     }
 }
 
-impl ControllerHandle {
-    /// Executes a short durable operation on a blocking executor while sharing the sole owner.
-    async fn access<T: Send + 'static>(
-        &self,
-        action: impl FnOnce(&mut Controller) -> Result<T, Error> + Send + 'static,
-    ) -> Result<T, Error> {
-        let owner = self.owner.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut owner = owner
-                .lock()
-                .map_err(|_| io::Error::other("Controller lock poisoned"))?;
-            action(&mut owner)
-        })
-        .await
-        .map_err(|error| io::Error::other(error.to_string()))?
+/// Reports a static Node's handshake to the store, which may wait for that proof of the
+/// configured identity before it registers work for the Node.
+struct StaticNode<'a, S>(&'a S);
+
+impl<S: CoordinationStore> SessionObserver for StaticNode<'_, S> {
+    fn established(&self, node: &NodeRuntimeIdentity) {
+        self.0.static_node_established(node);
     }
 
+    fn unresolved(&self, _execution: &ExecutionId) {}
+
+    fn answered(&self, _execution: &ExecutionId) {}
+}
+
+impl<S: CloneIntake> ControllerHandle<S> {
     /// Accepts only a deployment-configured target before any Node dispatch observes the operation.
     pub async fn accept_clone(
         &self,
@@ -146,17 +276,16 @@ impl ControllerHandle {
         if !self.nodes.contains(&spec.node_id) {
             return Err(Error::Conflict);
         }
-        self.access(move |owner| owner.accept_clone(request, spec))
-            .await
+        self.store.accept_request(request, spec).await
     }
 
     /// Returns accepted operations, including pending responsibility while Nodes are disconnected.
     pub async fn operations(&self) -> Result<Vec<CloneOperation>, Error> {
-        self.access(|owner| owner.operations()).await
+        self.store.operations().await
     }
 
     /// Reads one operation without confusing missing identity with an unknown terminal result.
     pub async fn operation(&self, execution: ExecutionId) -> Result<Option<CloneOperation>, Error> {
-        self.access(move |owner| owner.operation(&execution)).await
+        self.store.operation(&execution).await
     }
 }

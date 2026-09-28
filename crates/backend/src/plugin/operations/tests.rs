@@ -430,6 +430,7 @@ async fn manual_sync_during_a_rebuild_answers_from_the_cache() {
         SyncAvailablePluginsResponse {
             updated_at: 0,
             plugins: Vec::new(),
+            failed_sources: Vec::new(),
         },
         "an unsynced fixture caches an empty index"
     );

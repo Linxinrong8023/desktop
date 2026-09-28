@@ -401,10 +401,14 @@ export type ListAvailablePluginsRequest = Record<symbol, never>;
 
 /**
  * Returns the marketplace plugins cached in the registry index.
+ *
+ * `failed_sources` is read from the cache rather than from the request that rebuilt it, so a
+ * marketplace page opened long after a failed refresh still explains why the listings are stale.
  */
 export type ListAvailablePluginsResponse = {
   updatedAt: bigint;
   plugins: Array<AvailablePlugin>;
+  failedSources: Array<MarketplaceSourceSyncFailure>;
 };
 
 /**
@@ -522,6 +526,25 @@ export type MarketplaceSource = {
    * Release-artifact retrieval policy, with S3 credentials omitted.
    */
   artifactRetrieval: MarketplaceArtifactRetrieval;
+};
+
+/**
+ * Describes one marketplace source whose most recent refresh failed.
+ *
+ * The listing that source published is still served from the previous index, so the failure is
+ * reported instead of being folded into the listings it makes stale.
+ */
+export type MarketplaceSourceSyncFailure = {
+  /**
+   * The canonical URL of the source that could not be refreshed.
+   */
+  url: string;
+  /**
+   * Why the refresh failed: Git's own diagnosis, or the source configuration that prevented it
+   * such as a required proxy that is not configured. It never carries the Git command line or
+   * local checkout paths; the complete error is only written to the log.
+   */
+  message: string;
 };
 
 /**
@@ -845,11 +868,16 @@ export type StopPluginResponse = { plugin: InstalledPlugin };
 export type SyncAvailablePluginsRequest = Record<symbol, never>;
 
 /**
- * Returns the registry index rebuilt immediately after a marketplace sync succeeds.
+ * Returns the registry index rebuilt after a marketplace sync.
+ *
+ * A rebuild reports per source instead of failing as a whole: the sources that answered publish
+ * their new listings, the ones that failed keep the listings they already had, and
+ * `failed_sources` names them so the caller can tell the two apart.
  */
 export type SyncAvailablePluginsResponse = {
   updatedAt: bigint;
   plugins: Array<AvailablePlugin>;
+  failedSources: Array<MarketplaceSourceSyncFailure>;
 };
 
 /**

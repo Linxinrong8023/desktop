@@ -857,6 +857,69 @@ it("reports a failed marketplace sync", async () => {
   );
 });
 
+/**
+ * A source that could not be refreshed keeps its previous listings, so the page has to say which
+ * ones they are instead of presenting a partly stale catalog as freshly synced.
+ */
+it("names the marketplace sources that could not be refreshed", async () => {
+  const { state, client } = clientWithWeather();
+  state.marketplaceSourceFailures = [
+    {
+      url: "https://github.com/acme/plugins",
+      message:
+        "fatal: unable to access 'https://github.com/acme/plugins/': Could not resolve host: github.com",
+    },
+  ];
+  renderSettings(client);
+
+  const notice = await screen.findByText(
+    /1 个市场源同步失败|1 marketplace source failed to sync/,
+  );
+  expect(notice).toBeVisible();
+  expect(
+    screen.getByText(/以下源未能刷新|These sources could not be refreshed/),
+  ).toBeVisible();
+  expect(
+    screen.getByText(
+      /^https:\/\/github\.com\/acme\/plugins\s*[（(]fatal: unable to access .*Could not resolve host: github\.com[）)]$/,
+    ),
+  ).toBeVisible();
+});
+
+/** A sync that refreshed only part of the catalog reports the rest instead of claiming success. */
+it("reports the sources a manual sync could not refresh", async () => {
+  const user = userEvent.setup();
+  const { client, handlers } = clientWithWeather();
+  vi.spyOn(handlers, "syncAvailablePlugins").mockResolvedValue({
+    updatedAt: 1n,
+    plugins: [],
+    failedSources: [
+      {
+        url: "https://github.com/acme/plugins",
+        message: "git fetch failed",
+      },
+    ],
+  });
+  const warningToast = vi
+    .spyOn(toast, "warning")
+    .mockClear()
+    .mockImplementation(() => "toast");
+  renderSettings(client);
+
+  await user.click(
+    await screen.findByRole("button", {
+      name: /同步插件市场|Sync marketplace/,
+    }),
+  );
+
+  await waitFor(() => expect(warningToast).toHaveBeenCalled());
+  expect(warningToast.mock.calls[0]?.[0]).toEqual(
+    expect.stringMatching(
+      /1 个市场源同步失败|1 marketplace source failed to sync/,
+    ),
+  );
+});
+
 /** Importing a local archive goes through the backend and commits an enabled package. */
 it("imports a local archive through the backend", async () => {
   const user = userEvent.setup();
@@ -1623,7 +1686,8 @@ it("keeps the sync action disabled across leaving and reopening the page", async
   vi.spyOn(handlers, "syncAvailablePlugins").mockImplementation(
     () =>
       new Promise((resolve) => {
-        settle = () => resolve({ updatedAt: 0n, plugins: [] });
+        settle = () =>
+          resolve({ updatedAt: 0n, plugins: [], failedSources: [] });
       }),
   );
   const view = renderSettings(client);

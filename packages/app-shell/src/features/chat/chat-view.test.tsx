@@ -2363,7 +2363,12 @@ describe("ChatView", () => {
     await waitFor(() =>
       expect(screen.queryByRole("menu")).not.toBeInTheDocument(),
     );
-    expect(window.getSelection()?.toString()).toContain("hello from the user");
+    // Select All re-applies after menu close; wait for that frame on slow workers.
+    await waitFor(() =>
+      expect(window.getSelection()?.toString()).toContain(
+        "hello from the user",
+      ),
+    );
     fireEvent.contextMenu(thread);
     const copy = await screen.findByRole("menuitem", { name: "复制" });
     expect(copy).not.toHaveAttribute("aria-disabled", "true");

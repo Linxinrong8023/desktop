@@ -46,9 +46,23 @@ orchestrates checksum-verified installs of new plugin releases.
   `ora_domain::PluginId`.
 - Isolate malformed or unsupported packages as structured discovery issues.
 - Install a plugin release: download the `.orax` package (through an injected `ora-utils::http`
-  `HttpDownload`), verify its SHA-256 while downloading, and safely extract it into
-  `<data-dir>/plugins/installed/<namespace>/<name>/<version>` with `ora-utils::archive`, where the
-  namespace is supplied by the caller as the identity of the installing marketplace source.
+  `HttpDownload`), verify its SHA-256 while downloading, safely extract it into a staging directory
+  with `ora-utils::archive`, and commit it into
+  `<data-dir>/plugins/installed/<namespace>/<name>/<version>` with one rename, where the namespace
+  is supplied by the caller as the identity of the installing marketplace source. The extracted
+  package is validated from the manifest _inside_ the archive — the same parse and host-side checks
+  discovery applies — so an installed package is discoverable by construction; its `identifier`,
+  `version`, and `kind` must also agree with the listing that published it, while descriptive
+  metadata may differ and the in-package manifest wins.
+- Own `plugins/cache/` as transfer state rather than storage. Each install sweeps leftover `*.orax`
+  archives before it downloads — crash residue from an earlier run, including archives the
+  pre-namespace layout wrote directly into the cache root — and deletes its own archive on every
+  exit path, so the directory ends up holding only the derived `registry_index.json` that
+  `ora-plugin-registry` writes. Archives are addressed as
+  `<cache>/<namespace>/<name>-<version>.orax`: the namespace is a directory level because both a
+  namespace and a plugin name may contain hyphens, so a flat name could make two sources share one
+  path and unpack each other's bytes. Cleanup matches `*.orax` exactly, so the durable index and an
+  in-progress `<destination>.tmp` are never touched.
 - Convert a manifest `ReleaseLocator` into a transport-neutral `DownloadSource`: HTTPS locators
   remain URLs and object-key locators become S3 requests. Source-specific endpoint, bucket,
   credentials, proxy, and request signing stay outside this crate in the backend/downloader layer.
@@ -56,6 +70,7 @@ orchestrates checksum-verified installs of new plugin releases.
   manifest must declare a higher version than the highest installed SemVer directory), then
   downloading, verifying, and extracting the new release into its version directory and retiring
   every other version directory underneath `<data-dir>/plugins/installed/<namespace>/<name>`.
+  A no-op is refused before the transfer, so an update never downloads a package it will not unpack.
 - Import one local `.orax` release archive by extracting into a disposable staging directory,
   parsing its in-archive `orax.toml`, verifying a declared `sha256`, and then moving only the
   validated tree into `<data-dir>/plugins/installed/local/<name>/<version>`. A local archive has no
@@ -129,7 +144,26 @@ Structural failures (TOML syntax, unknown fields, wrong types) are reported as `
 with the TOML path of the offending value; semantic failures, from either crate, as
 `invalid_manifest`.
 
+Installation applies exactly this validation to the manifest the package ships, not to the
+marketplace listing that named it: the package's own `orax.toml` is what discovery reads back
+afterwards, so validating the same source is what makes "installed implies discoverable" hold.
+The installer reads that manifest under the same 1 MiB budget discovery uses — extraction's byte
+budget is sized for bundled CLIs — and reports a manifest that is missing, is not a regular file,
+is not valid UTF-8, or exceeds the budget as an invalid package at `orax.toml`. Identity is
+checked separately and before host-side validation: `identifier`, `version`, and `kind` must equal
+the listing's, and a disagreement is reported at that field rather than resolved by preferring one
+side. Descriptive metadata (`title`, `description`, `homepage`, `license`, icon) is not compared:
+the package ships the text users read, so it installs even when the listing says otherwise, and
+discovery reports the package's own values.
+
 ## Layout rules
+
+`plugins/cache/` holds at most one durable file, the derived marketplace index, plus the namespace
+directories of archives currently being installed. Every `.orax` below it is deleted by the install
+that created it, and every leftover is swept by the next install; an install that fails deletes its
+archive, leaves no version directory, and removes the `<namespace>/<name>` directory it created when
+nothing else lives there. Cleanup never deletes anything that is not a `*.orax` file, so the index
+and an in-progress download are safe by construction.
 
 Namespace, package, and version directories must be real directories (symlinks are skipped at
 every level, because the installer only ever writes real directories) and the manifest inside a

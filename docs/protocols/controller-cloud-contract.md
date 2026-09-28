@@ -8,7 +8,8 @@ recovery, and opens one server stream on which Cloud sends signals. The single s
 contract is the **Cloud repository**'s `proto/ora/cloud/internal/v1/` (package
 `ora.cloud.internal.v1`); Cloud is the server of every service and owns authoritative persistence,
 the Controller only dials out and exposes no gRPC service to Cloud. This repository never copies
-the `.proto` files; it only holds tonic **client** code generated from a pinned commit. Tenancy
+the `.proto` files; it only holds tonic code generated from a pinned commit, of which production uses
+only the **client**. Tenancy
 stays in Cloud: the contract carries only opaque identities Cloud has already authorized, with no
 tenant, user or membership fields.
 
@@ -16,22 +17,32 @@ The semantics belong to specs
 `decisions/cloud/controller-integration/0-cloud-owned-internal-grpc-contract.md`; how this
 repository consumes them is fixed by
 `decisions/controller/api-boundary/20260922-cloud-owned-contract-and-controller-dial-out.md`.
-This page only covers how the contract is obtained, generated and upgraded here. Runtime
-integration (the Cloud RPC adapter and the `Watch` dial-out task) is not implemented yet; see
+This page only covers how the contract is obtained, generated and upgraded here. The runtime
+integration is the `CloudStore` adapter described in the
+[Controller runtime](../controller/local-runtime.md): lease, `ExecutionService` and the `Watch` stream
+are consumed, the stream deciding when to claim as fixed by
+`decisions/controller/api-boundary/20260924-controller-consumes-watch-signals.md`. Its persistence semantics follow
 `decisions/controller/persistence/20260922-coordination-store-with-sqlite-and-cloud-adapters.md`.
+With a Substrate configured it also drives runtime Workspace operations through
+`WorkspaceOperationService` and reports sandbox Nodes through `NodeReportService`, as fixed by
+`decisions/controller/node-management/0-controller-drives-workspace-sandboxes.md`.
 
 ## Services and key semantics
 
-| Service | Methods | Key points |
-|---|---|---|
-| `ControllerLeaseService` | `AcquireLease` / `RenewLease` / `ReleaseLease` | Global coordination lease; `epoch` fences every write |
-| `ExecutionService` | `ClaimWork`, `RecordDispatch`, `TakeOverNodeEvent`, `RecordQueriedResult`, `GetDispatch`, `ListPendingDispatches` | Writes carry `submission_id`: same identity with identical content returns the original result, different content fails with `ABORTED`+`CONFLICT`; dispatch only after `RecordDispatch` succeeds, acknowledge only after `TakeOverNodeEvent` succeeds, `RecordQueriedResult` never authorizes an acknowledgement |
-| `ControlSignalService` | `Watch` (server stream) | `WorkAvailable` / `Drain` / `NodeAssignment`; at-most-once, not persisted, changes no ownership; after a stream loss fall back to periodic `ClaimWork` |
+| Service                     | Methods                                                                                                           | Key points                                                                                                                                                                                                                                                                                                       |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ControllerLeaseService`    | `AcquireLease` / `RenewLease` / `ReleaseLease`                                                                    | Global coordination lease; `epoch` fences every write                                                                                                                                                                                                                                                            |
+| `ExecutionService`          | `ClaimWork`, `RecordDispatch`, `TakeOverNodeEvent`, `RecordQueriedResult`, `GetDispatch`, `ListPendingDispatches` | Writes carry `submission_id`: same identity with identical content returns the original result, different content fails with `ABORTED`+`CONFLICT`; dispatch only after `RecordDispatch` succeeds, acknowledge only after `TakeOverNodeEvent` succeeds, `RecordQueriedResult` never authorizes an acknowledgement |
+| `ControlSignalService`      | `Watch` (server stream)                                                                                           | `WorkAvailable` / `OperationAvailable` / `Drain` / `NodeAssignment`; at-most-once, not persisted, changes no ownership; after a stream loss fall back to periodic `ClaimWork` and `ClaimOperation`                                                                                                               |
+| `WorkspaceOperationService` | `ClaimOperation`, `PlanEffect`, `RecordEffectResult`, `AdvanceOperation`, `DeferOperation`                        | `ClaimOperation` returns the oldest claimable operation (a running one again, with a new version), so one Controller drives one operation at a time; writes are fenced by `epoch` and the operation `version`; the clone step dispatches through `ExecutionService` with the operation's ID                      |
+| `NodeReportService`         | `RegisterNode`, `ReportNodeStatus`, `EndNode`, `ReportNodeIdle`                                                   | The Controller reports the sandbox Nodes it holds sessions with; `RegisterNode` is idempotent by (sandbox, incarnation) and a second live incarnation conflicts until the first is ended                                                                                                                         |
 
 Failures use the gRPC status code as the primary classification with `ErrorDetail{ErrorCode}`
 attached; the Rust side maps them once, inside the Cloud RPC adapter, to the persistence
 coordination classes (conflict, missing, unavailable, unknown, stale eligibility), so coordination
-logic never sees gRPC.
+logic never sees gRPC. Cloud answers a stale operation snapshot (`stale_operation`) with the same
+`FAILED_PRECONDITION` as a stale lease; the adapter classifies it as a conflict, so only the lease
+verdict drops the held epoch.
 
 ## Obtaining the contract: submodule + sparse-checkout
 
@@ -42,6 +53,10 @@ to `proto/`.
 - `task proto:init` (Linux / macOS; the generated client is committed, so Windows builds need neither the submodule nor buf): a first run clones with `--no-checkout --filter=blob:none --sparse`, runs
   `sparse-checkout set proto`, then `git submodule update --init` to the pinned commit; an already
   initialized submodule is only moved to the pinned commit. The crates CI job runs the same task.
+  It reuses `buf` from `PATH` or `~/.local/bin`; if absent, it uses `curl` to install Buf 1.73.0
+  from the [official GitHub release](https://buf.build/docs/cli/installation/) into `~/.local/bin`
+  without sudo. Downloads require network access. Protocol tasks include this directory in their
+  `PATH`; add it to your shell's `PATH` if you want to invoke `buf` directly.
 - A plain `git clone` or `actions/checkout` does not initialize it; dependency initialization is an
   explicit action.
 - `/specs` remains an ignored, independent checkout and is not a contract dependency.
@@ -49,8 +64,10 @@ to `proto/`.
 ## Generation and checks
 
 `crates/controller-proto` (`ora-controller-proto`) holds only the generated output under `src/gen/`,
-produced by `buf` with pinned remote plugins (`neoeinstein-prost`, `neoeinstein-tonic` with
-`no_server`) from `third_party/cloud/proto`; this needs network access, not a local `protoc`.
+produced by `buf` with pinned remote plugins (`neoeinstein-prost`, `neoeinstein-tonic`) from
+`third_party/cloud/proto`; this needs network access, not a local `protoc`. The server modules are
+generated behind `#[cfg(feature = "test-server")]`: production never compiles them, and the
+Controller's tests enable the feature to host an in-memory Cloud over the real contract.
 
 - `task proto:generate`: regenerate.
 - `task proto:check`: verify the submodule is at its pinned commit with no local changes under
@@ -66,5 +83,6 @@ produced by `buf` with pinned remote plugins (`neoeinstein-prost`, `neoeinstein-
 3. `task proto:generate`, adapt the adapter, and commit the gitlink, the generated code and the
    change together; link the Cloud change from the PR so reviewers can expand the submodule diff.
 
-Generation proves structural agreement; behavioral agreement is proven by adapter tests against a
-real Cloud gRPC server, registered when the runtime integration lands.
+Generation proves structural agreement. The Controller's tests exercise the adapter against an
+in-memory Cloud built on the generated server stubs; behavioral agreement with the real Cloud gRPC
+server is verified end to end through the minicloud cloud form and is not yet an automated test.

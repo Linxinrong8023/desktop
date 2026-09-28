@@ -1,9 +1,13 @@
 //! Local durable clone coordination; no Desktop/Backend writer or Cloud authority is installed.
+//! Coordination logic reaches persistence only through [`CoordinationStore`]: the SQLite adapter
+//! under `sqlite` for local deployments, the Cloud RPC adapter under `cloud` for cloud ones.
 #[cfg(target_os = "linux")]
 mod api;
 #[cfg(target_os = "linux")]
+mod cloud;
+mod coordination;
+#[cfg(target_os = "linux")]
 mod deployment;
-mod operations;
 #[cfg(target_os = "linux")]
 mod runtime;
 #[cfg(target_os = "linux")]
@@ -12,27 +16,39 @@ mod service;
 mod session;
 #[cfg(target_os = "linux")]
 mod single_node;
-mod storage;
-mod takeover;
+mod sqlite;
+mod store;
 #[cfg(target_os = "linux")]
 mod transport;
 #[cfg(target_os = "linux")]
-pub use deployment::{ApiConfig, DeploymentConfig, NodeHosting, SingleNodeConfig};
-pub use operations::CloneOperation;
-use ora_node_protocol::*;
-use ora_utils::fs::{ExclusiveFileLock, ExclusiveLockError};
+pub use cloud::CloudStore;
+pub use coordination::take_over;
 #[cfg(target_os = "linux")]
-pub use runtime::{ControllerHandle, ControllerRuntime, RuntimeConfig};
-use rusqlite::Connection;
+pub use deployment::{ApiConfig, DeploymentConfig, NodeHosting, SingleNodeConfig};
+use ora_node_protocol::*;
+#[cfg(target_os = "linux")]
+pub use runtime::{
+    ControllerHandle, ControllerRuntime, Persistence, RuntimeConfig, SubstrateConfig,
+};
 #[cfg(target_os = "linux")]
 pub use service::Service;
 #[cfg(target_os = "linux")]
-pub use session::{NodeEndpoint, SessionConfig, run_session};
-use std::path::{Path, PathBuf};
+pub use session::{
+    NodeEndpoint, NodeTarget, SessionConfig, SessionError, run_session, run_session_until,
+};
+pub use sqlite::SqliteStore;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
+pub use store::{CloneIntake, CoordinationStore, ExecutionOutcome};
 #[cfg(target_os = "linux")]
 pub use transport::{DEFAULT_PORT, Listener, Transport};
 
-/// Local persistence failures never authorize dispatch or acknowledgement.
+/// Persistence failures never authorize dispatch or acknowledgement. The classes an adapter must
+/// distinguish are fixed here: a conflict is never retried as-is, an unavailable authority means
+/// nothing was committed and the same call may be retried later, an unknown outcome may already
+/// be committed and is only ever retried with the same submission identity, and stale eligibility
+/// means the coordination lease must be re-acquired before any further write. A missing record is
+/// reported as `None` by reads and as a conflict where a fact was required.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("controller I/O: {0}")]
@@ -53,10 +69,20 @@ pub enum Error {
     Injected,
     #[error("invalid deployment composition: {0}")]
     Configuration(String),
+    /// The authority did not accept the call and committed nothing; retrying later is safe.
+    #[error("persistence unavailable: {0}")]
+    Unavailable(String),
+    /// The reply was lost after the call may have been committed; only the same submission may retry.
+    #[error("persistence outcome unknown: {0}")]
+    Unknown(String),
+    /// The coordination lease this Controller wrote under is no longer current.
+    #[error("coordination eligibility is stale; re-acquire the lease before continuing")]
+    StaleEligibility,
 }
 
 /// Test seams refuse writes before transactions commit, using the same real SQLite and reconciliation.
-pub trait WriteGuard {
+/// Guards travel with the store onto the blocking pool, hence the thread-safety bounds.
+pub trait WriteGuard: Send + 'static {
     /// Prevents a durable boundary; callers must not dispatch or acknowledge on failure.
     fn before_write(&self, point: WritePoint) -> Result<(), Error>;
 }
@@ -76,30 +102,10 @@ impl WriteGuard for DurableWrites {
     }
 }
 
-/// The database lease and transaction owner retain original dispatches, results and event receipts.
-pub struct Controller<W = DurableWrites> {
-    connection: Connection,
-    id: ControllerId,
-    home: PathBuf,
-    writes: W,
-    // Held beside the database rather than on it so SQLite's own locks never collide with ours.
-    _lease: ExclusiveFileLock,
-}
-
-impl Controller {
-    /// Opens explicitly injected local state, preserving unknown files instead of reinitializing them.
-    pub fn open(home: &Path, id: ControllerId) -> Result<Self, Error> {
-        Self::open_with_guard(home, id, DurableWrites)
-    }
-}
-
-impl<W: WriteGuard> Controller<W> {
-    /// Returns the persistent coordinator identity, never a process or connection identity.
-    pub fn id(&self) -> &ControllerId {
-        &self.id
-    }
-    /// Exposes the injected root for deployment overlap checks, not Node-scoped checkout resolution.
-    pub fn home_directory(&self) -> &Path {
-        &self.home
-    }
+/// An accepted operation and its durable terminal fact as the local catalogue keeps it, at full wire
+/// fidelity; no result means awaiting reconciliation, not failure.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CloneOperation {
+    pub command: CloneRepositoryMessage,
+    pub result: Option<CloneExecutionResult>,
 }

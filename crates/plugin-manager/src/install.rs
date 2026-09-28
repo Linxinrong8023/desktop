@@ -1,5 +1,8 @@
 //! Installs and updates plugin releases by downloading and safely extracting their package.
 
+mod cache;
+mod package;
+
 use crate::discovery::installed_root;
 use crate::limits::package_extract_limits;
 use ora_domain::{PluginId, PluginNamespace};
@@ -14,11 +17,6 @@ use ora_utils::http::{
 use semver::Version;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-
-/// Sub-directory of a plugin data directory that caches downloaded release archives.
-const CACHE_ROOT: &str = "cache";
-/// Extension appended to a downloaded release archive filename.
-const RELEASE_EXTENSION: &str = ".orax";
 
 /// Reports why a plugin release could not be installed.
 #[derive(Debug, Error)]
@@ -36,13 +34,14 @@ pub enum InstallError {
         #[source]
         source: ora_utils::archive::ArchiveError,
     },
-    /// The imported archive does not contain an `orax.toml` manifest at its root.
-    #[error("imported archive does not contain orax.toml at its root")]
+    /// The package does not contain an `orax.toml` manifest at its root.
+    #[error("plugin package does not contain orax.toml at its root")]
     MissingManifest,
-    /// The in-archive `orax.toml` could not be parsed or validated.
-    #[error("imported plugin manifest is invalid: {0}")]
+    /// The in-package `orax.toml` could not be parsed or validated.
+    #[error("plugin package manifest is invalid: {0}")]
     InvalidManifest(#[from] ora_plugin_manifest::ManifestError),
-    /// The extracted package does not satisfy the host-side requirements for its kind.
+    /// The extracted package is invalid at one manifest field: a host-side requirement for its
+    /// kind, its identity relative to the marketplace listing, or its manifest source.
     #[error("plugin package is invalid at `{field_path}`: {message}")]
     InvalidPackage { field_path: String, message: String },
     /// The imported archive digest does not match the digest the in-archive manifest declares.
@@ -91,9 +90,18 @@ impl From<ora_utils::http::DownloadError> for InstallError {
 
 impl InstallError {
     fn invalid_package(source: crate::validation::ManifestValidationError) -> Self {
+        Self::invalid_field(source.field_path(), source.to_string())
+    }
+
+    /// Builds a package-content failure the installer detects without the validation crate.
+    ///
+    /// A manifest source that cannot be read and an identity that contradicts the listing are the
+    /// same kind of user-facing problem as a failed host-side check — "this package is wrong at
+    /// field X" — so they carry that shape instead of growing one variant per detection site.
+    fn invalid_field(field_path: impl Into<String>, message: impl Into<String>) -> Self {
         Self::InvalidPackage {
-            field_path: source.field_path().to_owned(),
-            message: source.to_string(),
+            field_path: field_path.into(),
+            message: message.into(),
         }
     }
 }
@@ -314,6 +322,12 @@ where
     }
 
     /// Shares the atomic install path between callers that do and do not observe the transfer.
+    ///
+    /// The downloaded archive is a transfer artifact rather than state: it is deleted whether the
+    /// install commits or fails, and any archive an earlier run left behind is swept before this
+    /// one downloads its own. A failed install therefore leaves the installed tree exactly as it
+    /// found it — no version directory, no empty package parent, and no cached `.orax` — while a
+    /// successful one leaves only the installed package beside the derived marketplace index.
     async fn install_package(
         &self,
         manifest: &PluginManifest,
@@ -322,15 +336,16 @@ where
         data_dir: &Path,
         progress: Option<ProgressCallback>,
     ) -> Result<PathBuf, InstallError> {
-        let archive_path = self
-            .download_package(manifest, source.clone(), data_dir, progress)
-            .await?;
+        cache::sweep_leftovers(data_dir)?;
         let name = manifest.name();
         let version = manifest.version().to_string();
         let package_parent = installed_root(data_dir)
             .join(namespace.as_str())
             .join(name.as_str());
         let package_dir = package_parent.join(&version);
+        // The already-installed check runs before the transfer so re-installing a version never
+        // downloads a package it will refuse to unpack. `update_package` has already compared
+        // versions, so a directory here belongs to an unrelated install that committed first.
         if package_dir.exists() {
             return Err(InstallError::AlreadyInstalled {
                 path: package_dir,
@@ -339,58 +354,34 @@ where
                 version,
             });
         }
-        std::fs::create_dir_all(&package_parent).map_err(|source| InstallError::Io {
-            path: package_parent.clone(),
-            source,
-        })?;
-        let staging = tempfile::tempdir_in(&package_parent).map_err(|source| InstallError::Io {
-            path: package_parent,
-            source,
-        })?;
-        extract_archive(
-            ArchiveFormat::Zip,
+        let archive_path =
+            cache::release_archive_path(data_dir, namespace, name.as_str(), &version);
+        if let Err(error) = self
+            .download_package(&archive_path, source.clone(), progress)
+            .await
+        {
+            // A verified archive is renamed into place only after its digest matches, so a failed
+            // transfer normally leaves nothing behind; the removal covers the window between that
+            // rename and the failure.
+            cache::discard_downloaded_archive(&archive_path);
+            return Err(error);
+        }
+        let outcome = package::materialize_package(
             &archive_path,
-            staging.path(),
-            &package_extract_limits(),
-        )
-        .map_err(|source| InstallError::Extract {
-            path: staging.path().to_path_buf(),
-            source,
-        })?;
-        crate::validation::validate(staging.path(), manifest, namespace, /*logo*/ None)
-            .map_err(InstallError::invalid_package)?;
-        // A targeted archive must self-declare its target in an in-package `[artifact]` section.
-        // Missing the installed manifest or the section fails closed so a wrong-architecture
-        // archive cannot install as valid. Local import applies the same check against the host.
-        if let Some(selected) = source.target() {
-            let installed_manifest_path = staging.path().join(crate::discovery::MANIFEST_FILE_NAME);
-            if !installed_manifest_path.is_file() {
-                return Err(InstallError::MissingManifest);
-            }
-            let installed_source =
-                std::fs::read_to_string(&installed_manifest_path).map_err(|source| {
-                    InstallError::Io {
-                        path: installed_manifest_path.clone(),
-                        source,
-                    }
-                })?;
-            let installed_manifest =
-                ora_plugin_manifest::PluginManifest::parse_installed(&installed_source)?;
-            let Some(artifact) = installed_manifest.artifact() else {
-                return Err(InstallError::MissingArtifactTarget);
-            };
-            if selected != artifact.target() {
-                return Err(InstallError::TargetMismatch {
-                    release: selected.to_string(),
-                    artifact: artifact.target().to_string(),
-                });
+            &package_dir,
+            &package_parent,
+            namespace,
+            manifest,
+            source.target(),
+        );
+        cache::discard_downloaded_archive(&archive_path);
+        match outcome {
+            Ok(()) => Ok(package_dir),
+            Err(error) => {
+                cache::remove_empty_directory(&package_parent);
+                Err(error)
             }
         }
-        std::fs::rename(staging.path(), &package_dir).map_err(|source| InstallError::Io {
-            path: package_dir.clone(),
-            source,
-        })?;
-        Ok(package_dir)
     }
 
     /// Updates one installed plugin to `manifest`'s version by downloading, verifying, and
@@ -598,37 +589,33 @@ where
         })
     }
 
-    /// Fetches and verifies one release archive into the cache, returning its path.
+    /// Fetches and verifies one release archive into `archive_path`.
+    ///
+    /// The path is supplied by the caller because the caller also owns the archive's lifetime: it
+    /// sweeps leftovers before the transfer and deletes the file on every exit path.
     async fn download_package(
         &self,
-        manifest: &PluginManifest,
+        archive_path: &Path,
         source: ResolvedReleaseSource,
-        data_dir: &Path,
         progress: Option<ProgressCallback>,
-    ) -> Result<PathBuf, InstallError> {
+    ) -> Result<(), InstallError> {
+        if let Some(cache_dir) = archive_path.parent() {
+            std::fs::create_dir_all(cache_dir).map_err(|source| InstallError::Io {
+                path: cache_dir.to_path_buf(),
+                source,
+            })?;
+        }
         let digest = source.sha256();
-        let cache_dir = data_dir.join("plugins").join(CACHE_ROOT);
-        std::fs::create_dir_all(&cache_dir).map_err(|error| InstallError::Io {
-            path: cache_dir.clone(),
-            source: error,
-        })?;
-        let archive_name = format!(
-            "{}-{}{}",
-            manifest.name().as_str(),
-            manifest.version(),
-            RELEASE_EXTENSION
-        );
-        let archive_path = cache_dir.join(archive_name);
         let request = DownloadRequest {
             source: source.download().clone(),
-            destination: archive_path.clone(),
+            destination: archive_path.to_path_buf(),
             checksum: Some(Checksum::sha256(digest.to_vec())),
             options: DownloadOptions::default(),
             progress,
             cancel: None,
         };
         self.downloader.download(request).await?;
-        Ok(archive_path)
+        Ok(())
     }
 }
 
@@ -710,7 +697,7 @@ mod tests {
     use std::fs::{self, File};
     use std::future::Future;
     use std::io::Write;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
     use zip::ZipWriter;
@@ -771,6 +758,43 @@ mod tests {
         writer.finish().unwrap();
     }
 
+    /// Builds a complete installed-form manifest for one agent package.
+    fn installed_agent_manifest(name: &str, version: &str) -> String {
+        format!(
+            "resolver = 1\nidentifier = \"{name}\"\nkind = \"agent\"\nversion = \"{version}\"\ndescription = \"A test plugin\"\n"
+        )
+    }
+
+    /// Returns the cache path one release archive is downloaded into.
+    fn cache_archive_path(data_dir: &Path, namespace: &str, name: &str, version: &str) -> PathBuf {
+        data_dir
+            .join("plugins")
+            .join("cache")
+            .join(namespace)
+            .join(format!("{name}-{version}.orax"))
+    }
+
+    /// Asserts a failed install left no package, no empty package parent, and no cached archive.
+    fn assert_no_install_residue(data_dir: &Path, namespace: &str, name: &str, version: &str) {
+        let package_parent = data_dir
+            .join("plugins")
+            .join("installed")
+            .join(namespace)
+            .join(name);
+        assert!(
+            !package_parent.join(version).exists(),
+            "no package directory is committed"
+        );
+        assert!(
+            !package_parent.exists(),
+            "the empty package parent directory is removed"
+        );
+        assert!(
+            !cache_archive_path(data_dir, namespace, name, version).exists(),
+            "the downloaded archive is deleted"
+        );
+    }
+
     /// Builds an agent orax manifest whose sha256 matches `digest`.
     fn manifest_with_digest(name: &str, version: &str, digest: [u8; 32]) -> String {
         manifest_with_kind_digest(name, version, "agent", digest)
@@ -789,37 +813,50 @@ mod tests {
         )
     }
 
-    /// Verifies a full local install: cache download, checksum, and safe extraction.
+    /// Packs `files` as the marketplace release `official/weather` 1.0.0, listed with
+    /// `listing_kind` and the listing's own description, and installs it into `data_dir`.
+    ///
+    /// The listing is built from the archive's real digest so every failure the caller observes
+    /// comes from the package content rather than from transfer verification.
+    fn install_weather_release(
+        data_dir: &Path,
+        listing_kind: &str,
+        files: &[(&str, &[u8])],
+    ) -> Result<PathBuf, InstallError> {
+        let release_path = data_dir.join("pkg.orax");
+        write_orax_zip(&release_path, files);
+        let digest = sha256_file(&release_path);
+        let manifest = PluginManifest::parse(&manifest_with_kind_digest(
+            "weather",
+            "1.0.0",
+            listing_kind,
+            digest,
+        ))
+        .unwrap();
+        block_on(Installer::new(LocalFileDownloader).install(
+            &manifest,
+            &PluginNamespace::official(),
+            ResolvedReleaseSource::universal(DownloadSource::Local(release_path), digest),
+            data_dir,
+        ))
+    }
+
+    /// Verifies a full local install: cache download, checksum, extraction, and cache cleanup.
     #[test]
     fn installs_local_release_end_to_end() {
         let temp_dir = TempDir::new().unwrap();
-        let release_path = temp_dir.path().join("pkg.orax");
-        write_orax_zip(
-            &release_path,
+        let package_dir = install_weather_release(
+            temp_dir.path(),
+            "agent",
             &[
                 (
                     "orax.toml",
-                    b"resolver = 1\nidentifier = \"weather\"\n".as_slice(),
+                    installed_agent_manifest("weather", "1.0.0").as_bytes(),
                 ),
                 ("main.js", b"export {};\n".as_slice()),
                 ("logo.svg", b"<svg/>".as_slice()),
             ],
-        );
-        let manifest = PluginManifest::parse(&manifest_with_digest(
-            "weather",
-            "1.0.0",
-            sha256_file(&release_path),
-        ))
-        .unwrap();
-
-        let installer = Installer::new(LocalFileDownloader);
-        let digest = sha256_file(&release_path);
-        let package_dir = block_on(installer.install(
-            &manifest,
-            &PluginNamespace::official(),
-            ResolvedReleaseSource::universal(DownloadSource::Local(release_path), digest),
-            temp_dir.path(),
-        ))
+        )
         .unwrap();
 
         let expected_package = temp_dir
@@ -834,12 +871,348 @@ mod tests {
         assert!(expected_package.join("main.js").exists());
         assert!(expected_package.join("logo.svg").exists());
         assert!(
-            temp_dir
+            !cache_archive_path(temp_dir.path(), "official", "weather", "1.0.0").exists(),
+            "the downloaded archive is deleted once the install commits"
+        );
+        assert!(
+            !temp_dir
                 .path()
                 .join("plugins")
                 .join("cache")
-                .join("weather-1.0.0.orax")
-                .exists()
+                .join("official")
+                .exists(),
+            "the emptied namespace directory leaves the cache holding only the registry index"
+        );
+    }
+
+    /// A marketplace release whose archive ships no `orax.toml` is refused while it is still
+    /// staged: the error names the missing file, nothing is committed, and the downloaded archive
+    /// is deleted.
+    #[test]
+    fn rejects_a_release_without_an_in_package_manifest() {
+        let temp_dir = TempDir::new().unwrap();
+        let error = install_weather_release(
+            temp_dir.path(),
+            "agent",
+            &[("main.js", b"export {};\n".as_slice())],
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, InstallError::MissingManifest));
+        assert_no_install_residue(temp_dir.path(), "official", "weather", "1.0.0");
+    }
+
+    /// An archive entry named `orax.toml` that is not a regular file is refused instead of being
+    /// read, so a package cannot substitute a directory for its manifest.
+    #[test]
+    fn rejects_a_manifest_entry_that_is_not_a_regular_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let release_path = temp_dir.path().join("pkg.orax");
+        let mut writer = ZipWriter::new(File::create(&release_path).unwrap());
+        let options = SimpleFileOptions::default();
+        // A directory entry is only materialized when it has to hold something, so the substituted
+        // manifest carries one child file.
+        writer
+            .start_file("orax.toml/not-a-manifest.txt", options)
+            .unwrap();
+        writer.write_all(b"not a manifest").unwrap();
+        writer.start_file("main.js", options).unwrap();
+        writer.write_all(b"export {};\n").unwrap();
+        writer.finish().unwrap();
+        let digest = sha256_file(&release_path);
+        let manifest =
+            PluginManifest::parse(&manifest_with_digest("weather", "1.0.0", digest)).unwrap();
+
+        let error = block_on(Installer::new(LocalFileDownloader).install(
+            &manifest,
+            &PluginNamespace::official(),
+            ResolvedReleaseSource::universal(DownloadSource::Local(release_path), digest),
+            temp_dir.path(),
+        ))
+        .unwrap_err();
+
+        match error {
+            InstallError::InvalidPackage { field_path, .. } => {
+                assert_eq!(field_path, "orax.toml");
+            }
+            other => panic!("expected an invalid manifest source, got {other:?}"),
+        }
+        assert_no_install_residue(temp_dir.path(), "official", "weather", "1.0.0");
+    }
+
+    /// A package whose manifest omits a required field is refused with that field's path, so the
+    /// user learns which field to fix instead of seeing an internal error.
+    #[test]
+    fn rejects_a_package_manifest_missing_a_required_field() {
+        let temp_dir = TempDir::new().unwrap();
+        let error = install_weather_release(
+            temp_dir.path(),
+            "agent",
+            &[
+                (
+                    "orax.toml",
+                    b"resolver = 1\nidentifier = \"weather\"\nkind = \"agent\"\nversion = \"1.0.0\"\n"
+                        .as_slice(),
+                ),
+                ("main.js", b"export {};\n".as_slice()),
+            ],
+        )
+        .unwrap_err();
+
+        match error {
+            InstallError::InvalidManifest(source) => assert_eq!(
+                source.field_path(),
+                Some("description".to_owned()),
+                "{source}"
+            ),
+            other => panic!("expected a structural manifest error, got {other:?}"),
+        }
+        assert_no_install_residue(temp_dir.path(), "official", "weather", "1.0.0");
+    }
+
+    /// A package whose manifest is not valid TOML is refused while staged, and the failure names
+    /// no field because a syntax error belongs to the document as a whole.
+    #[test]
+    fn rejects_a_package_manifest_that_is_not_valid_toml() {
+        let temp_dir = TempDir::new().unwrap();
+        let error = install_weather_release(
+            temp_dir.path(),
+            "agent",
+            &[
+                (
+                    "orax.toml",
+                    b"resolver = 1\nidentifier = \"weather\"\nkind = \"agent\"\nversion = \ndescription = \"A test plugin\"\n"
+                        .as_slice(),
+                ),
+                ("main.js", b"export {};\n".as_slice()),
+            ],
+        )
+        .unwrap_err();
+
+        match error {
+            InstallError::InvalidManifest(source) => {
+                assert_eq!(source.field_path(), None, "{source}");
+            }
+            other => panic!("expected a TOML syntax error, got {other:?}"),
+        }
+        assert_no_install_residue(temp_dir.path(), "official", "weather", "1.0.0");
+    }
+
+    /// Descriptive metadata is deliberately outside the identity comparison: a package whose
+    /// title, description, homepage, and license differ from its listing still installs, and
+    /// discovery reports the package's own text because that is what the installed tree holds.
+    #[test]
+    fn installs_a_package_whose_descriptive_metadata_differs_from_the_listing() {
+        let temp_dir = TempDir::new().unwrap();
+        let package_dir = install_weather_release(
+            temp_dir.path(),
+            "agent",
+            &[
+                (
+                    "orax.toml",
+                    b"resolver = 1\nidentifier = \"weather\"\ntitle = \"Weather Pro\"\nkind = \"agent\"\nversion = \"1.0.0\"\ndescription = \"Forecasts shipped by the package\"\nhomepage = \"https://example.com/weather\"\nlicense = \"MIT\"\n"
+                        .as_slice(),
+                ),
+                ("main.js", b"export {};\n".as_slice()),
+            ],
+        )
+        .unwrap();
+
+        let discovered = crate::PluginManager::discover(temp_dir.path());
+        let [plugin] = discovered.installed_plugins() else {
+            panic!(
+                "expected exactly the installed package, got {:?}",
+                discovered.installed_plugins()
+            );
+        };
+        assert_eq!(
+            (
+                plugin.package_root.clone(),
+                plugin.display_name.as_str(),
+                plugin.description.as_str(),
+                plugin.homepage.as_deref(),
+                plugin.license.as_deref(),
+            ),
+            (
+                package_dir,
+                "Weather Pro",
+                "Forecasts shipped by the package",
+                Some("https://example.com/weather"),
+                Some("MIT"),
+            )
+        );
+    }
+
+    /// A package whose kind-specific contribution is malformed is refused at install time with
+    /// the file that carries it, instead of landing on disk and failing later during discovery.
+    #[test]
+    fn rejects_a_package_whose_kind_contribution_is_malformed() {
+        let temp_dir = TempDir::new().unwrap();
+        let error = install_weather_release(
+            temp_dir.path(),
+            "mcp",
+            &[
+                (
+                    "orax.toml",
+                    b"resolver = 1\nidentifier = \"weather\"\nkind = \"mcp\"\nversion = \"1.0.0\"\ndescription = \"A test plugin\"\n"
+                        .as_slice(),
+                ),
+                (
+                    "assets/config.json",
+                    br#"{"schemaVersion":1,"transport":{"type":"http"}}"#.as_slice(),
+                ),
+            ],
+        )
+        .unwrap_err();
+
+        match error {
+            InstallError::InvalidPackage { field_path, .. } => {
+                assert_eq!(field_path, "assets/config.json");
+            }
+            other => panic!("expected an invalid MCP contribution, got {other:?}"),
+        }
+        assert_no_install_residue(temp_dir.path(), "official", "weather", "1.0.0");
+    }
+
+    /// A package whose own manifest contradicts the listing identity never installs: identity
+    /// decides the installed directory and the plugin's data, so both spellings cannot be honored.
+    #[test]
+    fn rejects_packages_that_contradict_the_listing_identity() {
+        let cases = [
+            (
+                "identifier",
+                "resolver = 1\nidentifier = \"weather-service\"\nkind = \"agent\"\nversion = \"1.0.0\"\ndescription = \"A test plugin\"\n",
+                "package identifier `weather-service` does not match the marketplace listing identifier `weather`",
+            ),
+            (
+                "version",
+                "resolver = 1\nidentifier = \"weather\"\nkind = \"agent\"\nversion = \"1.1.0\"\ndescription = \"A test plugin\"\n",
+                "package version `1.1.0` does not match the marketplace listing version `1.0.0`",
+            ),
+            (
+                "kind",
+                "resolver = 1\nidentifier = \"weather\"\nkind = \"webview\"\nversion = \"1.0.0\"\ndescription = \"A test plugin\"\n\n[webview]\nstart_url = \"https://example.com\"\nallowed_origins = [\"https://example.com\"]\n",
+                "package kind `webview` does not match the marketplace listing kind `agent`",
+            ),
+        ];
+
+        for (field, in_package_manifest, expected_message) in cases {
+            let temp_dir = TempDir::new().unwrap();
+            let error = install_weather_release(
+                temp_dir.path(),
+                "agent",
+                &[
+                    ("orax.toml", in_package_manifest.as_bytes()),
+                    ("main.js", b"export {};\n".as_slice()),
+                ],
+            )
+            .unwrap_err();
+
+            match error {
+                InstallError::InvalidPackage {
+                    field_path,
+                    message,
+                } => assert_eq!(
+                    (field_path, message),
+                    (field.to_owned(), expected_message.to_owned()),
+                    "identity mismatch in `{field}`"
+                ),
+                other => panic!("expected an identity mismatch in `{field}`, got {other:?}"),
+            }
+            assert_no_install_residue(temp_dir.path(), "official", "weather", "1.0.0");
+        }
+    }
+
+    /// An install starts from a cache that holds only the derived marketplace index: leftovers
+    /// from a crashed run are swept, while the index every listing read depends on is untouched.
+    #[test]
+    fn sweeps_leftover_archives_without_touching_the_registry_index() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_root = temp_dir.path().join("plugins").join("cache");
+        // One archive in the pre-namespace layout, one in the current layout, the durable index,
+        // and the temporary file of a download that is still in progress.
+        std::fs::create_dir_all(cache_root.join("thirdparty")).unwrap();
+        std::fs::write(cache_root.join("weather-1.0.0.orax"), b"stale").unwrap();
+        std::fs::write(
+            cache_root.join("thirdparty").join("weather-1.0.0.orax"),
+            b"stale",
+        )
+        .unwrap();
+        std::fs::write(
+            cache_root.join("registry_index.json"),
+            b"{\"version\":\"1.0\"}",
+        )
+        .unwrap();
+        std::fs::write(cache_root.join("weather-1.0.0.orax.tmp"), b"partial").unwrap();
+
+        install_weather_release(
+            temp_dir.path(),
+            "agent",
+            &[
+                (
+                    "orax.toml",
+                    installed_agent_manifest("weather", "1.0.0").as_bytes(),
+                ),
+                ("main.js", b"export {};\n".as_slice()),
+            ],
+        )
+        .unwrap();
+
+        assert!(
+            !cache_root.join("weather-1.0.0.orax").exists(),
+            "the pre-namespace leftover is swept"
+        );
+        assert!(
+            !cache_root.join("thirdparty").exists(),
+            "an emptied namespace directory is removed"
+        );
+        assert_eq!(
+            std::fs::read(cache_root.join("registry_index.json")).unwrap(),
+            b"{\"version\":\"1.0\"}",
+            "the derived marketplace index is never deleted"
+        );
+        assert_eq!(
+            std::fs::read(cache_root.join("weather-1.0.0.orax.tmp")).unwrap(),
+            b"partial",
+            "a download still in progress is not disturbed"
+        );
+    }
+
+    /// The same plugin name and version from two sources must not share one cache path: the flat
+    /// `<name>-<version>.orax` name did, so a concurrent install from the other source could
+    /// overwrite the bytes this install was about to unpack.
+    #[test]
+    fn keeps_same_name_and_version_releases_from_different_namespaces_apart() {
+        let data_dir = Path::new("data");
+        let hyphenated_name = super::cache::release_archive_path(
+            data_dir,
+            &PluginNamespace::parse("foo").unwrap(),
+            "bar-baz",
+            "1.0.0",
+        );
+        let hyphenated_namespace = super::cache::release_archive_path(
+            data_dir,
+            &PluginNamespace::parse("foo-bar").unwrap(),
+            "baz",
+            "1.0.0",
+        );
+
+        assert_ne!(hyphenated_name, hyphenated_namespace);
+        assert_eq!(
+            hyphenated_name,
+            data_dir
+                .join("plugins")
+                .join("cache")
+                .join("foo")
+                .join("bar-baz-1.0.0.orax")
+        );
+        assert_eq!(
+            hyphenated_namespace,
+            data_dir
+                .join("plugins")
+                .join("cache")
+                .join("foo-bar")
+                .join("baz-1.0.0.orax")
         );
     }
 

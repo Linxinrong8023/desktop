@@ -93,17 +93,21 @@ pub async fn search_workspace(
     let task_id = request.task_id;
     let query = request.query;
     let kind = request.kind;
-    run_async_backend("search_workspace", async move {
-        let root = tauri::async_runtime::spawn_blocking(move || backend.resolve_task_cwd(&task_id))
-            .await
-            .map_err(|source| {
-                BackendError::internal("Desktop workspace root resolution failed", source)
-            })??;
-        workspace_files
-            .search(&root, &query, kind)
-            .await
-            .map_err(workspace_file_backend_error)
-    })
+    run_async_backend(
+        "search_workspace",
+        Box::pin(async move {
+            let root =
+                tauri::async_runtime::spawn_blocking(move || backend.resolve_task_cwd(&task_id))
+                    .await
+                    .map_err(|source| {
+                        BackendError::internal("Desktop workspace root resolution failed", source)
+                    })??;
+            workspace_files
+                .search(&root, &query, kind)
+                .await
+                .map_err(workspace_file_backend_error)
+        }),
+    )
     .await
 }
 
@@ -177,18 +181,22 @@ pub async fn search_project(
     let project_id = request.project_id;
     let query = request.query;
     let kind = request.kind;
-    run_async_backend("search_project", async move {
-        let root =
-            tauri::async_runtime::spawn_blocking(move || backend.resolve_project_cwd(&project_id))
-                .await
-                .map_err(|source| {
-                    BackendError::internal("Desktop workspace location resolution failed", source)
-                })??;
-        workspace_files
-            .search(&root, &query, kind)
+    run_async_backend(
+        "search_project",
+        Box::pin(async move {
+            let root = tauri::async_runtime::spawn_blocking(move || {
+                backend.resolve_project_cwd(&project_id)
+            })
             .await
-            .map_err(workspace_file_backend_error)
-    })
+            .map_err(|source| {
+                BackendError::internal("Desktop workspace location resolution failed", source)
+            })??;
+            workspace_files
+                .search(&root, &query, kind)
+                .await
+                .map_err(workspace_file_backend_error)
+        }),
+    )
     .await
 }
 

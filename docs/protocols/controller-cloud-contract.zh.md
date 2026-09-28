@@ -6,24 +6,33 @@ Controller 在云端部署中通过 gRPC 调用 Cloud（Ora Cloud，Go API Serve
 接管 Node 事件、保存查询结果、恢复读取，以及一条由 Controller 发起的服务端流接收 Cloud 的信号。
 契约的唯一来源是 **Cloud 仓库** 的 `proto/ora/cloud/internal/v1/`（package `ora.cloud.internal.v1`）；
 Cloud 是全部服务的服务端并拥有权威持久化，Controller 只拨出，不向 Cloud 暴露任何 gRPC 服务。
-本仓库不复制 `.proto`，只持有由锁定 commit 生成的 tonic **客户端**代码。租户留在 Cloud：契约只携带
+本仓库不复制 `.proto`，只持有由锁定 commit 生成的 tonic 代码，生产代码只使用其中的**客户端**。租户留在 Cloud：契约只携带
 Cloud 已授权的 opaque 身份，没有 tenant、user 或 membership 字段。
 
 语义由 specs 的 `decisions/cloud/controller-integration/0-cloud-owned-internal-grpc-contract.md`
 拥有，本仓库的消费方式由 `decisions/controller/api-boundary/20260922-cloud-owned-contract-and-controller-dial-out.md`
-固定；本页只讲本仓库如何取得契约、如何生成、如何升级。运行时接入（Cloud RPC 适配器、`Watch`
-拨出任务）尚未实现，见 `decisions/controller/persistence/20260922-coordination-store-with-sqlite-and-cloud-adapters.md`。
+固定；本页只讲本仓库如何取得契约、如何生成、如何升级。运行时接入是
+[Controller 运行时](../controller/local-runtime.zh.md) 描述的 `CloudStore` 适配器：租约、`ExecutionService`
+与 `Watch` 流均已接入，由流决定何时领取，规则见
+`decisions/controller/api-boundary/20260924-controller-consumes-watch-signals.md`；其持久语义遵循
+`decisions/controller/persistence/20260922-coordination-store-with-sqlite-and-cloud-adapters.md`。
+配置了 Substrate 时，它还经 `WorkspaceOperationService` 推进运行时 Workspace 操作，经 `NodeReportService`
+代报沙盒 Node，规则见 `decisions/controller/node-management/0-controller-drives-workspace-sandboxes.md`。
 
 ## 服务与语义要点
 
-| 服务 | 方法 | 要点 |
-|---|---|---|
-| `ControllerLeaseService` | `AcquireLease`／`RenewLease`／`ReleaseLease` | 全局协调租约；`epoch` 是所有写操作的 fencing token |
-| `ExecutionService` | `ClaimWork`、`RecordDispatch`、`TakeOverNodeEvent`、`RecordQueriedResult`、`GetDispatch`、`ListPendingDispatches` | 写操作携带 `submission_id`：同身份同内容返回原结果，不同内容 `ABORTED`+`CONFLICT`；`RecordDispatch` 成功后才可派发，`TakeOverNodeEvent` 成功后才可 Ack，`RecordQueriedResult` 不产生 Ack 依据 |
-| `ControlSignalService` | `Watch`（服务端流） | `WorkAvailable`／`Drain`／`NodeAssignment`；至多一次、不持久化、不改变归属；断流退回周期 `ClaimWork` |
+| 服务                        | 方法                                                                                                              | 要点                                                                                                                                                                                                            |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ControllerLeaseService`    | `AcquireLease`／`RenewLease`／`ReleaseLease`                                                                      | 全局协调租约；`epoch` 是所有写操作的 fencing token                                                                                                                                                              |
+| `ExecutionService`          | `ClaimWork`、`RecordDispatch`、`TakeOverNodeEvent`、`RecordQueriedResult`、`GetDispatch`、`ListPendingDispatches` | 写操作携带 `submission_id`：同身份同内容返回原结果，不同内容 `ABORTED`+`CONFLICT`；`RecordDispatch` 成功后才可派发，`TakeOverNodeEvent` 成功后才可 Ack，`RecordQueriedResult` 不产生 Ack 依据                   |
+| `ControlSignalService`      | `Watch`（服务端流）                                                                                               | `WorkAvailable`／`OperationAvailable`／`Drain`／`NodeAssignment`；至多一次、不持久化、不改变归属；断流退回周期 `ClaimWork` 与 `ClaimOperation`                                                                  |
+| `WorkspaceOperationService` | `ClaimOperation`、`PlanEffect`、`RecordEffectResult`、`AdvanceOperation`、`DeferOperation`                        | `ClaimOperation` 返回最早的可领取操作（进行中的会以新 version 再次返回），所以一个 Controller 同一时刻只推进一个操作；写操作受 `epoch` 与操作 `version` fencing；clone 步骤以操作 ID 经 `ExecutionService` 派发 |
+| `NodeReportService`         | `RegisterNode`、`ReportNodeStatus`、`EndNode`、`ReportNodeIdle`                                                   | Controller 代报它持有会话的沙盒 Node；`RegisterNode` 按（sandbox, incarnation）幂等，前一个 incarnation 结束前登记第二个会冲突                                                                                  |
 
 失败以 gRPC 状态码为主分类并附 `ErrorDetail{ErrorCode}`；Rust 侧在 Cloud RPC 适配器内把它们映射
-一次为持久协调接口的分类（冲突、缺失、不可用、未知、资格失效），协调逻辑不感知 gRPC。
+一次为持久协调接口的分类（冲突、缺失、不可用、未知、资格失效），协调逻辑不感知 gRPC。Cloud 对过期的
+操作快照（`stale_operation`）与过期租约都回 `FAILED_PRECONDITION`；适配器把前者归为冲突，只有租约的判定
+才会丢弃持有的 epoch。
 
 ## 契约的获取：submodule + sparse-checkout
 
@@ -32,14 +41,18 @@ clone（`--filter=blob:none`）与 sparse-checkout 只展开 `proto/`。
 
 - `task proto:init`（Linux／macOS；生成物已提交，Windows 构建不需要 submodule 与 buf）：首次以 `--no-checkout --filter=blob:none --sparse` clone，`sparse-checkout set proto`，
   再 `git submodule update --init` 到锁定 commit；已初始化时只移动到锁定 commit。CI 的 crates job 执行同一任务。
+  优先复用 `PATH` 或 `~/.local/bin` 中的 `buf`；缺失时用 `curl` 从
+  [官方 GitHub Release](https://buf.build/docs/cli/installation/) 下载 Buf 1.73.0 到 `~/.local/bin`，
+  无需 sudo，下载需要网络。协议任务会把此目录加入 `PATH`；如需在终端直接运行 `buf`，请将其加入 shell 的 `PATH`。
 - 普通 `git clone` 或 `actions/checkout` 不会初始化它；依赖初始化是显式动作。
 - `/specs` 仍是被忽略的独立 checkout，不作为契约依赖。
 
 ## 生成与检查
 
 `crates/controller-proto`（`ora-controller-proto`）只放 `src/gen/` 下的生成物，由 `buf` 用固定版本的
-远程插件（`neoeinstein-prost`、`neoeinstein-tonic`，`no_server`）从 `third_party/cloud/proto` 生成；
-需要网络，不需要本机 `protoc`。
+远程插件（`neoeinstein-prost`、`neoeinstein-tonic`）从 `third_party/cloud/proto` 生成；需要网络，不需要
+本机 `protoc`。服务端模块生成在 `#[cfg(feature = "test-server")]` 之后：生产构建从不编译它们，Controller
+的测试启用该 feature，以真实契约托管内存假 Cloud。
 
 - `task proto:generate`：重新生成。
 - `task proto:check`：先验证 submodule 位于锁定 commit 且 `proto/` 无本地修改，再重新生成并在有 diff
@@ -54,4 +67,5 @@ clone（`--filter=blob:none`）与 sparse-checkout 只展开 `proto/`。
 3. `task proto:generate`，修改适配器，把 gitlink、生成物与代码一起提交；PR 描述链接 Cloud 侧变更以便展开
    子模块 diff 评审。
 
-生成证明的是结构一致；行为一致由以真实 Cloud gRPC 服务端为对端的适配器测试保证，在运行时接入时登记。
+生成证明的是结构一致。Controller 的测试以生成的服务端桩构建内存假 Cloud 验证适配器行为；与真实 Cloud gRPC
+服务端的行为一致经 minicloud 云端形态端到端验证，尚未自动化。

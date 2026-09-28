@@ -10,6 +10,8 @@ Desktop 在 `bindings.rs` 和分领域 `bindings/` 中声明宿主绑定。Unary
 
 一个可克隆 Backend 服务所有命令。共享 wrapper 分配 request ID、创建 span、执行业务并投影错误。Session load、prompt 和 app events 通过 Tauri Channel 传送有序 data/error/end 帧；call ID 控制单流取消，request ID 关联完整请求。注册先于领域启动，直到所有者释放才允许复用 ID；取消不会放弃尚未完成的资源创建，迟到资源立即清理。退出取消启动中和运行中的注册并拒绝新流。
 
+异步 executor（`run_async_backend` 及其带 request ID 的变体）要求每个领域调用都以已装箱的 future（`Box::pin(..)`）传入，直接 await 领域 future 的手写命令同样装箱。Tauri 在主线程的 WebView2 IPC 回调内构造每个异步命令的 future，而该回调约 1 MB 的栈已被 handler 之下的 webview/Tauri 帧占用数百 KB。跨命令 await 持有的深层领域 future——仅市场安装链就单体化成约 650 KB 的状态机——会在异步 runtime 首次轮询之前溢出该栈；0.2.0 release 正是因此（WER `0xc00000fd`）在点击市场安装的瞬间崩溃。在调用点装箱使命令 future 保持指针大小，深层链只在首次轮询包装器的 runtime 线程上构造，而装箱参数类型使该约束由编译器强制。Desktop 测试以显式的 IPC future 尺寸预算锁定市场传输命令。
+
 Agent、Skill、工作流定义、项目、任务、workspace、插件、workflow run、session 和运行时状态命令各使用窄领域句柄，不增加根 Backend 转发。共享 executor 管请求生命周期，领域负责阻塞工作、级联、状态提交和通知。Workspace 克隆共享锁和清理租约；插件所有者负责 reconcile，surface 仅取 gateway；workflow run 持有 run gate 并在终态提交后清理 session。Session 标题先持久化再更新 actor；app events 只暴露订阅能力。Git identity 使用无状态 Backend 导出。
 
 前端将 `createTauriTransport()` 注入 `createContractsClient`，保持请求 DTO 不变。业务错误直接返回 `{ code, params, requestId }`；本地调用失败不伪造 request ID。Workspace 查询返回权威根路径和可选分支，事件流复用统一 framing、取消和完成机制。
@@ -26,7 +28,7 @@ Release 注册 Tauri updater 和 `ora-scheduler`：延迟首次检查，此后�
 
 检查失败不清除已下载可安装包；安装失败恢复 Ready。Linux 自动更新只支持 AppImage，deb/rpm 或裸程序在下载前返回 ManualUpdate 并引导手动更新。
 
-市场索引在启动十五秒后及每六小时刷新，按宿主本地时区调度，开发构建也启用。失败等待下一周期，不自行重试。Backend 同时只接纳一次重建，重复请求返回缓存。自动同步事件使界面禁用 Sync，完成后使列表查询失效。
+市场索引在启动十五秒后及每六小时刷新，按宿主本地时区调度，开发构建也启用。刷新按源独立进行：某个源失败时保留上一次索引中该源的条目，且不重扫它可能写了一半的检出，其余源照常刷新；只有被移除或禁用的源才真正丢失条目。失败原因属于哪个源就只影响哪个源：它自己的 Git 操作，或它勾选了代理但代理缺失/不可用；只有读取 Ora 自身状态（代理设置、源配置、命名空间绑定）失败才让整次刷新失败。失败随缓存记录并由 list/sync 返回，界面据此指明哪些源的列表陈旧，而不是把部分陈旧的目录当作刚刚同步；失败原因只保留 Git 自己的 `fatal:` / `error:` 诊断或配置问题，不含 Git 命令行和本地检出路径，完整错误只写日志。只有当至少一个源真正刷新成功时同步时间才前移，全部失败时保持原时间，从未成功过则显示「尚未同步」；没有任何启用源时不算失败，同步时间照常前移。失败等待下一周期，不自行重试。Backend 同时只接纳一次重建，重复请求返回缓存。自动同步事件使界面禁用 Sync，完成后使列表查询失效。
 
 每个市场源独立选择 Direct HTTPS 或 S3 SigV4。后者接受 object key 或本 endpoint/bucket 的 path-style locator，拒绝外部 locator；默认 Direct HTTPS。S3 endpoint、bucket、region 和完整静态凭据一起配置，凭据只写不读，当前以 SQLite 明文保存，没有系统钥匙串、临时凭据或 provider chain。IPC 凭据不得进入日志，Debug 必须脱敏。配置错误返回可恢复的类型化错误，不回传非法值。两种方式共享代理和下载流程，安装前都必须校验 release manifest SHA-256。
 

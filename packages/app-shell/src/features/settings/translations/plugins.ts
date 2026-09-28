@@ -3,6 +3,8 @@ export const pluginTranslations = {
   "zh-CN": {
     "errors.plugin_not_found": "未找到该插件。",
     "errors.plugin_host_incompatible": "当前主机不支持此插件的发布制品。",
+    "errors.plugin_package_invalid":
+      "插件包内容不合法（{{field}}）：{{message}}",
     "errors.pack_member_duplicate": "集合包重复声明了成员 {{pluginId}}。",
     "errors.pack_self_reference":
       "集合包不能把自身声明为成员（{{pluginId}}）。",
@@ -155,6 +157,11 @@ export const pluginTranslations = {
     "settings.plugins.sourceRemoveFailed": "删除市场源失败。",
     "settings.plugins.neverSynced": "尚未同步",
     "settings.plugins.lastSynced": "上次同步：{{time}}",
+    "settings.plugins.syncFailures.title_one": "{{count}} 个市场源同步失败",
+    "settings.plugins.syncFailures.title_other": "{{count}} 个市场源同步失败",
+    "settings.plugins.syncFailures.description":
+      "以下源未能刷新，列表中来自这些源的插件（如有）仍是上次同步成功时的数据：",
+    "settings.plugins.syncFailures.entry": "{{url}}（{{message}}）",
     "settings.plugins.syncing": "同步中…",
     "settings.plugins.viewAll": "查看全部",
     "settings.plugins.viewAllInstalled_one": "查看全部 {{count}} 个插件",
@@ -353,6 +360,8 @@ export const pluginTranslations = {
     "errors.plugin_not_found": "The plugin was not found.",
     "errors.plugin_host_incompatible":
       "This plugin's release artifact is not supported on the current host.",
+    "errors.plugin_package_invalid":
+      "The plugin package is invalid at {{field}}: {{message}}",
     "errors.pack_member_duplicate":
       "The pack declares member {{pluginId}} more than once.",
     "errors.pack_self_reference":
@@ -528,6 +537,13 @@ export const pluginTranslations = {
       "Failed to remove marketplace source.",
     "settings.plugins.neverSynced": "Never synced",
     "settings.plugins.lastSynced": "Last synced: {{time}}",
+    "settings.plugins.syncFailures.title_one":
+      "{{count}} marketplace source failed to sync",
+    "settings.plugins.syncFailures.title_other":
+      "{{count}} marketplace sources failed to sync",
+    "settings.plugins.syncFailures.description":
+      "These sources could not be refreshed. Any listings from them are kept from their last successful sync:",
+    "settings.plugins.syncFailures.entry": "{{url}} ({{message}})",
     "settings.plugins.syncing": "Syncing?",
     "settings.plugins.viewAll": "View all",
     "settings.plugins.viewAllInstalled_one": "View all {{count}} plugin",

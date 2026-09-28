@@ -553,6 +553,51 @@ fn still_rejects_missing_required_fields_after_relaxing_unknown_ones() {
     );
 }
 
+/// Verifies every parse failure names the field a user must fix, including a missing required
+/// field that the deserializer only names in its message, and that a document-level syntax error
+/// names no field.
+///
+/// The missing-field cases pin the deserializer wording `field_path` recovers the name from, so a
+/// `toml` upgrade that rewords it fails here instead of silently degrading attribution.
+#[test]
+fn attributes_parse_failures_to_the_field_to_fix() {
+    let missing_root_field =
+        MINIMAL_MANIFEST.replacen("description = \"获取实时天气信息的 Ora 插件\"\n", "", 1);
+    let missing_nested_field = WEBVIEW_MANIFEST.replacen(
+        "page = { origin = \"https://www.example.com\", path_prefix = \"/skills/\" }",
+        "page = { origin = \"https://www.example.com\" }",
+        1,
+    );
+    let empty_field = MINIMAL_MANIFEST.replacen(
+        "description = \"获取实时天气信息的 Ora 插件\"",
+        "description = \"\"",
+        1,
+    );
+    let syntax_error = MINIMAL_MANIFEST.replacen("resolver = 1", "resolver = ", 1);
+
+    let field_paths = [
+        PluginManifest::parse(&missing_root_field),
+        PluginManifest::parse_installed(&missing_nested_field),
+        PluginManifest::parse(&empty_field),
+        PluginManifest::parse(&MINIMAL_MANIFEST.replacen("resolver = 1", "resolver = 2", 1)),
+        PluginManifest::parse(&syntax_error),
+    ]
+    .map(|result| result.err().map(|error| error.field_path()));
+
+    assert_eq!(
+        field_paths,
+        [
+            Some(Some("description".to_owned())),
+            Some(Some(
+                "webview.downloads.rules[0].page.path_prefix".to_owned()
+            )),
+            Some(Some("description".to_owned())),
+            Some(Some("resolver".to_owned())),
+            Some(None),
+        ]
+    );
+}
+
 /// Verifies every required root field is rejected when missing or assigned the wrong TOML type.
 #[test]
 fn rejects_missing_and_mistyped_required_fields() {

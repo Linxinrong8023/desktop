@@ -310,3 +310,13 @@ pub fn query(command: &Command) -> GetExecutionStatusMessage {
         },
     }
 }
+
+/// Drives one store operation to completion from synchronous test code; the production runtime
+/// awaits the same futures, so tests exercise the identical blocking-pool path.
+pub fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(future)
+}

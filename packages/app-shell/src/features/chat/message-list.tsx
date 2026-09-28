@@ -72,6 +72,8 @@ export function MessageList({
   );
   const cwd = workspaceQuery.data?.rootPath ?? workspaceCwdQuery.data ?? null;
   const parkedSelectionTextRef = useRef("");
+  /** Select All must survive menu close: Base UI restores focus and drops the range. */
+  const restoreSelectAllRef = useRef(false);
   const [menuHasSelection, setMenuHasSelection] = useState(false);
   const [artifactCache] = useState(
     () => new Map<string, TurnArtifactCacheEntry>(),
@@ -227,6 +229,22 @@ export function MessageList({
           <TextEditContextMenu
             editable={false}
             hasSelection={menuHasSelection}
+            onOpenChange={(open) => {
+              if (open || !restoreSelectAllRef.current) {
+                return;
+              }
+              restoreSelectAllRef.current = false;
+              const root = contentRef.current;
+              if (root === null) {
+                return;
+              }
+              // Wait a frame so focus restoration finishes before re-selecting.
+              requestAnimationFrame(() => {
+                selectElementContents(root);
+                parkedSelectionTextRef.current = serializeSelectionPlainText();
+                setMenuHasSelection(parkedSelectionTextRef.current.length > 0);
+              });
+            }}
             trigger={
               <div
                 ref={scrollRef}
@@ -270,6 +288,8 @@ export function MessageList({
               selectElementContents(root);
               parkedSelectionTextRef.current = serializeSelectionPlainText();
               setMenuHasSelection(parkedSelectionTextRef.current.length > 0);
+              restoreSelectAllRef.current =
+                parkedSelectionTextRef.current.length > 0;
             }}
           >
             <div

@@ -30,6 +30,35 @@ pub enum ManifestError {
     },
 }
 
+impl ManifestError {
+    /// Returns the dotted manifest path this failure is attributed to, or `None` when it concerns
+    /// the document as a whole, such as a TOML syntax error.
+    ///
+    /// Required fields are declared through `serde`, so a missing one is reported by the
+    /// deserializer at the path of the table that lacks it and is named only in the message. The
+    /// name is recovered here, next to the schema that declares it, so callers reporting "which
+    /// field is wrong" never parse deserializer wording themselves; the parse tests pin the
+    /// wording so a `toml` change fails in this crate rather than silently degrading attribution.
+    pub fn field_path(&self) -> Option<String> {
+        match self {
+            Self::UnsupportedResolver { .. } => Some("resolver".to_owned()),
+            Self::InvalidField { field, .. } => Some(field.to_string()),
+            Self::InvalidToml { source, path, .. } => {
+                let missing_field = source
+                    .message()
+                    .strip_prefix("missing field `")
+                    .and_then(|rest| rest.strip_suffix('`'));
+                match (path, missing_field) {
+                    (Some(path), Some(field)) => Some(format!("{path}.{field}")),
+                    (Some(path), None) => Some(path.clone()),
+                    (None, Some(field)) => Some(field.to_owned()),
+                    (None, None) => None,
+                }
+            }
+        }
+    }
+}
+
 /// Identifies one semantic manifest field without requiring callers to parse dotted strings.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ManifestField {
